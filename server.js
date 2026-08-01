@@ -43,7 +43,7 @@ const marketplace = {
   ]
 };
 
-app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'SAIN Real Asset Market', version: '0.5.0', domainCore: 'ACTIVE', assetOnboarding: 'ACTIVE', timestamp: new Date().toISOString() }));
+app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'SAIN Real Asset Market', version: '0.6.0', domainCore: 'ACTIVE', v4vExchange: 'ACTIVE', assetOnboarding: 'V4V', timestamp: new Date().toISOString() }));
 app.get('/api/marketplace', (_req, res) => res.json(marketplace));
 app.get('/api/domain', (_req, res) => res.json(domainStore.snapshot()));
 app.get('/api/assets/:assetId/studio', (req, res) => {
@@ -57,23 +57,25 @@ app.post('/api/sane/message', (req, res) => {
   if (!message) return res.status(400).json({ error: 'A message is required.' });
   const lower = message.toLowerCase();
   let reply = 'I can move that through SRA. Name the asset, project, or outcome, and I will organize the marketplace path behind the conversation.';
-  if (lower.includes('register') || lower.includes('onboard') || lower.includes('new asset')) {
-    reply = 'Asset Onboarding is active. I will guide the asset through registration, identity, documents, ownership, classification, verification, and permanent Asset Account creation.';
+  if (lower.includes('v4v') || lower.includes('register') || lower.includes('onboard') || lower.includes('new asset')) {
+    reply = 'V4V is active. The Verified Value Exchange receives the asset, private evidence, ownership claim, proposed classification, and submitter attestation, then opens institutional review.';
+  } else if (lower.includes('institutional') || lower.includes('review')) {
+    reply = 'Institutional review begins after V4V submission. SRA reviews the evidence package, confirms or corrects the submitted facts, and only then creates the Verified Value record and Verified Value Package.';
   } else if (lower.includes('domain') || lower.includes('object')) {
     reply = 'The Phase One domain core is active. Participant, Asset Account, Lifecycle Record, Verified Value Package, True Bill, Marketplace Project, and Completion exist as real platform objects.';
   } else if (lower.includes('gain') || lower.includes('return') || lower.includes('upside')) {
     reply = 'The current live projects show $684,000 in combined projected gain. These are projections, not realized results.';
   } else if (lower.includes('asset')) {
-    reply = 'I can open an existing Asset Studio or begin the Asset Onboarding workflow to create a new permanent Asset Account.';
+    reply = 'I can open an existing Asset Studio or start a V4V to present a new asset and its private evidence for institutional review.';
   } else if (lower.includes('gap') || lower.includes('complete')) {
     reply = 'Mixed-Use Rehabilitation is currently eligible for a Completion Participant path with 94% verified coverage and an $88,000 completion gap.';
   } else if (lower.includes('true bill') || lower.includes('instrument')) {
     reply = 'True Bills exist as domain objects with purpose, supporting VVP, holder, controller, lifecycle state, history, and settlement fields.';
   } else if (lower.includes('verified value')) {
-    reply = 'Verified Value Packages are immutable frozen objects linked to Asset Accounts and projects. New assets begin with a pending Verified Value baseline.';
+    reply = 'Verified Value is the institutional record created after V4V evidence has passed review. The Verified Value Package becomes the frozen source for downstream marketplace and instrument workflows.';
   }
   return res.json({ reply });
 });
 
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
-app.listen(port, '0.0.0.0', () => console.log(`SRA Phase Two Asset Onboarding is running on port ${port}`));
+app.listen(port, '0.0.0.0', () => console.log(`SRA V4V Verified Value Exchange is running on port ${port}`));
