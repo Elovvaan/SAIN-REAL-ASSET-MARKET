@@ -25,8 +25,9 @@ function hashRecord(record) {
 }
 
 export class AssetOnboardingService {
-  constructor(domainStore) {
+  constructor(domainStore, documentService) {
     this.domainStore = domainStore;
+    this.documentService = documentService;
     this.applications = new Map();
   }
 
@@ -34,15 +35,23 @@ export class AssetOnboardingService {
     return {
       classifications,
       ownershipTypes: ['INDIVIDUAL', 'BUSINESS', 'TRUST', 'NONPROFIT', 'PARTNERSHIP', 'OTHER'],
-      documentTypes: ['TITLE_OR_DEED', 'OWNERSHIP_AGREEMENT', 'REGISTRATION', 'OPERATING_RECORD', 'INSPECTION', 'VALUATION', 'OTHER'],
-      steps: ['REGISTER', 'IDENTITY', 'DOCUMENTS', 'OWNERSHIP', 'CLASSIFICATION', 'VERIFICATION', 'CREATED']
+      documentTypes: ['TITLE_OR_DEED', 'OWNERSHIP_AGREEMENT', 'REGISTRATION', 'OPERATING_RECORD', 'INSPECTION', 'VALUATION', 'TAX_RECORD', 'CONTRACT', 'OTHER'],
+      acceptedMimeTypes: ['application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/msword', 'text/plain'],
+      maximumFileSizeMb: 15,
+      steps: ['REGISTER', 'IDENTITY', 'DOCUMENTS', 'OWNERSHIP', 'CLASSIFICATION', 'SUBMITTER_ATTESTATION', 'CREATED'],
+      verificationFlow: ['SUBMITTER_ATTESTED', 'INSTITUTIONAL_REVIEW_PENDING', 'INSTITUTIONALLY_VERIFIED', 'VERIFIED_VALUE_BASELINE'],
+      privacy: {
+        sourceDocuments: 'PRIVATE',
+        institutionalReview: 'RESTRICTED',
+        publicRepresentation: 'DERIVED_ONLY'
+      }
     };
   }
 
   onboard(payload = {}) {
     const identity = payload.identity || {};
     const ownership = payload.ownership || {};
-    const verification = payload.verification || {};
+    const attestation = payload.attestation || payload.verification || {};
     const documents = Array.isArray(payload.documents) ? payload.documents : [];
 
     const name = clean(identity.name, 120);
@@ -58,23 +67,35 @@ export class AssetOnboardingService {
     if (!classifications.includes(classification)) errors.push('A supported asset classification is required.');
     if (!ownerName) errors.push('Owner name is required.');
     if (!ownershipType) errors.push('Ownership type is required.');
-    if (!verification.attested) errors.push('Verification attestation is required.');
-    if (documents.length === 0) errors.push('At least one supporting document record is required.');
+    if (!attestation.attested) errors.push('Submitter attestation is required.');
+    if (documents.length === 0) errors.push('At least one private supporting document is required.');
+
+    const normalizedDocuments = documents.map((doc, index) => {
+      const uploadId = clean(doc.uploadId, 80);
+      const storedRecord = uploadId && this.documentService ? this.documentService.get(uploadId) : null;
+      if (!storedRecord) errors.push(`Document ${index + 1} has not been uploaded into the private evidence store.`);
+      return {
+        id: storedRecord?.id || uploadId,
+        type: clean(doc.type || storedRecord?.documentType, 60).toUpperCase() || 'OTHER',
+        name: clean(doc.name || storedRecord?.originalName, 180) || `Document ${index + 1}`,
+        uploadId,
+        sha256: storedRecord?.sha256 || null,
+        mimeType: storedRecord?.mimeType || null,
+        size: storedRecord?.size || null,
+        privacy: 'PRIVATE_EVIDENCE',
+        reviewState: 'SUBMITTED'
+      };
+    });
+
     if (errors.length) return { ok: false, errors };
 
     const participantId = createId('P');
     const assetId = createId('A');
     const lifecycleRecordId = `LR-${assetId}`;
     const applicationId = createId('AO');
+    const evidencePackageId = createId('EP');
+    const institutionalReviewId = createId('IR');
     const now = new Date().toISOString();
-
-    const normalizedDocuments = documents.map((doc, index) => ({
-      id: `${applicationId}-DOC-${index + 1}`,
-      type: clean(doc.type, 60).toUpperCase() || 'OTHER',
-      name: clean(doc.name, 180) || `Document ${index + 1}`,
-      reference: clean(doc.reference, 240),
-      status: 'RECORDED'
-    }));
 
     const participant = this.domainStore.addParticipant({
       id: participantId,
@@ -88,15 +109,44 @@ export class AssetOnboardingService {
       }
     });
 
+    const evidencePackage = {
+      id: evidencePackageId,
+      applicationId,
+      assetId,
+      documentIds: normalizedDocuments.map((document) => document.id),
+      documentHashes: normalizedDocuments.map((document) => document.sha256),
+      privacy: 'PRIVATE',
+      status: 'SUBMITTED',
+      createdAt: now,
+      submitterAttestation: {
+        participantId,
+        statement: clean(attestation.statement, 500) || 'I attest that these documents and statements are the evidence I am presenting for institutional review.',
+        attestedAt: now
+      }
+    };
+    evidencePackage.hash = hashRecord(evidencePackage);
+
+    const institutionalReview = {
+      id: institutionalReviewId,
+      evidencePackageId,
+      assetId,
+      status: 'INSTITUTIONAL_REVIEW_PENDING',
+      reviewerId: null,
+      findings: [],
+      requestedEvidence: [],
+      decisionAt: null,
+      createdAt: now
+    };
+
     const lifecycle = this.domainStore.addLifecycleRecord({
       id: lifecycleRecordId,
       assetId,
       events: [
-        { id: `${lifecycleRecordId}-EV-1`, type: 'ASSET_REGISTERED', recordedAt: now, payload: { applicationId } },
-        { id: `${lifecycleRecordId}-EV-2`, type: 'OWNERSHIP_RECORDED', recordedAt: now, payload: { participantId, ownershipType } },
-        { id: `${lifecycleRecordId}-EV-3`, type: 'DOCUMENTS_RECORDED', recordedAt: now, payload: { documentCount: normalizedDocuments.length } },
-        { id: `${lifecycleRecordId}-EV-4`, type: 'CLASSIFICATION_ASSIGNED', recordedAt: now, payload: { classification } },
-        { id: `${lifecycleRecordId}-EV-5`, type: 'ONBOARDING_VERIFIED', recordedAt: now, payload: { verifierName: clean(verification.verifierName, 120) || 'Self-attested onboarding', method: clean(verification.method, 80) || 'DOCUMENT_REVIEW' } }
+        { id: `${lifecycleRecordId}-EV-1`, type: 'ASSET_PRESENTED', recordedAt: now, payload: { applicationId } },
+        { id: `${lifecycleRecordId}-EV-2`, type: 'OWNERSHIP_CLAIM_RECORDED', recordedAt: now, payload: { participantId, ownershipType } },
+        { id: `${lifecycleRecordId}-EV-3`, type: 'PRIVATE_EVIDENCE_PACKAGE_CREATED', recordedAt: now, payload: { evidencePackageId, documentCount: normalizedDocuments.length } },
+        { id: `${lifecycleRecordId}-EV-4`, type: 'SUBMITTER_ATTESTATION_RECORDED', recordedAt: now, payload: { participantId } },
+        { id: `${lifecycleRecordId}-EV-5`, type: 'INSTITUTIONAL_REVIEW_OPENED', recordedAt: now, payload: { institutionalReviewId } }
       ]
     });
 
@@ -107,13 +157,8 @@ export class AssetOnboardingService {
       identity: { name, region, description, externalReference: clean(identity.externalReference, 160) },
       ownership: { ownerName, ownershipType },
       classification,
-      documents: normalizedDocuments,
-      verification: {
-        status: 'VERIFIED_FOR_ACCOUNT_CREATION',
-        method: clean(verification.method, 80) || 'DOCUMENT_REVIEW',
-        verifierName: clean(verification.verifierName, 120) || 'Self-attested onboarding',
-        attestedAt: now
-      },
+      evidencePackage,
+      institutionalReview,
       createdAt: now
     };
 
@@ -124,13 +169,15 @@ export class AssetOnboardingService {
       region,
       ownerId: participantId,
       lifecycleRecordId,
-      status: 'PENDING_VERIFIED_VALUE',
+      status: 'PENDING_INSTITUTIONAL_VERIFICATION',
       metadata: {
         onboardingApplicationId: applicationId,
         description,
         externalReference: clean(identity.externalReference, 160),
+        evidencePackageId,
+        institutionalReviewId,
         documents: normalizedDocuments,
-        verification: onboardingRecord.verification
+        publicRepresentation: null
       }
     });
 
@@ -144,11 +191,14 @@ export class AssetOnboardingService {
     return {
       ok: true,
       applicationId,
+      evidencePackage,
+      institutionalReview,
       assetAccount: asset,
       ownerParticipant: participant,
       lifecycleRecord: lifecycle,
       recordHash,
-      nextAction: 'BEGIN_VERIFIED_VALUE_BASELINE'
+      nextAction: 'INSTITUTIONAL_EVIDENCE_REVIEW',
+      futureFlow: ['INSTITUTIONALLY_VERIFIED', 'BEGIN_VERIFIED_VALUE_BASELINE', 'CREATE_DIGITAL_REPRESENTATION_IF_AUTHORIZED']
     };
   }
 
