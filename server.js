@@ -52,7 +52,7 @@ app.use('/api/participation', createParticipationRouter(marketplace, accessServi
 app.use('/api/onboarding', createOnboardingRouter(domainStore));
 app.use('/api/custody', createCustodyRouter());
 
-app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'SAIN Real Asset Market', version: '1.2.0', universalAccount: 'FREE', capabilityTiers: 'ACTIVE', feeArchitecture: 'ACTIVE', marketplaceParticipation: 'ACTIVE', institutionalCustody: 'ACTIVE', timestamp: new Date().toISOString() }));
+app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'SAIN Real Asset Market', version: '1.3.0', productExperience: 'ACTIVE', operatingTierEngine: 'ACTIVE', tierAwareSane: 'ACTIVE', universalAccount: 'FREE', capabilityTiers: 'ACTIVE', marketplaceParticipation: 'ACTIVE', institutionalCustody: 'ACTIVE', timestamp: new Date().toISOString() }));
 app.get('/api/marketplace', (_req, res) => res.json(marketplace));
 app.get('/api/domain', (_req, res) => res.json(domainStore.snapshot()));
 app.get('/api/assets/:assetId/studio', (req, res) => {
@@ -64,21 +64,31 @@ app.get('/api/assets/:assetId/studio', (req, res) => {
 app.post('/api/sane/message', (req, res) => {
   const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
   if (!message) return res.status(400).json({ error: 'A message is required.' });
+  const tier = typeof req.body?.operatingTier === 'string' ? req.body.operatingTier : 'UNIVERSAL';
   const lower = message.toLowerCase();
-  let reply = 'I can move that through SRA. Name the asset, project, or outcome, and I will organize the marketplace path behind the conversation.';
-  if (lower.includes('capability') || lower.includes('tier') || lower.includes('fee') || lower.includes('upgrade')) {
-    reply = 'V12 keeps the Universal Account free. Asset Provider and Market Professional are paid capacities with their own application and lifecycle states. Institutional access is agreement-based, and Platform Administration remains internal.';
-  } else if (lower.includes('participate') || lower.includes('position') || lower.includes('contribution')) {
-    reply = 'Open an opportunity, choose a participation position, select what you are contributing, review the ticket, authorize it, and track the resulting position in My Positions.';
-  } else if (lower.includes('custody') || lower.includes('collateral') || lower.includes('bic')) {
-    reply = 'Custody, collateral schedules, filing, setoff, and discharge remain institutional-only records. Public and participant views receive approved summaries rather than the internal machinery.';
-  } else if (lower.includes('v4v') || lower.includes('register') || lower.includes('new asset')) {
-    reply = 'Asset Provider Capacity unlocks V4V, private evidence intake, Asset Accounts, projects, and opportunity publishing. The Universal Account remains intact beneath it.';
-  } else if (lower.includes('verified value')) {
-    reply = 'The public sees a Verified Value summary. Authorized participants can enter due diligence views. Institutional operators can see the underlying measurements, evidence links, ruleset, custody, and filing records.';
+  const defaults = {
+    UNIVERSAL: 'You are operating in the Universal tier. I can help you browse, compare opportunities, participate, and track positions.',
+    ASSET_PROVIDER: 'You are operating in the Asset Provider tier. I can help you present an asset, start V4V, manage projects, publish opportunities, and track completion.',
+    MARKET_PROFESSIONAL: 'You are operating in the Market Professional tier. I can help you find openings, offer capacity, review assignments, manage positions, and track settlement.',
+    INSTITUTIONAL_OPERATOR: 'You are operating in the Institutional tier. I can route verification, custody, settlement, discharge, filing, and audit workflows.',
+    PLATFORM_ADMIN: 'You are operating in Platform Administration. I can route the SRA platform account, parent-platform connection, treasury, platform funding, and cross-platform reporting.'
+  };
+  let reply = defaults[tier] || defaults.UNIVERSAL;
+  if (lower.includes('tier') || lower.includes('workspace') || lower.includes('switch')) {
+    reply = `Your current operating tier is ${tier.replaceAll('_',' ')}. The navigation, workspace, permissions, and my working context all derive from that tier.`;
+  } else if (tier === 'UNIVERSAL' && (lower.includes('participate') || lower.includes('position') || lower.includes('opportunit'))) {
+    reply = 'Open an opportunity, review the Verified Value summary and terms, choose your contribution medium, authorize the participation ticket, and track the resulting position in My Positions.';
+  } else if (tier === 'ASSET_PROVIDER' && (lower.includes('asset') || lower.includes('v4v') || lower.includes('project') || lower.includes('publish'))) {
+    reply = 'I can start the Asset Provider path: present the asset, collect private evidence, move it through V4V, establish the Asset Account, open a project, and prepare a marketplace opportunity.';
+  } else if (tier === 'MARKET_PROFESSIONAL' && (lower.includes('service') || lower.includes('equipment') || lower.includes('material') || lower.includes('contract') || lower.includes('capital'))) {
+    reply = 'I can match your professional capacity to open project positions, organize the proposal or participation ticket, and track deployment, milestones, and settlement.';
+  } else if (tier === 'INSTITUTIONAL_OPERATOR' && (lower.includes('custody') || lower.includes('collateral') || lower.includes('settlement') || lower.includes('discharge') || lower.includes('filing'))) {
+    reply = 'I can route the institutional record through custody, collateral scheduling, settlement, setoff, discharge, filing, and lifecycle updates without exposing those records to ordinary participants.';
+  } else if (tier === 'PLATFORM_ADMIN' && (lower.includes('platform') || lower.includes('treasury') || lower.includes('parent') || lower.includes('funding'))) {
+    reply = 'I can open the SRA Platform Account and route parent-platform connection status, treasury position, platform funding, internal returns, and cross-platform administration.';
   }
-  return res.json({ reply });
+  return res.json({ reply, operatingTier: tier });
 });
 
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
-app.listen(port, '0.0.0.0', () => console.log(`SRA V12 Capability & Fee Tier Architecture is running on port ${port}`));
+app.listen(port, '0.0.0.0', () => console.log(`SRA V13 Product Experience & Operating Tier Architecture is running on port ${port}`));
