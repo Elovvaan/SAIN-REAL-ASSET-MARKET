@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="SAIN Real Asset Market universal account model">
-  <title>SAIN Real Assets — Account Model</title>
+  <meta name="description" content="SAIN Real Asset Market V14 Sane Skill Architecture">
+  <title>SAIN Real Assets — V14</title>
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/gains.css">
   <link rel="stylesheet" href="/interoperability.css">
@@ -12,12 +12,13 @@
   <link rel="stylesheet" href="/custody.css">
   <link rel="stylesheet" href="/access.css">
   <link rel="stylesheet" href="/participation.css">
+  <link rel="stylesheet" href="/sane-skills.css">
 </head>
 <body>
   <div class="app-shell">
     <aside class="sidebar">
       <div class="brand-block"><div class="brand-mark">SRA</div><div><strong>SAIN Real Assets</strong><span>Verified Value Market</span></div></div>
-      <button class="sane-entry" id="sidebar-sane"><span class="status-dot"></span><span><strong>Sane</strong><small>What are we moving today?</small></span></button>
+      <button class="sane-entry" id="sidebar-sane"><span class="status-dot"></span><span><strong>Sane</strong><small>One agent. Many skills.</small></span></button>
       <nav class="nav-list" aria-label="Operating divisions">
         <button class="nav-item active" data-view="marketplace"><span>◫</span> Marketplace</button>
         <button class="nav-item" data-view="positions"><span>▤</span> My Positions</button>
@@ -33,21 +34,22 @@
         <button class="nav-item" data-view="pools"><span>⬡</span> Market Pools</button>
         <button class="nav-item" data-view="activity"><span>≋</span> Life Record</button>
       </nav>
-      <div class="system-card"><span class="status-dot"></span><div><strong>Account model active</strong><small>Universal identity + specialized capacities</small></div></div>
+      <div class="system-card"><span class="status-dot"></span><div><strong>V14 skill architecture</strong><small>Registry · dispatcher · multi-skill plans</small></div></div>
     </aside>
     <main class="main-area">
       <header class="topbar"><div><p class="eyebrow">PRODUCTIVE ASSET NETWORK</p><h1 id="page-title">Marketplace</h1></div><div class="top-actions"><span class="market-pill"><span class="status-dot"></span> Market Live</span><button class="primary-button" id="open-sane">Talk to Sane</button></div></header>
       <section class="heartbeat" aria-label="Live market heartbeat"><span class="heartbeat-label">LIVE</span><div class="heartbeat-track" id="heartbeat-track">Verified Value is moving through the network…</div></section>
-      <section id="view-root" class="view-root" aria-live="polite"><div class="loading-state">Loading SAIN Real Assets…</div></section>
+      <section id="view-root" class="view-root" aria-live="polite"><div class="loading-state">Loading SAIN Real Assets V14…</div></section>
     </main>
     <section class="sane-panel" id="sane-panel" aria-label="Sane conversation">
-      <div class="sane-header"><div><p class="eyebrow">VERIFIED VALUE INTELLIGENCE</p><h2>Sane</h2></div><button class="icon-button" id="close-sane" aria-label="Close Sane panel">×</button></div>
-      <div class="chat-context">One Universal Account can carry additional Asset Provider, Market Professional, or institutional capacities.</div>
-      <div class="chat-log" id="chat-log"><div class="message sane-message">Start as a universal marketplace user. Add specialized account capacity only when you bring assets, professional capacity, or institutional authority.</div></div>
-      <div class="quick-prompts"><button data-prompt="Show me the marketplace opportunities.">Marketplace</button><button data-prompt="Explain my account capacities.">Account capacities</button><button data-prompt="Show my participation positions.">My Positions</button></div>
-      <div class="chat-composer"><label class="sr-only" for="sane-input">Message Sane</label><textarea id="sane-input" rows="2" placeholder="What are we accomplishing today?"></textarea><button id="send-message" class="primary-button">Send</button></div>
+      <div class="sane-header"><div><p class="eyebrow">SANE SKILL ARCHITECTURE</p><h2>Sane</h2></div><button class="icon-button" id="close-sane" aria-label="Close Sane panel">×</button></div>
+      <div class="chat-context">Sane is one agent. The active operating tier determines which skills it may call.</div>
+      <div class="chat-log" id="chat-log"><div class="message sane-message">Tell me the outcome. I will select and coordinate Marketplace, V4V, Asset, Participation, Project, True Bill, Settlement, Discharge, or Completion skills as needed.</div></div>
+      <div class="quick-prompts"><button data-prompt="What skills can you use in this workspace?">My available skills</button><button data-prompt="I want to remodel my restaurant and publish the opportunity.">Plan a project</button><button data-prompt="Help complete a stalled project and close the position.">Completion plan</button></div>
+      <div class="chat-composer"><label class="sr-only" for="sane-input">Message Sane</label><textarea id="sane-input" rows="2" placeholder="What outcome are we accomplishing?"></textarea><button id="send-message" class="primary-button">Send</button></div>
     </section>
   </div>
+  <script src="/sane-skills.js" defer></script>
   <script src="/app.js" defer></script>
   <script src="/interoperability.js" defer></script>
   <script src="/onboarding.js" defer></script>
