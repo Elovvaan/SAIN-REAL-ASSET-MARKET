@@ -3,14 +3,15 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="SAIN Real Asset Market layered access marketplace">
-  <title>SAIN Real Assets</title>
+  <meta name="description" content="SAIN Real Asset Market V10 Marketplace Participation Layer">
+  <title>SAIN Real Assets — V10</title>
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/gains.css">
   <link rel="stylesheet" href="/interoperability.css">
   <link rel="stylesheet" href="/onboarding.css">
   <link rel="stylesheet" href="/custody.css">
   <link rel="stylesheet" href="/access.css">
+  <link rel="stylesheet" href="/participation.css">
 </head>
 <body>
   <div class="app-shell">
@@ -31,18 +32,18 @@
         <button class="nav-item" data-view="pools"><span>⬡</span> Market Pools</button>
         <button class="nav-item" data-view="activity"><span>≋</span> Life Record</button>
       </nav>
-      <div class="system-card"><span class="status-dot"></span><div><strong>Access Layer active</strong><small>Public, participant & institutional shells</small></div></div>
+      <div class="system-card"><span class="status-dot"></span><div><strong>V10 active</strong><small>Marketplace participation & positions</small></div></div>
     </aside>
     <main class="main-area">
       <header class="topbar"><div><p class="eyebrow">PRODUCTIVE ASSET NETWORK</p><h1 id="page-title">Marketplace</h1></div><div class="top-actions"><span class="market-pill"><span class="status-dot"></span> Market Live</span><button class="primary-button" id="open-sane">Talk to Sane</button></div></header>
       <section class="heartbeat" aria-label="Live market heartbeat"><span class="heartbeat-label">LIVE</span><div class="heartbeat-track" id="heartbeat-track">Verified Value is moving through the network…</div></section>
-      <section id="view-root" class="view-root" aria-live="polite"><div class="loading-state">Loading SAIN Real Assets…</div></section>
+      <section id="view-root" class="view-root" aria-live="polite"><div class="loading-state">Loading SAIN Real Assets V10…</div></section>
     </main>
     <section class="sane-panel" id="sane-panel" aria-label="Sane conversation">
       <div class="sane-header"><div><p class="eyebrow">VERIFIED VALUE INTELLIGENCE</p><h2>Sane</h2></div><button class="icon-button" id="close-sane" aria-label="Close Sane panel">×</button></div>
-      <div class="chat-context">Your active role controls which tools and institutional records are available.</div>
-      <div class="chat-log" id="chat-log"><div class="message sane-message">Tell me what you are accomplishing. I will open the authorized asset, project, position, or institutional workflow for your active role.</div></div>
-      <div class="quick-prompts"><button data-prompt="Explain my current role and access.">My access</button><button data-prompt="Start a V4V for a new asset.">Start V4V</button><button data-prompt="Show me the marketplace opportunities.">Marketplace</button></div>
+      <div class="chat-context">Browse, open an opportunity, choose how to participate, and track the resulting position.</div>
+      <div class="chat-log" id="chat-log"><div class="message sane-message">Tell me what opportunity you want to open or what you want to contribute. I can route the participation ticket and resulting position.</div></div>
+      <div class="quick-prompts"><button data-prompt="Show me the marketplace opportunities.">Marketplace</button><button data-prompt="Explain how I can participate with USD or another contribution medium.">Participate</button><button data-prompt="Show my participation positions.">My Positions</button></div>
       <div class="chat-composer"><label class="sr-only" for="sane-input">Message Sane</label><textarea id="sane-input" rows="2" placeholder="What are we accomplishing today?"></textarea><button id="send-message" class="primary-button">Send</button></div>
     </section>
   </div>
@@ -51,5 +52,6 @@
   <script src="/onboarding.js" defer></script>
   <script src="/custody.js" defer></script>
   <script src="/access.js" defer></script>
+  <script src="/participation.js" defer></script>
 </body>
 </html>
