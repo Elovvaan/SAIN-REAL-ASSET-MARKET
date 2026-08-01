@@ -5,12 +5,15 @@ import { createSeededDomainStore } from './services/domain-store.js';
 import { createOnboardingRouter } from './routes/onboarding-router.js';
 import { createCustodyRouter } from './routes/custody-router.js';
 import { createAccessRouter } from './routes/access-router.js';
+import { createParticipationRouter } from './routes/participation-router.js';
+import { AccessService } from './services/access-service.js';
 
 const app = express();
 const port = Number(process.env.PORT) || 3000;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const domainStore = createSeededDomainStore();
+const accessService = new AccessService();
 
 app.disable('x-powered-by');
 app.use(express.json({ limit: '1mb' }));
@@ -44,11 +47,12 @@ const marketplace = {
   ]
 };
 
-app.use('/api/access', createAccessRouter(marketplace));
+app.use('/api/access', createAccessRouter(marketplace, accessService));
+app.use('/api/participation', createParticipationRouter(marketplace, accessService));
 app.use('/api/onboarding', createOnboardingRouter(domainStore));
 app.use('/api/custody', createCustodyRouter());
 
-app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'SAIN Real Asset Market', version: '1.0.0', accessLayer: 'ACTIVE', publicMarketplace: 'ACTIVE', roleSessions: 'ACTIVE', institutionalCustody: 'ACTIVE', timestamp: new Date().toISOString() }));
+app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'SAIN Real Asset Market', version: '1.1.0', accessLayer: 'ACTIVE', marketplaceParticipation: 'ACTIVE', contributionMedia: 'ACTIVE', publicMarketplace: 'ACTIVE', roleSessions: 'ACTIVE', institutionalCustody: 'ACTIVE', timestamp: new Date().toISOString() }));
 app.get('/api/marketplace', (_req, res) => res.json(marketplace));
 app.get('/api/domain', (_req, res) => res.json(domainStore.snapshot()));
 app.get('/api/assets/:assetId/studio', (req, res) => {
@@ -62,14 +66,16 @@ app.post('/api/sane/message', (req, res) => {
   if (!message) return res.status(400).json({ error: 'A message is required.' });
   const lower = message.toLowerCase();
   let reply = 'I can move that through SRA. Name the asset, project, or outcome, and I will organize the marketplace path behind the conversation.';
-  if (lower.includes('sign in') || lower.includes('role') || lower.includes('access')) {
+  if (lower.includes('participate') || lower.includes('position') || lower.includes('contribution')) {
+    reply = 'V10 is active. Open an opportunity, choose a participation position, select what you are contributing, review the ticket, authorize it, and track the resulting position in My Positions.';
+  } else if (lower.includes('sign in') || lower.includes('role') || lower.includes('access')) {
     reply = 'The Access Layer separates the public marketplace, participant workspaces, and institutional operations. A participant sees only the tools available to the active role and the specific object they engage.';
   } else if (lower.includes('custody') || lower.includes('collateral') || lower.includes('bic')) {
     reply = 'Custody, collateral schedules, filing, setoff, and discharge remain institutional-only records. Public and participant views receive approved summaries rather than the internal machinery.';
   } else if (lower.includes('discharge') || lower.includes('setoff') || lower.includes('settlement')) {
     reply = 'Discharge is a first-class institutional accounting record. It is not exposed in the public marketplace and appears only within authorized operations and object-level workspaces.';
   } else if (lower.includes('v4v') || lower.includes('register') || lower.includes('new asset')) {
-    reply = 'Asset Owners can start V4V from their participant workspace. The private evidence and institutional review windows appear only after they enter that workflow.';
+    reply = 'Asset Owners can start V4V from their participant workspace. Outside non-cash contributions can also enter a focused Contribution V4V when a participation ticket requires verification.';
   } else if (lower.includes('verified value')) {
     reply = 'The public sees a Verified Value summary. Authorized participants can enter due diligence views. Institutional operators can see the underlying measurements, evidence links, ruleset, custody, and filing records.';
   }
@@ -77,4 +83,4 @@ app.post('/api/sane/message', (req, res) => {
 });
 
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
-app.listen(port, '0.0.0.0', () => console.log(`SRA Access & Interface Layer is running on port ${port}`));
+app.listen(port, '0.0.0.0', () => console.log(`SRA V10 Marketplace Participation Layer is running on port ${port}`));
