@@ -41,6 +41,20 @@ const SKILL_REGISTRY = {
     tiers: ['ASSET_PROVIDER','INSTITUTIONAL_OPERATOR'],
     keywords: ['true bill','instrument','pledge','discount','capital formation']
   },
+  ASSIGNMENT: {
+    id: 'ASSIGNMENT',
+    label: 'Assignment Skill',
+    description: 'Transfers all or part of a recognized SRA position and updates holder, custody, and settlement routing records.',
+    tiers: ['ASSET_PROVIDER','MARKET_PROFESSIONAL','INSTITUTIONAL_OPERATOR'],
+    keywords: ['assign','assignment','transfer position','new holder','payment right','contract right','partial interest']
+  },
+  CREATIVE_FINANCE: {
+    id: 'CREATIVE_FINANCE',
+    label: 'Creative Finance Skill',
+    description: 'Identifies verified value, project gaps, transferable positions, and contribution media to assemble an executable project structure.',
+    tiers: ['ASSET_PROVIDER','MARKET_PROFESSIONAL','INSTITUTIONAL_OPERATOR'],
+    keywords: ['creative finance','structure financing','assemble value','funding gap','project gap','transferable position','payment right','future production','completion capacity']
+  },
   SETTLEMENT: {
     id: 'SETTLEMENT',
     label: 'Settlement Skill',
@@ -105,6 +119,16 @@ function detectSkills(message, tier) {
 
 function expandPlan(skillIds) {
   const plan = [...skillIds];
+  if (plan.includes('CREATIVE_FINANCE')) {
+    ['ASSET','V4V','TRUE_BILL','ASSIGNMENT','PARTICIPATION','PROJECT','COMPLETION','SETTLEMENT','DISCHARGE'].forEach((id) => {
+      if (!plan.includes(id)) plan.push(id);
+    });
+  }
+  if (plan.includes('ASSIGNMENT')) {
+    ['PARTICIPATION','SETTLEMENT'].forEach((id) => {
+      if (!plan.includes(id)) plan.push(id);
+    });
+  }
   if (plan.includes('COMPLETION')) {
     ['PROJECT','PARTICIPATION','SETTLEMENT','DISCHARGE'].forEach((id) => {
       if (!plan.includes(id)) plan.push(id);
@@ -113,7 +137,7 @@ function expandPlan(skillIds) {
   if (plan.includes('PROJECT') && plan.includes('ASSET') && !plan.includes('MARKETPLACE')) plan.push('MARKETPLACE');
   if (plan.includes('TRUE_BILL') && !plan.includes('V4V')) plan.unshift('V4V');
   if (plan.includes('DISCHARGE') && !plan.includes('SETTLEMENT')) plan.unshift('SETTLEMENT');
-  return plan.slice(0, 8);
+  return plan.slice(0, 10);
 }
 
 function buildReply(message, tier, skills) {
@@ -123,6 +147,12 @@ function buildReply(message, tier, skills) {
 
   if (lower.includes('what skills') || lower.includes('your skills') || lower.includes('skill registry')) {
     return `I am one Sane agent operating in the ${tier.replaceAll('_',' ')} tier. My available abilities here are ${skillLine}. I select and combine them according to the outcome you describe.`;
+  }
+  if (skills.includes('CREATIVE_FINANCE')) {
+    return `I will use ${skillLine} as one creative-finance plan: identify verified value, measure the project gap, locate transferable positions and contribution media, assemble the execution structure, reconcile every movement, then settle and preserve discharge where applicable.`;
+  }
+  if (skills.includes('ASSIGNMENT')) {
+    return `I will use ${skillLine}: identify the current holder and transferable amount, record the assignment, update custody and settlement routing, preserve any retained position, and reconcile the new holder's position.`;
   }
   if (skills.includes('COMPLETION')) {
     return `I will use ${skillLine} as one coordinated plan: identify the project gap, confirm the supporting position, route completion capacity, reconcile settlement, and preserve the discharge record when the position is extinguished.`;
@@ -162,7 +192,7 @@ export class SaneSkillService {
     }));
     return {
       agent: 'SANE',
-      architectureVersion: 'V14',
+      architectureVersion: 'V15',
       operatingTier,
       selectedSkills: selected,
       executionPlan,
