@@ -3,24 +3,23 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="SAIN Real Asset Market V4V Verified Value Exchange">
-  <title>SAIN Real Assets — V4V</title>
+  <meta name="description" content="SAIN Real Asset Market V9 Institutional Custody and Records">
+  <title>SAIN Real Assets — V9</title>
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/gains.css">
   <link rel="stylesheet" href="/interoperability.css">
   <link rel="stylesheet" href="/onboarding.css">
+  <link rel="stylesheet" href="/custody.css">
 </head>
 <body>
   <div class="app-shell">
     <aside class="sidebar">
-      <div class="brand-block">
-        <div class="brand-mark">SRA</div>
-        <div><strong>SAIN Real Assets</strong><span>Verified Value Market</span></div>
-      </div>
+      <div class="brand-block"><div class="brand-mark">SRA</div><div><strong>SAIN Real Assets</strong><span>Verified Value Market</span></div></div>
       <button class="sane-entry" id="sidebar-sane"><span class="status-dot"></span><span><strong>Sane</strong><small>What are we moving today?</small></span></button>
       <nav class="nav-list" aria-label="Operating divisions">
         <button class="nav-item active" data-view="marketplace"><span>◫</span> Marketplace</button>
         <button class="nav-item" data-view="onboarding"><span>＋</span> V4V Exchange</button>
+        <button class="nav-item" data-view="custody"><span>▣</span> Custody & Records</button>
         <button class="nav-item" data-view="assets"><span>◇</span> Asset Accounts</button>
         <button class="nav-item" data-view="verified"><span>◎</span> Verified Value</button>
         <button class="nav-item" data-view="projects"><span>△</span> Projects</button>
@@ -31,23 +30,24 @@
         <button class="nav-item" data-view="pools"><span>⬡</span> Market Pools</button>
         <button class="nav-item" data-view="activity"><span>≋</span> Life Record</button>
       </nav>
-      <div class="system-card"><span class="status-dot"></span><div><strong>V4V active</strong><small>Verified Value Exchange intake</small></div></div>
+      <div class="system-card"><span class="status-dot"></span><div><strong>V9 active</strong><small>Institutional custody, filing & discharge</small></div></div>
     </aside>
     <main class="main-area">
       <header class="topbar"><div><p class="eyebrow">PRODUCTIVE ASSET NETWORK</p><h1 id="page-title">Marketplace</h1></div><div class="top-actions"><span class="market-pill"><span class="status-dot"></span> Market Live</span><button class="primary-button" id="open-sane">Talk to Sane</button></div></header>
       <section class="heartbeat" aria-label="Live market heartbeat"><span class="heartbeat-label">LIVE</span><div class="heartbeat-track" id="heartbeat-track">Verified Value is moving through the network…</div></section>
-      <section id="view-root" class="view-root" aria-live="polite"><div class="loading-state">Loading SRA…</div></section>
+      <section id="view-root" class="view-root" aria-live="polite"><div class="loading-state">Loading SRA V9…</div></section>
     </main>
     <section class="sane-panel" id="sane-panel" aria-label="Sane conversation">
       <div class="sane-header"><div><p class="eyebrow">VERIFIED VALUE INTELLIGENCE</p><h2>Sane</h2></div><button class="icon-button" id="close-sane" aria-label="Close Sane panel">×</button></div>
-      <div class="chat-context">Conversation is the primary operating layer. Source documents remain private.</div>
-      <div class="chat-log" id="chat-log"><div class="message sane-message">Start a V4V to present an asset, upload private evidence, and open institutional review.</div></div>
-      <div class="quick-prompts"><button data-prompt="Start a V4V for a new asset.">Start V4V</button><button data-prompt="Explain institutional verification.">Institutional review</button><button data-prompt="Explain the DeFi interoperability layer.">DeFi interop</button></div>
+      <div class="chat-context">Customer experience stays simple. Custody, collateral, filing, setoff, and discharge operate behind the scenes.</div>
+      <div class="chat-log" id="chat-log"><div class="message sane-message">Start with V4V. Once evidence passes review, I can route it into institutional custody, Verified Value, collateral scheduling, settlement, setoff, discharge, and release.</div></div>
+      <div class="quick-prompts"><button data-prompt="Explain the custody and collateral workflow.">Custody workflow</button><button data-prompt="Show me how discharge is recorded.">Discharge filing</button><button data-prompt="Start a V4V for a new asset.">Start V4V</button></div>
       <div class="chat-composer"><label class="sr-only" for="sane-input">Message Sane</label><textarea id="sane-input" rows="2" placeholder="What are we accomplishing today?"></textarea><button id="send-message" class="primary-button">Send</button></div>
     </section>
   </div>
   <script src="/app.js" defer></script>
   <script src="/interoperability.js" defer></script>
   <script src="/onboarding.js" defer></script>
+  <script src="/custody.js" defer></script>
 </body>
 </html>
