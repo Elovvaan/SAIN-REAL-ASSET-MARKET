@@ -1,0 +1,88 @@
+import crypto from 'node:crypto';
+
+const PARTICIPATION_TYPES = ['CAPITAL','SERVICE','MATERIAL','EQUIPMENT','CONTRACT'];
+const CONTRIBUTION_MEDIA = ['USD','BANK_TRANSFER','STABLE_DIGITAL_ASSET','CRYPTOCURRENCY','SRA_BALANCE','EQUIPMENT','MATERIAL','SERVICE','CONTRACT_RIGHT'];
+
+function id(prefix){return `${prefix}-${crypto.randomUUID().split('-')[0].toUpperCase()}`}
+function clean(value,max=240){return typeof value==='string'?value.trim().slice(0,max):''}
+
+export class ParticipationService{
+  constructor(marketplace,accessStore){
+    this.marketplace=marketplace;
+    this.accessStore=accessStore;
+    this.positions=new Map();
+  }
+
+  listOpportunities(){
+    return this.marketplace.projects.map(project=>({
+      id:project.id,
+      assetId:project.assetId,
+      assetName:project.assetName,
+      title:project.title,
+      region:project.region,
+      stage:project.stage,
+      progress:project.progress,
+      verifiedValue:project.verifiedValue,
+      projectedCompletedValue:project.projectedCompletedValue,
+      projectedGain:project.projectedGain,
+      projectedGainRate:project.projectedGainRate,
+      participationWindow:project.participationWindow,
+      completionState:project.completionState,
+      fundingTarget:project.fundingTarget,
+      fundingProgress:project.fundingProgress,
+      openPositions:[
+        {type:'CAPITAL',remaining:Math.max(project.fundingTarget*(1-project.fundingProgress/100),0),acceptedMedia:['USD','BANK_TRANSFER','STABLE_DIGITAL_ASSET','CRYPTOCURRENCY','SRA_BALANCE']},
+        {type:'SERVICE',remaining:null,acceptedMedia:['SERVICE']},
+        {type:'MATERIAL',remaining:null,acceptedMedia:['MATERIAL']},
+        {type:'EQUIPMENT',remaining:null,acceptedMedia:['EQUIPMENT']},
+        {type:'CONTRACT',remaining:null,acceptedMedia:['CONTRACT_RIGHT']}
+      ]
+    }));
+  }
+
+  getOpportunity(projectId){return this.listOpportunities().find(item=>item.id===projectId)||null}
+
+  createPosition({session,projectId,participationType,medium,amount,description}){
+    if(!session)return{ok:false,status:401,error:'Sign in to create a participation position.'};
+    const opportunity=this.getOpportunity(projectId);
+    if(!opportunity)return{ok:false,status:404,error:'Opportunity not found.'};
+    const type=clean(participationType,40).toUpperCase();
+    const contributionMedium=clean(medium,60).toUpperCase();
+    if(!PARTICIPATION_TYPES.includes(type))return{ok:false,status:400,error:'Unsupported participation type.'};
+    if(!CONTRIBUTION_MEDIA.includes(contributionMedium))return{ok:false,status:400,error:'Unsupported contribution medium.'};
+    const available=opportunity.openPositions.find(position=>position.type===type);
+    if(!available||!available.acceptedMedia.includes(contributionMedium))return{ok:false,status:400,error:'That contribution medium is not available for this position.'};
+    const numericAmount=Number(amount||0);
+    if(type==='CAPITAL'&&(!Number.isFinite(numericAmount)||numericAmount<=0))return{ok:false,status:400,error:'Enter a capital contribution amount.'};
+
+    const position={
+      id:id('POS'),
+      participantId:session.userId,
+      participantName:session.displayName,
+      activeRole:session.activeRole,
+      projectId:opportunity.id,
+      opportunityTitle:opportunity.title,
+      assetName:opportunity.assetName,
+      participationType:type,
+      contribution:{
+        medium:contributionMedium,
+        statedAmount:type==='CAPITAL'?numericAmount:null,
+        denomination:type==='CAPITAL'?'USD':contributionMedium,
+        description:clean(description,500),
+        verificationStatus:['USD','BANK_TRANSFER','SRA_BALANCE'].includes(contributionMedium)?'PENDING_RECEIPT':'CONTRIBUTION_V4V_REQUIRED'
+      },
+      state:'AUTHORIZED',
+      createdAt:new Date().toISOString(),
+      history:[{state:'AUTHORIZED',at:new Date().toISOString(),note:'Participant authorized the participation ticket.'}]
+    };
+    this.positions.set(position.id,position);
+    return{ok:true,status:201,position,nextAction:position.contribution.verificationStatus==='CONTRIBUTION_V4V_REQUIRED'?'BEGIN_CONTRIBUTION_V4V':'VERIFY_RECEIPT'};
+  }
+
+  listPositions(session){
+    if(!session)return[];
+    return[...this.positions.values()].filter(position=>position.participantId===session.userId);
+  }
+}
+
+export const participationConfiguration={participationTypes:PARTICIPATION_TYPES,contributionMedia:CONTRIBUTION_MEDIA};
