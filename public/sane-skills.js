@@ -1,7 +1,13 @@
 (() => {
   const originalFetch = window.fetch.bind(window);
 
+  function mayExposeInternalPlan(payload) {
+    const tier = payload?.operatingTier || window.accessState?.session?.activeCapacity || 'UNIVERSAL';
+    return tier === 'INSTITUTIONAL_OPERATOR' || tier === 'PLATFORM_ADMIN';
+  }
+
   function renderSkillTrace(payload) {
+    if (!mayExposeInternalPlan(payload)) return;
     if (!Array.isArray(payload?.executionPlan) || !payload.executionPlan.length) return;
     const chatLog = document.querySelector('#chat-log');
     if (!chatLog) return;
@@ -10,7 +16,7 @@
     const skills = payload.executionPlan
       .map((step) => `<span class="sane-skill-chip"><small>${step.order}</small>${String(step.skillLabel).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;')}</span>`)
       .join('');
-    trace.innerHTML = `<div class="sane-skill-trace-head"><strong>Sane skill plan</strong><span>${String(payload.operatingTier || 'UNIVERSAL').replaceAll('_',' ')}</span></div><div class="sane-skill-chip-row">${skills}</div>`;
+    trace.innerHTML = `<div class="sane-skill-trace-head"><strong>Internal execution plan</strong><span>${String(payload.operatingTier || 'UNIVERSAL').replaceAll('_',' ')}</span></div><div class="sane-skill-chip-row">${skills}</div>`;
     chatLog.append(trace);
     chatLog.scrollTop = chatLog.scrollHeight;
   }
