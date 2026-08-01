@@ -1,4 +1,5 @@
 const accessState={session:null,publicData:null,mode:'signin'};
+window.accessState=accessState;
 const accessEscape=value=>String(value??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;');
 const accessMoney=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0});
 
