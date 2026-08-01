@@ -7,7 +7,9 @@ import { createCustodyRouter } from './routes/custody-router.js';
 import { createAccessRouter } from './routes/access-router.js';
 import { createParticipationRouter } from './routes/participation-router.js';
 import { createSaneRouter } from './routes/sane-router.js';
+import { createCreativeFinanceRouter } from './routes/creative-finance-router.js';
 import { AccessService } from './services/access-service.js';
+import { CreativeFinanceService } from './services/creative-finance-service.js';
 
 const app = express();
 const port = Number(process.env.PORT) || 3000;
@@ -48,20 +50,26 @@ const marketplace = {
   ]
 };
 
+const creativeFinanceService = new CreativeFinanceService(marketplace);
+
 app.use('/api/access', createAccessRouter(marketplace, accessService));
 app.use('/api/participation', createParticipationRouter(marketplace, accessService));
 app.use('/api/onboarding', createOnboardingRouter(domainStore));
 app.use('/api/custody', createCustodyRouter());
 app.use('/api/sane', createSaneRouter());
+app.use('/api/creative-finance', createCreativeFinanceRouter(creativeFinanceService));
 
 app.get('/api/health', (_req, res) => res.json({
   status: 'ok',
   service: 'SAIN Real Asset Market',
-  version: '1.4.0',
+  version: '1.5.0',
   saneAgent: 'ACTIVE',
   skillRegistry: 'ACTIVE',
   skillDispatcher: 'ACTIVE',
-  multiSkillPlans: 'ACTIVE',
+  creativeFinanceSkill: 'ACTIVE',
+  transferablePositions: 'ACTIVE',
+  gapAnalysis: 'ACTIVE',
+  reconciliationSequence: 'ACTIVE',
   productExperience: 'ACTIVE',
   operatingTierEngine: 'ACTIVE',
   universalAccount: 'FREE',
@@ -78,4 +86,4 @@ app.get('/api/assets/:assetId/studio', (req, res) => {
 });
 
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
-app.listen(port, '0.0.0.0', () => console.log(`SRA V14 Sane Skill Architecture is running on port ${port}`));
+app.listen(port, '0.0.0.0', () => console.log(`SRA V15 Creative Finance Skill Architecture is running on port ${port}`));
