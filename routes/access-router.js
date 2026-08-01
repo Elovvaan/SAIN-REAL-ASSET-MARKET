@@ -28,7 +28,8 @@ export function createAccessRouter(marketplace, service = new AccessService()) {
   router.post('/signin', (req, res) => { try { const result = service.signin(req.body); setSessionCookie(res, result.token); res.json({ authenticated: true, session: result.session }); } catch (error) { res.status(401).json({ error: error.message }); } });
   router.post('/signout', (req, res) => { service.signout(readCookie(req, 'sra_session')); clearSessionCookie(res); res.json({ authenticated: false }); });
   router.post('/role', (req, res) => { try { const session = service.switchRole(readCookie(req, 'sra_session'), req.body?.role); res.json({ authenticated: true, session }); } catch (error) { res.status(403).json({ error: error.message }); } });
-  router.post('/capacity', (req, res) => { try { const session = service.addCapacity(readCookie(req, 'sra_session'), req.body?.capacity); res.status(201).json({ authenticated: true, session }); } catch (error) { res.status(403).json({ error: error.message }); } });
+  router.post('/capacity/apply', (req, res) => { try { const session = service.applyForCapacity(readCookie(req, 'sra_session'), req.body?.capacity); res.status(202).json({ authenticated: true, session }); } catch (error) { res.status(403).json({ error: error.message }); } });
+  router.post('/capacity/activate', (req, res) => { try { const session = service.activateCapacity(readCookie(req, 'sra_session'), req.body?.capacity); res.status(201).json({ authenticated: true, session }); } catch (error) { res.status(403).json({ error: error.message }); } });
   return router;
 }
 export { readCookie };
