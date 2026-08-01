@@ -52,7 +52,7 @@ app.use('/api/participation', createParticipationRouter(marketplace, accessServi
 app.use('/api/onboarding', createOnboardingRouter(domainStore));
 app.use('/api/custody', createCustodyRouter());
 
-app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'SAIN Real Asset Market', version: '1.1.0', accessLayer: 'ACTIVE', marketplaceParticipation: 'ACTIVE', contributionMedia: 'ACTIVE', publicMarketplace: 'ACTIVE', roleSessions: 'ACTIVE', institutionalCustody: 'ACTIVE', timestamp: new Date().toISOString() }));
+app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'SAIN Real Asset Market', version: '1.2.0', universalAccount: 'FREE', capabilityTiers: 'ACTIVE', feeArchitecture: 'ACTIVE', marketplaceParticipation: 'ACTIVE', institutionalCustody: 'ACTIVE', timestamp: new Date().toISOString() }));
 app.get('/api/marketplace', (_req, res) => res.json(marketplace));
 app.get('/api/domain', (_req, res) => res.json(domainStore.snapshot()));
 app.get('/api/assets/:assetId/studio', (req, res) => {
@@ -66,16 +66,14 @@ app.post('/api/sane/message', (req, res) => {
   if (!message) return res.status(400).json({ error: 'A message is required.' });
   const lower = message.toLowerCase();
   let reply = 'I can move that through SRA. Name the asset, project, or outcome, and I will organize the marketplace path behind the conversation.';
-  if (lower.includes('participate') || lower.includes('position') || lower.includes('contribution')) {
-    reply = 'V10 is active. Open an opportunity, choose a participation position, select what you are contributing, review the ticket, authorize it, and track the resulting position in My Positions.';
-  } else if (lower.includes('sign in') || lower.includes('role') || lower.includes('access')) {
-    reply = 'The Access Layer separates the public marketplace, participant workspaces, and institutional operations. A participant sees only the tools available to the active role and the specific object they engage.';
+  if (lower.includes('capability') || lower.includes('tier') || lower.includes('fee') || lower.includes('upgrade')) {
+    reply = 'V12 keeps the Universal Account free. Asset Provider and Market Professional are paid capacities with their own application and lifecycle states. Institutional access is agreement-based, and Platform Administration remains internal.';
+  } else if (lower.includes('participate') || lower.includes('position') || lower.includes('contribution')) {
+    reply = 'Open an opportunity, choose a participation position, select what you are contributing, review the ticket, authorize it, and track the resulting position in My Positions.';
   } else if (lower.includes('custody') || lower.includes('collateral') || lower.includes('bic')) {
     reply = 'Custody, collateral schedules, filing, setoff, and discharge remain institutional-only records. Public and participant views receive approved summaries rather than the internal machinery.';
-  } else if (lower.includes('discharge') || lower.includes('setoff') || lower.includes('settlement')) {
-    reply = 'Discharge is a first-class institutional accounting record. It is not exposed in the public marketplace and appears only within authorized operations and object-level workspaces.';
   } else if (lower.includes('v4v') || lower.includes('register') || lower.includes('new asset')) {
-    reply = 'Asset Owners can start V4V from their participant workspace. Outside non-cash contributions can also enter a focused Contribution V4V when a participation ticket requires verification.';
+    reply = 'Asset Provider Capacity unlocks V4V, private evidence intake, Asset Accounts, projects, and opportunity publishing. The Universal Account remains intact beneath it.';
   } else if (lower.includes('verified value')) {
     reply = 'The public sees a Verified Value summary. Authorized participants can enter due diligence views. Institutional operators can see the underlying measurements, evidence links, ruleset, custody, and filing records.';
   }
@@ -83,4 +81,4 @@ app.post('/api/sane/message', (req, res) => {
 });
 
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
-app.listen(port, '0.0.0.0', () => console.log(`SRA V10 Marketplace Participation Layer is running on port ${port}`));
+app.listen(port, '0.0.0.0', () => console.log(`SRA V12 Capability & Fee Tier Architecture is running on port ${port}`));
