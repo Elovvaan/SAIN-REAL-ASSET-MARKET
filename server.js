@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { createSeededDomainStore } from './services/domain-store.js';
 import { createOnboardingRouter } from './routes/onboarding-router.js';
 import { createCustodyRouter } from './routes/custody-router.js';
+import { createAccessRouter } from './routes/access-router.js';
 
 const app = express();
 const port = Number(process.env.PORT) || 3000;
@@ -14,8 +15,6 @@ const domainStore = createSeededDomainStore();
 app.disable('x-powered-by');
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
-app.use('/api/onboarding', createOnboardingRouter(domainStore));
-app.use('/api/custody', createCustodyRouter());
 
 const marketplace = {
   marketStatus: 'LIVE', verifiedValue: 12840000, projectedMarketplaceGain: 684000, activeProjects: 18,
@@ -45,7 +44,11 @@ const marketplace = {
   ]
 };
 
-app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'SAIN Real Asset Market', version: '0.9.0', domainCore: 'ACTIVE', v4vExchange: 'ACTIVE', institutionalCustody: 'ACTIVE', dischargeRecords: 'ACTIVE', timestamp: new Date().toISOString() }));
+app.use('/api/access', createAccessRouter(marketplace));
+app.use('/api/onboarding', createOnboardingRouter(domainStore));
+app.use('/api/custody', createCustodyRouter());
+
+app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'SAIN Real Asset Market', version: '1.0.0', accessLayer: 'ACTIVE', publicMarketplace: 'ACTIVE', roleSessions: 'ACTIVE', institutionalCustody: 'ACTIVE', timestamp: new Date().toISOString() }));
 app.get('/api/marketplace', (_req, res) => res.json(marketplace));
 app.get('/api/domain', (_req, res) => res.json(domainStore.snapshot()));
 app.get('/api/assets/:assetId/studio', (req, res) => {
@@ -59,19 +62,19 @@ app.post('/api/sane/message', (req, res) => {
   if (!message) return res.status(400).json({ error: 'A message is required.' });
   const lower = message.toLowerCase();
   let reply = 'I can move that through SRA. Name the asset, project, or outcome, and I will organize the marketplace path behind the conversation.';
-  if (lower.includes('custody') || lower.includes('collateral') || lower.includes('bic')) {
-    reply = 'The V9 Institutional Custody layer is active behind V4V. It tracks restricted evidence, filing references, chain of custody, internal collateral schedules, designation state, settlement, setoff, discharge, and release. An internal eligibility status does not represent outside-program approval or a completed pledge.';
+  if (lower.includes('sign in') || lower.includes('role') || lower.includes('access')) {
+    reply = 'The Access Layer separates the public marketplace, participant workspaces, and institutional operations. A participant sees only the tools available to the active role and the specific object they engage.';
+  } else if (lower.includes('custody') || lower.includes('collateral') || lower.includes('bic')) {
+    reply = 'Custody, collateral schedules, filing, setoff, and discharge remain institutional-only records. Public and participant views receive approved summaries rather than the internal machinery.';
   } else if (lower.includes('discharge') || lower.includes('setoff') || lower.includes('settlement')) {
-    reply = 'Discharge is a first-class accounting record in V9. It identifies the opening position, settlement value, setoff, release, remaining balance, filing number, supporting VVPs, and the date the position was posted as discharged.';
-  } else if (lower.includes('v4v') || lower.includes('register') || lower.includes('onboard') || lower.includes('new asset')) {
-    reply = 'V4V receives the asset, private evidence, ownership claim, proposed classification, and submitter attestation. V9 then accepts the approved evidence into institutional custody and records its filing and access controls.';
-  } else if (lower.includes('institutional') || lower.includes('review')) {
-    reply = 'Institutional review begins after V4V submission. Approved evidence can move into custody, Verified Value processing, collateral scheduling, capital deployment, and later settlement and discharge.';
+    reply = 'Discharge is a first-class institutional accounting record. It is not exposed in the public marketplace and appears only within authorized operations and object-level workspaces.';
+  } else if (lower.includes('v4v') || lower.includes('register') || lower.includes('new asset')) {
+    reply = 'Asset Owners can start V4V from their participant workspace. The private evidence and institutional review windows appear only after they enter that workflow.';
   } else if (lower.includes('verified value')) {
-    reply = 'Verified Value is created after institutional review. The VVP links the private evidence and custody record to downstream projects, instruments, collateral schedules, settlement, and discharge without exposing source documents publicly.';
+    reply = 'The public sees a Verified Value summary. Authorized participants can enter due diligence views. Institutional operators can see the underlying measurements, evidence links, ruleset, custody, and filing records.';
   }
   return res.json({ reply });
 });
 
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
-app.listen(port, '0.0.0.0', () => console.log(`SRA V9 Institutional Custody & Records Layer is running on port ${port}`));
+app.listen(port, '0.0.0.0', () => console.log(`SRA Access & Interface Layer is running on port ${port}`));
