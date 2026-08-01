@@ -15,9 +15,8 @@ function clearSessionCookie(res) {
   res.setHeader('Set-Cookie', 'sra_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');
 }
 
-export function createAccessRouter(marketplace) {
+export function createAccessRouter(marketplace, service = new AccessService()) {
   const router = Router();
-  const service = new AccessService();
 
   router.get('/public', (_req, res) => {
     res.json({
@@ -82,3 +81,5 @@ export function createAccessRouter(marketplace) {
 
   return router;
 }
+
+export { readCookie };
