@@ -2,6 +2,7 @@ import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createSeededDomainStore } from './services/domain-store.js';
+import { createOnboardingRouter } from './routes/onboarding-router.js';
 
 const app = express();
 const port = Number(process.env.PORT) || 3000;
@@ -12,18 +13,12 @@ const domainStore = createSeededDomainStore();
 app.disable('x-powered-by');
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+app.use('/api/onboarding', createOnboardingRouter(domainStore));
 
 const marketplace = {
-  marketStatus: 'LIVE',
-  verifiedValue: 12840000,
-  projectedMarketplaceGain: 684000,
-  activeProjects: 18,
-  participatingAssets: 42,
-  openPositions: 27,
-  completionCandidates: 3,
-  instrumentsActive: 9,
-  completionNeed: 240000,
-  completionReturn: 26000,
+  marketStatus: 'LIVE', verifiedValue: 12840000, projectedMarketplaceGain: 684000, activeProjects: 18,
+  participatingAssets: 42, openPositions: 27, completionCandidates: 3, instrumentsActive: 9,
+  completionNeed: 240000, completionReturn: 26000,
   assets: [
     { id: 'A-1042', name: 'North District Market', type: 'OPERATING_BUSINESS', region: 'Ogden, Utah', state: 'ACTIVE', lifecycleEvents: 418, verifiedCycles: 392, verifiedValue: 735000, verifiedScore: 88, valueSignal: 'STABLE', projectId: 'SRA-RE-0021', dimensions: { production: 91, condition: 84, reliability: 93, capacity: 79 } },
     { id: 'A-2088', name: 'Weber Residential Portfolio', type: 'REAL_ESTATE', region: 'Northern Utah', state: 'UNDER_PROJECT', lifecycleEvents: 96, verifiedCycles: 81, verifiedValue: 1860000, verifiedScore: 76, valueSignal: 'GROWING', projectId: 'SRA-RE-0014', dimensions: { production: 72, condition: 68, reliability: 82, capacity: 81 } },
@@ -48,7 +43,7 @@ const marketplace = {
   ]
 };
 
-app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'SAIN Real Asset Market', version: '0.4.0', domainCore: 'ACTIVE', timestamp: new Date().toISOString() }));
+app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'SAIN Real Asset Market', version: '0.5.0', domainCore: 'ACTIVE', assetOnboarding: 'ACTIVE', timestamp: new Date().toISOString() }));
 app.get('/api/marketplace', (_req, res) => res.json(marketplace));
 app.get('/api/domain', (_req, res) => res.json(domainStore.snapshot()));
 app.get('/api/assets/:assetId/studio', (req, res) => {
@@ -62,21 +57,23 @@ app.post('/api/sane/message', (req, res) => {
   if (!message) return res.status(400).json({ error: 'A message is required.' });
   const lower = message.toLowerCase();
   let reply = 'I can move that through SRA. Name the asset, project, or outcome, and I will organize the marketplace path behind the conversation.';
-  if (lower.includes('domain') || lower.includes('object')) {
-    reply = 'The Phase One domain core is active. Participant, Asset Account, Lifecycle Record, Verified Value Package, True Bill, Marketplace Project, and Completion now exist as real platform objects.';
+  if (lower.includes('register') || lower.includes('onboard') || lower.includes('new asset')) {
+    reply = 'Asset Onboarding is active. I will guide the asset through registration, identity, documents, ownership, classification, verification, and permanent Asset Account creation.';
+  } else if (lower.includes('domain') || lower.includes('object')) {
+    reply = 'The Phase One domain core is active. Participant, Asset Account, Lifecycle Record, Verified Value Package, True Bill, Marketplace Project, and Completion exist as real platform objects.';
   } else if (lower.includes('gain') || lower.includes('return') || lower.includes('upside')) {
-    reply = 'The current live projects show $684,000 in combined projected gain. Mixed-Use Rehabilitation has $197,000 projected gain with 94% verified completion coverage. These are projections, not realized results.';
+    reply = 'The current live projects show $684,000 in combined projected gain. These are projections, not realized results.';
   } else if (lower.includes('asset')) {
-    reply = 'Asset Accounts are now backed by domain services. I can open the Asset Studio relationship for A-1042, A-2088, or A-3104 and return its lifecycle, frozen Verified Value Packages, projects, True Bills, and Completion records.';
+    reply = 'I can open an existing Asset Studio or begin the Asset Onboarding workflow to create a new permanent Asset Account.';
   } else if (lower.includes('gap') || lower.includes('complete')) {
-    reply = 'Mixed-Use Rehabilitation is currently eligible for a Completion Participant path. The verified coverage is 94%, the completion gap is $88,000, and the projected gain is $197,000.';
+    reply = 'Mixed-Use Rehabilitation is currently eligible for a Completion Participant path with 94% verified coverage and an $88,000 completion gap.';
   } else if (lower.includes('true bill') || lower.includes('instrument')) {
-    reply = 'True Bills now exist as domain objects with purpose, supporting VVP, holder, controller, lifecycle state, history, and settlement fields.';
+    reply = 'True Bills exist as domain objects with purpose, supporting VVP, holder, controller, lifecycle state, history, and settlement fields.';
   } else if (lower.includes('verified value')) {
-    reply = 'Verified Value Packages now exist as immutable frozen objects linked to Asset Accounts and projects. Projected future gain remains separate from verified present value.';
+    reply = 'Verified Value Packages are immutable frozen objects linked to Asset Accounts and projects. New assets begin with a pending Verified Value baseline.';
   }
   return res.json({ reply });
 });
 
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
-app.listen(port, '0.0.0.0', () => console.log(`SRA Phase One Domain Core is running on port ${port}`));
+app.listen(port, '0.0.0.0', () => console.log(`SRA Phase Two Asset Onboarding is running on port ${port}`));
