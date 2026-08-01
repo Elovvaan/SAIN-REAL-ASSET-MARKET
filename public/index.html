@@ -3,10 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="SAIN Real Asset Market Build V2">
-  <title>SAIN Real Assets — Build V2</title>
+  <meta name="description" content="SAIN Real Asset Market Build V3">
+  <title>SAIN Real Assets — Build V3</title>
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/gains.css">
+  <link rel="stylesheet" href="/interoperability.css">
 </head>
 <body>
   <div class="app-shell">
@@ -28,6 +29,7 @@
         <button class="nav-item" data-view="projects"><span>△</span> Projects</button>
         <button class="nav-item" data-view="instruments"><span>▱</span> True Bills</button>
         <button class="nav-item" data-view="completion"><span>◉</span> Completion</button>
+        <button class="nav-item" data-view="interoperability"><span>⌁</span> DeFi Interop</button>
         <button class="nav-item" data-view="participants"><span>◌</span> Participants</button>
         <button class="nav-item" data-view="pools"><span>⬡</span> Market Pools</button>
         <button class="nav-item" data-view="activity"><span>≋</span> Life Record</button>
@@ -35,7 +37,7 @@
 
       <div class="system-card">
         <span class="status-dot"></span>
-        <div><strong>Build V2 active</strong><small>Asset-first visual system</small></div>
+        <div><strong>Build V3 active</strong><small>DeFi interoperability layer</small></div>
       </div>
     </aside>
 
@@ -54,7 +56,7 @@
       </section>
 
       <section id="view-root" class="view-root" aria-live="polite">
-        <div class="loading-state">Loading SRA Build V2…</div>
+        <div class="loading-state">Loading SRA Build V3…</div>
       </section>
     </main>
 
@@ -68,9 +70,9 @@
         <div class="message sane-message">Tell me what you want to accomplish. I will find the asset, read its lifecycle, organize the marketplace path, and bring back the decision that needs your approval.</div>
       </div>
       <div class="quick-prompts">
+        <button data-prompt="Explain the DeFi interoperability layer.">DeFi interop</button>
         <button data-prompt="Show me the projected gains across active projects.">Projected gains</button>
         <button data-prompt="Which project has a completion gap?">Completion gaps</button>
-        <button data-prompt="Show me the active True Bills.">True Bills</button>
       </div>
       <div class="chat-composer">
         <label class="sr-only" for="sane-input">Message Sane</label>
@@ -80,5 +82,6 @@
     </section>
   </div>
   <script src="/app.js" defer></script>
+  <script src="/interoperability.js" defer></script>
 </body>
 </html>
