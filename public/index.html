@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="SAIN Real Asset Market V10 Marketplace Participation Layer">
-  <title>SAIN Real Assets — V10</title>
+  <meta name="description" content="SAIN Real Asset Market universal account model">
+  <title>SAIN Real Assets — Account Model</title>
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/gains.css">
   <link rel="stylesheet" href="/interoperability.css">
@@ -20,6 +20,7 @@
       <button class="sane-entry" id="sidebar-sane"><span class="status-dot"></span><span><strong>Sane</strong><small>What are we moving today?</small></span></button>
       <nav class="nav-list" aria-label="Operating divisions">
         <button class="nav-item active" data-view="marketplace"><span>◫</span> Marketplace</button>
+        <button class="nav-item" data-view="positions"><span>▤</span> My Positions</button>
         <button class="nav-item" data-view="onboarding"><span>＋</span> V4V Exchange</button>
         <button class="nav-item" data-view="custody"><span>▣</span> Custody & Records</button>
         <button class="nav-item" data-view="assets"><span>◇</span> Asset Accounts</button>
@@ -32,18 +33,18 @@
         <button class="nav-item" data-view="pools"><span>⬡</span> Market Pools</button>
         <button class="nav-item" data-view="activity"><span>≋</span> Life Record</button>
       </nav>
-      <div class="system-card"><span class="status-dot"></span><div><strong>V10 active</strong><small>Marketplace participation & positions</small></div></div>
+      <div class="system-card"><span class="status-dot"></span><div><strong>Account model active</strong><small>Universal identity + specialized capacities</small></div></div>
     </aside>
     <main class="main-area">
       <header class="topbar"><div><p class="eyebrow">PRODUCTIVE ASSET NETWORK</p><h1 id="page-title">Marketplace</h1></div><div class="top-actions"><span class="market-pill"><span class="status-dot"></span> Market Live</span><button class="primary-button" id="open-sane">Talk to Sane</button></div></header>
       <section class="heartbeat" aria-label="Live market heartbeat"><span class="heartbeat-label">LIVE</span><div class="heartbeat-track" id="heartbeat-track">Verified Value is moving through the network…</div></section>
-      <section id="view-root" class="view-root" aria-live="polite"><div class="loading-state">Loading SAIN Real Assets V10…</div></section>
+      <section id="view-root" class="view-root" aria-live="polite"><div class="loading-state">Loading SAIN Real Assets…</div></section>
     </main>
     <section class="sane-panel" id="sane-panel" aria-label="Sane conversation">
       <div class="sane-header"><div><p class="eyebrow">VERIFIED VALUE INTELLIGENCE</p><h2>Sane</h2></div><button class="icon-button" id="close-sane" aria-label="Close Sane panel">×</button></div>
-      <div class="chat-context">Browse, open an opportunity, choose how to participate, and track the resulting position.</div>
-      <div class="chat-log" id="chat-log"><div class="message sane-message">Tell me what opportunity you want to open or what you want to contribute. I can route the participation ticket and resulting position.</div></div>
-      <div class="quick-prompts"><button data-prompt="Show me the marketplace opportunities.">Marketplace</button><button data-prompt="Explain how I can participate with USD or another contribution medium.">Participate</button><button data-prompt="Show my participation positions.">My Positions</button></div>
+      <div class="chat-context">One Universal Account can carry additional Asset Provider, Market Professional, or institutional capacities.</div>
+      <div class="chat-log" id="chat-log"><div class="message sane-message">Start as a universal marketplace user. Add specialized account capacity only when you bring assets, professional capacity, or institutional authority.</div></div>
+      <div class="quick-prompts"><button data-prompt="Show me the marketplace opportunities.">Marketplace</button><button data-prompt="Explain my account capacities.">Account capacities</button><button data-prompt="Show my participation positions.">My Positions</button></div>
       <div class="chat-composer"><label class="sr-only" for="sane-input">Message Sane</label><textarea id="sane-input" rows="2" placeholder="What are we accomplishing today?"></textarea><button id="send-message" class="primary-button">Send</button></div>
     </section>
   </div>
@@ -53,5 +54,6 @@
   <script src="/custody.js" defer></script>
   <script src="/access.js" defer></script>
   <script src="/participation.js" defer></script>
+  <script src="/account-capacities.js" defer></script>
 </body>
 </html>
