@@ -3,11 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="SAIN Real Asset Market Build V3">
-  <title>SAIN Real Assets — Build V3</title>
+  <meta name="description" content="SAIN Real Asset Market Build V5">
+  <title>SAIN Real Assets — Phase Two</title>
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/gains.css">
   <link rel="stylesheet" href="/interoperability.css">
+  <link rel="stylesheet" href="/onboarding.css">
 </head>
 <body>
   <div class="app-shell">
@@ -24,6 +25,7 @@
 
       <nav class="nav-list" aria-label="Operating divisions">
         <button class="nav-item active" data-view="marketplace"><span>◫</span> Marketplace</button>
+        <button class="nav-item" data-view="onboarding"><span>＋</span> Register Asset</button>
         <button class="nav-item" data-view="assets"><span>◇</span> Asset Accounts</button>
         <button class="nav-item" data-view="verified"><span>◎</span> Verified Value</button>
         <button class="nav-item" data-view="projects"><span>△</span> Projects</button>
@@ -37,7 +39,7 @@
 
       <div class="system-card">
         <span class="status-dot"></span>
-        <div><strong>Build V3 active</strong><small>DeFi interoperability layer</small></div>
+        <div><strong>Phase Two active</strong><small>Asset onboarding workflow</small></div>
       </div>
     </aside>
 
@@ -56,7 +58,7 @@
       </section>
 
       <section id="view-root" class="view-root" aria-live="polite">
-        <div class="loading-state">Loading SRA Build V3…</div>
+        <div class="loading-state">Loading SRA Phase Two…</div>
       </section>
     </main>
 
@@ -67,12 +69,12 @@
       </div>
       <div class="chat-context">Conversation is the primary operating layer. Buttons only execute decisions.</div>
       <div class="chat-log" id="chat-log">
-        <div class="message sane-message">Tell me what you want to accomplish. I will find the asset, read its lifecycle, organize the marketplace path, and bring back the decision that needs your approval.</div>
+        <div class="message sane-message">Tell me what you want to accomplish. I can now register a new asset and create its permanent Asset Account.</div>
       </div>
       <div class="quick-prompts">
-        <button data-prompt="Explain the DeFi interoperability layer.">DeFi interop</button>
+        <button data-prompt="I want to register a new asset.">Register asset</button>
         <button data-prompt="Show me the projected gains across active projects.">Projected gains</button>
-        <button data-prompt="Which project has a completion gap?">Completion gaps</button>
+        <button data-prompt="Explain the DeFi interoperability layer.">DeFi interop</button>
       </div>
       <div class="chat-composer">
         <label class="sr-only" for="sane-input">Message Sane</label>
@@ -83,5 +85,6 @@
   </div>
   <script src="/app.js" defer></script>
   <script src="/interoperability.js" defer></script>
+  <script src="/onboarding.js" defer></script>
 </body>
 </html>
