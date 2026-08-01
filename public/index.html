@@ -3,13 +3,14 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="SAIN Real Asset Market V9 Institutional Custody and Records">
-  <title>SAIN Real Assets — V9</title>
+  <meta name="description" content="SAIN Real Asset Market layered access marketplace">
+  <title>SAIN Real Assets</title>
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/gains.css">
   <link rel="stylesheet" href="/interoperability.css">
   <link rel="stylesheet" href="/onboarding.css">
   <link rel="stylesheet" href="/custody.css">
+  <link rel="stylesheet" href="/access.css">
 </head>
 <body>
   <div class="app-shell">
@@ -30,18 +31,18 @@
         <button class="nav-item" data-view="pools"><span>⬡</span> Market Pools</button>
         <button class="nav-item" data-view="activity"><span>≋</span> Life Record</button>
       </nav>
-      <div class="system-card"><span class="status-dot"></span><div><strong>V9 active</strong><small>Institutional custody, filing & discharge</small></div></div>
+      <div class="system-card"><span class="status-dot"></span><div><strong>Access Layer active</strong><small>Public, participant & institutional shells</small></div></div>
     </aside>
     <main class="main-area">
       <header class="topbar"><div><p class="eyebrow">PRODUCTIVE ASSET NETWORK</p><h1 id="page-title">Marketplace</h1></div><div class="top-actions"><span class="market-pill"><span class="status-dot"></span> Market Live</span><button class="primary-button" id="open-sane">Talk to Sane</button></div></header>
       <section class="heartbeat" aria-label="Live market heartbeat"><span class="heartbeat-label">LIVE</span><div class="heartbeat-track" id="heartbeat-track">Verified Value is moving through the network…</div></section>
-      <section id="view-root" class="view-root" aria-live="polite"><div class="loading-state">Loading SRA V9…</div></section>
+      <section id="view-root" class="view-root" aria-live="polite"><div class="loading-state">Loading SAIN Real Assets…</div></section>
     </main>
     <section class="sane-panel" id="sane-panel" aria-label="Sane conversation">
       <div class="sane-header"><div><p class="eyebrow">VERIFIED VALUE INTELLIGENCE</p><h2>Sane</h2></div><button class="icon-button" id="close-sane" aria-label="Close Sane panel">×</button></div>
-      <div class="chat-context">Customer experience stays simple. Custody, collateral, filing, setoff, and discharge operate behind the scenes.</div>
-      <div class="chat-log" id="chat-log"><div class="message sane-message">Start with V4V. Once evidence passes review, I can route it into institutional custody, Verified Value, collateral scheduling, settlement, setoff, discharge, and release.</div></div>
-      <div class="quick-prompts"><button data-prompt="Explain the custody and collateral workflow.">Custody workflow</button><button data-prompt="Show me how discharge is recorded.">Discharge filing</button><button data-prompt="Start a V4V for a new asset.">Start V4V</button></div>
+      <div class="chat-context">Your active role controls which tools and institutional records are available.</div>
+      <div class="chat-log" id="chat-log"><div class="message sane-message">Tell me what you are accomplishing. I will open the authorized asset, project, position, or institutional workflow for your active role.</div></div>
+      <div class="quick-prompts"><button data-prompt="Explain my current role and access.">My access</button><button data-prompt="Start a V4V for a new asset.">Start V4V</button><button data-prompt="Show me the marketplace opportunities.">Marketplace</button></div>
       <div class="chat-composer"><label class="sr-only" for="sane-input">Message Sane</label><textarea id="sane-input" rows="2" placeholder="What are we accomplishing today?"></textarea><button id="send-message" class="primary-button">Send</button></div>
     </section>
   </div>
@@ -49,5 +50,6 @@
   <script src="/interoperability.js" defer></script>
   <script src="/onboarding.js" defer></script>
   <script src="/custody.js" defer></script>
+  <script src="/access.js" defer></script>
 </body>
 </html>
