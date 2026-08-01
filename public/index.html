@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="SAIN Real Asset Market visual prototype">
-  <title>SAIN Real Asset Market</title>
+  <meta name="description" content="SAIN Real Asset Market Build V2">
+  <title>SAIN Real Assets — Build V2</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
@@ -12,66 +12,68 @@
     <aside class="sidebar">
       <div class="brand-block">
         <div class="brand-mark">SRA</div>
-        <div>
-          <strong>SAIN Real Assets</strong>
-          <span>Verified Value Market</span>
-        </div>
+        <div><strong>SAIN Real Assets</strong><span>Verified Value Market</span></div>
       </div>
 
-      <nav class="nav-list" aria-label="Primary navigation">
+      <button class="sane-entry" id="sidebar-sane">
+        <span class="status-dot"></span>
+        <span><strong>Sane</strong><small>What are we moving today?</small></span>
+      </button>
+
+      <nav class="nav-list" aria-label="Operating divisions">
         <button class="nav-item active" data-view="marketplace"><span>◫</span> Marketplace</button>
         <button class="nav-item" data-view="assets"><span>◇</span> Asset Accounts</button>
+        <button class="nav-item" data-view="verified"><span>◎</span> Verified Value</button>
         <button class="nav-item" data-view="projects"><span>△</span> Projects</button>
-        <button class="nav-item" data-view="participants"><span>◎</span> Participants</button>
+        <button class="nav-item" data-view="instruments"><span>▱</span> True Bills</button>
+        <button class="nav-item" data-view="completion"><span>◉</span> Completion</button>
+        <button class="nav-item" data-view="participants"><span>◌</span> Participants</button>
         <button class="nav-item" data-view="pools"><span>⬡</span> Market Pools</button>
         <button class="nav-item" data-view="activity"><span>≋</span> Life Record</button>
       </nav>
 
       <div class="system-card">
         <span class="status-dot"></span>
-        <div>
-          <strong>Sane is active</strong>
-          <small>Conversational operating layer</small>
-        </div>
+        <div><strong>Build V2 active</strong><small>Asset-first visual system</small></div>
       </div>
     </aside>
 
     <main class="main-area">
       <header class="topbar">
-        <div>
-          <p class="eyebrow">PRODUCTIVE ASSET NETWORK</p>
-          <h1 id="page-title">Marketplace</h1>
-        </div>
+        <div><p class="eyebrow">PRODUCTIVE ASSET NETWORK</p><h1 id="page-title">Marketplace</h1></div>
         <div class="top-actions">
           <span class="market-pill"><span class="status-dot"></span> Market Live</span>
           <button class="primary-button" id="open-sane">Talk to Sane</button>
         </div>
       </header>
 
+      <section class="heartbeat" aria-label="Live market heartbeat">
+        <span class="heartbeat-label">LIVE</span>
+        <div class="heartbeat-track" id="heartbeat-track">Verified Value is moving through the network…</div>
+      </section>
+
       <section id="view-root" class="view-root" aria-live="polite">
-        <div class="loading-state">Loading SRA marketplace…</div>
+        <div class="loading-state">Loading SRA Build V2…</div>
       </section>
     </main>
 
     <section class="sane-panel" id="sane-panel" aria-label="Sane conversation">
       <div class="sane-header">
-        <div>
-          <p class="eyebrow">VERIFIED VALUE INTELLIGENCE</p>
-          <h2>Sane</h2>
-        </div>
+        <div><p class="eyebrow">VERIFIED VALUE INTELLIGENCE</p><h2>Sane</h2></div>
         <button class="icon-button" id="close-sane" aria-label="Close Sane panel">×</button>
       </div>
+      <div class="chat-context">Conversation is the primary operating layer. Buttons only execute decisions.</div>
       <div class="chat-log" id="chat-log">
-        <div class="message sane-message">Tell me what you want to move into action. I will organize the asset, participants, marketplace path, and Verified Value workflow behind the conversation.</div>
+        <div class="message sane-message">Tell me what you want to accomplish. I will find the asset, read its lifecycle, organize the marketplace path, and bring back the decision that needs your approval.</div>
       </div>
       <div class="quick-prompts">
-        <button data-prompt="Show me the active capital opportunities.">Active capital</button>
-        <button data-prompt="I want to remodel one of my assets.">Start a remodel</button>
+        <button data-prompt="Show me the asset with the strongest Verified Value.">Strongest asset</button>
         <button data-prompt="Which project has a completion gap?">Completion gaps</button>
+        <button data-prompt="Show me the active True Bills.">True Bills</button>
       </div>
       <div class="chat-composer">
         <label class="sr-only" for="sane-input">Message Sane</label>
-        <textarea id="sane-input" rows="2" placeholder="Tell Sane what you want to accomplish…"></textarea>
+        <textarea id="sane-input" rows="2" placeholder="What are we accomplishing today?"></textarea>
         <button id="send-message" class="primary-button">Send</button>
       </div>
     </section>
