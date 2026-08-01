@@ -1,8 +1,8 @@
 {
   "name": "sain-real-asset-market",
-  "version": "0.1.0",
+  "version": "0.6.0",
   "private": true,
-  "description": "First visual build of SAIN Real Asset Market (SRA)",
+  "description": "SAIN Real Asset Market with private evidence onboarding",
   "type": "module",
   "scripts": {
     "start": "node server.js",
@@ -12,6 +12,7 @@
     "node": ">=20"
   },
   "dependencies": {
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "multer": "^1.4.5-lts.1"
   }
 }
