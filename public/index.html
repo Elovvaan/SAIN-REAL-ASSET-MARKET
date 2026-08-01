@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="SAIN Real Asset Market Build V5">
-  <title>SAIN Real Assets — Phase Two</title>
+  <meta name="description" content="SAIN Real Asset Market private evidence onboarding">
+  <title>SAIN Real Assets — Private Evidence</title>
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/gains.css">
   <link rel="stylesheet" href="/interoperability.css">
@@ -17,12 +17,7 @@
         <div class="brand-mark">SRA</div>
         <div><strong>SAIN Real Assets</strong><span>Verified Value Market</span></div>
       </div>
-
-      <button class="sane-entry" id="sidebar-sane">
-        <span class="status-dot"></span>
-        <span><strong>Sane</strong><small>What are we moving today?</small></span>
-      </button>
-
+      <button class="sane-entry" id="sidebar-sane"><span class="status-dot"></span><span><strong>Sane</strong><small>What are we moving today?</small></span></button>
       <nav class="nav-list" aria-label="Operating divisions">
         <button class="nav-item active" data-view="marketplace"><span>◫</span> Marketplace</button>
         <button class="nav-item" data-view="onboarding"><span>＋</span> Register Asset</button>
@@ -36,51 +31,19 @@
         <button class="nav-item" data-view="pools"><span>⬡</span> Market Pools</button>
         <button class="nav-item" data-view="activity"><span>≋</span> Life Record</button>
       </nav>
-
-      <div class="system-card">
-        <span class="status-dot"></span>
-        <div><strong>Phase Two active</strong><small>Asset onboarding workflow</small></div>
-      </div>
+      <div class="system-card"><span class="status-dot"></span><div><strong>Private evidence active</strong><small>Institutional review follows submission</small></div></div>
     </aside>
-
     <main class="main-area">
-      <header class="topbar">
-        <div><p class="eyebrow">PRODUCTIVE ASSET NETWORK</p><h1 id="page-title">Marketplace</h1></div>
-        <div class="top-actions">
-          <span class="market-pill"><span class="status-dot"></span> Market Live</span>
-          <button class="primary-button" id="open-sane">Talk to Sane</button>
-        </div>
-      </header>
-
-      <section class="heartbeat" aria-label="Live market heartbeat">
-        <span class="heartbeat-label">LIVE</span>
-        <div class="heartbeat-track" id="heartbeat-track">Verified Value is moving through the network…</div>
-      </section>
-
-      <section id="view-root" class="view-root" aria-live="polite">
-        <div class="loading-state">Loading SRA Phase Two…</div>
-      </section>
+      <header class="topbar"><div><p class="eyebrow">PRODUCTIVE ASSET NETWORK</p><h1 id="page-title">Marketplace</h1></div><div class="top-actions"><span class="market-pill"><span class="status-dot"></span> Market Live</span><button class="primary-button" id="open-sane">Talk to Sane</button></div></header>
+      <section class="heartbeat" aria-label="Live market heartbeat"><span class="heartbeat-label">LIVE</span><div class="heartbeat-track" id="heartbeat-track">Verified Value is moving through the network…</div></section>
+      <section id="view-root" class="view-root" aria-live="polite"><div class="loading-state">Loading SRA…</div></section>
     </main>
-
     <section class="sane-panel" id="sane-panel" aria-label="Sane conversation">
-      <div class="sane-header">
-        <div><p class="eyebrow">VERIFIED VALUE INTELLIGENCE</p><h2>Sane</h2></div>
-        <button class="icon-button" id="close-sane" aria-label="Close Sane panel">×</button>
-      </div>
-      <div class="chat-context">Conversation is the primary operating layer. Buttons only execute decisions.</div>
-      <div class="chat-log" id="chat-log">
-        <div class="message sane-message">Tell me what you want to accomplish. I can now register a new asset and create its permanent Asset Account.</div>
-      </div>
-      <div class="quick-prompts">
-        <button data-prompt="I want to register a new asset.">Register asset</button>
-        <button data-prompt="Show me the projected gains across active projects.">Projected gains</button>
-        <button data-prompt="Explain the DeFi interoperability layer.">DeFi interop</button>
-      </div>
-      <div class="chat-composer">
-        <label class="sr-only" for="sane-input">Message Sane</label>
-        <textarea id="sane-input" rows="2" placeholder="What are we accomplishing today?"></textarea>
-        <button id="send-message" class="primary-button">Send</button>
-      </div>
+      <div class="sane-header"><div><p class="eyebrow">VERIFIED VALUE INTELLIGENCE</p><h2>Sane</h2></div><button class="icon-button" id="close-sane" aria-label="Close Sane panel">×</button></div>
+      <div class="chat-context">Conversation is the primary operating layer. Source documents remain private.</div>
+      <div class="chat-log" id="chat-log"><div class="message sane-message">Present the asset and its source documents. I will create the private evidence package and open institutional review.</div></div>
+      <div class="quick-prompts"><button data-prompt="I want to register a new asset.">Register asset</button><button data-prompt="Explain institutional verification.">Institutional review</button><button data-prompt="Explain the DeFi interoperability layer.">DeFi interop</button></div>
+      <div class="chat-composer"><label class="sr-only" for="sane-input">Message Sane</label><textarea id="sane-input" rows="2" placeholder="What are we accomplishing today?"></textarea><button id="send-message" class="primary-button">Send</button></div>
     </section>
   </div>
   <script src="/app.js" defer></script>
