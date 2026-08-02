@@ -45,6 +45,7 @@ Sane is the conversational intelligence.
         ├── Asset Engine
         ├── Participant Engine
         ├── Market Circulation Guardrail
+        ├── Optional Settlement Layer
         └── Verified Value Engine
                 ↓
            True Bill Engine
@@ -62,6 +63,9 @@ Responsible for:
 -   Scheduling
 -   Matching
 -   Public Registry
+-   Participation Positions
+-   Settlement Availability
+-   Participant Settlement Choices
 
 ------------------------------------------------------------------------
 
@@ -145,6 +149,8 @@ Responsible for:
 -   Multi-role Participation
 -   Permissions
 -   Context
+-   Participation Position Ownership
+-   Settlement Instructions
 
 ------------------------------------------------------------------------
 
@@ -176,6 +182,61 @@ Lifecycle:
 -   Settled
 -   Closed
 -   Archived
+
+------------------------------------------------------------------------
+
+# Optional Settlement Layer
+
+Settlement is an available participant choice after a verified marketplace outcome is completed.
+
+Completion does not force immediate settlement or automatic closure.
+
+Core flow:
+
+    Participation Position
+            ↓
+    Active Deployment
+            ↓
+    Verified Outcome Completed
+            ↓
+    Settlement Available
+            ├── Settle Now
+            ├── Hold Position
+            ├── Transfer Position
+            ├── Redeploy in SRA
+            └── Route Cross-Platform
+            ↓
+    Participant Authorization
+            ↓
+    Settlement Instruction
+            ↓
+    Execution Evidence
+            ↓
+    Reconciliation
+            ↓
+    Updated Position and Asset History
+
+The Optional Settlement Layer is responsible for:
+
+-   settlement-availability events;
+-   participant-directed settlement choices;
+-   durable Settlement Instructions;
+-   settlement-medium selection;
+-   position holding;
+-   position transfer;
+-   SRA redeployment;
+-   cross-platform routing;
+-   execution confirmation;
+-   reconciliation;
+-   closure eligibility.
+
+The SRA settlement coin is an optional settlement medium for recognized SRA transactions and eligible cross-platform transactions. It does not replace the underlying asset, Verified Value Package, Participation Position, True Bill, or SRA lifecycle record.
+
+The participant is not required to use the SRA settlement coin and may choose any eligible path or rail made available for the position.
+
+The authoritative architecture is defined in:
+
+`docs/SRA_V18_OPTIONAL_SETTLEMENT_AND_CROSS_PLATFORM.md`
 
 ------------------------------------------------------------------------
 
@@ -300,6 +361,10 @@ Sane may not silently expand source scopes, extract unapproved fields, publish a
 
 Sane may also guide Market Circulation Event review, affected-record resolution, threshold evaluation, protection activation, redirection, settlement, and reconciliation.
 
+For optional settlement, Sane may display eligible choices, prepare the Settlement Instruction, request participant authorization, monitor execution, surface missing confirmations or variances, and present the reconciled result.
+
+Sane may not force settlement, choose a path for the participant, silently transfer or redeploy a position, require the SRA settlement coin, or represent cross-platform settlement as complete before destination confirmation.
+
 ------------------------------------------------------------------------
 
 # Public Registry
@@ -310,6 +375,8 @@ policies while protecting private operational data.
 EDX source records remain private unless a separate projection policy and company approval authorize specific fields or calculated outputs for institutional, marketplace, or public use.
 
 Approved Market Circulation Event and Protection Instrument states may be projected without exposing private evidence, positions, or institutional instructions.
+
+Approved settlement-availability and completed-settlement states may be projected without exposing private participant instructions, destination details, evidence, balances, or routing data.
 
 ------------------------------------------------------------------------
 
@@ -327,16 +394,23 @@ Approved Market Circulation Event and Protection Instrument states may be projec
 10. Protection capacity is tied to the verified transition requirement.
 11. Every protection event returns to the asset and lifecycle records through reconciliation.
 12. SRA retains its own instruments and does not import Family Capital architecture.
+13. Completion makes settlement available; it does not force settlement.
+14. The participant selects whether to hold, transfer, redeploy, settle, or route cross-platform.
+15. The SRA settlement coin is optional and never replaces the authoritative SRA record.
+16. Every settlement, transfer, redeployment, or cross-platform route returns through reconciliation.
+17. A position closes only after the selected path is completed and no unresolved position remains.
 
 ------------------------------------------------------------------------
 
 # Current Status
 
-The SRA architecture defines the Marketplace Engine, Enterprise Data Exchange, Asset Engine, Participant Engine, Verified Value Engine, True Bill Engine, Market Circulation Guardrail, Sane conversational layer, and Public Registry.
+The SRA architecture defines the Marketplace Engine, Enterprise Data Exchange, Asset Engine, Participant Engine, Verified Value Engine, True Bill Engine, Optional Settlement Layer, Market Circulation Guardrail, Sane conversational layer, and Public Registry.
 
 EDX Phase 1 defines the connector architecture, permission and visibility model, normalized record contract, security boundaries, audit vocabulary, Verified Snapshot lifecycle, and VVP handoff.
 
 The Market Circulation implementation includes persistent Market Circulation Event and Protection Instrument records plus the activation service and API router.
+
+The optional-settlement architecture defines Participation Position completion, settlement availability, participant-directed choices, durable Settlement Instructions, the optional SRA settlement coin, cross-platform routing, confirmation, reconciliation, and closure eligibility.
 
 This document is the authoritative architectural reference for the SRA
 repository.
