@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { RECORD_TYPES } from './persistent-domain-service.js';
 
 const classifications = [
   'OPERATING_BUSINESS',
@@ -25,10 +26,18 @@ function hashRecord(record) {
 }
 
 export class AssetOnboardingService {
-  constructor(domainStore, documentService) {
+  constructor(domainStore, documentService, persistentDomain = null) {
     this.domainStore = domainStore;
     this.documentService = documentService;
+    this.persistentDomain = persistentDomain;
     this.applications = new Map();
+  }
+
+  async initialize() {
+    if (!this.persistentDomain) return;
+    for (const application of this.persistentDomain.list(RECORD_TYPES.ONBOARDING_APPLICATION)) {
+      this.applications.set(application.applicationId, application);
+    }
   }
 
   getConfiguration() {
@@ -48,7 +57,7 @@ export class AssetOnboardingService {
     };
   }
 
-  onboard(payload = {}) {
+  async onboard(payload = {}, actor = {}) {
     const identity = payload.identity || {};
     const ownership = payload.ownership || {};
     const attestation = payload.attestation || payload.verification || {};
@@ -111,6 +120,7 @@ export class AssetOnboardingService {
 
     const evidencePackage = {
       id: evidencePackageId,
+      evidencePackageId,
       applicationId,
       assetId,
       documentIds: normalizedDocuments.map((document) => document.id),
@@ -128,6 +138,7 @@ export class AssetOnboardingService {
 
     const institutionalReview = {
       id: institutionalReviewId,
+      institutionalReviewId,
       evidencePackageId,
       assetId,
       status: 'INSTITUTIONAL_REVIEW_PENDING',
@@ -151,14 +162,16 @@ export class AssetOnboardingService {
     });
 
     const onboardingRecord = {
+      id: applicationId,
       applicationId,
       assetId,
       participantId,
       identity: { name, region, description, externalReference: clean(identity.externalReference, 160) },
       ownership: { ownerName, ownershipType },
       classification,
-      evidencePackage,
-      institutionalReview,
+      evidencePackageId,
+      institutionalReviewId,
+      status: 'INSTITUTIONAL_REVIEW_PENDING',
       createdAt: now
     };
 
@@ -185,8 +198,29 @@ export class AssetOnboardingService {
     asset.hash = recordHash;
     lifecycle.hash = hashRecord(lifecycle.events);
     participant.hash = hashRecord({ id: participant.id, displayName: participant.displayName, roles: participant.roles });
+    const persistedApplication = { ...onboardingRecord, recordHash };
+    this.applications.set(applicationId, persistedApplication);
 
-    this.applications.set(applicationId, { ...onboardingRecord, recordHash });
+    if (this.persistentDomain) {
+      const actorId = clean(actor.userId, 120) || participantId;
+      await Promise.all([
+        this.persistentDomain.put(RECORD_TYPES.PARTICIPANT, participantId, participant, { actorId, eventType: 'ASSET_OWNER_RECORDED' }),
+        this.persistentDomain.put(RECORD_TYPES.ONBOARDING_APPLICATION, applicationId, persistedApplication, { actorId, eventType: 'ONBOARDING_APPLICATION_CREATED' }),
+        this.persistentDomain.put(RECORD_TYPES.EVIDENCE_PACKAGE, evidencePackageId, evidencePackage, { actorId, eventType: 'PRIVATE_EVIDENCE_PACKAGE_CREATED' }),
+        this.persistentDomain.put(RECORD_TYPES.V4V_PACKAGE, evidencePackageId, { ...evidencePackage, packageId: evidencePackageId, stage: 'EVIDENCE_SUBMITTED' }, { actorId, eventType: 'V4V_PACKAGE_OPENED' }),
+        this.persistentDomain.put(RECORD_TYPES.INSTITUTIONAL_REVIEW, institutionalReviewId, institutionalReview, { actorId, eventType: 'INSTITUTIONAL_REVIEW_OPENED' }),
+        this.persistentDomain.put(RECORD_TYPES.ASSET_ACCOUNT, assetId, { ...asset, assetId }, { actorId, eventType: 'ASSET_ACCOUNT_CREATED' })
+      ]);
+      for (const event of lifecycle.events) {
+        await this.persistentDomain.lifecycle({
+          objectType: RECORD_TYPES.ASSET_ACCOUNT,
+          objectId: assetId,
+          eventType: event.type,
+          actorId,
+          payload: event.payload
+        });
+      }
+    }
 
     return {
       ok: true,
