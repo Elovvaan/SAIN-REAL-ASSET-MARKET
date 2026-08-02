@@ -15,6 +15,7 @@ import { createEdxExtractionRouter } from './routes/edx-extraction-router.js';
 import { createEdxNormalizationRouter } from './routes/edx-normalization-router.js';
 import { createEdxSnapshotRouter } from './routes/edx-snapshot-router.js';
 import { createEdxValuePackageRouter } from './routes/edx-value-package-router.js';
+import { createEdxMarketplacePublisherRouter } from './routes/edx-marketplace-publisher-router.js';
 import { AccessService } from './services/access-service.js';
 import { CreativeFinanceService } from './services/creative-finance-service.js';
 import { ValueIntelligenceService } from './services/value-intelligence-service.js';
@@ -24,6 +25,8 @@ import { EdxExtractionService } from './services/edx-extraction-service.js';
 import { EdxNormalizationService } from './services/edx-normalization-service.js';
 import { EdxSnapshotService } from './services/edx-snapshot-service.js';
 import { EdxValuePackageService } from './services/edx-value-package-service.js';
+import { EdxMarketplacePublisherService } from './services/edx-marketplace-publisher-service.js';
+import { SaneEdxOperationsService } from './services/sane-edx-operations-service.js';
 import { DatabaseService } from './services/database-service.js';
 import { PersistentDomainService, RECORD_TYPES } from './services/persistent-domain-service.js';
 import { PersistentMarketplaceService } from './services/persistent-marketplace-service.js';
@@ -86,13 +89,15 @@ const edxExtractionService = new EdxExtractionService(persistentDomain, edxPermi
 const edxNormalizationService = new EdxNormalizationService(persistentDomain);
 const edxSnapshotService = new EdxSnapshotService(persistentDomain);
 const edxValuePackageService = new EdxValuePackageService(persistentDomain);
+const edxMarketplacePublisherService = new EdxMarketplacePublisherService(persistentDomain, edxValuePackageService);
+const saneEdxOperationsService = new SaneEdxOperationsService(persistentDomain, edxMarketplacePublisherService);
 const onboardingRouter = await createOnboardingRouter(domainStore, database, persistentDomain);
 
 app.use('/api/access', createAccessRouter(marketplace, accessService));
 app.use('/api/participation', createParticipationRouter(marketplace, accessService, persistentDomain));
 app.use('/api/onboarding', onboardingRouter);
 app.use('/api/custody', createCustodyRouter());
-app.use('/api/sane', createSaneRouter());
+app.use('/api/sane', createSaneRouter(undefined, saneEdxOperationsService));
 app.use('/api/creative-finance', createCreativeFinanceRouter(creativeFinanceService));
 app.use('/api/value-intelligence', createValueIntelligenceRouter(valueIntelligenceService));
 app.use('/api/edx', createEdxConnectionRouter(edxConnectionService));
@@ -101,13 +106,14 @@ app.use('/api/edx', createEdxExtractionRouter(edxExtractionService));
 app.use('/api/edx', createEdxNormalizationRouter(edxNormalizationService));
 app.use('/api/edx', createEdxSnapshotRouter(edxSnapshotService));
 app.use('/api/edx', createEdxValuePackageRouter(edxValuePackageService));
+app.use('/api/edx', createEdxMarketplacePublisherRouter(edxMarketplacePublisherService));
 
 app.get('/api/health', async (_req, res) => {
   try {
     const persistence = await database.health();
     res.json({
-      status: 'ok', service: 'SAIN Real Asset Market', version: '1.14.0',
-      phase: 'EDX_PHASE_7_VERIFIED_VALUE_PACKAGE', persistence,
+      status: 'ok', service: 'SAIN Real Asset Market', version: '1.16.0',
+      phase: 'EDX_PHASE_8_9_MARKETPLACE_PUBLISHER_AND_SANE', persistence,
       persistentDomain: persistentDomain.snapshot(),
       marketplaceReadSource: 'PERSISTENT_DOMAIN',
       persistentIdentity: 'ACTIVE', persistentSessions: 'ACTIVE',
@@ -119,14 +125,15 @@ app.get('/api/health', async (_req, res) => {
       persistentCreativeFinanceStructures: 'ACTIVE', persistentValueIntelligence: 'ACTIVE',
       edxConnectorRegistry: 'ACTIVE', edxEnterpriseConnections: 'ACTIVE', edxPermissionEngine: 'ACTIVE',
       edxExtractionEngine: 'ACTIVE', edxNormalizationEngine: 'ACTIVE', edxVerifiedSnapshotEngine: 'ACTIVE',
-      edxVerifiedValuePackages: 'ACTIVE',
+      edxVerifiedValuePackages: 'ACTIVE', edxMarketplacePublisher: 'ACTIVE', saneEdxOperations: 'ACTIVE',
+      automaticPublication: 'DISABLED', companyPublicationApproval: 'REQUIRED',
       lifecycleEventLedger: 'ACTIVE', auditLedger: 'ACTIVE',
       durableFileStorage: process.env.SRA_PRIVATE_DOCUMENT_ROOT ? 'CONFIGURED_PATH' : 'TEMPORARY_PATH',
       saneAgent: 'ACTIVE', creativeFinanceSkill: 'ACTIVE', marketplaceParticipation: 'ACTIVE',
       timestamp: new Date().toISOString()
     });
   } catch (error) {
-    res.status(503).json({ status: 'degraded', service: 'SAIN Real Asset Market', version: '1.14.0', persistence: { ready: false, error: error.message }, timestamp: new Date().toISOString() });
+    res.status(503).json({ status: 'degraded', service: 'SAIN Real Asset Market', version: '1.16.0', persistence: { ready: false, error: error.message }, timestamp: new Date().toISOString() });
   }
 });
 app.get('/api/marketplace', (_req, res) => res.json(marketplace.snapshot()));
@@ -149,4 +156,4 @@ app.get('/api/assets/:assetId/studio', (req, res) => {
 });
 
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
-app.listen(port, '0.0.0.0', () => console.log(`SRA EDX Phase 7 Verified Value Package is running on port ${port}`));
+app.listen(port, '0.0.0.0', () => console.log(`SRA EDX Phase 8-9 Marketplace Publisher and Sane Operations is running on port ${port}`));
