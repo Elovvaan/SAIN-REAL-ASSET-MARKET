@@ -7,9 +7,9 @@ function readCookie(req,name){
   return entry?decodeURIComponent(entry.slice(name.length+1)):'';
 }
 
-export function createParticipationRouter(marketplace,accessService){
+export function createParticipationRouter(marketplace,accessService,domain){
   const router=Router();
-  const service=new ParticipationService(marketplace,accessService);
+  const service=new ParticipationService(marketplace,accessService,domain);
 
   router.get('/configuration',(_req,res)=>res.json(participationConfiguration));
   router.get('/opportunities',(_req,res)=>res.json({opportunities:service.listOpportunities()}));
@@ -25,7 +25,7 @@ export function createParticipationRouter(marketplace,accessService){
   });
   router.post('/positions',async(req,res)=>{
     const session=await accessService.getSession(readCookie(req,'sra_session'));
-    const result=service.createPosition({session,...req.body});
+    const result=await service.createPosition({session,...req.body});
     return res.status(result.status).json(result.ok?{position:result.position,nextAction:result.nextAction}:{error:result.error});
   });
 
