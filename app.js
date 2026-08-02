@@ -1,0 +1,122 @@
+import express from 'express';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createSeededDomainStore } from './services/domain-store.js';
+import { createOnboardingRouter } from './routes/onboarding-router.js';
+import { createCustodyRouter } from './routes/custody-router.js';
+import { createAccessRouter } from './routes/access-router.js';
+import { createParticipationRouter } from './routes/participation-router.js';
+import { createSaneRouter } from './routes/sane-router.js';
+import { createCreativeFinanceRouter } from './routes/creative-finance-router.js';
+import { createValueIntelligenceRouter } from './routes/value-intelligence-router.js';
+import { createEdxConnectionRouter } from './routes/edx-connection-router.js';
+import { createEdxPermissionRouter } from './routes/edx-permission-router.js';
+import { createEdxExtractionRouter } from './routes/edx-extraction-router.js';
+import { createEdxNormalizationRouter } from './routes/edx-normalization-router.js';
+import { createEdxSnapshotRouter } from './routes/edx-snapshot-router.js';
+import { createEdxValuePackageRouter } from './routes/edx-value-package-router.js';
+import { createEdxMarketplacePublisherRouter } from './routes/edx-marketplace-publisher-router.js';
+import { createEdxDashboardIntelligenceRouter } from './routes/edx-dashboard-intelligence-router.js';
+import { createEdxEnterpriseSdkRouter } from './routes/edx-enterprise-sdk-router.js';
+import { AccessService } from './services/access-service.js';
+import { CreativeFinanceService } from './services/creative-finance-service.js';
+import { ValueIntelligenceService } from './services/value-intelligence-service.js';
+import { EdxConnectionService } from './services/edx-connection-service.js';
+import { EdxPermissionService } from './services/edx-permission-service.js';
+import { EdxExtractionService } from './services/edx-extraction-service.js';
+import { EdxNormalizationService } from './services/edx-normalization-service.js';
+import { EdxSnapshotService } from './services/edx-snapshot-service.js';
+import { EdxValuePackageService } from './services/edx-value-package-service.js';
+import { EdxMarketplacePublisherService } from './services/edx-marketplace-publisher-service.js';
+import { EdxDashboardIntelligenceService } from './services/edx-dashboard-intelligence-service.js';
+import { EdxEnterpriseSdkService } from './services/edx-enterprise-sdk-service.js';
+import { SaneEdxOperationsService } from './services/sane-edx-operations-service.js';
+import { DatabaseService } from './services/database-service.js';
+import { PersistentDomainService, RECORD_TYPES } from './services/persistent-domain-service.js';
+import { PersistentMarketplaceService } from './services/persistent-marketplace-service.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const marketplaceSeed = {
+  marketStatus: 'LIVE', verifiedValue: 12840000, projectedMarketplaceGain: 684000, activeProjects: 18,
+  participatingAssets: 42, openPositions: 27, completionCandidates: 3, instrumentsActive: 9,
+  completionNeed: 240000, completionReturn: 26000,
+  assets: [
+    { id: 'A-1042', assetId: 'A-1042', name: 'North District Market', type: 'OPERATING_BUSINESS', classification: 'OPERATING_BUSINESS', region: 'Ogden, Utah', state: 'ACTIVE', status: 'ACTIVE', lifecycleEvents: 418, verifiedCycles: 392, verifiedValue: 735000, verifiedScore: 88, valueSignal: 'STABLE', projectId: 'SRA-RE-0021', dimensions: { production: 91, condition: 84, reliability: 93, capacity: 79 } },
+    { id: 'A-2088', assetId: 'A-2088', name: 'Weber Residential Portfolio', type: 'REAL_ESTATE', classification: 'REAL_ESTATE', region: 'Northern Utah', state: 'UNDER_PROJECT', status: 'UNDER_PROJECT', lifecycleEvents: 96, verifiedCycles: 81, verifiedValue: 1860000, verifiedScore: 76, valueSignal: 'GROWING', projectId: 'SRA-RE-0014', dimensions: { production: 72, condition: 68, reliability: 82, capacity: 81 } },
+    { id: 'A-3104', assetId: 'A-3104', name: 'Weber Mixed-Use Block', type: 'MIXED_USE_REAL_ESTATE', classification: 'MIXED_USE_REAL_ESTATE', region: 'Weber County, Utah', state: 'UNDER_PROJECT', status: 'UNDER_PROJECT', lifecycleEvents: 147, verifiedCycles: 126, verifiedValue: 2480000, verifiedScore: 92, valueSignal: 'ACCELERATING', projectId: 'SRA-RE-0033', dimensions: { production: 89, condition: 90, reliability: 94, capacity: 95 } }
+  ],
+  projects: [
+    { id: 'SRA-RE-0014', projectId: 'SRA-RE-0014', assetId: 'A-2088', assetName: 'Weber Residential Portfolio', title: '14-Unit Residential Recovery', region: 'Northern Utah', stage: 'SERVICES_SCHEDULED', progress: 62, verifiedValue: 1860000, fundingTarget: 420000, fundingProgress: 74, signal: '+4.8%', status: 'OPEN', completionState: 'WATCH', projectedCompletedValue: 2240000, projectedGain: 380000, projectedGainRate: 20.4, participationWindow: '8–14 months', trueBill: { id: 'TB-0014', state: 'ACTIVE', purpose: 'CAPITAL_FORMATION', value: 310000 } },
+    { id: 'SRA-RE-0021', projectId: 'SRA-RE-0021', assetId: 'A-1042', assetName: 'North District Market', title: 'Neighborhood Grocery Expansion', region: 'Ogden, Utah', stage: 'PRODUCTION_BEGINS', progress: 39, verifiedValue: 735000, fundingTarget: 185000, fundingProgress: 91, signal: '+2.1%', status: 'OPEN', completionState: 'NORMAL', projectedCompletedValue: 842000, projectedGain: 107000, projectedGainRate: 14.6, participationWindow: '10–16 months', trueBill: { id: 'TB-0021', state: 'ISSUED', purpose: 'ASSET_EXPANSION', value: 168000 } },
+    { id: 'SRA-RE-0033', projectId: 'SRA-RE-0033', assetId: 'A-3104', assetName: 'Weber Mixed-Use Block', title: 'Mixed-Use Rehabilitation', region: 'Weber County, Utah', stage: 'VERIFIED_VALUE', progress: 78, verifiedValue: 2480000, fundingTarget: 610000, fundingProgress: 83, signal: '+6.3%', status: 'OPEN', completionState: 'ELIGIBLE', projectedCompletedValue: 2677000, projectedGain: 197000, projectedGainRate: 7.9, participationWindow: '5–9 months', trueBill: { id: 'TB-0033', state: 'PLEDGED', purpose: 'COMPLETION_CAPACITY', value: 505000 } }
+  ],
+  completionWatch: [],
+  activity: []
+};
+
+export async function createApp(options = {}) {
+  const app = express();
+  const database = options.database || new DatabaseService({ connectionString: options.connectionString });
+  await database.initialize();
+  const persistentDomain = new PersistentDomainService(database);
+  await persistentDomain.hydrate();
+  const domainStore = options.domainStore || createSeededDomainStore();
+  const accessService = new AccessService({ database });
+  await accessService.initialize();
+
+  app.disable('x-powered-by');
+  app.use(express.json({ limit: '1mb' }));
+  if (options.serveStatic !== false) app.use(express.static(path.join(__dirname, 'public')));
+
+  if (options.seedMarketplace !== false) {
+    await persistentDomain.seed(RECORD_TYPES.ASSET_ACCOUNT, marketplaceSeed.assets);
+    await persistentDomain.seed(RECORD_TYPES.PROJECT_ACCOUNT, marketplaceSeed.projects);
+  }
+  const marketplace = new PersistentMarketplaceService(persistentDomain, marketplaceSeed);
+  const creativeFinanceService = new CreativeFinanceService(marketplace, persistentDomain);
+  await creativeFinanceService.initialize();
+  const valueIntelligenceService = new ValueIntelligenceService(marketplace, persistentDomain);
+  await valueIntelligenceService.initialize();
+  const edxConnectionService = new EdxConnectionService(persistentDomain);
+  const edxPermissionService = new EdxPermissionService(persistentDomain);
+  const edxExtractionService = new EdxExtractionService(persistentDomain, edxPermissionService);
+  const edxNormalizationService = new EdxNormalizationService(persistentDomain);
+  const edxSnapshotService = new EdxSnapshotService(persistentDomain);
+  const edxValuePackageService = new EdxValuePackageService(persistentDomain);
+  const edxMarketplacePublisherService = new EdxMarketplacePublisherService(persistentDomain, edxValuePackageService);
+  const edxDashboardIntelligenceService = new EdxDashboardIntelligenceService(persistentDomain);
+  const edxEnterpriseSdkService = new EdxEnterpriseSdkService(persistentDomain);
+  const saneEdxOperationsService = new SaneEdxOperationsService(persistentDomain, edxMarketplacePublisherService);
+  const onboardingRouter = await createOnboardingRouter(domainStore, database, persistentDomain);
+
+  app.use('/api/access', createAccessRouter(marketplace, accessService));
+  app.use('/api/participation', createParticipationRouter(marketplace, accessService, persistentDomain));
+  app.use('/api/onboarding', onboardingRouter);
+  app.use('/api/custody', createCustodyRouter());
+  app.use('/api/sane', createSaneRouter(undefined, saneEdxOperationsService));
+  app.use('/api/creative-finance', createCreativeFinanceRouter(creativeFinanceService));
+  app.use('/api/value-intelligence', createValueIntelligenceRouter(valueIntelligenceService));
+  app.use('/api/edx', createEdxConnectionRouter(edxConnectionService));
+  app.use('/api/edx', createEdxPermissionRouter(edxPermissionService));
+  app.use('/api/edx', createEdxExtractionRouter(edxExtractionService));
+  app.use('/api/edx', createEdxNormalizationRouter(edxNormalizationService));
+  app.use('/api/edx', createEdxSnapshotRouter(edxSnapshotService));
+  app.use('/api/edx', createEdxValuePackageRouter(edxValuePackageService));
+  app.use('/api/edx', createEdxMarketplacePublisherRouter(edxMarketplacePublisherService));
+  app.use('/api/edx', createEdxDashboardIntelligenceRouter(edxDashboardIntelligenceService));
+  app.use('/api/edx', createEdxEnterpriseSdkRouter(edxEnterpriseSdkService));
+
+  app.get('/api/health', async (_req, res) => {
+    const persistence = await database.health();
+    res.json({ status: 'ok', service: 'SAIN Real Asset Market', version: '1.21.0', phase: 'EDX_STABILIZATION_PRIORITY_1_PROVABLE_PIPELINE', persistence, persistentDomain: persistentDomain.snapshot(), automaticPublication: 'DISABLED', companyPublicationApproval: 'REQUIRED', timestamp: new Date().toISOString() });
+  });
+  app.get('/api/domain', (_req, res) => res.json({ persistent: persistentDomain.snapshot() }));
+
+  if (options.serveStatic !== false) {
+    app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+  }
+
+  return { app, database, persistentDomain };
+}
