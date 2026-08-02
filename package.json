@@ -1,8 +1,8 @@
 {
   "name": "sain-real-asset-market",
-  "version": "1.8.1",
+  "version": "1.8.2",
   "private": true,
-  "description": "SAIN Real Asset Market with persistent business objects and lifecycle records",
+  "description": "SAIN Real Asset Market persistent onboarding and marketplace read model",
   "type": "module",
   "scripts": {
     "start": "node server.js",
