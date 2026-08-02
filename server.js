@@ -14,6 +14,7 @@ import { CreativeFinanceService } from './services/creative-finance-service.js';
 import { ValueIntelligenceService } from './services/value-intelligence-service.js';
 import { DatabaseService } from './services/database-service.js';
 import { PersistentDomainService, RECORD_TYPES } from './services/persistent-domain-service.js';
+import { PersistentMarketplaceService } from './services/persistent-marketplace-service.js';
 
 const app = express();
 const port = Number(process.env.PORT) || 3000;
@@ -31,19 +32,19 @@ app.disable('x-powered-by');
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-const marketplace = {
+const marketplaceSeed = {
   marketStatus: 'LIVE', verifiedValue: 12840000, projectedMarketplaceGain: 684000, activeProjects: 18,
   participatingAssets: 42, openPositions: 27, completionCandidates: 3, instrumentsActive: 9,
   completionNeed: 240000, completionReturn: 26000,
   assets: [
-    { id: 'A-1042', name: 'North District Market', type: 'OPERATING_BUSINESS', region: 'Ogden, Utah', state: 'ACTIVE', lifecycleEvents: 418, verifiedCycles: 392, verifiedValue: 735000, verifiedScore: 88, valueSignal: 'STABLE', projectId: 'SRA-RE-0021', dimensions: { production: 91, condition: 84, reliability: 93, capacity: 79 } },
-    { id: 'A-2088', name: 'Weber Residential Portfolio', type: 'REAL_ESTATE', region: 'Northern Utah', state: 'UNDER_PROJECT', lifecycleEvents: 96, verifiedCycles: 81, verifiedValue: 1860000, verifiedScore: 76, valueSignal: 'GROWING', projectId: 'SRA-RE-0014', dimensions: { production: 72, condition: 68, reliability: 82, capacity: 81 } },
-    { id: 'A-3104', name: 'Weber Mixed-Use Block', type: 'MIXED_USE_REAL_ESTATE', region: 'Weber County, Utah', state: 'UNDER_PROJECT', lifecycleEvents: 147, verifiedCycles: 126, verifiedValue: 2480000, verifiedScore: 92, valueSignal: 'ACCELERATING', projectId: 'SRA-RE-0033', dimensions: { production: 89, condition: 90, reliability: 94, capacity: 95 } }
+    { id: 'A-1042', assetId: 'A-1042', name: 'North District Market', type: 'OPERATING_BUSINESS', classification: 'OPERATING_BUSINESS', region: 'Ogden, Utah', state: 'ACTIVE', status: 'ACTIVE', lifecycleEvents: 418, verifiedCycles: 392, verifiedValue: 735000, verifiedScore: 88, valueSignal: 'STABLE', projectId: 'SRA-RE-0021', dimensions: { production: 91, condition: 84, reliability: 93, capacity: 79 } },
+    { id: 'A-2088', assetId: 'A-2088', name: 'Weber Residential Portfolio', type: 'REAL_ESTATE', classification: 'REAL_ESTATE', region: 'Northern Utah', state: 'UNDER_PROJECT', status: 'UNDER_PROJECT', lifecycleEvents: 96, verifiedCycles: 81, verifiedValue: 1860000, verifiedScore: 76, valueSignal: 'GROWING', projectId: 'SRA-RE-0014', dimensions: { production: 72, condition: 68, reliability: 82, capacity: 81 } },
+    { id: 'A-3104', assetId: 'A-3104', name: 'Weber Mixed-Use Block', type: 'MIXED_USE_REAL_ESTATE', classification: 'MIXED_USE_REAL_ESTATE', region: 'Weber County, Utah', state: 'UNDER_PROJECT', status: 'UNDER_PROJECT', lifecycleEvents: 147, verifiedCycles: 126, verifiedValue: 2480000, verifiedScore: 92, valueSignal: 'ACCELERATING', projectId: 'SRA-RE-0033', dimensions: { production: 89, condition: 90, reliability: 94, capacity: 95 } }
   ],
   projects: [
-    { id: 'SRA-RE-0014', assetId: 'A-2088', assetName: 'Weber Residential Portfolio', title: '14-Unit Residential Recovery', region: 'Northern Utah', stage: 'SERVICES_SCHEDULED', progress: 62, verifiedValue: 1860000, fundingTarget: 420000, fundingProgress: 74, signal: '+4.8%', status: 'OPEN', completionState: 'WATCH', projectedCompletedValue: 2240000, projectedGain: 380000, projectedGainRate: 20.4, participationWindow: '8–14 months', trueBill: { id: 'TB-0014', state: 'ACTIVE', purpose: 'CAPITAL_FORMATION', value: 310000 } },
-    { id: 'SRA-RE-0021', assetId: 'A-1042', assetName: 'North District Market', title: 'Neighborhood Grocery Expansion', region: 'Ogden, Utah', stage: 'PRODUCTION_BEGINS', progress: 39, verifiedValue: 735000, fundingTarget: 185000, fundingProgress: 91, signal: '+2.1%', status: 'OPEN', completionState: 'NORMAL', projectedCompletedValue: 842000, projectedGain: 107000, projectedGainRate: 14.6, participationWindow: '10–16 months', trueBill: { id: 'TB-0021', state: 'ISSUED', purpose: 'ASSET_EXPANSION', value: 168000 } },
-    { id: 'SRA-RE-0033', assetId: 'A-3104', assetName: 'Weber Mixed-Use Block', title: 'Mixed-Use Rehabilitation', region: 'Weber County, Utah', stage: 'VERIFIED_VALUE', progress: 78, verifiedValue: 2480000, fundingTarget: 610000, fundingProgress: 83, signal: '+6.3%', status: 'OPEN', completionState: 'ELIGIBLE', projectedCompletedValue: 2677000, projectedGain: 197000, projectedGainRate: 7.9, participationWindow: '5–9 months', trueBill: { id: 'TB-0033', state: 'PLEDGED', purpose: 'COMPLETION_CAPACITY', value: 505000 } }
+    { id: 'SRA-RE-0014', projectId: 'SRA-RE-0014', assetId: 'A-2088', assetName: 'Weber Residential Portfolio', title: '14-Unit Residential Recovery', region: 'Northern Utah', stage: 'SERVICES_SCHEDULED', progress: 62, verifiedValue: 1860000, fundingTarget: 420000, fundingProgress: 74, signal: '+4.8%', status: 'OPEN', completionState: 'WATCH', projectedCompletedValue: 2240000, projectedGain: 380000, projectedGainRate: 20.4, participationWindow: '8–14 months', trueBill: { id: 'TB-0014', state: 'ACTIVE', purpose: 'CAPITAL_FORMATION', value: 310000 } },
+    { id: 'SRA-RE-0021', projectId: 'SRA-RE-0021', assetId: 'A-1042', assetName: 'North District Market', title: 'Neighborhood Grocery Expansion', region: 'Ogden, Utah', stage: 'PRODUCTION_BEGINS', progress: 39, verifiedValue: 735000, fundingTarget: 185000, fundingProgress: 91, signal: '+2.1%', status: 'OPEN', completionState: 'NORMAL', projectedCompletedValue: 842000, projectedGain: 107000, projectedGainRate: 14.6, participationWindow: '10–16 months', trueBill: { id: 'TB-0021', state: 'ISSUED', purpose: 'ASSET_EXPANSION', value: 168000 } },
+    { id: 'SRA-RE-0033', projectId: 'SRA-RE-0033', assetId: 'A-3104', assetName: 'Weber Mixed-Use Block', title: 'Mixed-Use Rehabilitation', region: 'Weber County, Utah', stage: 'VERIFIED_VALUE', progress: 78, verifiedValue: 2480000, fundingTarget: 610000, fundingProgress: 83, signal: '+6.3%', status: 'OPEN', completionState: 'ELIGIBLE', projectedCompletedValue: 2677000, projectedGain: 197000, projectedGainRate: 7.9, participationWindow: '5–9 months', trueBill: { id: 'TB-0033', state: 'PLEDGED', purpose: 'COMPLETION_CAPACITY', value: 505000 } }
   ],
   completionWatch: [
     { projectId: 'SRA-RE-0014', title: '14-Unit Residential Recovery', gap: 109000, verifiedCoverage: 82, potentialGain: 380000, platformReturn: 12000, state: 'WATCH', action: 'Wait for market participation' },
@@ -59,17 +60,19 @@ const marketplace = {
   ]
 };
 
-await persistentDomain.seed(RECORD_TYPES.ASSET_ACCOUNT, marketplace.assets.map((asset) => ({ ...asset, assetId: asset.id })));
-await persistentDomain.seed(RECORD_TYPES.PROJECT_ACCOUNT, marketplace.projects.map((project) => ({ ...project, projectId: project.id })));
+await persistentDomain.seed(RECORD_TYPES.ASSET_ACCOUNT, marketplaceSeed.assets);
+await persistentDomain.seed(RECORD_TYPES.PROJECT_ACCOUNT, marketplaceSeed.projects);
+const marketplace = new PersistentMarketplaceService(persistentDomain, marketplaceSeed);
 
 const creativeFinanceService = new CreativeFinanceService(marketplace, persistentDomain);
 await creativeFinanceService.initialize();
 const valueIntelligenceService = new ValueIntelligenceService(marketplace, persistentDomain);
 await valueIntelligenceService.initialize();
+const onboardingRouter = await createOnboardingRouter(domainStore, database, persistentDomain);
 
 app.use('/api/access', createAccessRouter(marketplace, accessService));
 app.use('/api/participation', createParticipationRouter(marketplace, accessService, persistentDomain));
-app.use('/api/onboarding', createOnboardingRouter(domainStore, database));
+app.use('/api/onboarding', onboardingRouter);
 app.use('/api/custody', createCustodyRouter());
 app.use('/api/sane', createSaneRouter());
 app.use('/api/creative-finance', createCreativeFinanceRouter(creativeFinanceService));
@@ -79,31 +82,44 @@ app.get('/api/health', async (_req, res) => {
   try {
     const persistence = await database.health();
     res.json({
-      status: 'ok', service: 'SAIN Real Asset Market', version: '1.8.1',
-      phase: '8B_PERSISTENT_BUSINESS_OBJECTS', persistence,
+      status: 'ok', service: 'SAIN Real Asset Market', version: '1.8.2',
+      phase: '8C_PERSISTENT_ONBOARDING_AND_MARKET_READ_MODEL', persistence,
       persistentDomain: persistentDomain.snapshot(),
+      marketplaceReadSource: 'PERSISTENT_DOMAIN',
       persistentIdentity: 'ACTIVE', persistentSessions: 'ACTIVE',
       persistentCapabilityRecords: 'ACTIVE', persistentDocumentMetadata: 'ACTIVE',
+      persistentOnboardingApplications: 'ACTIVE', persistentEvidencePackages: 'ACTIVE',
+      persistentInstitutionalReviews: 'ACTIVE', persistentV4VPackages: 'ACTIVE',
       persistentAssetAccounts: 'ACTIVE', persistentProjects: 'ACTIVE',
       persistentParticipationPositions: 'ACTIVE', persistentTransferablePositions: 'ACTIVE',
       persistentCreativeFinanceStructures: 'ACTIVE', persistentValueIntelligence: 'ACTIVE',
       lifecycleEventLedger: 'ACTIVE', auditLedger: 'ACTIVE',
       durableFileStorage: process.env.SRA_PRIVATE_DOCUMENT_ROOT ? 'CONFIGURED_PATH' : 'TEMPORARY_PATH',
-      verifiedValueLayer: 'ACTIVE', marketIntelligenceLayer: 'ACTIVE', verifiedMarketEvents: 'ACTIVE',
       saneAgent: 'ACTIVE', creativeFinanceSkill: 'ACTIVE', marketplaceParticipation: 'ACTIVE',
       timestamp: new Date().toISOString()
     });
   } catch (error) {
-    res.status(503).json({ status: 'degraded', service: 'SAIN Real Asset Market', version: '1.8.1', persistence: { ready: false, error: error.message }, timestamp: new Date().toISOString() });
+    res.status(503).json({ status: 'degraded', service: 'SAIN Real Asset Market', version: '1.8.2', persistence: { ready: false, error: error.message }, timestamp: new Date().toISOString() });
   }
 });
-app.get('/api/marketplace', (_req, res) => res.json(marketplace));
-app.get('/api/domain', (_req, res) => res.json({ prototype: domainStore.snapshot(), persistent: persistentDomain.snapshot() }));
+app.get('/api/marketplace', (_req, res) => res.json(marketplace.snapshot()));
+app.get('/api/domain', (_req, res) => res.json({ persistent: persistentDomain.snapshot() }));
 app.get('/api/assets/:assetId/studio', (req, res) => {
-  const studio = domainStore.getAssetStudio(req.params.assetId);
-  if (!studio) return res.status(404).json({ error: 'Asset Account not found.' });
+  const asset = persistentDomain.get(RECORD_TYPES.ASSET_ACCOUNT, req.params.assetId);
+  if (!asset) return res.status(404).json({ error: 'Asset Account not found.' });
+  const studio = {
+    asset,
+    onboardingApplication: asset.metadata?.onboardingApplicationId ? persistentDomain.get(RECORD_TYPES.ONBOARDING_APPLICATION, asset.metadata.onboardingApplicationId) : null,
+    evidencePackage: asset.metadata?.evidencePackageId ? persistentDomain.get(RECORD_TYPES.EVIDENCE_PACKAGE, asset.metadata.evidencePackageId) : null,
+    institutionalReview: asset.metadata?.institutionalReviewId ? persistentDomain.get(RECORD_TYPES.INSTITUTIONAL_REVIEW, asset.metadata.institutionalReviewId) : null,
+    verifiedValuePackages: persistentDomain.list(RECORD_TYPES.V4V_PACKAGE).filter((item) => item.assetId === asset.id || item.assetId === asset.assetId),
+    projects: persistentDomain.list(RECORD_TYPES.PROJECT_ACCOUNT).filter((item) => item.assetId === asset.id || item.assetId === asset.assetId),
+    marketSignals: persistentDomain.list(RECORD_TYPES.MARKET_SIGNAL).filter((item) => item.assetId === asset.id || item.assetId === asset.assetId),
+    verifiedMarketEvents: persistentDomain.list(RECORD_TYPES.VERIFIED_MARKET_EVENT).filter((item) => item.assetId === asset.id || item.assetId === asset.assetId),
+    lifecycleEvents: persistentDomain.list(RECORD_TYPES.LIFECYCLE_EVENT).filter((item) => item.objectId === asset.id || item.objectId === asset.assetId)
+  };
   return res.json(studio);
 });
 
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
-app.listen(port, '0.0.0.0', () => console.log(`SRA Phase 8B Persistent Business Objects is running on port ${port}`));
+app.listen(port, '0.0.0.0', () => console.log(`SRA Phase 8C Persistent Onboarding and Marketplace Read Model is running on port ${port}`));
