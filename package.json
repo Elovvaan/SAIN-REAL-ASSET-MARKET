@@ -1,8 +1,8 @@
 {
   "name": "sain-real-asset-market",
-  "version": "1.8.0",
+  "version": "1.8.1",
   "private": true,
-  "description": "SAIN Real Asset Market persistent domain foundation",
+  "description": "SAIN Real Asset Market with persistent business objects and lifecycle records",
   "type": "module",
   "scripts": {
     "start": "node server.js",
