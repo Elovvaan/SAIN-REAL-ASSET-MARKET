@@ -5,8 +5,12 @@ function copy(value) {
 }
 
 export const RECORD_TYPES = Object.freeze({
+  PARTICIPANT: 'PARTICIPANT',
   ASSET_ACCOUNT: 'ASSET_ACCOUNT',
   PROJECT_ACCOUNT: 'PROJECT_ACCOUNT',
+  ONBOARDING_APPLICATION: 'ONBOARDING_APPLICATION',
+  EVIDENCE_PACKAGE: 'EVIDENCE_PACKAGE',
+  INSTITUTIONAL_REVIEW: 'INSTITUTIONAL_REVIEW',
   V4V_PACKAGE: 'V4V_PACKAGE',
   PARTICIPATION_POSITION: 'PARTICIPATION_POSITION',
   TRANSFERABLE_POSITION: 'TRANSFERABLE_POSITION',
@@ -18,7 +22,7 @@ export const RECORD_TYPES = Object.freeze({
 });
 
 function recordId(record) {
-  return record?.id || record?.assetId || record?.projectId || record?.packageId || record?.positionId || record?.structureId || record?.signalId || record?.eventId || null;
+  return record?.id || record?.applicationId || record?.evidencePackageId || record?.institutionalReviewId || record?.assetId || record?.projectId || record?.packageId || record?.positionId || record?.structureId || record?.signalId || record?.eventId || null;
 }
 
 export class PersistentDomainService {
