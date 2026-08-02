@@ -22,11 +22,12 @@ export const RECORD_TYPES = Object.freeze({
   PROTECTION_INSTRUMENT: 'PROTECTION_INSTRUMENT',
   EDX_CONNECTOR_DEFINITION: 'EDX_CONNECTOR_DEFINITION',
   EDX_ENTERPRISE_CONNECTION: 'EDX_ENTERPRISE_CONNECTION',
+  EDX_EXTRACTION_POLICY: 'EDX_EXTRACTION_POLICY',
   LIFECYCLE_EVENT: 'LIFECYCLE_EVENT'
 });
 
 function recordId(record) {
-  return record?.id || record?.applicationId || record?.evidencePackageId || record?.institutionalReviewId || record?.assetId || record?.projectId || record?.packageId || record?.positionId || record?.structureId || record?.signalId || record?.eventId || record?.instrumentId || record?.connectorDefinitionId || record?.connectionId || null;
+  return record?.id || record?.applicationId || record?.evidencePackageId || record?.institutionalReviewId || record?.assetId || record?.projectId || record?.packageId || record?.positionId || record?.structureId || record?.signalId || record?.eventId || record?.instrumentId || record?.connectorDefinitionId || record?.connectionId || record?.policyId || null;
 }
 
 export class PersistentDomainService {
