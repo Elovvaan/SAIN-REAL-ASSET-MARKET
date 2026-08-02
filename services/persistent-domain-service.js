@@ -28,11 +28,13 @@ export const RECORD_TYPES = Object.freeze({
   EDX_NORMALIZED_RECORD: 'EDX_NORMALIZED_RECORD',
   EDX_VERIFIED_SNAPSHOT: 'EDX_VERIFIED_SNAPSHOT',
   EDX_VERIFIED_VALUE_PACKAGE: 'EDX_VERIFIED_VALUE_PACKAGE',
+  EDX_PUBLICATION_DECISION: 'EDX_PUBLICATION_DECISION',
+  EDX_MARKETPLACE_PROJECTION: 'EDX_MARKETPLACE_PROJECTION',
   LIFECYCLE_EVENT: 'LIFECYCLE_EVENT'
 });
 
 function recordId(record) {
-  return record?.id || record?.applicationId || record?.evidencePackageId || record?.institutionalReviewId || record?.assetId || record?.projectId || record?.packageId || record?.positionId || record?.structureId || record?.signalId || record?.eventId || record?.instrumentId || record?.connectorDefinitionId || record?.connectionId || record?.policyId || record?.extractionRequestId || record?.extractionResultId || record?.normalizedRecordId || record?.snapshotId || record?.valuePackageId || null;
+  return record?.id || record?.applicationId || record?.evidencePackageId || record?.institutionalReviewId || record?.assetId || record?.projectId || record?.packageId || record?.positionId || record?.structureId || record?.signalId || record?.eventId || record?.instrumentId || record?.connectorDefinitionId || record?.connectionId || record?.policyId || record?.extractionRequestId || record?.extractionResultId || record?.normalizedRecordId || record?.snapshotId || record?.valuePackageId || record?.publicationDecisionId || record?.projectionId || null;
 }
 
 export class PersistentDomainService {
