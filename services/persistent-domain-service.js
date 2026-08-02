@@ -18,11 +18,13 @@ export const RECORD_TYPES = Object.freeze({
   VERIFIED_VALUE_RECORD: 'VERIFIED_VALUE_RECORD',
   MARKET_SIGNAL: 'MARKET_SIGNAL',
   VERIFIED_MARKET_EVENT: 'VERIFIED_MARKET_EVENT',
+  MARKET_CIRCULATION_EVENT: 'MARKET_CIRCULATION_EVENT',
+  PROTECTION_INSTRUMENT: 'PROTECTION_INSTRUMENT',
   LIFECYCLE_EVENT: 'LIFECYCLE_EVENT'
 });
 
 function recordId(record) {
-  return record?.id || record?.applicationId || record?.evidencePackageId || record?.institutionalReviewId || record?.assetId || record?.projectId || record?.packageId || record?.positionId || record?.structureId || record?.signalId || record?.eventId || null;
+  return record?.id || record?.applicationId || record?.evidencePackageId || record?.institutionalReviewId || record?.assetId || record?.projectId || record?.packageId || record?.positionId || record?.structureId || record?.signalId || record?.eventId || record?.instrumentId || null;
 }
 
 export class PersistentDomainService {
