@@ -9,9 +9,11 @@ import { createParticipationRouter } from './routes/participation-router.js';
 import { createSaneRouter } from './routes/sane-router.js';
 import { createCreativeFinanceRouter } from './routes/creative-finance-router.js';
 import { createValueIntelligenceRouter } from './routes/value-intelligence-router.js';
+import { createEdxConnectionRouter } from './routes/edx-connection-router.js';
 import { AccessService } from './services/access-service.js';
 import { CreativeFinanceService } from './services/creative-finance-service.js';
 import { ValueIntelligenceService } from './services/value-intelligence-service.js';
+import { EdxConnectionService } from './services/edx-connection-service.js';
 import { DatabaseService } from './services/database-service.js';
 import { PersistentDomainService, RECORD_TYPES } from './services/persistent-domain-service.js';
 import { PersistentMarketplaceService } from './services/persistent-marketplace-service.js';
@@ -68,6 +70,7 @@ const creativeFinanceService = new CreativeFinanceService(marketplace, persisten
 await creativeFinanceService.initialize();
 const valueIntelligenceService = new ValueIntelligenceService(marketplace, persistentDomain);
 await valueIntelligenceService.initialize();
+const edxConnectionService = new EdxConnectionService(persistentDomain);
 const onboardingRouter = await createOnboardingRouter(domainStore, database, persistentDomain);
 
 app.use('/api/access', createAccessRouter(marketplace, accessService));
@@ -77,13 +80,14 @@ app.use('/api/custody', createCustodyRouter());
 app.use('/api/sane', createSaneRouter());
 app.use('/api/creative-finance', createCreativeFinanceRouter(creativeFinanceService));
 app.use('/api/value-intelligence', createValueIntelligenceRouter(valueIntelligenceService));
+app.use('/api/edx', createEdxConnectionRouter(edxConnectionService));
 
 app.get('/api/health', async (_req, res) => {
   try {
     const persistence = await database.health();
     res.json({
-      status: 'ok', service: 'SAIN Real Asset Market', version: '1.8.2',
-      phase: '8C_PERSISTENT_ONBOARDING_AND_MARKET_READ_MODEL', persistence,
+      status: 'ok', service: 'SAIN Real Asset Market', version: '1.9.0',
+      phase: 'EDX_PHASE_2_ENTERPRISE_CONNECTION_LAYER', persistence,
       persistentDomain: persistentDomain.snapshot(),
       marketplaceReadSource: 'PERSISTENT_DOMAIN',
       persistentIdentity: 'ACTIVE', persistentSessions: 'ACTIVE',
@@ -93,13 +97,14 @@ app.get('/api/health', async (_req, res) => {
       persistentAssetAccounts: 'ACTIVE', persistentProjects: 'ACTIVE',
       persistentParticipationPositions: 'ACTIVE', persistentTransferablePositions: 'ACTIVE',
       persistentCreativeFinanceStructures: 'ACTIVE', persistentValueIntelligence: 'ACTIVE',
+      edxConnectorRegistry: 'ACTIVE', edxEnterpriseConnections: 'ACTIVE',
       lifecycleEventLedger: 'ACTIVE', auditLedger: 'ACTIVE',
       durableFileStorage: process.env.SRA_PRIVATE_DOCUMENT_ROOT ? 'CONFIGURED_PATH' : 'TEMPORARY_PATH',
       saneAgent: 'ACTIVE', creativeFinanceSkill: 'ACTIVE', marketplaceParticipation: 'ACTIVE',
       timestamp: new Date().toISOString()
     });
   } catch (error) {
-    res.status(503).json({ status: 'degraded', service: 'SAIN Real Asset Market', version: '1.8.2', persistence: { ready: false, error: error.message }, timestamp: new Date().toISOString() });
+    res.status(503).json({ status: 'degraded', service: 'SAIN Real Asset Market', version: '1.9.0', persistence: { ready: false, error: error.message }, timestamp: new Date().toISOString() });
   }
 });
 app.get('/api/marketplace', (_req, res) => res.json(marketplace.snapshot()));
@@ -122,4 +127,4 @@ app.get('/api/assets/:assetId/studio', (req, res) => {
 });
 
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
-app.listen(port, '0.0.0.0', () => console.log(`SRA Phase 8C Persistent Onboarding and Marketplace Read Model is running on port ${port}`));
+app.listen(port, '0.0.0.0', () => console.log(`SRA EDX Phase 2 Enterprise Connection Layer is running on port ${port}`));
