@@ -1,0 +1,32 @@
+name: EDX Integration
+
+on:
+  pull_request:
+    paths:
+      - '**/*.js'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/edx-integration.yml'
+  push:
+    branches:
+      - main
+
+jobs:
+  edx-pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run EDX end-to-end integration test
+        run: npm run test:edx
