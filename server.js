@@ -9,11 +9,9 @@ import { createParticipationRouter } from './routes/participation-router.js';
 import { createSaneRouter } from './routes/sane-router.js';
 import { createCreativeFinanceRouter } from './routes/creative-finance-router.js';
 import { createValueIntelligenceRouter } from './routes/value-intelligence-router.js';
-import { createInstrumentRouter } from './routes/instrument-router.js';
 import { AccessService } from './services/access-service.js';
 import { CreativeFinanceService } from './services/creative-finance-service.js';
 import { ValueIntelligenceService } from './services/value-intelligence-service.js';
-import { InstrumentService } from './services/instrument-service.js';
 import { DatabaseService } from './services/database-service.js';
 import { PersistentDomainService, RECORD_TYPES } from './services/persistent-domain-service.js';
 import { PersistentMarketplaceService } from './services/persistent-marketplace-service.js';
@@ -62,40 +60,14 @@ const marketplaceSeed = {
   ]
 };
 
-const instrumentFamilySeed = [
-  {
-    id: 'IF-COMPLETION', familyId: 'IF-COMPLETION', name: 'Completion Instrument',
-    purpose: 'Purpose-bound capacity for completing verified asset work',
-    permittedPurposes: ['COMPLETION_CAPACITY', 'PROJECT_COMPLETION'],
-    lifecycle: ['DRAFT', 'ISSUED', 'ACTIVE', 'SETTLED', 'CLOSED', 'ARCHIVED'],
-    status: 'ACTIVE'
-  },
-  {
-    id: 'IF-EXPANSION', familyId: 'IF-EXPANSION', name: 'Expansion Instrument',
-    purpose: 'Purpose-bound capacity for verified asset expansion',
-    permittedPurposes: ['ASSET_EXPANSION', 'PRODUCTION_EXPANSION'],
-    lifecycle: ['DRAFT', 'ISSUED', 'ACTIVE', 'SETTLED', 'CLOSED', 'ARCHIVED'],
-    status: 'ACTIVE'
-  },
-  {
-    id: 'IF-PRODUCTION', familyId: 'IF-PRODUCTION', name: 'Production Instrument',
-    purpose: 'Purpose-bound participation in productive asset activity',
-    permittedPurposes: ['PRODUCTION', 'OPERATING_CAPACITY'],
-    lifecycle: ['DRAFT', 'ISSUED', 'ACTIVE', 'SETTLED', 'CLOSED', 'ARCHIVED'],
-    status: 'ACTIVE'
-  }
-];
-
 await persistentDomain.seed(RECORD_TYPES.ASSET_ACCOUNT, marketplaceSeed.assets);
 await persistentDomain.seed(RECORD_TYPES.PROJECT_ACCOUNT, marketplaceSeed.projects);
-await persistentDomain.seed(RECORD_TYPES.INSTRUMENT_FAMILY, instrumentFamilySeed);
 const marketplace = new PersistentMarketplaceService(persistentDomain, marketplaceSeed);
 
 const creativeFinanceService = new CreativeFinanceService(marketplace, persistentDomain);
 await creativeFinanceService.initialize();
 const valueIntelligenceService = new ValueIntelligenceService(marketplace, persistentDomain);
 await valueIntelligenceService.initialize();
-const instrumentService = new InstrumentService(persistentDomain);
 const onboardingRouter = await createOnboardingRouter(domainStore, database, persistentDomain);
 
 app.use('/api/access', createAccessRouter(marketplace, accessService));
@@ -105,14 +77,13 @@ app.use('/api/custody', createCustodyRouter());
 app.use('/api/sane', createSaneRouter());
 app.use('/api/creative-finance', createCreativeFinanceRouter(creativeFinanceService));
 app.use('/api/value-intelligence', createValueIntelligenceRouter(valueIntelligenceService));
-app.use('/api/instruments', createInstrumentRouter(instrumentService));
 
 app.get('/api/health', async (_req, res) => {
   try {
     const persistence = await database.health();
     res.json({
-      status: 'ok', service: 'SAIN Real Asset Market', version: '1.9.0',
-      phase: '8D_INSTRUMENT_CATALOG_AND_SERIES', persistence,
+      status: 'ok', service: 'SAIN Real Asset Market', version: '1.8.2',
+      phase: '8C_PERSISTENT_ONBOARDING_AND_MARKET_READ_MODEL', persistence,
       persistentDomain: persistentDomain.snapshot(),
       marketplaceReadSource: 'PERSISTENT_DOMAIN',
       persistentIdentity: 'ACTIVE', persistentSessions: 'ACTIVE',
@@ -120,7 +91,6 @@ app.get('/api/health', async (_req, res) => {
       persistentOnboardingApplications: 'ACTIVE', persistentEvidencePackages: 'ACTIVE',
       persistentInstitutionalReviews: 'ACTIVE', persistentV4VPackages: 'ACTIVE',
       persistentAssetAccounts: 'ACTIVE', persistentProjects: 'ACTIVE',
-      persistentInstrumentFamilies: 'ACTIVE', persistentInstrumentSeries: 'ACTIVE',
       persistentParticipationPositions: 'ACTIVE', persistentTransferablePositions: 'ACTIVE',
       persistentCreativeFinanceStructures: 'ACTIVE', persistentValueIntelligence: 'ACTIVE',
       lifecycleEventLedger: 'ACTIVE', auditLedger: 'ACTIVE',
@@ -129,7 +99,7 @@ app.get('/api/health', async (_req, res) => {
       timestamp: new Date().toISOString()
     });
   } catch (error) {
-    res.status(503).json({ status: 'degraded', service: 'SAIN Real Asset Market', version: '1.9.0', persistence: { ready: false, error: error.message }, timestamp: new Date().toISOString() });
+    res.status(503).json({ status: 'degraded', service: 'SAIN Real Asset Market', version: '1.8.2', persistence: { ready: false, error: error.message }, timestamp: new Date().toISOString() });
   }
 });
 app.get('/api/marketplace', (_req, res) => res.json(marketplace.snapshot()));
@@ -143,7 +113,6 @@ app.get('/api/assets/:assetId/studio', (req, res) => {
     evidencePackage: asset.metadata?.evidencePackageId ? persistentDomain.get(RECORD_TYPES.EVIDENCE_PACKAGE, asset.metadata.evidencePackageId) : null,
     institutionalReview: asset.metadata?.institutionalReviewId ? persistentDomain.get(RECORD_TYPES.INSTITUTIONAL_REVIEW, asset.metadata.institutionalReviewId) : null,
     verifiedValuePackages: persistentDomain.list(RECORD_TYPES.V4V_PACKAGE).filter((item) => item.assetId === asset.id || item.assetId === asset.assetId),
-    instrumentSeries: persistentDomain.list(RECORD_TYPES.INSTRUMENT_SERIES).filter((item) => item.assetId === asset.id || item.assetId === asset.assetId),
     projects: persistentDomain.list(RECORD_TYPES.PROJECT_ACCOUNT).filter((item) => item.assetId === asset.id || item.assetId === asset.assetId),
     marketSignals: persistentDomain.list(RECORD_TYPES.MARKET_SIGNAL).filter((item) => item.assetId === asset.id || item.assetId === asset.assetId),
     verifiedMarketEvents: persistentDomain.list(RECORD_TYPES.VERIFIED_MARKET_EVENT).filter((item) => item.assetId === asset.id || item.assetId === asset.assetId),
@@ -153,4 +122,4 @@ app.get('/api/assets/:assetId/studio', (req, res) => {
 });
 
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
-app.listen(port, '0.0.0.0', () => console.log(`SRA Phase 8D Instrument Catalog and Series is running on port ${port}`));
+app.listen(port, '0.0.0.0', () => console.log(`SRA Phase 8C Persistent Onboarding and Marketplace Read Model is running on port ${port}`));

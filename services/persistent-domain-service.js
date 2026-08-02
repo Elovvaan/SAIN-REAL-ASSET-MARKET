@@ -12,8 +12,6 @@ export const RECORD_TYPES = Object.freeze({
   EVIDENCE_PACKAGE: 'EVIDENCE_PACKAGE',
   INSTITUTIONAL_REVIEW: 'INSTITUTIONAL_REVIEW',
   V4V_PACKAGE: 'V4V_PACKAGE',
-  INSTRUMENT_FAMILY: 'INSTRUMENT_FAMILY',
-  INSTRUMENT_SERIES: 'INSTRUMENT_SERIES',
   PARTICIPATION_POSITION: 'PARTICIPATION_POSITION',
   TRANSFERABLE_POSITION: 'TRANSFERABLE_POSITION',
   CREATIVE_FINANCE_STRUCTURE: 'CREATIVE_FINANCE_STRUCTURE',
@@ -24,7 +22,7 @@ export const RECORD_TYPES = Object.freeze({
 });
 
 function recordId(record) {
-  return record?.id || record?.applicationId || record?.evidencePackageId || record?.institutionalReviewId || record?.assetId || record?.projectId || record?.packageId || record?.familyId || record?.seriesId || record?.positionId || record?.structureId || record?.signalId || record?.eventId || null;
+  return record?.id || record?.applicationId || record?.evidencePackageId || record?.institutionalReviewId || record?.assetId || record?.projectId || record?.packageId || record?.positionId || record?.structureId || record?.signalId || record?.eventId || null;
 }
 
 export class PersistentDomainService {
