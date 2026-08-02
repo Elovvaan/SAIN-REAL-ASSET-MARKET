@@ -8,8 +8,10 @@ import { createAccessRouter } from './routes/access-router.js';
 import { createParticipationRouter } from './routes/participation-router.js';
 import { createSaneRouter } from './routes/sane-router.js';
 import { createCreativeFinanceRouter } from './routes/creative-finance-router.js';
+import { createValueIntelligenceRouter } from './routes/value-intelligence-router.js';
 import { AccessService } from './services/access-service.js';
 import { CreativeFinanceService } from './services/creative-finance-service.js';
+import { ValueIntelligenceService } from './services/value-intelligence-service.js';
 
 const app = express();
 const port = Number(process.env.PORT) || 3000;
@@ -51,6 +53,7 @@ const marketplace = {
 };
 
 const creativeFinanceService = new CreativeFinanceService(marketplace);
+const valueIntelligenceService = new ValueIntelligenceService(marketplace);
 
 app.use('/api/access', createAccessRouter(marketplace, accessService));
 app.use('/api/participation', createParticipationRouter(marketplace, accessService));
@@ -58,11 +61,16 @@ app.use('/api/onboarding', createOnboardingRouter(domainStore));
 app.use('/api/custody', createCustodyRouter());
 app.use('/api/sane', createSaneRouter());
 app.use('/api/creative-finance', createCreativeFinanceRouter(creativeFinanceService));
+app.use('/api/value-intelligence', createValueIntelligenceRouter(valueIntelligenceService));
 
 app.get('/api/health', (_req, res) => res.json({
   status: 'ok',
   service: 'SAIN Real Asset Market',
-  version: '1.5.0',
+  version: '1.7.0',
+  verifiedValueLayer: 'ACTIVE',
+  marketIntelligenceLayer: 'ACTIVE',
+  verifiedMarketEvents: 'ACTIVE',
+  signalGraduationRule: 'ACTIVE',
   saneAgent: 'ACTIVE',
   skillRegistry: 'ACTIVE',
   skillDispatcher: 'ACTIVE',
@@ -86,4 +94,4 @@ app.get('/api/assets/:assetId/studio', (req, res) => {
 });
 
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
-app.listen(port, '0.0.0.0', () => console.log(`SRA V15 Creative Finance Skill Architecture is running on port ${port}`));
+app.listen(port, '0.0.0.0', () => console.log(`SRA V17 Verified Value & Market Intelligence is running on port ${port}`));
