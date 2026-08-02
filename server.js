@@ -12,13 +12,17 @@ import { createValueIntelligenceRouter } from './routes/value-intelligence-route
 import { AccessService } from './services/access-service.js';
 import { CreativeFinanceService } from './services/creative-finance-service.js';
 import { ValueIntelligenceService } from './services/value-intelligence-service.js';
+import { DatabaseService } from './services/database-service.js';
 
 const app = express();
 const port = Number(process.env.PORT) || 3000;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const domainStore = createSeededDomainStore();
-const accessService = new AccessService();
+const database = new DatabaseService();
+await database.initialize();
+const accessService = new AccessService({ database });
+await accessService.initialize();
 
 app.disable('x-powered-by');
 app.use(express.json({ limit: '1mb' }));
@@ -57,34 +61,29 @@ const valueIntelligenceService = new ValueIntelligenceService(marketplace);
 
 app.use('/api/access', createAccessRouter(marketplace, accessService));
 app.use('/api/participation', createParticipationRouter(marketplace, accessService));
-app.use('/api/onboarding', createOnboardingRouter(domainStore));
+app.use('/api/onboarding', createOnboardingRouter(domainStore, database));
 app.use('/api/custody', createCustodyRouter());
 app.use('/api/sane', createSaneRouter());
 app.use('/api/creative-finance', createCreativeFinanceRouter(creativeFinanceService));
 app.use('/api/value-intelligence', createValueIntelligenceRouter(valueIntelligenceService));
 
-app.get('/api/health', (_req, res) => res.json({
-  status: 'ok',
-  service: 'SAIN Real Asset Market',
-  version: '1.7.0',
-  verifiedValueLayer: 'ACTIVE',
-  marketIntelligenceLayer: 'ACTIVE',
-  verifiedMarketEvents: 'ACTIVE',
-  signalGraduationRule: 'ACTIVE',
-  saneAgent: 'ACTIVE',
-  skillRegistry: 'ACTIVE',
-  skillDispatcher: 'ACTIVE',
-  creativeFinanceSkill: 'ACTIVE',
-  transferablePositions: 'ACTIVE',
-  gapAnalysis: 'ACTIVE',
-  reconciliationSequence: 'ACTIVE',
-  productExperience: 'ACTIVE',
-  operatingTierEngine: 'ACTIVE',
-  universalAccount: 'FREE',
-  marketplaceParticipation: 'ACTIVE',
-  institutionalCustody: 'ACTIVE',
-  timestamp: new Date().toISOString()
-}));
+app.get('/api/health', async (_req, res) => {
+  try {
+    const persistence = await database.health();
+    res.json({
+      status: 'ok', service: 'SAIN Real Asset Market', version: '1.8.0',
+      phase: '8A_PERSISTENT_DOMAIN_FOUNDATION', persistence,
+      persistentIdentity: 'ACTIVE', persistentSessions: 'ACTIVE',
+      persistentCapabilityRecords: 'ACTIVE', persistentDocumentMetadata: 'ACTIVE',
+      auditLedger: 'ACTIVE', durableFileStorage: process.env.SRA_PRIVATE_DOCUMENT_ROOT ? 'CONFIGURED_PATH' : 'TEMPORARY_PATH',
+      verifiedValueLayer: 'ACTIVE', marketIntelligenceLayer: 'ACTIVE', verifiedMarketEvents: 'ACTIVE',
+      saneAgent: 'ACTIVE', creativeFinanceSkill: 'ACTIVE', marketplaceParticipation: 'ACTIVE',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(503).json({ status: 'degraded', service: 'SAIN Real Asset Market', version: '1.8.0', persistence: { ready: false, error: error.message }, timestamp: new Date().toISOString() });
+  }
+});
 app.get('/api/marketplace', (_req, res) => res.json(marketplace));
 app.get('/api/domain', (_req, res) => res.json(domainStore.snapshot()));
 app.get('/api/assets/:assetId/studio', (req, res) => {
@@ -94,4 +93,4 @@ app.get('/api/assets/:assetId/studio', (req, res) => {
 });
 
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
-app.listen(port, '0.0.0.0', () => console.log(`SRA V17 Verified Value & Market Intelligence is running on port ${port}`));
+app.listen(port, '0.0.0.0', () => console.log(`SRA Phase 8A Persistent Domain Foundation is running on port ${port}`));
