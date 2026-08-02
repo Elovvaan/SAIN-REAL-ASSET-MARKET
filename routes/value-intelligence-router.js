@@ -15,17 +15,17 @@ export function createValueIntelligenceRouter(service) {
     }
   });
 
-  router.post('/signals', (req, res) => {
+  router.post('/signals', async (req, res) => {
     try {
-      res.status(201).json({ signal: service.createSignal(req.body) });
+      res.status(201).json({ signal: await service.createSignal(req.body, req.body?.actorId || null) });
     } catch (error) {
       res.status(400).json({ error: error.message });
     }
   });
 
-  router.post('/events/verify', (req, res) => {
+  router.post('/events/verify', async (req, res) => {
     try {
-      res.status(201).json(service.verifyMarketEvent(req.body));
+      res.status(201).json(await service.verifyMarketEvent(req.body, req.body?.actorId || null));
     } catch (error) {
       res.status(400).json({ error: error.message });
     }
