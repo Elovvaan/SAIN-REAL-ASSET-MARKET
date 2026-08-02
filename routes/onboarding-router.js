@@ -5,19 +5,17 @@ import { PrivateDocumentService } from '../services/private-document-service.js'
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024, files: 10 } });
 
-export function createOnboardingRouter(domainStore, database = null) {
+export async function createOnboardingRouter(domainStore, database = null, persistentDomain = null) {
   const router = Router();
   const documentService = new PrivateDocumentService({ database });
-  const service = new AssetOnboardingService(domainStore, documentService);
+  await documentService.initialize();
+  const service = new AssetOnboardingService(domainStore, documentService, persistentDomain);
+  await service.initialize();
 
   router.get('/configuration', (_req, res) => res.json(service.getConfiguration()));
   router.get('/applications', (_req, res) => res.json({ applications: service.listApplications() }));
-  router.get('/documents', async (_req, res) => {
-    await documentService.initialize();
-    res.json({ documents: documentService.listMetadata() });
-  });
-  router.get('/documents/:documentId', async (req, res) => {
-    await documentService.initialize();
+  router.get('/documents', (_req, res) => res.json({ documents: documentService.listMetadata() }));
+  router.get('/documents/:documentId', (req, res) => {
     const document = documentService.toPublicMetadata(documentService.get(req.params.documentId));
     if (!document) return res.status(404).json({ error: 'Private document record not found.' });
     return res.json({ document });
@@ -39,9 +37,9 @@ export function createOnboardingRouter(domainStore, database = null) {
       return res.status(500).json({ ok: false, errors: ['Private documents could not be uploaded.'] });
     }
   });
-  router.post('/assets', (req, res) => {
+  router.post('/assets', async (req, res) => {
     try {
-      const result = service.onboard(req.body);
+      const result = await service.onboard(req.body, { userId: req.body?.userId || null });
       if (!result.ok) return res.status(400).json(result);
       return res.status(201).json(result);
     } catch (error) {
