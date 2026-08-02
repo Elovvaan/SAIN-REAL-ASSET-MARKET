@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { RECORD_TYPES } from './persistent-domain-service.js';
 
 const PARTICIPATION_TYPES = ['CAPITAL','SERVICE','MATERIAL','EQUIPMENT','CONTRACT'];
 const CONTRIBUTION_MEDIA = ['USD','BANK_TRANSFER','STABLE_DIGITAL_ASSET','CRYPTOCURRENCY','SRA_BALANCE','EQUIPMENT','MATERIAL','SERVICE','CONTRACT_RIGHT'];
@@ -7,10 +8,10 @@ function id(prefix){return `${prefix}-${crypto.randomUUID().split('-')[0].toUppe
 function clean(value,max=240){return typeof value==='string'?value.trim().slice(0,max):''}
 
 export class ParticipationService{
-  constructor(marketplace,accessStore){
+  constructor(marketplace,accessStore,domain){
     this.marketplace=marketplace;
     this.accessStore=accessStore;
-    this.positions=new Map();
+    this.domain=domain;
   }
 
   listOpportunities(){
@@ -42,7 +43,7 @@ export class ParticipationService{
 
   getOpportunity(projectId){return this.listOpportunities().find(item=>item.id===projectId)||null}
 
-  createPosition({session,projectId,participationType,medium,amount,description}){
+  async createPosition({session,projectId,participationType,medium,amount,description}){
     if(!session)return{ok:false,status:401,error:'Sign in to create a participation position.'};
     const opportunity=this.getOpportunity(projectId);
     if(!opportunity)return{ok:false,status:404,error:'Opportunity not found.'};
@@ -55,9 +56,10 @@ export class ParticipationService{
     const numericAmount=Number(amount||0);
     if(type==='CAPITAL'&&(!Number.isFinite(numericAmount)||numericAmount<=0))return{ok:false,status:400,error:'Enter a capital contribution amount.'};
 
+    const now=new Date().toISOString();
     const position={
       id:id('POS'),
-      participantId:session.userId,
+      participantId:session.id,
       participantName:session.displayName,
       activeRole:session.activeRole,
       projectId:opportunity.id,
@@ -72,16 +74,18 @@ export class ParticipationService{
         verificationStatus:['USD','BANK_TRANSFER','SRA_BALANCE'].includes(contributionMedium)?'PENDING_RECEIPT':'CONTRIBUTION_V4V_REQUIRED'
       },
       state:'AUTHORIZED',
-      createdAt:new Date().toISOString(),
-      history:[{state:'AUTHORIZED',at:new Date().toISOString(),note:'Participant authorized the participation ticket.'}]
+      createdAt:now,
+      updatedAt:now,
+      history:[{state:'AUTHORIZED',at:now,note:'Participant authorized the participation ticket.'}]
     };
-    this.positions.set(position.id,position);
+    await this.domain.put(RECORD_TYPES.PARTICIPATION_POSITION,position.id,position,{actorId:session.id,eventType:'PARTICIPATION_POSITION_CREATED'});
+    await this.domain.lifecycle({actorId:session.id,objectType:RECORD_TYPES.PARTICIPATION_POSITION,objectId:position.id,eventType:'POSITION_AUTHORIZED',payload:{projectId:position.projectId,medium:contributionMedium}});
     return{ok:true,status:201,position,nextAction:position.contribution.verificationStatus==='CONTRIBUTION_V4V_REQUIRED'?'BEGIN_CONTRIBUTION_V4V':'VERIFY_RECEIPT'};
   }
 
   listPositions(session){
     if(!session)return[];
-    return[...this.positions.values()].filter(position=>position.participantId===session.userId);
+    return this.domain.list(RECORD_TYPES.PARTICIPATION_POSITION).filter(position=>position.participantId===session.id);
   }
 }
 
