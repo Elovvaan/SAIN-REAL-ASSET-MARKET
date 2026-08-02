@@ -13,6 +13,7 @@ import { AccessService } from './services/access-service.js';
 import { CreativeFinanceService } from './services/creative-finance-service.js';
 import { ValueIntelligenceService } from './services/value-intelligence-service.js';
 import { DatabaseService } from './services/database-service.js';
+import { PersistentDomainService, RECORD_TYPES } from './services/persistent-domain-service.js';
 
 const app = express();
 const port = Number(process.env.PORT) || 3000;
@@ -21,6 +22,8 @@ const __dirname = path.dirname(__filename);
 const domainStore = createSeededDomainStore();
 const database = new DatabaseService();
 await database.initialize();
+const persistentDomain = new PersistentDomainService(database);
+await persistentDomain.hydrate();
 const accessService = new AccessService({ database });
 await accessService.initialize();
 
@@ -56,11 +59,16 @@ const marketplace = {
   ]
 };
 
-const creativeFinanceService = new CreativeFinanceService(marketplace);
-const valueIntelligenceService = new ValueIntelligenceService(marketplace);
+await persistentDomain.seed(RECORD_TYPES.ASSET_ACCOUNT, marketplace.assets.map((asset) => ({ ...asset, assetId: asset.id })));
+await persistentDomain.seed(RECORD_TYPES.PROJECT_ACCOUNT, marketplace.projects.map((project) => ({ ...project, projectId: project.id })));
+
+const creativeFinanceService = new CreativeFinanceService(marketplace, persistentDomain);
+await creativeFinanceService.initialize();
+const valueIntelligenceService = new ValueIntelligenceService(marketplace, persistentDomain);
+await valueIntelligenceService.initialize();
 
 app.use('/api/access', createAccessRouter(marketplace, accessService));
-app.use('/api/participation', createParticipationRouter(marketplace, accessService));
+app.use('/api/participation', createParticipationRouter(marketplace, accessService, persistentDomain));
 app.use('/api/onboarding', createOnboardingRouter(domainStore, database));
 app.use('/api/custody', createCustodyRouter());
 app.use('/api/sane', createSaneRouter());
@@ -71,21 +79,26 @@ app.get('/api/health', async (_req, res) => {
   try {
     const persistence = await database.health();
     res.json({
-      status: 'ok', service: 'SAIN Real Asset Market', version: '1.8.0',
-      phase: '8A_PERSISTENT_DOMAIN_FOUNDATION', persistence,
+      status: 'ok', service: 'SAIN Real Asset Market', version: '1.8.1',
+      phase: '8B_PERSISTENT_BUSINESS_OBJECTS', persistence,
+      persistentDomain: persistentDomain.snapshot(),
       persistentIdentity: 'ACTIVE', persistentSessions: 'ACTIVE',
       persistentCapabilityRecords: 'ACTIVE', persistentDocumentMetadata: 'ACTIVE',
-      auditLedger: 'ACTIVE', durableFileStorage: process.env.SRA_PRIVATE_DOCUMENT_ROOT ? 'CONFIGURED_PATH' : 'TEMPORARY_PATH',
+      persistentAssetAccounts: 'ACTIVE', persistentProjects: 'ACTIVE',
+      persistentParticipationPositions: 'ACTIVE', persistentTransferablePositions: 'ACTIVE',
+      persistentCreativeFinanceStructures: 'ACTIVE', persistentValueIntelligence: 'ACTIVE',
+      lifecycleEventLedger: 'ACTIVE', auditLedger: 'ACTIVE',
+      durableFileStorage: process.env.SRA_PRIVATE_DOCUMENT_ROOT ? 'CONFIGURED_PATH' : 'TEMPORARY_PATH',
       verifiedValueLayer: 'ACTIVE', marketIntelligenceLayer: 'ACTIVE', verifiedMarketEvents: 'ACTIVE',
       saneAgent: 'ACTIVE', creativeFinanceSkill: 'ACTIVE', marketplaceParticipation: 'ACTIVE',
       timestamp: new Date().toISOString()
     });
   } catch (error) {
-    res.status(503).json({ status: 'degraded', service: 'SAIN Real Asset Market', version: '1.8.0', persistence: { ready: false, error: error.message }, timestamp: new Date().toISOString() });
+    res.status(503).json({ status: 'degraded', service: 'SAIN Real Asset Market', version: '1.8.1', persistence: { ready: false, error: error.message }, timestamp: new Date().toISOString() });
   }
 });
 app.get('/api/marketplace', (_req, res) => res.json(marketplace));
-app.get('/api/domain', (_req, res) => res.json(domainStore.snapshot()));
+app.get('/api/domain', (_req, res) => res.json({ prototype: domainStore.snapshot(), persistent: persistentDomain.snapshot() }));
 app.get('/api/assets/:assetId/studio', (req, res) => {
   const studio = domainStore.getAssetStudio(req.params.assetId);
   if (!studio) return res.status(404).json({ error: 'Asset Account not found.' });
@@ -93,4 +106,4 @@ app.get('/api/assets/:assetId/studio', (req, res) => {
 });
 
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
-app.listen(port, '0.0.0.0', () => console.log(`SRA Phase 8A Persistent Domain Foundation is running on port ${port}`));
+app.listen(port, '0.0.0.0', () => console.log(`SRA Phase 8B Persistent Business Objects is running on port ${port}`));
