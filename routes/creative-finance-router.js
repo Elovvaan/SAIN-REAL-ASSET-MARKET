@@ -21,49 +21,49 @@ export function createCreativeFinanceRouter(service) {
     res.json({ positions: service.listPositions(typeof req.query.projectId === 'string' ? req.query.projectId : '') });
   });
 
-  router.post('/positions', (req, res) => {
+  router.post('/positions', async (req, res) => {
     try {
-      res.status(201).json({ position: service.createPosition(req.body, actorFromRequest(req)) });
+      res.status(201).json({ position: await service.createPosition(req.body, actorFromRequest(req)) });
     } catch (error) {
       res.status(400).json({ error: error.message });
     }
   });
 
-  router.post('/positions/:positionId/assign', (req, res) => {
+  router.post('/positions/:positionId/assign', async (req, res) => {
     try {
-      res.status(201).json(service.assignPosition(req.params.positionId, req.body, actorFromRequest(req)));
+      res.status(201).json(await service.assignPosition(req.params.positionId, req.body, actorFromRequest(req)));
     } catch (error) {
       res.status(400).json({ error: error.message });
     }
   });
 
-  router.post('/structures', (req, res) => {
+  router.post('/structures', async (req, res) => {
     try {
-      res.status(201).json({ structure: service.buildStructure(req.body, actorFromRequest(req)) });
+      res.status(201).json({ structure: await service.buildStructure(req.body, actorFromRequest(req)) });
     } catch (error) {
       res.status(400).json({ error: error.message });
     }
   });
 
-  router.post('/structures/:structureId/reconcile', (req, res) => {
+  router.post('/structures/:structureId/reconcile', async (req, res) => {
     try {
-      res.json({ structure: service.reconcile(req.params.structureId, req.body) });
+      res.json({ structure: await service.reconcile(req.params.structureId, req.body) });
     } catch (error) {
       res.status(400).json({ error: error.message });
     }
   });
 
-  router.post('/structures/:structureId/settle', (req, res) => {
+  router.post('/structures/:structureId/settle', async (req, res) => {
     try {
-      res.json({ structure: service.settle(req.params.structureId) });
+      res.json({ structure: await service.settle(req.params.structureId) });
     } catch (error) {
       res.status(400).json({ error: error.message });
     }
   });
 
-  router.post('/structures/:structureId/discharge', (req, res) => {
+  router.post('/structures/:structureId/discharge', async (req, res) => {
     try {
-      res.json({ structure: service.discharge(req.params.structureId, req.body) });
+      res.json({ structure: await service.discharge(req.params.structureId, req.body) });
     } catch (error) {
       res.status(400).json({ error: error.message });
     }
