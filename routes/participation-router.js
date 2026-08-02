@@ -18,13 +18,13 @@ export function createParticipationRouter(marketplace,accessService){
     if(!opportunity)return res.status(404).json({error:'Opportunity not found.'});
     return res.json({opportunity});
   });
-  router.get('/positions',(req,res)=>{
-    const session=accessService.getSession(readCookie(req,'sra_session'));
+  router.get('/positions',async(req,res)=>{
+    const session=await accessService.getSession(readCookie(req,'sra_session'));
     if(!session)return res.status(401).json({error:'Sign in to view positions.'});
     return res.json({positions:service.listPositions(session)});
   });
-  router.post('/positions',(req,res)=>{
-    const session=accessService.getSession(readCookie(req,'sra_session'));
+  router.post('/positions',async(req,res)=>{
+    const session=await accessService.getSession(readCookie(req,'sra_session'));
     const result=service.createPosition({session,...req.body});
     return res.status(result.status).json(result.ok?{position:result.position,nextAction:result.nextAction}:{error:result.error});
   });
