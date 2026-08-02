@@ -13,6 +13,7 @@ import { createEdxConnectionRouter } from './routes/edx-connection-router.js';
 import { createEdxPermissionRouter } from './routes/edx-permission-router.js';
 import { createEdxExtractionRouter } from './routes/edx-extraction-router.js';
 import { createEdxNormalizationRouter } from './routes/edx-normalization-router.js';
+import { createEdxSnapshotRouter } from './routes/edx-snapshot-router.js';
 import { AccessService } from './services/access-service.js';
 import { CreativeFinanceService } from './services/creative-finance-service.js';
 import { ValueIntelligenceService } from './services/value-intelligence-service.js';
@@ -20,6 +21,7 @@ import { EdxConnectionService } from './services/edx-connection-service.js';
 import { EdxPermissionService } from './services/edx-permission-service.js';
 import { EdxExtractionService } from './services/edx-extraction-service.js';
 import { EdxNormalizationService } from './services/edx-normalization-service.js';
+import { EdxSnapshotService } from './services/edx-snapshot-service.js';
 import { DatabaseService } from './services/database-service.js';
 import { PersistentDomainService, RECORD_TYPES } from './services/persistent-domain-service.js';
 import { PersistentMarketplaceService } from './services/persistent-marketplace-service.js';
@@ -80,6 +82,7 @@ const edxConnectionService = new EdxConnectionService(persistentDomain);
 const edxPermissionService = new EdxPermissionService(persistentDomain);
 const edxExtractionService = new EdxExtractionService(persistentDomain, edxPermissionService);
 const edxNormalizationService = new EdxNormalizationService(persistentDomain);
+const edxSnapshotService = new EdxSnapshotService(persistentDomain);
 const onboardingRouter = await createOnboardingRouter(domainStore, database, persistentDomain);
 
 app.use('/api/access', createAccessRouter(marketplace, accessService));
@@ -93,13 +96,14 @@ app.use('/api/edx', createEdxConnectionRouter(edxConnectionService));
 app.use('/api/edx', createEdxPermissionRouter(edxPermissionService));
 app.use('/api/edx', createEdxExtractionRouter(edxExtractionService));
 app.use('/api/edx', createEdxNormalizationRouter(edxNormalizationService));
+app.use('/api/edx', createEdxSnapshotRouter(edxSnapshotService));
 
 app.get('/api/health', async (_req, res) => {
   try {
     const persistence = await database.health();
     res.json({
-      status: 'ok', service: 'SAIN Real Asset Market', version: '1.12.0',
-      phase: 'EDX_PHASE_5_DATA_NORMALIZATION', persistence,
+      status: 'ok', service: 'SAIN Real Asset Market', version: '1.13.0',
+      phase: 'EDX_PHASE_6_VERIFIED_SNAPSHOT_ENGINE', persistence,
       persistentDomain: persistentDomain.snapshot(),
       marketplaceReadSource: 'PERSISTENT_DOMAIN',
       persistentIdentity: 'ACTIVE', persistentSessions: 'ACTIVE',
@@ -110,14 +114,14 @@ app.get('/api/health', async (_req, res) => {
       persistentParticipationPositions: 'ACTIVE', persistentTransferablePositions: 'ACTIVE',
       persistentCreativeFinanceStructures: 'ACTIVE', persistentValueIntelligence: 'ACTIVE',
       edxConnectorRegistry: 'ACTIVE', edxEnterpriseConnections: 'ACTIVE', edxPermissionEngine: 'ACTIVE',
-      edxExtractionEngine: 'ACTIVE', edxNormalizationEngine: 'ACTIVE',
+      edxExtractionEngine: 'ACTIVE', edxNormalizationEngine: 'ACTIVE', edxVerifiedSnapshotEngine: 'ACTIVE',
       lifecycleEventLedger: 'ACTIVE', auditLedger: 'ACTIVE',
       durableFileStorage: process.env.SRA_PRIVATE_DOCUMENT_ROOT ? 'CONFIGURED_PATH' : 'TEMPORARY_PATH',
       saneAgent: 'ACTIVE', creativeFinanceSkill: 'ACTIVE', marketplaceParticipation: 'ACTIVE',
       timestamp: new Date().toISOString()
     });
   } catch (error) {
-    res.status(503).json({ status: 'degraded', service: 'SAIN Real Asset Market', version: '1.12.0', persistence: { ready: false, error: error.message }, timestamp: new Date().toISOString() });
+    res.status(503).json({ status: 'degraded', service: 'SAIN Real Asset Market', version: '1.13.0', persistence: { ready: false, error: error.message }, timestamp: new Date().toISOString() });
   }
 });
 app.get('/api/marketplace', (_req, res) => res.json(marketplace.snapshot()));
@@ -140,4 +144,4 @@ app.get('/api/assets/:assetId/studio', (req, res) => {
 });
 
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
-app.listen(port, '0.0.0.0', () => console.log(`SRA EDX Phase 5 Data Normalization is running on port ${port}`));
+app.listen(port, '0.0.0.0', () => console.log(`SRA EDX Phase 6 Verified Snapshot Engine is running on port ${port}`));
