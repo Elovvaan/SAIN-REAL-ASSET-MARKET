@@ -54,6 +54,174 @@ export class MarketplaceProject extends DomainEntity {
   }
 }
 
+export const PARTICIPATION_POSITION_STATES = Object.freeze([
+  'AUTHORIZED',
+  'PENDING_RECEIPT',
+  'CONTRIBUTION_V4V_REQUIRED',
+  'RECEIVED',
+  'DEPLOYED',
+  'ACTIVE',
+  'OUTCOME_COMPLETED',
+  'SETTLEMENT_AVAILABLE',
+  'HELD',
+  'TRANSFER_PENDING',
+  'REDEPLOYMENT_PENDING',
+  'SETTLEMENT_PENDING',
+  'CROSS_PLATFORM_ROUTING_PENDING',
+  'TRANSFERRED',
+  'REDEPLOYED',
+  'SETTLED',
+  'ROUTED_EXTERNALLY',
+  'RECONCILED',
+  'CLOSED',
+]);
+
+export const SETTLEMENT_ACTIONS = Object.freeze([
+  'SETTLE_NOW',
+  'HOLD_POSITION',
+  'TRANSFER_POSITION',
+  'REDEPLOY_IN_SRA',
+  'ROUTE_CROSS_PLATFORM',
+]);
+
+export class ParticipationPosition extends DomainEntity {
+  constructor({
+    id,
+    projectId,
+    assetId,
+    participantId,
+    contributionType,
+    contributionMedium,
+    statedValue = 0,
+    verifiedValue = 0,
+    transferableValue = 0,
+    retainedValue = 0,
+    state = 'AUTHORIZED',
+    settlementAvailableAt = null,
+    settlementInstructionIds = [],
+    history = [],
+    ...base
+  }) {
+    if (!PARTICIPATION_POSITION_STATES.includes(state)) {
+      throw new Error(`Unsupported participation position state: ${state}`);
+    }
+    super({ id, status: state, ownerId: participantId, ...base });
+    this.projectId = projectId;
+    this.assetId = assetId;
+    this.participantId = participantId;
+    this.contributionType = contributionType;
+    this.contributionMedium = contributionMedium;
+    this.statedValue = statedValue;
+    this.verifiedValue = verifiedValue;
+    this.transferableValue = transferableValue;
+    this.retainedValue = retainedValue;
+    this.state = state;
+    this.settlementAvailableAt = settlementAvailableAt;
+    this.settlementInstructionIds = settlementInstructionIds;
+    this.history = history;
+  }
+
+  transition(nextState, note = null, evidenceIds = []) {
+    if (!PARTICIPATION_POSITION_STATES.includes(nextState)) {
+      throw new Error(`Unsupported participation position state: ${nextState}`);
+    }
+    const event = {
+      from: this.state,
+      to: nextState,
+      note,
+      evidenceIds: [...evidenceIds],
+      at: new Date().toISOString(),
+    };
+    this.history.push(event);
+    this.state = nextState;
+    this.status = nextState;
+    if (nextState === 'SETTLEMENT_AVAILABLE' && !this.settlementAvailableAt) {
+      this.settlementAvailableAt = event.at;
+    }
+    this.touch();
+    return event;
+  }
+
+  addSettlementInstruction(instructionId) {
+    if (!instructionId) throw new Error('Settlement instruction id is required.');
+    if (!this.settlementInstructionIds.includes(instructionId)) {
+      this.settlementInstructionIds.push(instructionId);
+      this.touch();
+    }
+  }
+}
+
+export class SettlementInstruction extends DomainEntity {
+  constructor({
+    id,
+    participantId,
+    positionId,
+    positionVersion,
+    projectId,
+    assetId,
+    action,
+    availableAmount = 0,
+    currency = null,
+    nonCashState = null,
+    settlementMedium = null,
+    destinationPlatform = null,
+    destinationReference = null,
+    authorizationReference,
+    restrictions = [],
+    conditions = [],
+    state = 'DRAFT',
+    evidenceIds = [],
+    reconciliationEventId = null,
+    ...base
+  }) {
+    if (!SETTLEMENT_ACTIONS.includes(action)) {
+      throw new Error(`Unsupported settlement action: ${action}`);
+    }
+    super({ id, status: state, ownerId: participantId, ...base });
+    this.participantId = participantId;
+    this.positionId = positionId;
+    this.positionVersion = positionVersion;
+    this.projectId = projectId;
+    this.assetId = assetId;
+    this.action = action;
+    this.availableAmount = availableAmount;
+    this.currency = currency;
+    this.nonCashState = nonCashState;
+    this.settlementMedium = settlementMedium;
+    this.destinationPlatform = destinationPlatform;
+    this.destinationReference = destinationReference;
+    this.authorizationReference = authorizationReference;
+    this.restrictions = restrictions;
+    this.conditions = conditions;
+    this.state = state;
+    this.evidenceIds = evidenceIds;
+    this.reconciliationEventId = reconciliationEventId;
+    this.history = [];
+  }
+
+  transition(nextState, note = null, evidenceIds = []) {
+    const event = {
+      from: this.state,
+      to: nextState,
+      note,
+      evidenceIds: [...evidenceIds],
+      at: new Date().toISOString(),
+    };
+    this.history.push(event);
+    this.evidenceIds.push(...evidenceIds.filter((id) => !this.evidenceIds.includes(id)));
+    this.state = nextState;
+    this.status = nextState;
+    this.touch();
+    return event;
+  }
+
+  reconcile(reconciliationEventId, evidenceIds = []) {
+    if (!reconciliationEventId) throw new Error('Reconciliation event id is required.');
+    this.reconciliationEventId = reconciliationEventId;
+    return this.transition('RECONCILED', 'Settlement instruction reconciled.', evidenceIds);
+  }
+}
+
 export class Completion extends DomainEntity {
   constructor({ id, projectId, gap = 0, coverage = 0, health = 0, projectedGain = 0, platformReturn = 0, participantId = null, result = null, state = 'MONITORING', ...base }) {
     super({ id, status: state, ...base }); this.projectId = projectId; this.gap = gap; this.coverage = coverage;
