@@ -31,11 +31,15 @@ export const RECORD_TYPES = Object.freeze({
   EDX_PUBLICATION_DECISION: 'EDX_PUBLICATION_DECISION',
   EDX_MARKETPLACE_PROJECTION: 'EDX_MARKETPLACE_PROJECTION',
   EDX_INTELLIGENCE_REPORT: 'EDX_INTELLIGENCE_REPORT',
+  EDX_SDK_CLIENT: 'EDX_SDK_CLIENT',
+  EDX_WEBHOOK_SUBSCRIPTION: 'EDX_WEBHOOK_SUBSCRIPTION',
+  EDX_EVENT_STREAM_SUBSCRIPTION: 'EDX_EVENT_STREAM_SUBSCRIPTION',
+  EDX_OUTBOUND_EVENT: 'EDX_OUTBOUND_EVENT',
   LIFECYCLE_EVENT: 'LIFECYCLE_EVENT'
 });
 
 function recordId(record) {
-  return record?.id || record?.applicationId || record?.evidencePackageId || record?.institutionalReviewId || record?.assetId || record?.projectId || record?.packageId || record?.positionId || record?.structureId || record?.signalId || record?.eventId || record?.instrumentId || record?.connectorDefinitionId || record?.connectionId || record?.policyId || record?.extractionRequestId || record?.extractionResultId || record?.normalizedRecordId || record?.snapshotId || record?.valuePackageId || record?.publicationDecisionId || record?.projectionId || record?.intelligenceReportId || null;
+  return record?.id || record?.applicationId || record?.evidencePackageId || record?.institutionalReviewId || record?.assetId || record?.projectId || record?.packageId || record?.positionId || record?.structureId || record?.signalId || record?.eventId || record?.instrumentId || record?.connectorDefinitionId || record?.connectionId || record?.policyId || record?.extractionRequestId || record?.extractionResultId || record?.normalizedRecordId || record?.snapshotId || record?.valuePackageId || record?.publicationDecisionId || record?.projectionId || record?.intelligenceReportId || record?.sdkClientId || record?.webhookSubscriptionId || record?.eventStreamSubscriptionId || record?.outboundEventId || null;
 }
 
 export class PersistentDomainService {
