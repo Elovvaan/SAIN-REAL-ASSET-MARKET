@@ -2,8 +2,18 @@ body:not(.access-public) .operating-workspace{grid-template-columns:minmax(0,1fr
 body:not(.access-public) .context-workspace{display:none}
 body.workspace-open:not(.access-public) .operating-workspace{grid-template-columns:minmax(420px,1.12fr) minmax(360px,.88fr)}
 body.workspace-open:not(.access-public) .context-workspace{display:flex;min-height:0;height:max-content;align-self:start}
-body.workspace-open:not(.access-public) .view-root{overflow:visible;max-height:none;padding:14px}
-body.workspace-open:not(.access-public) .current-workspace-market{display:grid;gap:12px}
-body.workspace-open:not(.access-public) .current-workspace-opportunities{display:grid;grid-template-columns:1fr;gap:10px}
-body.workspace-open:not(.access-public) .current-workspace-opportunities .compact-opportunity{max-height:none}
+body.workspace-open:not(.access-public) .view-root{overflow:visible;max-height:none;padding:16px}
+.workspace-overview{display:grid;gap:16px}
+.workspace-overview-intro{border:1px solid var(--line);border-radius:16px;padding:18px;background:linear-gradient(145deg,rgba(215,166,42,.08),rgba(255,255,255,.02))}
+.workspace-overview-intro h2{margin-bottom:8px;font-size:22px}
+.workspace-overview-intro p:last-child{margin-bottom:0;color:var(--muted);font-size:13px;line-height:1.55}
+.workspace-feature-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.workspace-feature-card{border:1px solid var(--line);border-radius:15px;background:linear-gradient(180deg,#121212,#0a0a0a);color:var(--text);padding:16px;text-align:left;display:grid;gap:8px;min-height:132px;align-content:start}
+.workspace-feature-card:hover{border-color:var(--gold);transform:translateY(-1px)}
+.workspace-feature-card strong{font-size:14px}
+.workspace-feature-card span{color:var(--muted);font-size:12px;line-height:1.45}
+.workspace-feature-card small{margin-top:auto;color:var(--gold);font-size:10px;letter-spacing:.08em;text-transform:uppercase}
+.workspace-position-note{margin:0;border-top:1px solid var(--line);padding:14px 2px 2px;color:var(--muted);font-size:12px;line-height:1.5}
+.workspace-position-note strong{color:var(--text)}
 @media(max-width:1180px){body.workspace-open:not(.access-public) .operating-workspace{grid-template-columns:1fr}}
+@media(max-width:760px){.workspace-feature-grid{grid-template-columns:1fr}}
