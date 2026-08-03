@@ -12,6 +12,8 @@ export const RECORD_TYPES = Object.freeze({
   FUNDING_PLAN: 'FUNDING_PLAN',
   SRA_SETTLEMENT: 'SRA_SETTLEMENT',
   SRA_SETTLEMENT_RECORD: 'SRA_SETTLEMENT_RECORD',
+  HOME_PARTICIPATION_PLAN: 'HOME_PARTICIPATION_PLAN',
+  HOME_PARTICIPATION_COMMITMENT: 'HOME_PARTICIPATION_COMMITMENT',
   ONBOARDING_APPLICATION: 'ONBOARDING_APPLICATION',
   EVIDENCE_PACKAGE: 'EVIDENCE_PACKAGE',
   INSTITUTIONAL_REVIEW: 'INSTITUTIONAL_REVIEW',
@@ -43,7 +45,7 @@ export const RECORD_TYPES = Object.freeze({
 });
 
 function recordId(record) {
-  return record?.id || record?.applicationId || record?.evidencePackageId || record?.institutionalReviewId || record?.assetId || record?.projectId || record?.homeProjectId || record?.fundingPlanId || record?.settlementId || record?.settlementRecordId || record?.packageId || record?.positionId || record?.structureId || record?.signalId || record?.eventId || record?.instrumentId || record?.connectorDefinitionId || record?.connectionId || record?.policyId || record?.extractionRequestId || record?.extractionResultId || record?.normalizedRecordId || record?.snapshotId || record?.valuePackageId || record?.publicationDecisionId || record?.projectionId || record?.intelligenceReportId || record?.sdkClientId || record?.webhookSubscriptionId || record?.eventStreamSubscriptionId || record?.outboundEventId || null;
+  return record?.id || record?.applicationId || record?.evidencePackageId || record?.institutionalReviewId || record?.assetId || record?.projectId || record?.homeProjectId || record?.fundingPlanId || record?.settlementId || record?.settlementRecordId || record?.planId || record?.commitmentId || record?.packageId || record?.positionId || record?.structureId || record?.signalId || record?.eventId || record?.instrumentId || record?.connectorDefinitionId || record?.connectionId || record?.policyId || record?.extractionRequestId || record?.extractionResultId || record?.normalizedRecordId || record?.snapshotId || record?.valuePackageId || record?.publicationDecisionId || record?.projectionId || record?.intelligenceReportId || record?.sdkClientId || record?.webhookSubscriptionId || record?.eventStreamSubscriptionId || record?.outboundEventId || null;
 }
 
 export class PersistentDomainService {
