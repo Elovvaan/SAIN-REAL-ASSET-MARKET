@@ -14,6 +14,7 @@ import { createPlatformLedgerRouter } from './routes/platform-ledger-router.js';
 import { createInstitutionalBillingRouter } from './routes/institutional-billing-router.js';
 import { createAssetServicingRouter } from './routes/asset-servicing-router.js';
 import { createPlatformTreasuryRouter } from './routes/platform-treasury-router.js';
+import { createFinancialStatementsRouter } from './routes/financial-statements-router.js';
 import { createSaneRouter } from './routes/sane-router.js';
 import { createCreativeFinanceRouter } from './routes/creative-finance-router.js';
 import { createValueIntelligenceRouter } from './routes/value-intelligence-router.js';
@@ -51,6 +52,7 @@ import { PlatformLedgerService } from './services/platform-ledger-service.js';
 import { InstitutionalBillingService } from './services/institutional-billing-service.js';
 import { AssetServicingService } from './services/asset-servicing-service.js';
 import { PlatformTreasuryService } from './services/platform-treasury-service.js';
+import { FinancialStatementsService } from './services/financial-statements-service.js';
 import { DatabaseService } from './services/database-service.js';
 import { PersistentDomainService, RECORD_TYPES } from './services/persistent-domain-service.js';
 import { PersistentMarketplaceService } from './services/persistent-marketplace-service.js';
@@ -77,8 +79,12 @@ const marketplaceSeed = {
 const ledgerSeed = [
   { accountId: 'GL-CASH-OPERATING', code: '1000-CASH', name: 'Operating Cash', type: 'ASSET', normalBalance: 'DEBIT', currency: 'USD', state: 'ACTIVE' },
   { accountId: 'GL-AR', code: '1100-AR', name: 'Accounts Receivable', type: 'ASSET', normalBalance: 'DEBIT', currency: 'USD', state: 'ACTIVE' },
+  { accountId: 'GL-AP', code: '2000-AP', name: 'Accounts Payable', type: 'LIABILITY', normalBalance: 'CREDIT', currency: 'USD', state: 'ACTIVE' },
+  { accountId: 'GL-CONTRIBUTED-CAPITAL', code: '3000-CONTRIBUTED-CAPITAL', name: 'Contributed Capital', type: 'EQUITY', normalBalance: 'CREDIT', currency: 'USD', state: 'ACTIVE' },
+  { accountId: 'GL-RETAINED-EARNINGS', code: '3100-RETAINED-EARNINGS', name: 'Retained Earnings', type: 'EQUITY', normalBalance: 'CREDIT', currency: 'USD', state: 'ACTIVE' },
   { accountId: 'GL-FEE-REVENUE', code: '4100-FEE-REVENUE', name: 'Platform Fee Revenue', type: 'REVENUE', normalBalance: 'CREDIT', currency: 'USD', state: 'ACTIVE' },
-  { accountId: 'GL-FEE-WAIVERS', code: '4190-FEE-WAIVERS', name: 'Fee Waivers and Concessions', type: 'CONTRA_REVENUE', normalBalance: 'DEBIT', currency: 'USD', state: 'ACTIVE' }
+  { accountId: 'GL-FEE-WAIVERS', code: '4190-FEE-WAIVERS', name: 'Fee Waivers and Concessions', type: 'CONTRA_REVENUE', normalBalance: 'DEBIT', currency: 'USD', state: 'ACTIVE' },
+  { accountId: 'GL-OPERATING-EXPENSE', code: '5100-OPERATING-EXPENSE', name: 'Operating Expense', type: 'EXPENSE', normalBalance: 'DEBIT', currency: 'USD', state: 'ACTIVE' }
 ];
 
 export async function createApp(options = {}) {
@@ -119,6 +125,7 @@ export async function createApp(options = {}) {
   const institutionalBillingService = new InstitutionalBillingService(persistentDomain, platformEconomicsService);
   const assetServicingService = new AssetServicingService(persistentDomain);
   const platformTreasuryService = new PlatformTreasuryService(persistentDomain, platformLedgerService);
+  const financialStatementsService = new FinancialStatementsService(persistentDomain, platformLedgerService);
   const onboardingRouter = await createOnboardingRouter(domainStore, database, persistentDomain);
   app.use('/api/access', createAccessRouter(marketplace, accessService));
   app.use('/api/participation', createParticipationRouter(marketplace, accessService, persistentDomain));
@@ -130,6 +137,7 @@ export async function createApp(options = {}) {
   app.use('/api/institution-billing', createInstitutionalBillingRouter(institutionalBillingService));
   app.use('/api/servicing', createAssetServicingRouter(assetServicingService));
   app.use('/api/platform-treasury', createPlatformTreasuryRouter(platformTreasuryService));
+  app.use('/api/financial-statements', createFinancialStatementsRouter(financialStatementsService));
   app.use('/api/onboarding', onboardingRouter);
   app.use('/api/custody', createCustodyRouter());
   app.use('/api/sane', createSaneRouter(undefined, saneEdxOperationsService));
@@ -146,7 +154,7 @@ export async function createApp(options = {}) {
   app.use('/api/edx', createEdxEnterpriseSdkRouter(edxEnterpriseSdkService));
   app.use('/api/financing', createHomeFinancingRouter(homeFinancingService));
   app.use('/api/settlement', createSraSettlementRouter(sraSettlementService));
-  app.get('/api/health', async (_req, res) => { const persistence = await database.health(); res.json({ status: 'ok', service: 'SAIN Real Asset Market', version: '1.31.0', phase: 'PHASE_22_PLATFORM_TREASURY', persistence, persistentDomain: persistentDomain.snapshot(), settlementEngine: 'ACTIVE', settlementRailGateway: 'ACTIVE', treasuryBankConnector: 'ACTIVE', platformEconomics: 'ACTIVE', feeEngine: 'ACTIVE', platformLedger: 'ACTIVE', institutionalBilling: 'ACTIVE', assetServicing: 'ACTIVE', platformTreasury: 'ACTIVE', liquidityForecasting: 'EXPLICIT', treasuryExceptions: 'ACTIVE', automaticFeeAssessment: 'DISABLED', automaticSettlement: 'DISABLED', settlementExecution: 'EXPLICIT', timestamp: new Date().toISOString() }); });
+  app.get('/api/health', async (_req, res) => { const persistence = await database.health(); res.json({ status: 'ok', service: 'SAIN Real Asset Market', version: '1.32.0', phase: 'PHASE_23_BALANCE_SHEET_FINANCIAL_STATEMENTS', persistence, persistentDomain: persistentDomain.snapshot(), settlementEngine: 'ACTIVE', settlementRailGateway: 'ACTIVE', treasuryBankConnector: 'ACTIVE', platformEconomics: 'ACTIVE', feeEngine: 'ACTIVE', platformLedger: 'ACTIVE', institutionalBilling: 'ACTIVE', assetServicing: 'ACTIVE', platformTreasury: 'ACTIVE', financialStatements: 'ACTIVE', accountingPeriods: 'ACTIVE', periodClose: 'EXPLICIT', automaticFeeAssessment: 'DISABLED', automaticSettlement: 'DISABLED', settlementExecution: 'EXPLICIT', timestamp: new Date().toISOString() }); });
   app.get('/api/domain', (_req, res) => res.json({ persistent: persistentDomain.snapshot() }));
   if (options.serveStatic !== false) app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
   return { app, database, persistentDomain };
