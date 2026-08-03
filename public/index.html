@@ -19,7 +19,7 @@
   <div class="app-shell">
     <aside class="sidebar">
       <div class="brand-block"><div class="brand-mark">SRA</div><div><strong>SAIN Real Assets</strong><span>Verified Value Market</span></div></div>
-      <button class="sane-entry" id="sidebar-sane"><span class="status-dot"></span><span><strong>Sane</strong><small>What are we accomplishing today?</small></span></button>
+      <div class="sane-entry persistent"><span class="status-dot"></span><span><strong>Sane</strong><small>Present in every workspace</small></span></div>
       <nav class="nav-list" aria-label="Operating divisions">
         <button class="nav-item active" data-view="marketplace"><span>◫</span> Marketplace</button>
         <button class="nav-item" data-view="positions"><span>▤</span> My Positions</button>
@@ -37,18 +37,37 @@
       </nav>
       <div class="system-card"><span class="status-dot"></span><div><strong>SRA active</strong><small>Verified productive marketplace</small></div></div>
     </aside>
+
     <main class="main-area">
-      <header class="topbar"><div><p class="eyebrow">PRODUCTIVE ASSET NETWORK</p><h1 id="page-title">Marketplace</h1></div><div class="top-actions"><span class="market-pill"><span class="status-dot"></span> Market Live</span><button class="primary-button" id="open-sane">Talk to Sane</button></div></header>
+      <header class="topbar">
+        <div><p class="eyebrow">PRODUCTIVE ASSET NETWORK</p><h1 id="page-title">Marketplace</h1></div>
+        <div class="top-actions"><span class="market-pill"><span class="status-dot"></span> Market Live</span></div>
+      </header>
+
       <section class="heartbeat" aria-label="Live market heartbeat"><span class="heartbeat-label">LIVE</span><div class="heartbeat-track" id="heartbeat-track">Verified Value is moving through the network…</div></section>
-      <section id="view-root" class="view-root" aria-live="polite"><div class="loading-state">Loading SAIN Real Assets…</div></section>
+
+      <section class="operating-workspace" aria-label="SRA operating workspace">
+        <section class="sane-workspace" aria-label="Sane conversation">
+          <div class="sane-workspace-header">
+            <div class="sane-orb"><span class="status-dot"></span><strong>Sane</strong></div>
+            <div><p class="eyebrow">YOUR MARKETPLACE GUIDE</p><h2 id="sane-workspace-title">What are you trying to accomplish?</h2></div>
+          </div>
+          <div class="chat-context" id="chat-context">Ask Sane to find, compare, explain, prepare, or navigate the current workspace.</div>
+          <div class="chat-log" id="chat-log"><div class="message sane-message">What would you like to accomplish in the marketplace today?</div></div>
+          <div class="quick-prompts" id="quick-prompts">
+            <button data-prompt="Show me opportunities I can participate in.">Find opportunities</button>
+            <button data-prompt="Compare the current projects for me.">Compare projects</button>
+            <button data-prompt="Show me my current positions.">My positions</button>
+          </div>
+          <div class="chat-composer"><label class="sr-only" for="sane-input">Message Sane</label><textarea id="sane-input" rows="2" placeholder="Message Sane..."></textarea><button id="send-message" class="primary-button">Send</button></div>
+        </section>
+
+        <aside class="context-workspace" aria-label="Contextual workspace">
+          <div class="context-header"><div><p class="eyebrow">CURRENT WORKSPACE</p><h2 id="context-title">Marketplace</h2></div><span class="badge open" id="context-status">LIVE</span></div>
+          <section id="view-root" class="view-root" aria-live="polite"><div class="loading-state">Loading SAIN Real Assets…</div></section>
+        </aside>
+      </section>
     </main>
-    <section class="sane-panel" id="sane-panel" aria-label="Sane conversation">
-      <div class="sane-header"><div><p class="eyebrow">YOUR SRA GUIDE</p><h2>Sane</h2></div><button class="icon-button" id="close-sane" aria-label="Close Sane panel">×</button></div>
-      <div class="chat-context">Tell Sane what you want to accomplish. The platform will organize the next steps.</div>
-      <div class="chat-log" id="chat-log"><div class="message sane-message">What would you like to accomplish in the marketplace today?</div></div>
-      <div class="quick-prompts"><button data-prompt="Show me opportunities I can participate in.">Find opportunities</button><button data-prompt="Compare the current projects for me.">Compare projects</button><button data-prompt="Show me my current positions.">My positions</button></div>
-      <div class="chat-composer"><label class="sr-only" for="sane-input">Message Sane</label><textarea id="sane-input" rows="2" placeholder="Tell Sane what you want to do..."></textarea><button id="send-message" class="primary-button">Send</button></div>
-    </section>
   </div>
   <script src="/sane-skills.js" defer></script>
   <script src="/app.js" defer></script>
