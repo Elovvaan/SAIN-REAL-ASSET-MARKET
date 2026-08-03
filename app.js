@@ -12,6 +12,7 @@ import { createTreasuryBankConnectorRouter } from './routes/treasury-bank-connec
 import { createPlatformEconomicsRouter } from './routes/platform-economics-router.js';
 import { createPlatformLedgerRouter } from './routes/platform-ledger-router.js';
 import { createInstitutionalBillingRouter } from './routes/institutional-billing-router.js';
+import { createAssetServicingRouter } from './routes/asset-servicing-router.js';
 import { createSaneRouter } from './routes/sane-router.js';
 import { createCreativeFinanceRouter } from './routes/creative-finance-router.js';
 import { createValueIntelligenceRouter } from './routes/value-intelligence-router.js';
@@ -47,6 +48,7 @@ import { TreasuryBankConnectorService } from './services/treasury-bank-connector
 import { PlatformEconomicsService } from './services/platform-economics-service.js';
 import { PlatformLedgerService } from './services/platform-ledger-service.js';
 import { InstitutionalBillingService } from './services/institutional-billing-service.js';
+import { AssetServicingService } from './services/asset-servicing-service.js';
 import { DatabaseService } from './services/database-service.js';
 import { PersistentDomainService, RECORD_TYPES } from './services/persistent-domain-service.js';
 import { PersistentMarketplaceService } from './services/persistent-marketplace-service.js';
@@ -113,6 +115,7 @@ export async function createApp(options = {}) {
   const platformLedgerService = new PlatformLedgerService(persistentDomain);
   const platformEconomicsService = new PlatformEconomicsService(persistentDomain, platformLedgerService);
   const institutionalBillingService = new InstitutionalBillingService(persistentDomain, platformEconomicsService);
+  const assetServicingService = new AssetServicingService(persistentDomain);
   const onboardingRouter = await createOnboardingRouter(domainStore, database, persistentDomain);
   app.use('/api/access', createAccessRouter(marketplace, accessService));
   app.use('/api/participation', createParticipationRouter(marketplace, accessService, persistentDomain));
@@ -122,6 +125,7 @@ export async function createApp(options = {}) {
   app.use('/api/economics', createPlatformEconomicsRouter(platformEconomicsService));
   app.use('/api/ledger', createPlatformLedgerRouter(platformLedgerService));
   app.use('/api/institution-billing', createInstitutionalBillingRouter(institutionalBillingService));
+  app.use('/api/servicing', createAssetServicingRouter(assetServicingService));
   app.use('/api/onboarding', onboardingRouter);
   app.use('/api/custody', createCustodyRouter());
   app.use('/api/sane', createSaneRouter(undefined, saneEdxOperationsService));
@@ -138,7 +142,7 @@ export async function createApp(options = {}) {
   app.use('/api/edx', createEdxEnterpriseSdkRouter(edxEnterpriseSdkService));
   app.use('/api/financing', createHomeFinancingRouter(homeFinancingService));
   app.use('/api/settlement', createSraSettlementRouter(sraSettlementService));
-  app.get('/api/health', async (_req, res) => { const persistence = await database.health(); res.json({ status: 'ok', service: 'SAIN Real Asset Market', version: '1.29.0', phase: 'PHASE_20_INSTITUTIONAL_BILLING', persistence, persistentDomain: persistentDomain.snapshot(), settlementEngine: 'ACTIVE', settlementRailGateway: 'ACTIVE', treasuryBankConnector: 'ACTIVE', platformEconomics: 'ACTIVE', feeEngine: 'ACTIVE', platformLedger: 'ACTIVE', institutionalBilling: 'ACTIVE', recurringBilling: 'EXPLICIT_RUN', automaticFeeAssessment: 'DISABLED', automaticSettlement: 'DISABLED', settlementExecution: 'EXPLICIT', timestamp: new Date().toISOString() }); });
+  app.get('/api/health', async (_req, res) => { const persistence = await database.health(); res.json({ status: 'ok', service: 'SAIN Real Asset Market', version: '1.30.0', phase: 'PHASE_21_ASSET_SERVICING', persistence, persistentDomain: persistentDomain.snapshot(), settlementEngine: 'ACTIVE', settlementRailGateway: 'ACTIVE', treasuryBankConnector: 'ACTIVE', platformEconomics: 'ACTIVE', feeEngine: 'ACTIVE', platformLedger: 'ACTIVE', institutionalBilling: 'ACTIVE', assetServicing: 'ACTIVE', servicingLifecycle: 'EXPLICIT_EVENT_DRIVEN', recurringBilling: 'EXPLICIT_RUN', automaticFeeAssessment: 'DISABLED', automaticSettlement: 'DISABLED', settlementExecution: 'EXPLICIT', timestamp: new Date().toISOString() }); });
   app.get('/api/domain', (_req, res) => res.json({ persistent: persistentDomain.snapshot() }));
   if (options.serveStatic !== false) app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
   return { app, database, persistentDomain };
