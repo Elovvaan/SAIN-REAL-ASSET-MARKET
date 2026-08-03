@@ -10,6 +10,7 @@ import { createInstitutionParticipationRouter } from './routes/institution-parti
 import { createSettlementRailGatewayRouter } from './routes/settlement-rail-gateway-router.js';
 import { createTreasuryBankConnectorRouter } from './routes/treasury-bank-connector-router.js';
 import { createPlatformEconomicsRouter } from './routes/platform-economics-router.js';
+import { createPlatformLedgerRouter } from './routes/platform-ledger-router.js';
 import { createSaneRouter } from './routes/sane-router.js';
 import { createCreativeFinanceRouter } from './routes/creative-finance-router.js';
 import { createValueIntelligenceRouter } from './routes/value-intelligence-router.js';
@@ -43,6 +44,7 @@ import { InstitutionParticipationService } from './services/institution-particip
 import { SettlementRailGatewayService } from './services/settlement-rail-gateway-service.js';
 import { TreasuryBankConnectorService } from './services/treasury-bank-connector-service.js';
 import { PlatformEconomicsService } from './services/platform-economics-service.js';
+import { PlatformLedgerService } from './services/platform-ledger-service.js';
 import { DatabaseService } from './services/database-service.js';
 import { PersistentDomainService, RECORD_TYPES } from './services/persistent-domain-service.js';
 import { PersistentMarketplaceService } from './services/persistent-marketplace-service.js';
@@ -66,6 +68,13 @@ const marketplaceSeed = {
   ], completionWatch: [], activity: []
 };
 
+const ledgerSeed = [
+  { accountId: 'GL-CASH-OPERATING', code: '1000-CASH', name: 'Operating Cash', type: 'ASSET', normalBalance: 'DEBIT', currency: 'USD', state: 'ACTIVE' },
+  { accountId: 'GL-AR', code: '1100-AR', name: 'Accounts Receivable', type: 'ASSET', normalBalance: 'DEBIT', currency: 'USD', state: 'ACTIVE' },
+  { accountId: 'GL-FEE-REVENUE', code: '4100-FEE-REVENUE', name: 'Platform Fee Revenue', type: 'REVENUE', normalBalance: 'CREDIT', currency: 'USD', state: 'ACTIVE' },
+  { accountId: 'GL-FEE-WAIVERS', code: '4190-FEE-WAIVERS', name: 'Fee Waivers and Concessions', type: 'CONTRA_REVENUE', normalBalance: 'DEBIT', currency: 'USD', state: 'ACTIVE' }
+];
+
 export async function createApp(options = {}) {
   const app = express();
   const database = options.database || new DatabaseService({ connectionString: options.connectionString });
@@ -80,6 +89,7 @@ export async function createApp(options = {}) {
   app.get('/brand-logo', (_req, res) => res.sendFile(path.join(__dirname, 'SRA LOGO.jpg')));
   if (options.serveStatic !== false) app.use(express.static(path.join(__dirname, 'public')));
   if (options.seedMarketplace !== false) { await persistentDomain.seed(RECORD_TYPES.ASSET_ACCOUNT, marketplaceSeed.assets); await persistentDomain.seed(RECORD_TYPES.PROJECT_ACCOUNT, marketplaceSeed.projects); }
+  await persistentDomain.seed(RECORD_TYPES.LEDGER_ACCOUNT, ledgerSeed);
   const marketplace = new PersistentMarketplaceService(persistentDomain, marketplaceSeed);
   const creativeFinanceService = new CreativeFinanceService(marketplace, persistentDomain); await creativeFinanceService.initialize();
   const valueIntelligenceService = new ValueIntelligenceService(marketplace, persistentDomain); await valueIntelligenceService.initialize();
@@ -98,7 +108,8 @@ export async function createApp(options = {}) {
   const institutionParticipationService = new InstitutionParticipationService(persistentDomain, homeFinancingService, sraSettlementService);
   const settlementRailGatewayService = new SettlementRailGatewayService(persistentDomain, sraSettlementService, institutionParticipationService);
   const treasuryBankConnectorService = new TreasuryBankConnectorService(persistentDomain, settlementRailGatewayService);
-  const platformEconomicsService = new PlatformEconomicsService(persistentDomain);
+  const platformLedgerService = new PlatformLedgerService(persistentDomain);
+  const platformEconomicsService = new PlatformEconomicsService(persistentDomain, platformLedgerService);
   const onboardingRouter = await createOnboardingRouter(domainStore, database, persistentDomain);
   app.use('/api/access', createAccessRouter(marketplace, accessService));
   app.use('/api/participation', createParticipationRouter(marketplace, accessService, persistentDomain));
@@ -106,6 +117,7 @@ export async function createApp(options = {}) {
   app.use('/api/settlement-rails', createSettlementRailGatewayRouter(settlementRailGatewayService));
   app.use('/api/treasury', createTreasuryBankConnectorRouter(treasuryBankConnectorService));
   app.use('/api/economics', createPlatformEconomicsRouter(platformEconomicsService));
+  app.use('/api/ledger', createPlatformLedgerRouter(platformLedgerService));
   app.use('/api/onboarding', onboardingRouter);
   app.use('/api/custody', createCustodyRouter());
   app.use('/api/sane', createSaneRouter(undefined, saneEdxOperationsService));
@@ -122,7 +134,7 @@ export async function createApp(options = {}) {
   app.use('/api/edx', createEdxEnterpriseSdkRouter(edxEnterpriseSdkService));
   app.use('/api/financing', createHomeFinancingRouter(homeFinancingService));
   app.use('/api/settlement', createSraSettlementRouter(sraSettlementService));
-  app.get('/api/health', async (_req, res) => { const persistence = await database.health(); res.json({ status: 'ok', service: 'SAIN Real Asset Market', version: '1.27.0', phase: 'PHASE_18_PLATFORM_ECONOMICS_FEE_ENGINE', persistence, persistentDomain: persistentDomain.snapshot(), settlementEngine: 'ACTIVE', settlementRailGateway: 'ACTIVE', treasuryBankConnector: 'ACTIVE', platformEconomics: 'ACTIVE', feeEngine: 'ACTIVE', feeScheduleRequired: true, automaticFeeAssessment: 'DISABLED', automaticSettlement: 'DISABLED', settlementExecution: 'EXPLICIT', timestamp: new Date().toISOString() }); });
+  app.get('/api/health', async (_req, res) => { const persistence = await database.health(); res.json({ status: 'ok', service: 'SAIN Real Asset Market', version: '1.28.0', phase: 'PHASE_19_PLATFORM_LEDGER', persistence, persistentDomain: persistentDomain.snapshot(), settlementEngine: 'ACTIVE', settlementRailGateway: 'ACTIVE', treasuryBankConnector: 'ACTIVE', platformEconomics: 'ACTIVE', feeEngine: 'ACTIVE', platformLedger: 'ACTIVE', doubleEntryRequired: true, automaticFeeAssessment: 'DISABLED', automaticSettlement: 'DISABLED', settlementExecution: 'EXPLICIT', timestamp: new Date().toISOString() }); });
   app.get('/api/domain', (_req, res) => res.json({ persistent: persistentDomain.snapshot() }));
   if (options.serveStatic !== false) app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
   return { app, database, persistentDomain };

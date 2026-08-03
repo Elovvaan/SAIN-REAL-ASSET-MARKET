@@ -23,6 +23,8 @@ export const RECORD_TYPES = Object.freeze({
   FEE_SCHEDULE: 'FEE_SCHEDULE',
   FEE_CHARGE: 'FEE_CHARGE',
   FEE_INVOICE: 'FEE_INVOICE',
+  LEDGER_ACCOUNT: 'LEDGER_ACCOUNT',
+  LEDGER_ENTRY: 'LEDGER_ENTRY',
   ONBOARDING_APPLICATION: 'ONBOARDING_APPLICATION',
   EVIDENCE_PACKAGE: 'EVIDENCE_PACKAGE',
   INSTITUTIONAL_REVIEW: 'INSTITUTIONAL_REVIEW',
@@ -54,7 +56,7 @@ export const RECORD_TYPES = Object.freeze({
 });
 
 function recordId(record) {
-  return record?.id || record?.applicationId || record?.evidencePackageId || record?.institutionalReviewId || record?.assetId || record?.projectId || record?.homeProjectId || record?.fundingPlanId || record?.settlementId || record?.settlementRecordId || record?.planId || record?.commitmentId || record?.adapterId || record?.instructionId || record?.connectionId || record?.paymentOrderId || record?.statementId || record?.feeCode || record?.scheduleId || record?.chargeId || record?.invoiceId || record?.packageId || record?.positionId || record?.structureId || record?.signalId || record?.eventId || record?.instrumentId || record?.connectorDefinitionId || record?.policyId || record?.extractionRequestId || record?.extractionResultId || record?.normalizedRecordId || record?.snapshotId || record?.valuePackageId || record?.publicationDecisionId || record?.projectionId || record?.intelligenceReportId || record?.sdkClientId || record?.webhookSubscriptionId || record?.eventStreamSubscriptionId || record?.outboundEventId || null;
+  return record?.id || record?.applicationId || record?.evidencePackageId || record?.institutionalReviewId || record?.assetId || record?.projectId || record?.homeProjectId || record?.fundingPlanId || record?.settlementId || record?.settlementRecordId || record?.planId || record?.commitmentId || record?.adapterId || record?.instructionId || record?.connectionId || record?.paymentOrderId || record?.statementId || record?.feeCode || record?.scheduleId || record?.chargeId || record?.invoiceId || record?.accountId || record?.entryId || record?.packageId || record?.positionId || record?.structureId || record?.signalId || record?.eventId || record?.instrumentId || record?.connectorDefinitionId || record?.policyId || record?.extractionRequestId || record?.extractionResultId || record?.normalizedRecordId || record?.snapshotId || record?.valuePackageId || record?.publicationDecisionId || record?.projectionId || record?.intelligenceReportId || record?.sdkClientId || record?.webhookSubscriptionId || record?.eventStreamSubscriptionId || record?.outboundEventId || null;
 }
 
 export class PersistentDomainService {
