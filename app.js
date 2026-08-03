@@ -8,6 +8,7 @@ import { createAccessRouter } from './routes/access-router.js';
 import { createParticipationRouter } from './routes/participation-router.js';
 import { createInstitutionParticipationRouter } from './routes/institution-participation-router.js';
 import { createSettlementRailGatewayRouter } from './routes/settlement-rail-gateway-router.js';
+import { createTreasuryBankConnectorRouter } from './routes/treasury-bank-connector-router.js';
 import { createSaneRouter } from './routes/sane-router.js';
 import { createCreativeFinanceRouter } from './routes/creative-finance-router.js';
 import { createValueIntelligenceRouter } from './routes/value-intelligence-router.js';
@@ -39,6 +40,7 @@ import { HomeFinancingService } from './services/home-financing-service.js';
 import { SraSettlementService } from './services/sra-settlement-service.js';
 import { InstitutionParticipationService } from './services/institution-participation-service.js';
 import { SettlementRailGatewayService } from './services/settlement-rail-gateway-service.js';
+import { TreasuryBankConnectorService } from './services/treasury-bank-connector-service.js';
 import { DatabaseService } from './services/database-service.js';
 import { PersistentDomainService, RECORD_TYPES } from './services/persistent-domain-service.js';
 import { PersistentMarketplaceService } from './services/persistent-marketplace-service.js';
@@ -59,9 +61,7 @@ const marketplaceSeed = {
     { id: 'SRA-RE-0014', projectId: 'SRA-RE-0014', assetId: 'A-2088', assetName: 'Weber Residential Portfolio', title: '14-Unit Residential Recovery', region: 'Northern Utah', stage: 'SERVICES_SCHEDULED', progress: 62, verifiedValue: 1860000, fundingTarget: 420000, fundingProgress: 74, signal: '+4.8%', status: 'OPEN', completionState: 'WATCH', projectedCompletedValue: 2240000, projectedGain: 380000, projectedGainRate: 20.4, participationWindow: '8–14 months', trueBill: { id: 'TB-0014', state: 'ACTIVE', purpose: 'CAPITAL_FORMATION', value: 310000 } },
     { id: 'SRA-RE-0021', projectId: 'SRA-RE-0021', assetId: 'A-1042', assetName: 'North District Market', title: 'Neighborhood Grocery Expansion', region: 'Ogden, Utah', stage: 'PRODUCTION_BEGINS', progress: 39, verifiedValue: 735000, fundingTarget: 185000, fundingProgress: 91, signal: '+2.1%', status: 'OPEN', completionState: 'NORMAL', projectedCompletedValue: 842000, projectedGain: 107000, projectedGainRate: 14.6, participationWindow: '10–16 months', trueBill: { id: 'TB-0021', state: 'ISSUED', purpose: 'ASSET_EXPANSION', value: 168000 } },
     { id: 'SRA-RE-0033', projectId: 'SRA-RE-0033', assetId: 'A-3104', assetName: 'Weber Mixed-Use Block', title: 'Mixed-Use Rehabilitation', region: 'Weber County, Utah', stage: 'VERIFIED_VALUE', progress: 78, verifiedValue: 2480000, fundingTarget: 610000, fundingProgress: 83, signal: '+6.3%', status: 'OPEN', completionState: 'ELIGIBLE', projectedCompletedValue: 2677000, projectedGain: 197000, projectedGainRate: 7.9, participationWindow: '5–9 months', trueBill: { id: 'TB-0033', state: 'PLEDGED', purpose: 'COMPLETION_CAPACITY', value: 505000 } }
-  ],
-  completionWatch: [],
-  activity: []
+  ], completionWatch: [], activity: []
 };
 
 export async function createApp(options = {}) {
@@ -73,21 +73,14 @@ export async function createApp(options = {}) {
   const domainStore = options.domainStore || createSeededDomainStore();
   const accessService = new AccessService({ database });
   await accessService.initialize();
-
   app.disable('x-powered-by');
   app.use(express.json({ limit: '1mb' }));
   app.get('/brand-logo', (_req, res) => res.sendFile(path.join(__dirname, 'SRA LOGO.jpg')));
   if (options.serveStatic !== false) app.use(express.static(path.join(__dirname, 'public')));
-
-  if (options.seedMarketplace !== false) {
-    await persistentDomain.seed(RECORD_TYPES.ASSET_ACCOUNT, marketplaceSeed.assets);
-    await persistentDomain.seed(RECORD_TYPES.PROJECT_ACCOUNT, marketplaceSeed.projects);
-  }
+  if (options.seedMarketplace !== false) { await persistentDomain.seed(RECORD_TYPES.ASSET_ACCOUNT, marketplaceSeed.assets); await persistentDomain.seed(RECORD_TYPES.PROJECT_ACCOUNT, marketplaceSeed.projects); }
   const marketplace = new PersistentMarketplaceService(persistentDomain, marketplaceSeed);
-  const creativeFinanceService = new CreativeFinanceService(marketplace, persistentDomain);
-  await creativeFinanceService.initialize();
-  const valueIntelligenceService = new ValueIntelligenceService(marketplace, persistentDomain);
-  await valueIntelligenceService.initialize();
+  const creativeFinanceService = new CreativeFinanceService(marketplace, persistentDomain); await creativeFinanceService.initialize();
+  const valueIntelligenceService = new ValueIntelligenceService(marketplace, persistentDomain); await valueIntelligenceService.initialize();
   const edxConnectionService = new EdxConnectionService(persistentDomain);
   const edxPermissionService = new EdxPermissionService(persistentDomain);
   const edxExtractionService = new EdxExtractionService(persistentDomain, edxPermissionService);
@@ -102,12 +95,13 @@ export async function createApp(options = {}) {
   const sraSettlementService = new SraSettlementService(persistentDomain, homeFinancingService);
   const institutionParticipationService = new InstitutionParticipationService(persistentDomain, homeFinancingService, sraSettlementService);
   const settlementRailGatewayService = new SettlementRailGatewayService(persistentDomain, sraSettlementService, institutionParticipationService);
+  const treasuryBankConnectorService = new TreasuryBankConnectorService(persistentDomain, settlementRailGatewayService);
   const onboardingRouter = await createOnboardingRouter(domainStore, database, persistentDomain);
-
   app.use('/api/access', createAccessRouter(marketplace, accessService));
   app.use('/api/participation', createParticipationRouter(marketplace, accessService, persistentDomain));
   app.use('/api/institutions', createInstitutionParticipationRouter(institutionParticipationService, accessService));
   app.use('/api/settlement-rails', createSettlementRailGatewayRouter(settlementRailGatewayService));
+  app.use('/api/treasury', createTreasuryBankConnectorRouter(treasuryBankConnectorService));
   app.use('/api/onboarding', onboardingRouter);
   app.use('/api/custody', createCustodyRouter());
   app.use('/api/sane', createSaneRouter(undefined, saneEdxOperationsService));
@@ -124,16 +118,8 @@ export async function createApp(options = {}) {
   app.use('/api/edx', createEdxEnterpriseSdkRouter(edxEnterpriseSdkService));
   app.use('/api/financing', createHomeFinancingRouter(homeFinancingService));
   app.use('/api/settlement', createSraSettlementRouter(sraSettlementService));
-
-  app.get('/api/health', async (_req, res) => {
-    const persistence = await database.health();
-    res.json({ status: 'ok', service: 'SAIN Real Asset Market', version: '1.25.0', phase: 'PHASE_16_SETTLEMENT_RAIL_GATEWAY', persistence, persistentDomain: persistentDomain.snapshot(), homeProjects: 'ACTIVE', fundingPlans: 'ACTIVE', settlementEngine: 'ACTIVE', institutionParticipation: 'ACTIVE', settlementRailGateway: 'ACTIVE', institutionUnderwriting: 'NOT_REQUIRED', settlementReadiness: 'SRA_EVALUATED', railExecution: 'EXTERNAL_CHANNEL_CONFIRMED', automaticSettlement: 'DISABLED', settlementExecution: 'EXPLICIT', automaticFundingApproval: 'DISABLED', customerFundingApproval: 'REQUIRED', automaticPublication: 'DISABLED', companyPublicationApproval: 'REQUIRED', timestamp: new Date().toISOString() });
-  });
+  app.get('/api/health', async (_req, res) => { const persistence = await database.health(); res.json({ status: 'ok', service: 'SAIN Real Asset Market', version: '1.26.0', phase: 'PHASE_17_TREASURY_BANK_CONNECTOR', persistence, persistentDomain: persistentDomain.snapshot(), settlementEngine: 'ACTIVE', settlementRailGateway: 'ACTIVE', treasuryBankConnector: 'ACTIVE', treasurySubmission: 'API_DRIVEN', bankConnectionRequired: true, liveBankConnection: 'CONFIGURATION_REQUIRED', automaticSettlement: 'DISABLED', settlementExecution: 'EXPLICIT', timestamp: new Date().toISOString() }); });
   app.get('/api/domain', (_req, res) => res.json({ persistent: persistentDomain.snapshot() }));
-
-  if (options.serveStatic !== false) {
-    app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
-  }
-
+  if (options.serveStatic !== false) app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
   return { app, database, persistentDomain };
 }
