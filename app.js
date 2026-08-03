@@ -7,6 +7,7 @@ import { createCustodyRouter } from './routes/custody-router.js';
 import { createAccessRouter } from './routes/access-router.js';
 import { createParticipationRouter } from './routes/participation-router.js';
 import { createInstitutionParticipationRouter } from './routes/institution-participation-router.js';
+import { createSettlementRailGatewayRouter } from './routes/settlement-rail-gateway-router.js';
 import { createSaneRouter } from './routes/sane-router.js';
 import { createCreativeFinanceRouter } from './routes/creative-finance-router.js';
 import { createValueIntelligenceRouter } from './routes/value-intelligence-router.js';
@@ -37,6 +38,7 @@ import { SaneEdxOperationsService } from './services/sane-edx-operations-service
 import { HomeFinancingService } from './services/home-financing-service.js';
 import { SraSettlementService } from './services/sra-settlement-service.js';
 import { InstitutionParticipationService } from './services/institution-participation-service.js';
+import { SettlementRailGatewayService } from './services/settlement-rail-gateway-service.js';
 import { DatabaseService } from './services/database-service.js';
 import { PersistentDomainService, RECORD_TYPES } from './services/persistent-domain-service.js';
 import { PersistentMarketplaceService } from './services/persistent-marketplace-service.js';
@@ -99,11 +101,13 @@ export async function createApp(options = {}) {
   const homeFinancingService = new HomeFinancingService(persistentDomain);
   const sraSettlementService = new SraSettlementService(persistentDomain, homeFinancingService);
   const institutionParticipationService = new InstitutionParticipationService(persistentDomain, homeFinancingService, sraSettlementService);
+  const settlementRailGatewayService = new SettlementRailGatewayService(persistentDomain, sraSettlementService, institutionParticipationService);
   const onboardingRouter = await createOnboardingRouter(domainStore, database, persistentDomain);
 
   app.use('/api/access', createAccessRouter(marketplace, accessService));
   app.use('/api/participation', createParticipationRouter(marketplace, accessService, persistentDomain));
   app.use('/api/institutions', createInstitutionParticipationRouter(institutionParticipationService, accessService));
+  app.use('/api/settlement-rails', createSettlementRailGatewayRouter(settlementRailGatewayService));
   app.use('/api/onboarding', onboardingRouter);
   app.use('/api/custody', createCustodyRouter());
   app.use('/api/sane', createSaneRouter(undefined, saneEdxOperationsService));
@@ -123,7 +127,7 @@ export async function createApp(options = {}) {
 
   app.get('/api/health', async (_req, res) => {
     const persistence = await database.health();
-    res.json({ status: 'ok', service: 'SAIN Real Asset Market', version: '1.24.0', phase: 'PHASE_15_INSTITUTION_PARTICIPATION_WORKSPACE', persistence, persistentDomain: persistentDomain.snapshot(), homeProjects: 'ACTIVE', fundingPlans: 'ACTIVE', settlementEngine: 'ACTIVE', institutionParticipation: 'ACTIVE', institutionUnderwriting: 'NOT_REQUIRED', settlementReadiness: 'SRA_EVALUATED', automaticSettlement: 'DISABLED', settlementExecution: 'EXPLICIT', automaticFundingApproval: 'DISABLED', customerFundingApproval: 'REQUIRED', automaticPublication: 'DISABLED', companyPublicationApproval: 'REQUIRED', timestamp: new Date().toISOString() });
+    res.json({ status: 'ok', service: 'SAIN Real Asset Market', version: '1.25.0', phase: 'PHASE_16_SETTLEMENT_RAIL_GATEWAY', persistence, persistentDomain: persistentDomain.snapshot(), homeProjects: 'ACTIVE', fundingPlans: 'ACTIVE', settlementEngine: 'ACTIVE', institutionParticipation: 'ACTIVE', settlementRailGateway: 'ACTIVE', institutionUnderwriting: 'NOT_REQUIRED', settlementReadiness: 'SRA_EVALUATED', railExecution: 'EXTERNAL_CHANNEL_CONFIRMED', automaticSettlement: 'DISABLED', settlementExecution: 'EXPLICIT', automaticFundingApproval: 'DISABLED', customerFundingApproval: 'REQUIRED', automaticPublication: 'DISABLED', companyPublicationApproval: 'REQUIRED', timestamp: new Date().toISOString() });
   });
   app.get('/api/domain', (_req, res) => res.json({ persistent: persistentDomain.snapshot() }));
 
