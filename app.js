@@ -68,6 +68,7 @@ export async function createApp(options = {}) {
 
   app.disable('x-powered-by');
   app.use(express.json({ limit: '1mb' }));
+  app.get('/brand-logo', (_req, res) => res.sendFile(path.join(__dirname, 'SRA LOGO.jpg')));
   if (options.serveStatic !== false) app.use(express.static(path.join(__dirname, 'public')));
 
   if (options.seedMarketplace !== false) {

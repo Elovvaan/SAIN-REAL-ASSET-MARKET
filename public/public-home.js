@@ -1,5 +1,5 @@
 (() => {
-  const PUBLIC_HOME_VERSION = 'V17';
+  const PUBLIC_HOME_VERSION = 'V18';
   const originalFetch = window.fetch.bind(window);
 
   const leftCards = [
@@ -10,7 +10,7 @@
 
   const rightCards = [
     ['Financial Assets','Learn how recognized assets move through the platform.','How do financial assets work here?'],
-    ['SAIN Coin','Understand the platform coin and where it fits.','Explain the SAIN coin and its purpose.'],
+    ['SRA Coin','Understand the marketplace coin and where it fits.','Explain the SRA coin and its purpose.'],
     ['Institutional Operations','See how documents, assets, accounts, and activity connect.','Explain how the institution operates.']
   ];
 
@@ -28,7 +28,7 @@
     document.querySelector(target)?.click();
   }
 
-  function openSaneWithPrompt(prompt) {
+  function openSainWithPrompt(prompt) {
     const input = document.querySelector('#sane-input');
     if (!input) return;
     input.value = prompt;
@@ -44,35 +44,35 @@
   }
 
   function cardMarkup(cards, side) {
-    return `<aside class="public-feature-rail public-feature-rail-${side}" aria-label="Platform highlights">${cards.map(([title,description,prompt])=>`<button class="public-feature-card" data-public-prompt="${escape(prompt)}"><strong>${escape(title)}</strong><span>${escape(description)}</span><small>Ask Sane →</small></button>`).join('')}</aside>`;
+    return `<aside class="public-feature-rail public-feature-rail-${side}" aria-label="Platform highlights">${cards.map(([title,description,prompt])=>`<button class="public-feature-card" data-public-prompt="${escape(prompt)}"><strong>${escape(title)}</strong><span>${escape(description)}</span><small>Ask SAIN →</small></button>`).join('')}</aside>`;
   }
 
   function buildPublicHome() {
     if (!isSignedOut()) return;
     const workspace = document.querySelector('.operating-workspace');
-    const sane = document.querySelector('.sane-workspace');
-    if (!workspace || !sane) return;
+    const sain = document.querySelector('.sane-workspace');
+    if (!workspace || !sain) return;
 
     document.querySelector('#access-actions')?.classList.add('public-top-access-hidden');
     const title = document.querySelector('#page-title');
     if (title) title.textContent = 'Living Marketplace';
 
     if (!document.querySelector('.public-feature-rail-left')) {
-      sane.insertAdjacentHTML('beforebegin', cardMarkup(leftCards,'left'));
-      sane.insertAdjacentHTML('afterend', cardMarkup(rightCards,'right'));
+      sain.insertAdjacentHTML('beforebegin', cardMarkup(leftCards,'left'));
+      sain.insertAdjacentHTML('afterend', cardMarkup(rightCards,'right'));
     }
 
     if (!document.querySelector('.public-home-actions')) {
-      sane.insertAdjacentHTML('afterend', `<div class="public-home-actions"><button class="secondary-button" data-public-action="signin">Sign in</button><button class="primary-button" data-public-action="signup">Create free account</button></div>`);
+      sain.insertAdjacentHTML('afterend', `<div class="public-home-actions"><button class="secondary-button" data-public-action="signin">Sign in</button><button class="primary-button" data-public-action="signup">Create free account</button></div>`);
     }
 
     const firstMessage = document.querySelector('#chat-log .sane-message');
     if (firstMessage) {
-      firstMessage.textContent = 'Welcome to the Living Marketplace. I can help you understand Verified Value, explore opportunities, compare projects, explain the platform, or decide what to do next. What would you like to accomplish?';
+      firstMessage.textContent = 'Welcome to the Living Marketplace. I am SAIN. I can help you understand Verified Value, explore opportunities, compare projects, explain the platform, or decide what to do next. What would you like to accomplish?';
     }
 
     document.querySelectorAll('[data-public-prompt]').forEach(button => {
-      button.addEventListener('click', () => openSaneWithPrompt(button.dataset.publicPrompt || 'Help me understand this marketplace.'));
+      button.addEventListener('click', () => openSainWithPrompt(button.dataset.publicPrompt || 'Help me understand this marketplace.'));
     });
     document.querySelector('[data-public-action="signin"]')?.addEventListener('click', () => openAccess('signin'));
     document.querySelector('[data-public-action="signup"]')?.addEventListener('click', () => openAccess('signup'));
@@ -96,7 +96,7 @@
       } catch {}
     }
     canvas.hidden = false;
-    canvas.innerHTML = `<div class="public-decision-head"><p class="eyebrow">SANE GUIDANCE</p><h2>Here is what may help you decide</h2><p>This area appears only after you ask.</p></div><div class="public-guide-response">${escape(payload.reply || 'I can help you understand the marketplace and decide what to do next.')}</div>${opportunities.length ? `<div class="public-decision-grid">${opportunities.map(item=>`<button class="public-decision-card" data-public-result="${escape(item.id)}"><span class="badge open">${escape(String(item.stage || '').replaceAll('_',' '))}</span><h3>${escape(item.title)}</h3><p>${escape(item.assetName)} · ${escape(item.region)}</p><strong>${money(item.verifiedValue)} · +${escape(item.projectedGainRate)}%</strong></button>`).join('')}</div>` : ''}`;
+    canvas.innerHTML = `<div class="public-decision-head"><p class="eyebrow">SAIN GUIDANCE</p><h2>Here is what may help you decide</h2><p>This area appears only after you ask.</p></div><div class="public-guide-response">${escape(payload.reply || 'I can help you understand the marketplace and decide what to do next.')}</div>${opportunities.length ? `<div class="public-decision-grid">${opportunities.map(item=>`<button class="public-decision-card" data-public-result="${escape(item.id)}"><span class="badge open">${escape(String(item.stage || '').replaceAll('_',' '))}</span><h3>${escape(item.title)}</h3><p>${escape(item.assetName)} · ${escape(item.region)}</p><strong>${money(item.verifiedValue)} · +${escape(item.projectedGainRate)}%</strong></button>`).join('')}</div>` : ''}`;
     canvas.querySelectorAll('[data-public-result]').forEach(card=>card.addEventListener('click',()=>openAccess('signup')));
   }
 
