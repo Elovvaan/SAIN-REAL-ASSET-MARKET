@@ -1,5 +1,9 @@
 body:not(.access-public) .operating-workspace{grid-template-columns:minmax(0,1fr)}
 body:not(.access-public) .context-workspace{display:none}
 body.workspace-open:not(.access-public) .operating-workspace{grid-template-columns:minmax(420px,1.12fr) minmax(360px,.88fr)}
-body.workspace-open:not(.access-public) .context-workspace{display:flex}
+body.workspace-open:not(.access-public) .context-workspace{display:flex;min-height:0;height:max-content;align-self:start}
+body.workspace-open:not(.access-public) .view-root{overflow:visible;max-height:none;padding:14px}
+body.workspace-open:not(.access-public) .current-workspace-market{display:grid;gap:12px}
+body.workspace-open:not(.access-public) .current-workspace-opportunities{display:grid;grid-template-columns:1fr;gap:10px}
+body.workspace-open:not(.access-public) .current-workspace-opportunities .compact-opportunity{max-height:none}
 @media(max-width:1180px){body.workspace-open:not(.access-public) .operating-workspace{grid-template-columns:1fr}}
