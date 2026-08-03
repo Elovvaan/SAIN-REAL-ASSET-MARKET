@@ -108,8 +108,8 @@ export async function createApp(options = {}) {
   const institutionParticipationService = new InstitutionParticipationService(persistentDomain, homeFinancingService, sraSettlementService);
   const settlementRailGatewayService = new SettlementRailGatewayService(persistentDomain, sraSettlementService, institutionParticipationService);
   const treasuryBankConnectorService = new TreasuryBankConnectorService(persistentDomain, settlementRailGatewayService);
-  const platformEconomicsService = new PlatformEconomicsService(persistentDomain);
   const platformLedgerService = new PlatformLedgerService(persistentDomain);
+  const platformEconomicsService = new PlatformEconomicsService(persistentDomain, platformLedgerService);
   const onboardingRouter = await createOnboardingRouter(domainStore, database, persistentDomain);
   app.use('/api/access', createAccessRouter(marketplace, accessService));
   app.use('/api/participation', createParticipationRouter(marketplace, accessService, persistentDomain));
