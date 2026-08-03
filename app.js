@@ -19,6 +19,7 @@ import { createEdxMarketplacePublisherRouter } from './routes/edx-marketplace-pu
 import { createEdxDashboardIntelligenceRouter } from './routes/edx-dashboard-intelligence-router.js';
 import { createEdxEnterpriseSdkRouter } from './routes/edx-enterprise-sdk-router.js';
 import { createHomeFinancingRouter } from './routes/home-financing-router.js';
+import { createSraSettlementRouter } from './routes/sra-settlement-router.js';
 import { AccessService } from './services/access-service.js';
 import { CreativeFinanceService } from './services/creative-finance-service.js';
 import { ValueIntelligenceService } from './services/value-intelligence-service.js';
@@ -33,6 +34,7 @@ import { EdxDashboardIntelligenceService } from './services/edx-dashboard-intell
 import { EdxEnterpriseSdkService } from './services/edx-enterprise-sdk-service.js';
 import { SaneEdxOperationsService } from './services/sane-edx-operations-service.js';
 import { HomeFinancingService } from './services/home-financing-service.js';
+import { SraSettlementService } from './services/sra-settlement-service.js';
 import { DatabaseService } from './services/database-service.js';
 import { PersistentDomainService, RECORD_TYPES } from './services/persistent-domain-service.js';
 import { PersistentMarketplaceService } from './services/persistent-marketplace-service.js';
@@ -93,6 +95,7 @@ export async function createApp(options = {}) {
   const edxEnterpriseSdkService = new EdxEnterpriseSdkService(persistentDomain);
   const saneEdxOperationsService = new SaneEdxOperationsService(persistentDomain, edxMarketplacePublisherService);
   const homeFinancingService = new HomeFinancingService(persistentDomain);
+  const sraSettlementService = new SraSettlementService(persistentDomain, homeFinancingService);
   const onboardingRouter = await createOnboardingRouter(domainStore, database, persistentDomain);
 
   app.use('/api/access', createAccessRouter(marketplace, accessService));
@@ -112,10 +115,11 @@ export async function createApp(options = {}) {
   app.use('/api/edx', createEdxDashboardIntelligenceRouter(edxDashboardIntelligenceService));
   app.use('/api/edx', createEdxEnterpriseSdkRouter(edxEnterpriseSdkService));
   app.use('/api/financing', createHomeFinancingRouter(homeFinancingService));
+  app.use('/api/settlement', createSraSettlementRouter(sraSettlementService));
 
   app.get('/api/health', async (_req, res) => {
     const persistence = await database.health();
-    res.json({ status: 'ok', service: 'SAIN Real Asset Market', version: '1.22.0', phase: 'HOME_PROJECT_FINANCING_WORKSPACE', persistence, persistentDomain: persistentDomain.snapshot(), homeProjects: 'ACTIVE', fundingPlans: 'ACTIVE', automaticFundingApproval: 'DISABLED', customerFundingApproval: 'REQUIRED', automaticPublication: 'DISABLED', companyPublicationApproval: 'REQUIRED', timestamp: new Date().toISOString() });
+    res.json({ status: 'ok', service: 'SAIN Real Asset Market', version: '1.23.0', phase: 'PHASE_14_SRA_SETTLEMENT_ENGINE', persistence, persistentDomain: persistentDomain.snapshot(), homeProjects: 'ACTIVE', fundingPlans: 'ACTIVE', settlementEngine: 'ACTIVE', settlementReadiness: 'SRA_EVALUATED', automaticSettlement: 'DISABLED', settlementExecution: 'EXPLICIT', automaticFundingApproval: 'DISABLED', customerFundingApproval: 'REQUIRED', automaticPublication: 'DISABLED', companyPublicationApproval: 'REQUIRED', timestamp: new Date().toISOString() });
   });
   app.get('/api/domain', (_req, res) => res.json({ persistent: persistentDomain.snapshot() }));
 
