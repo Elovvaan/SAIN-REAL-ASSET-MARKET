@@ -45,7 +45,7 @@ async function seedTrade(observations, tradeId = '9001', notional = 600) {
   }, 'COINBASE_PUBLIC_MARKET_TRADES');
 }
 
-function services() {
+function services(environment = {}) {
   const domain = new MemoryDomain();
   const observations = new ObservationLayerService(domain);
   const financialRecords = new FinancialRecordService(domain);
@@ -53,13 +53,17 @@ function services() {
     observationLayerService: observations,
     financialRecordService: financialRecords,
     persistentDomain: domain,
-    environment: { COINBASE_TRANSACTION_ASSET_PIPELINE_ENABLED: 'true' },
+    environment: {
+      COINBASE_TRANSACTION_ASSET_PIPELINE_ENABLED: 'true',
+      COINBASE_TRANSACTION_INSTRUMENT_FORMATION_ENABLED: 'true',
+      ...environment
+    },
     logger: { error() {} }
   });
   return { domain, observations, financialRecords, pipeline };
 }
 
-test('Coinbase trade becomes a Recognition, Financial Record, and SRA Coin Position', async () => {
+test('Coinbase trade becomes a Recognition, Financial Record, SRA Coin Position, and draft Instrument', async () => {
   const { domain, observations, pipeline } = services();
   const { observation } = await seedTrade(observations);
   const result = await pipeline.processObservation(observation);
@@ -80,12 +84,21 @@ test('Coinbase trade becomes a Recognition, Financial Record, and SRA Coin Posit
   assert.equal(result.coinPosition.sourceLineage.observationId, observation.observationId);
   assert.equal(result.coinPosition.state, 'REPRESENTED');
 
+  assert.equal(result.instrument.instrumentType, 'SRA_TRANSACTION_VALUE_INSTRUMENT');
+  assert.equal(result.instrument.state, 'DRAFT');
+  assert.equal(result.instrument.coinPositionId, result.coinPosition.coinPositionId);
+  assert.equal(result.instrument.denomination.principalQuantity, 600);
+  assert.equal(result.instrument.terms.purpose, 'MARKETPLACE_LISTING_PREPARATION');
+  assert.ok(result.instrument.restrictions.some((item) => item.type === 'DRAFT_NOT_YET_LISTED'));
+  assert.ok(result.instrument.conditions.some((item) => item.type === 'ADMINISTRATIVE_REVIEW_REQUIRED'));
+
   assert.equal(domain.list(RECORD_TYPES.RECOGNITION_ASSESSMENT).length, 1);
   assert.equal(domain.list(RECORD_TYPES.FINANCIAL_RECORD).length, 1);
   assert.equal(domain.list(RECORD_TYPES.COIN_POSITION).length, 1);
+  assert.equal(domain.list(RECORD_TYPES.SRA_INSTRUMENT).length, 1);
 });
 
-test('reprocessing the same observation returns the existing asset chain', async () => {
+test('reprocessing the same observation returns the existing full asset chain', async () => {
   const { domain, observations, pipeline } = services();
   const { observation } = await seedTrade(observations);
   const first = await pipeline.processObservation(observation);
@@ -95,12 +108,14 @@ test('reprocessing the same observation returns the existing asset chain', async
   assert.equal(second.recognition.recognitionId, first.recognition.recognitionId);
   assert.equal(second.financialRecord.financialRecordId, first.financialRecord.financialRecordId);
   assert.equal(second.coinPosition.coinPositionId, first.coinPosition.coinPositionId);
+  assert.equal(second.instrument.instrumentId, first.instrument.instrumentId);
   assert.equal(domain.list(RECORD_TYPES.RECOGNITION_ASSESSMENT).length, 1);
   assert.equal(domain.list(RECORD_TYPES.FINANCIAL_RECORD).length, 1);
   assert.equal(domain.list(RECORD_TYPES.COIN_POSITION).length, 1);
+  assert.equal(domain.list(RECORD_TYPES.SRA_INSTRUMENT).length, 1);
 });
 
-test('backfill processes previously recorded Coinbase observations', async () => {
+test('backfill forms instruments for previously recorded Coinbase observations', async () => {
   const { domain, observations, pipeline } = services();
   await seedTrade(observations, '9001', 600);
   await seedTrade(observations, '9002', 125);
@@ -108,11 +123,24 @@ test('backfill processes previously recorded Coinbase observations', async () =>
   const status = await pipeline.backfill();
 
   assert.equal(status.backfillState, 'COMPLETED');
+  assert.equal(status.instrumentsCreated, 2);
   assert.equal(domain.list(RECORD_TYPES.RECOGNITION_ASSESSMENT).length, 2);
   assert.equal(domain.list(RECORD_TYPES.FINANCIAL_RECORD).length, 2);
   assert.equal(domain.list(RECORD_TYPES.COIN_POSITION).length, 2);
+  assert.equal(domain.list(RECORD_TYPES.SRA_INSTRUMENT).length, 2);
   assert.equal(domain.list(RECORD_TYPES.COIN_ACCOUNT).length, 1);
   assert.equal(domain.list(RECORD_TYPES.FINANCIAL_RECORD_ACCOUNT).length, 1);
+});
+
+test('instrument formation may be disabled without stopping the upstream asset pipeline', async () => {
+  const { domain, observations, pipeline } = services({ COINBASE_TRANSACTION_INSTRUMENT_FORMATION_ENABLED: 'false' });
+  const { observation } = await seedTrade(observations);
+  const result = await pipeline.processObservation(observation);
+
+  assert.equal(result.processed, true);
+  assert.equal(result.instrument, null);
+  assert.equal(domain.list(RECORD_TYPES.COIN_POSITION).length, 1);
+  assert.equal(domain.list(RECORD_TYPES.SRA_INSTRUMENT).length, 0);
 });
 
 test('public trade recognition does not infer the identity of an underlying Coinbase customer', async () => {
@@ -124,4 +152,5 @@ test('public trade recognition does not infer the identity of an underlying Coin
   assert.equal(result.recognition.identity.subjectId, 'COINBASE:BTC-USD');
   assert.ok(result.recognition.limitations.includes('PUBLIC_MARKET_TRADE_DOES_NOT_INFER_UNDERLYING_CUSTOMER_IDENTITY'));
   assert.ok(result.financialRecord.restrictions.some((item) => item.type === 'NO_UNDERLYING_ACCOUNT_OWNERSHIP_INFERRED'));
+  assert.ok(result.instrument.restrictions.some((item) => item.type === 'PUBLIC_SOURCE_TRADE_DOES_NOT_CONVEY_COINBASE_CUSTOMER_RIGHTS'));
 });
