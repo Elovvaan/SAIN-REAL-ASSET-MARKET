@@ -42,6 +42,7 @@ import { EdxMarketplacePublisherService } from './services/edx-marketplace-publi
 import { EdxDashboardIntelligenceService } from './services/edx-dashboard-intelligence-service.js';
 import { EdxEnterpriseSdkService } from './services/edx-enterprise-sdk-service.js';
 import { SaneEdxOperationsService } from './services/sane-edx-operations-service.js';
+import { SraAgentService } from './services/sra-agent-service.js';
 import { HomeFinancingService } from './services/home-financing-service.js';
 import { SraSettlementService } from './services/sra-settlement-service.js';
 import { InstitutionParticipationService } from './services/institution-participation-service.js';
@@ -100,7 +101,10 @@ export async function createApp(options = {}) {
   app.use(express.json({ limit: '1mb' }));
   app.get('/brand-logo', (_req, res) => res.sendFile(path.join(__dirname, 'SRA LOGO.jpg')));
   if (options.serveStatic !== false) app.use(express.static(path.join(__dirname, 'public')));
-  if (options.seedMarketplace !== false) { await persistentDomain.seed(RECORD_TYPES.ASSET_ACCOUNT, marketplaceSeed.assets); await persistentDomain.seed(RECORD_TYPES.PROJECT_ACCOUNT, marketplaceSeed.projects); }
+  if (options.seedMarketplace !== false) {
+    await persistentDomain.seed(RECORD_TYPES.ASSET_ACCOUNT, marketplaceSeed.assets);
+    await persistentDomain.seed(RECORD_TYPES.PROJECT_ACCOUNT, marketplaceSeed.projects);
+  }
   await persistentDomain.seed(RECORD_TYPES.LEDGER_ACCOUNT, ledgerSeed);
   const marketplace = new PersistentMarketplaceService(persistentDomain, marketplaceSeed);
   const creativeFinanceService = new CreativeFinanceService(marketplace, persistentDomain); await creativeFinanceService.initialize();
@@ -126,7 +130,20 @@ export async function createApp(options = {}) {
   const assetServicingService = new AssetServicingService(persistentDomain);
   const platformTreasuryService = new PlatformTreasuryService(persistentDomain, platformLedgerService);
   const financialStatementsService = new FinancialStatementsService(persistentDomain, platformLedgerService);
+  const sraAgentService = new SraAgentService({
+    persistentDomain,
+    marketplace,
+    ledgerService: platformLedgerService,
+    treasuryService: platformTreasuryService,
+    financialStatementsService,
+    assetServicingService,
+    institutionBillingService,
+    economicsService: platformEconomicsService,
+    homeFinancingService,
+    settlementService: sraSettlementService
+  });
   const onboardingRouter = await createOnboardingRouter(domainStore, database, persistentDomain);
+
   app.use('/api/access', createAccessRouter(marketplace, accessService));
   app.use('/api/participation', createParticipationRouter(marketplace, accessService, persistentDomain));
   app.use('/api/institutions', createInstitutionParticipationRouter(institutionParticipationService, accessService));
@@ -140,7 +157,7 @@ export async function createApp(options = {}) {
   app.use('/api/financial-statements', createFinancialStatementsRouter(financialStatementsService));
   app.use('/api/onboarding', onboardingRouter);
   app.use('/api/custody', createCustodyRouter());
-  app.use('/api/sane', createSaneRouter(undefined, saneEdxOperationsService));
+  app.use('/api/sane', createSaneRouter(undefined, saneEdxOperationsService, sraAgentService));
   app.use('/api/creative-finance', createCreativeFinanceRouter(creativeFinanceService));
   app.use('/api/value-intelligence', createValueIntelligenceRouter(valueIntelligenceService));
   app.use('/api/edx', createEdxConnectionRouter(edxConnectionService));
@@ -154,7 +171,38 @@ export async function createApp(options = {}) {
   app.use('/api/edx', createEdxEnterpriseSdkRouter(edxEnterpriseSdkService));
   app.use('/api/financing', createHomeFinancingRouter(homeFinancingService));
   app.use('/api/settlement', createSraSettlementRouter(sraSettlementService));
-  app.get('/api/health', async (_req, res) => { const persistence = await database.health(); res.json({ status: 'ok', service: 'SAIN Real Asset Market', version: '1.32.0', phase: 'PHASE_23_BALANCE_SHEET_FINANCIAL_STATEMENTS', persistence, persistentDomain: persistentDomain.snapshot(), settlementEngine: 'ACTIVE', settlementRailGateway: 'ACTIVE', treasuryBankConnector: 'ACTIVE', platformEconomics: 'ACTIVE', feeEngine: 'ACTIVE', platformLedger: 'ACTIVE', institutionalBilling: 'ACTIVE', assetServicing: 'ACTIVE', platformTreasury: 'ACTIVE', financialStatements: 'ACTIVE', accountingPeriods: 'ACTIVE', periodClose: 'EXPLICIT', automaticFeeAssessment: 'DISABLED', automaticSettlement: 'DISABLED', settlementExecution: 'EXPLICIT', timestamp: new Date().toISOString() }); });
+
+  app.get('/api/health', async (_req, res) => {
+    const persistence = await database.health();
+    res.json({
+      status: 'ok',
+      service: 'SAIN Real Asset Market',
+      version: '1.33.0',
+      phase: 'SRA_OPENAI_AGENT_INTEGRATION',
+      persistence,
+      persistentDomain: persistentDomain.snapshot(),
+      saneAgent: sraAgentService.available() ? 'ACTIVE' : 'UNAVAILABLE',
+      saneAgentModel: sraAgentService.model,
+      saneAgentWriteAccess: 'DISABLED',
+      approvalRequiredForStateChanges: true,
+      settlementEngine: 'ACTIVE',
+      settlementRailGateway: 'ACTIVE',
+      treasuryBankConnector: 'ACTIVE',
+      platformEconomics: 'ACTIVE',
+      feeEngine: 'ACTIVE',
+      platformLedger: 'ACTIVE',
+      institutionalBilling: 'ACTIVE',
+      assetServicing: 'ACTIVE',
+      platformTreasury: 'ACTIVE',
+      financialStatements: 'ACTIVE',
+      accountingPeriods: 'ACTIVE',
+      periodClose: 'EXPLICIT',
+      automaticFeeAssessment: 'DISABLED',
+      automaticSettlement: 'DISABLED',
+      settlementExecution: 'EXPLICIT',
+      timestamp: new Date().toISOString()
+    });
+  });
   app.get('/api/domain', (_req, res) => res.json({ persistent: persistentDomain.snapshot() }));
   if (options.serveStatic !== false) app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
   return { app, database, persistentDomain };
