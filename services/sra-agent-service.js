@@ -3,8 +3,7 @@ import OpenAI from 'openai';
 const DEFAULT_MODEL = process.env.OPENAI_MODEL || 'gpt-5.1';
 
 function compact(value, maxItems = 20) {
-  if (Array.isArray(value)) return value.slice(0, maxItems);
-  return value;
+  return Array.isArray(value) ? value.slice(0, maxItems) : value;
 }
 
 export class SraAgentService {
@@ -19,7 +18,8 @@ export class SraAgentService {
     economicsService,
     homeFinancingService,
     settlementService,
-    model = DEFAULT_MODEL
+    model = DEFAULT_MODEL,
+    client = null
   }) {
     this.domain = persistentDomain;
     this.marketplace = marketplace;
@@ -32,7 +32,7 @@ export class SraAgentService {
     this.financing = homeFinancingService;
     this.settlement = settlementService;
     this.model = model;
-    this.client = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
+    this.client = client || (process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null);
   }
 
   available() {
@@ -55,51 +55,30 @@ export class SraAgentService {
   buildContext(scope = {}) {
     const context = {
       generatedAt: new Date().toISOString(),
+      activeView: scope.activeView || null,
+      operatingTier: scope.operatingTier || null,
       domainCounts: this.domain?.snapshot?.() || null
     };
 
     if (scope.includeMarketplace !== false && this.marketplace) {
       context.marketplace = {
-        assets: compact(this.marketplace.assets?.() || this.marketplaceSeed?.assets || []),
-        projects: compact(this.marketplace.projects?.() || this.marketplaceSeed?.projects || [])
+        marketStatus: this.marketplace.marketStatus,
+        verifiedValue: this.marketplace.verifiedValue,
+        projectedMarketplaceGain: this.marketplace.projectedMarketplaceGain,
+        assets: compact(this.marketplace.assets),
+        projects: compact(this.marketplace.projects)
       };
     }
 
-    if (scope.ledgerAccountId && this.ledger) {
-      context.ledgerAccount = this.ledger.balance(scope.ledgerAccountId);
-    }
-
-    if (scope.includeTrialBalance && this.ledger) {
-      context.trialBalance = this.ledger.trialBalance();
-    }
-
-    if (scope.treasuryProfileId && this.treasury) {
-      context.treasuryPosition = this.treasury.position(scope.treasuryProfileId);
-    }
-
-    if (scope.accountingPeriodId && this.statements) {
-      context.financialStatements = this.statements.generate(scope.accountingPeriodId);
-    }
-
-    if (scope.servicingAccountId && this.servicing) {
-      context.servicingSummary = this.servicing.summary(scope.servicingAccountId);
-    }
-
-    if (scope.institutionId && this.billing) {
-      context.institutionBilling = this.billing.summary(scope.institutionId);
-    }
-
-    if (scope.settlementId && this.settlement?.getSettlement) {
-      context.settlement = this.settlement.getSettlement(scope.settlementId);
-    }
-
-    if (scope.homeProjectId && this.financing?.getHomeProject) {
-      context.homeProject = this.financing.getHomeProject(scope.homeProjectId);
-    }
-
-    if (scope.recordType && scope.recordId) {
-      context.requestedRecord = this.domain.get(scope.recordType, scope.recordId);
-    }
+    if (scope.ledgerAccountId && this.ledger) context.ledgerAccount = this.ledger.balance(scope.ledgerAccountId);
+    if (scope.includeTrialBalance && this.ledger) context.trialBalance = this.ledger.trialBalance();
+    if (scope.treasuryProfileId && this.treasury) context.treasuryPosition = this.treasury.position(scope.treasuryProfileId);
+    if (scope.accountingPeriodId && this.statements) context.financialStatements = this.statements.generate(scope.accountingPeriodId);
+    if (scope.servicingAccountId && this.servicing) context.servicingSummary = this.servicing.summary(scope.servicingAccountId);
+    if (scope.institutionId && this.billing) context.institutionBilling = this.billing.summary(scope.institutionId);
+    if (scope.settlementId && this.settlement?.getSettlement) context.settlement = this.settlement.getSettlement(scope.settlementId);
+    if (scope.homeProjectId && this.financing?.getHomeProject) context.homeProject = this.financing.getHomeProject(scope.homeProjectId);
+    if (scope.recordType && scope.recordId) context.requestedRecord = this.domain.get(scope.recordType, scope.recordId);
 
     return context;
   }
