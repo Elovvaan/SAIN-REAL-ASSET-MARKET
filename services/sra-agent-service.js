@@ -5,6 +5,11 @@ function compact(value, maxItems = 20) {
   return Array.isArray(value) ? value.slice(0, maxItems) : value;
 }
 
+function safeExternalContext(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return JSON.parse(JSON.stringify(value));
+}
+
 function extractOutputText(response) {
   if (typeof response?.output_text === 'string') return response.output_text;
   const parts = [];
@@ -43,6 +48,15 @@ const COIN_ASSET_LANGUAGE_LOCK = [
   'You must not say or imply that trading is what creates the asset, validates its existence, or makes it real.',
   'When discussing value, distinguish the recorded source amount, current Verified Value, offered price, and executed trade price.',
   'A completed trade records consideration, ownership change, and market history and supplies new evidence; it does not erase the asset\'s prior lineage or automatically redefine Verified Value.'
+].join('\n');
+
+const CONNECTION_STATE_LOCK = [
+  'SRA CONNECTION STATE LOCK:',
+  'Public market-data connectors, treasury wallets, settlement-rail adapters, Coin Accounts, Coin Positions, and SRA Transactions are separate record classes and separate operational states.',
+  'Evaluate a named connector from its own supplied connector status, including enabled, state, products, receivedTrades, recordedTrades, timestamps, and lastError.',
+  'Never infer that a public market-data connector is absent or disconnected merely because treasury wallets, treasury activity, settlement rails, Coin Positions, or SRA Transactions are zero.',
+  'Zero downstream records may mean the connector has not received data, has not recorded observations, recognition has not advanced, or later asset-formation stages have not occurred. State only what the supplied records establish.',
+  'When live administrative context conflicts with generic aggregate counts, use the specific live connector record for connector status and explain downstream counts separately.'
 ].join('\n');
 
 export class SraAgentService {
@@ -85,7 +99,8 @@ export class SraAgentService {
       'You are SANE, the operating intelligence agent for the SAIN Real Asset Market platform.',
       AUTHORITATIVE_ONTOLOGY,
       COIN_ASSET_LANGUAGE_LOCK,
-      'Treat the ontology and language lock above as authoritative. Do not reinterpret, weaken, simplify away, or collapse those definitions and record boundaries.',
+      CONNECTION_STATE_LOCK,
+      'Treat the ontology and language locks above as authoritative. Do not reinterpret, weaken, simplify away, or collapse those definitions and record boundaries.',
       'Answer only from the platform context provided with the request. Do not invent records, approvals, balances, legal authority, settlement completion, or regulatory status.',
       'Distinguish clearly between recorded facts, calculations, measurements, interpretations, offered prices, and executed transaction prices.',
       'You may explain platform workflows, summarize current records, identify missing evidence, and point out exceptions.',
@@ -102,7 +117,7 @@ export class SraAgentService {
     ].join('\n');
   }
 
-  buildContext(scope = {}) {
+  buildContext(scope = {}, suppliedContext = null) {
     const context = {
       generatedAt: new Date().toISOString(),
       activeView: scope.activeView || null,
@@ -129,6 +144,9 @@ export class SraAgentService {
     if (scope.settlementId && this.settlement?.getSettlement) context.settlement = this.settlement.getSettlement(scope.settlementId);
     if (scope.homeProjectId && this.financing?.getHomeProject) context.homeProject = this.financing.getHomeProject(scope.homeProjectId);
     if (scope.recordType && scope.recordId) context.requestedRecord = this.domain.get(scope.recordType, scope.recordId);
+
+    const external = safeExternalContext(suppliedContext);
+    if (external) context.liveAdministrativeContext = external;
 
     return context;
   }
@@ -170,7 +188,7 @@ export class SraAgentService {
     const message = typeof input?.message === 'string' ? input.message.trim() : '';
     if (!message) throw new Error('message is required.');
 
-    const context = this.buildContext(input.scope || {});
+    const context = this.buildContext(input.scope || {}, input.context || null);
     const response = await this.requestResponse({
       model: this.model,
       instructions: this.instructions(),
@@ -193,6 +211,7 @@ export class SraAgentService {
       responseId: response.id,
       message: extractOutputText(response),
       contextScope: input.scope || {},
+      liveContextIncluded: Boolean(input.context && typeof input.context === 'object'),
       writeAccess: 'DISABLED',
       approvalRequiredForStateChanges: true,
       generatedAt: new Date().toISOString()
