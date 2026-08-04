@@ -11,6 +11,61 @@ function setSessionCookie(res, token) {
   res.setHeader('Set-Cookie', `sra_session=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=43200${secure}`);
 }
 function clearSessionCookie(res) { res.setHeader('Set-Cookie', 'sra_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0'); }
+function amount(value) { const parsed = Number(value); return Number.isFinite(parsed) ? Number(parsed.toFixed(2)) : 0; }
+function isCompleted(transaction) {
+  return ['COMPLETED', 'SETTLED', 'POSTED', 'EXECUTED', 'EVIDENCED', 'VERIFIED', 'CLOSED']
+    .some((state) => String(transaction.state || '').toUpperCase().includes(state));
+}
+function isPending(transaction) {
+  return ['PENDING', 'QUEUED', 'AUTHORIZED', 'SUBMITTED', 'PROCESSING', 'AVAILABLE']
+    .some((state) => String(transaction.state || '').toUpperCase().includes(state));
+}
+function participantVault(session, transactions = []) {
+  const identityKeys = new Set([session.id, session.universalAccountId].filter(Boolean));
+  const linked = transactions.filter((transaction) => [
+    transaction.participantId,
+    transaction.fromAccountId,
+    transaction.toAccountId
+  ].some((value) => value && identityKeys.has(value)));
+
+  let incoming = 0;
+  let outgoing = 0;
+  const activity = linked.map((transaction) => {
+    const completed = isCompleted(transaction);
+    const incomingMatch = transaction.toAccountId && identityKeys.has(transaction.toAccountId);
+    const outgoingMatch = transaction.fromAccountId && identityKeys.has(transaction.fromAccountId);
+    let direction = 'RECORDED';
+    if (incomingMatch && !outgoingMatch) direction = 'INCOMING';
+    if (outgoingMatch && !incomingMatch) direction = 'OUTGOING';
+    if (incomingMatch && outgoingMatch) direction = 'INTERNAL';
+    if (completed && direction === 'INCOMING') incoming += amount(transaction.amount);
+    if (completed && direction === 'OUTGOING') outgoing += amount(transaction.amount);
+    return { ...transaction, direction, completed };
+  });
+
+  const completed = activity.filter((transaction) => transaction.completed);
+  const pending = activity.filter(isPending);
+  const verified = activity.filter((transaction) => transaction.verified);
+
+  return {
+    accountId: session.universalAccountId,
+    participantId: session.id,
+    displayName: session.displayName,
+    activeCapacity: session.activeCapacity,
+    ownership: 'PARTICIPANT',
+    platformRole: 'INFRASTRUCTURE',
+    custodyState: 'NOT_INFERRED',
+    currency: 'USD',
+    recordedBalance: amount(incoming - outgoing),
+    incomingTotal: amount(incoming),
+    outgoingTotal: amount(outgoing),
+    transactionCount: activity.length,
+    completedTransactionCount: completed.length,
+    pendingTransactionCount: pending.length,
+    verifiedTransactionCount: verified.length,
+    transactions: activity.slice(0, 50)
+  };
+}
 
 export function createAccessRouter(marketplace, service = new AccessService()) {
   const router = Router();
@@ -31,6 +86,13 @@ export function createAccessRouter(marketplace, service = new AccessService()) {
       const session = await service.getSession(readCookie(req, 'sra_session'));
       res.json({ authenticated: Boolean(session), session });
     } catch (error) { res.status(500).json({ error: 'Session lookup failed.' }); }
+  });
+  router.get('/vault', async (req, res) => {
+    try {
+      const session = await service.getSession(readCookie(req, 'sra_session'));
+      if (!session) return res.status(401).json({ error: 'Authentication required.' });
+      return res.json({ vault: participantVault(session, marketplace.transactions || []) });
+    } catch (error) { return res.status(500).json({ error: 'Asset Vault lookup failed.' }); }
   });
   router.post('/signup', async (req, res) => {
     try { const result = await service.signup(req.body); setSessionCookie(res, result.token); res.status(201).json({ authenticated: true, session: result.session }); }
@@ -59,4 +121,4 @@ export function createAccessRouter(marketplace, service = new AccessService()) {
   });
   return router;
 }
-export { readCookie };
+export { readCookie, participantVault };
