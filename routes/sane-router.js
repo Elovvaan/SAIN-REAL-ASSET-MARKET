@@ -5,7 +5,7 @@ function actorId(req) {
   return req.headers['x-sra-actor-id'] || req.body?.actorId || null;
 }
 
-export function createSaneRouter(service = new SaneSkillService(), edxOperationsService = null) {
+export function createSaneRouter(service = new SaneSkillService(), edxOperationsService = null, sraAgentService = null) {
   const router = Router();
 
   router.get('/skills', (req, res) => {
@@ -18,6 +18,25 @@ export function createSaneRouter(service = new SaneSkillService(), edxOperations
       res.json(service.dispatch(req.body));
     } catch (error) {
       res.status(400).json({ error: error.message });
+    }
+  });
+
+  router.get('/agent/status', (_req, res) => {
+    res.json({
+      agent: 'SANE',
+      available: Boolean(sraAgentService?.available()),
+      model: sraAgentService?.model || null,
+      writeAccess: 'DISABLED',
+      approvalRequiredForStateChanges: true
+    });
+  });
+
+  router.post('/agent/chat', async (req, res) => {
+    if (!sraAgentService) return res.status(503).json({ error: 'SRA agent service is unavailable.' });
+    try {
+      return res.json(await sraAgentService.chat(req.body || {}));
+    } catch (error) {
+      return res.status(error.statusCode || 400).json({ error: error.message });
     }
   });
 
