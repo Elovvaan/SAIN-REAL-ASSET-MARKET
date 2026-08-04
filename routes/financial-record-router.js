@@ -1,4 +1,5 @@
 import express from 'express';
+import { InstrumentEngineService } from '../services/instrument-engine-service.js';
 
 function fail(res, error) {
   return res.status(400).json({ error: error?.message || 'Financial record request failed.' });
@@ -6,13 +7,14 @@ function fail(res, error) {
 
 export function createFinancialRecordRouter(service) {
   const router = express.Router();
+  const instrumentEngine = new InstrumentEngineService(service.persistentDomain);
 
   router.get('/', (req, res) => {
     const financialRecords = service.list({ state: req.query.state, accountId: req.query.accountId, classification: req.query.classification });
     res.json({ financialRecords, count: financialRecords.length });
   });
 
-  router.get('/summary', (_req, res) => res.json(service.summary()));
+  router.get('/summary', (_req, res) => res.json({ ...service.summary(), instrumentEngine: instrumentEngine.summary(), phase: 5, layer: 'INSTRUMENT_ENGINE' }));
   router.get('/accounts', (_req, res) => res.json({ accounts: service.listAccounts() }));
   router.get('/accounts/:accountId', (req, res) => {
     const account = service.getAccount(req.params.accountId);
@@ -45,6 +47,29 @@ export function createFinancialRecordRouter(service) {
     try {
       const coinPosition = await service.changeCoinState(req.params.coinPositionId, req.body || {}, req.headers['x-sra-actor-id'] || 'SRA_PLATFORM');
       return res.json({ coinPosition });
+    } catch (error) { return fail(res, error); }
+  });
+
+  router.get('/instruments', (req, res) => {
+    const instruments = instrumentEngine.list({ state: req.query.state, instrumentType: req.query.instrumentType, coinPositionId: req.query.coinPositionId });
+    return res.json({ instruments, count: instruments.length });
+  });
+  router.get('/instruments/summary', (_req, res) => res.json(instrumentEngine.summary()));
+  router.get('/instruments/:instrumentId', (req, res) => {
+    const instrument = instrumentEngine.get(req.params.instrumentId);
+    if (!instrument) return res.status(404).json({ error: 'Instrument not found.' });
+    return res.json({ instrument });
+  });
+  router.post('/instruments/from-coin-position/:coinPositionId', async (req, res) => {
+    try {
+      const result = await instrumentEngine.createFromCoinPosition(req.params.coinPositionId, req.body || {}, req.headers['x-sra-actor-id'] || 'SAIN_AGENT');
+      return res.status(result.created ? 201 : 200).json(result);
+    } catch (error) { return fail(res, error); }
+  });
+  router.post('/instruments/:instrumentId/state', async (req, res) => {
+    try {
+      const instrument = await instrumentEngine.changeState(req.params.instrumentId, req.body || {}, req.headers['x-sra-actor-id'] || 'SRA_PLATFORM');
+      return res.json({ instrument });
     } catch (error) { return fail(res, error); }
   });
 
