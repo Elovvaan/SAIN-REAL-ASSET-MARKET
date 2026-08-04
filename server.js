@@ -1,10 +1,12 @@
 import express from 'express';
 import { createApp } from './app.js';
+import { createUniversalAccountBlockchainRouter } from './routes/universal-account-blockchain-router.js';
 
 const port = Number(process.env.PORT) || 3000;
 const bootstrap = express();
 
 let platformApp = null;
+let platformExtensions = null;
 let startupState = 'STARTING';
 let startupError = null;
 let startedAt = new Date().toISOString();
@@ -33,6 +35,11 @@ bootstrap.get('/api/startup', (_req, res) => {
 });
 
 bootstrap.use((req, res, next) => {
+  if (platformExtensions && (
+    req.path.startsWith('/api/blockchain-accounts')
+    || (req.method === 'POST' && req.path === '/api/access/funding/crypto-instructions')
+  )) return platformExtensions(req, res, next);
+
   if (platformApp) return platformApp(req, res, next);
 
   return res.status(503).json({
@@ -49,6 +56,7 @@ bootstrap.listen(port, '0.0.0.0', () => {
 
 try {
   const created = await createApp();
+  platformExtensions = await createUniversalAccountBlockchainRouter(created.persistentDomain, created.database);
   platformApp = created.app;
   startupState = 'READY';
   startupError = null;
