@@ -1,8 +1,64 @@
+import express from 'express';
 import { createApp } from './app.js';
 
 const port = Number(process.env.PORT) || 3000;
-const { app } = await createApp();
+const bootstrap = express();
 
-app.listen(port, '0.0.0.0', () => {
-  console.log(`SRA EDX Stabilization Priority 1 is running on port ${port}`);
+let platformApp = null;
+let startupState = 'STARTING';
+let startupError = null;
+let startedAt = new Date().toISOString();
+
+bootstrap.get('/api/health', (req, res, next) => {
+  if (platformApp) return platformApp(req, res, next);
+
+  return res.status(200).json({
+    status: startupState === 'FAILED' ? 'degraded' : 'starting',
+    service: 'SAIN Real Asset Market',
+    bootstrap: true,
+    startupState,
+    startupError,
+    startedAt,
+    timestamp: new Date().toISOString()
+  });
 });
+
+bootstrap.get('/api/startup', (_req, res) => {
+  return res.status(startupState === 'FAILED' ? 500 : 200).json({
+    startupState,
+    startupError,
+    startedAt,
+    timestamp: new Date().toISOString()
+  });
+});
+
+bootstrap.use((req, res, next) => {
+  if (platformApp) return platformApp(req, res, next);
+
+  return res.status(503).json({
+    error: startupState === 'FAILED'
+      ? 'The platform failed during initialization. Check /api/startup.'
+      : 'The platform is still initializing.',
+    startupState
+  });
+});
+
+bootstrap.listen(port, '0.0.0.0', () => {
+  console.log(`SRA bootstrap server is listening on port ${port}`);
+});
+
+try {
+  const created = await createApp();
+  platformApp = created.app;
+  startupState = 'READY';
+  startupError = null;
+  console.log('SRA platform initialization completed.');
+} catch (error) {
+  startupState = 'FAILED';
+  startupError = {
+    name: error?.name || 'Error',
+    message: error?.message || 'Unknown startup error',
+    stack: process.env.NODE_ENV === 'production' ? undefined : error?.stack
+  };
+  console.error('SRA platform initialization failed:', error);
+}
