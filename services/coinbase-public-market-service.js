@@ -19,9 +19,10 @@ function finiteNumber(value) {
 }
 
 export class CoinbasePublicMarketService {
-  constructor({ observationLayerService, WebSocketImpl = WebSocket, environment = process.env, logger = console } = {}) {
+  constructor({ observationLayerService, transactionAssetPipeline = null, WebSocketImpl = WebSocket, environment = process.env, logger = console } = {}) {
     if (!observationLayerService?.observe) throw new Error('observationLayerService is required.');
     this.observations = observationLayerService;
+    this.transactionAssetPipeline = transactionAssetPipeline;
     this.WebSocketImpl = WebSocketImpl;
     this.environment = environment;
     this.logger = logger;
@@ -46,6 +47,9 @@ export class CoinbasePublicMarketService {
     this.recordedTrades = 0;
     this.duplicateTrades = 0;
     this.throttledTrades = 0;
+    this.pipelineProcessedTrades = 0;
+    this.pipelineFailedTrades = 0;
+    this.lastPipelineError = null;
   }
 
   status() {
@@ -69,6 +73,10 @@ export class CoinbasePublicMarketService {
       recordedTrades: this.recordedTrades,
       duplicateTrades: this.duplicateTrades,
       throttledTrades: this.throttledTrades,
+      pipelineProcessedTrades: this.pipelineProcessedTrades,
+      pipelineFailedTrades: this.pipelineFailedTrades,
+      lastPipelineError: this.lastPipelineError,
+      transactionAssetPipeline: this.transactionAssetPipeline?.status?.() || null,
       reconnectAttempt: this.reconnectAttempt,
       generatedAt: now()
     };
@@ -171,6 +179,19 @@ export class CoinbasePublicMarketService {
     }
   }
 
+  async processAssetPipeline(observation) {
+    if (!this.transactionAssetPipeline?.processObservation || !observation) return;
+    try {
+      const result = await this.transactionAssetPipeline.processObservation(observation);
+      if (result?.processed) this.pipelineProcessedTrades += 1;
+      this.lastPipelineError = null;
+    } catch (error) {
+      this.pipelineFailedTrades += 1;
+      this.lastPipelineError = { message: error?.message || String(error), observationId: observation.observationId, at: now() };
+      this.logger.error?.('Coinbase trade recorded but downstream SRA asset pipeline failed:', error);
+    }
+  }
+
   async recordTrade(trade, envelope, eventType) {
     const tradeId = String(trade.trade_id || '').trim();
     const productId = String(trade.product_id || '').trim().toUpperCase();
@@ -201,6 +222,7 @@ export class CoinbasePublicMarketService {
     this.lastTradeAt = trade.time || envelope.timestamp || now();
     if (result.created) this.recordedTrades += 1;
     else this.duplicateTrades += 1;
+    await this.processAssetPipeline(result.observation);
   }
 }
 
