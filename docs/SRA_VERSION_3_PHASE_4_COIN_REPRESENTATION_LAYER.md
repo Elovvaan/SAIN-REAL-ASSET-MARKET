@@ -24,6 +24,31 @@ The Coin Position is not detached from its source. It records:
 - source and evidence lineage;
 - representation and status history.
 
+## Governing financial-asset rule
+
+An eligible Financial Record represented as an SRA Coin Position is a platform-recognized digital financial asset. Its existence as a financial asset does not depend on whether it has already been listed, offered, transferred, or traded.
+
+The SRA Coin Position is the digital financial-asset representation of the recorded right, obligation, receivable, instrument, participation position, ownership position, settlement entitlement, or other supported financial relationship contained in its Financial Record.
+
+The platform and SANE agent must not reduce an SRA Coin Position to merely:
+
+- a receipt;
+- a database entry;
+- a symbolic record;
+- an informational reference;
+- or a non-asset awaiting market activity.
+
+Trading does not create the asset's underlying existence. A completed trade establishes a new transaction price, consideration record, ownership event, and market-history event for an asset that already exists in SRA.
+
+The following values remain separate and traceable:
+
+1. the original recorded source or transaction amount;
+2. the current SRA Verified Value;
+3. the offered price, when applicable;
+4. the executed trade price and consideration, when a trade completes.
+
+A later trade price does not erase the source amount or automatically replace Verified Value. The completed trade becomes new evidence for recognition, ownership, transaction history, and any later Verified Value review.
+
 ## Core records
 
 ### Coin Account
@@ -32,7 +57,7 @@ A Coin Account belongs to the same recognized subject and Financial Record Accou
 
 ### Coin Position
 
-A Coin Position is the digital expression of one Financial Record under a stated conversion rule.
+A Coin Position is the digital expression of one Financial Record under a stated conversion rule and is the platform-recognized digital financial asset produced by that representation.
 
 The default rule is:
 
@@ -66,4 +91,4 @@ POST /api/financial-records/coin-positions/:coinPositionId/state
 
 ## Phase boundary
 
-Phase 4 creates the common coin representation. It does not create an instrument, publish an offering, post a general-ledger entry, transfer a coin position, settle a transaction, or expose a public blockchain token. Those functions belong to later locked phases.
+Phase 4 creates and recognizes the common digital financial-asset representation. It does not by itself create a separate instrument, publish an offering, post a general-ledger entry, transfer a Coin Position, settle a transaction, or expose a public blockchain token. Those are later functions and do not limit or negate the Coin Position's status as an SRA digital financial asset.
