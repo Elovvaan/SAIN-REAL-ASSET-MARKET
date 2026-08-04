@@ -10,60 +10,27 @@ function firstValue(...values) {
 }
 
 function occurredAt(record) {
-  return firstValue(
-    record.occurredAt,
-    record.completedAt,
-    record.settledAt,
-    record.executedAt,
-    record.postedAt,
-    record.createdAt,
-    record.updatedAt
-  ) || null;
+  return firstValue(record.occurredAt, record.completedAt, record.settledAt, record.executedAt, record.postedAt, record.createdAt, record.updatedAt) || null;
 }
 
 function transactionAmount(record) {
-  return number(firstValue(
-    record.amount,
-    record.settlementAmount,
-    record.executedAmount,
-    record.value,
-    record.payload?.amount,
-    record.payload?.settlementAmount,
-    record.payload?.value
-  ));
+  return number(firstValue(record.amount, record.settlementAmount, record.executedAmount, record.value, record.totalDebits, record.payload?.amount, record.payload?.settlementAmount, record.payload?.value));
 }
 
-function transactionCurrency(record) {
-  return firstValue(record.currency, record.payload?.currency, 'USD');
-}
-
-function transactionState(record) {
-  return String(firstValue(record.state, record.status, record.eventType, 'RECORDED')).toUpperCase();
-}
-
-function transactionKind(record, sourceType) {
-  return firstValue(record.transactionType, record.kind, record.eventType, record.type, sourceType);
-}
-
+function transactionCurrency(record) { return firstValue(record.currency, record.payload?.currency, 'USD'); }
+function transactionState(record) { return String(firstValue(record.state, record.status, record.eventType, 'RECORDED')).toUpperCase(); }
+function transactionKind(record, sourceType) { return firstValue(record.transactionType, record.kind, record.eventType, record.type, sourceType); }
 function transactionId(record, sourceType, index) {
-  return firstValue(
-    record.transactionId,
-    record.entryId,
-    record.settlementId,
-    record.settlementRecordId,
-    record.instructionId,
-    record.paymentOrderId,
-    record.eventId,
-    record.id,
-    `${sourceType}-${index + 1}`
-  );
+  return firstValue(record.transactionId, record.entryId, record.settlementId, record.settlementRecordId, record.instructionId, record.paymentOrderId, record.eventId, record.id, `${sourceType}-${index + 1}`);
 }
 
 function normalizeTransaction(record, sourceType, index) {
+  const kind = transactionKind(record, sourceType);
+  const directFeePayment = kind === 'PLATFORM_FEE_PAYMENT_CONFIRMED';
   return {
     transactionId: transactionId(record, sourceType, index),
     sourceType,
-    kind: transactionKind(record, sourceType),
+    kind,
     state: transactionState(record),
     amount: transactionAmount(record),
     currency: transactionCurrency(record),
@@ -71,7 +38,7 @@ function normalizeTransaction(record, sourceType, index) {
     assetId: firstValue(record.assetId, record.payload?.assetId, null),
     projectId: firstValue(record.projectId, record.payload?.projectId, null),
     participantId: firstValue(record.participantId, record.ownerId, record.payload?.participantId, null),
-    fromAccountId: firstValue(record.fromAccountId, record.debitAccountId, record.payload?.fromAccountId, null),
+    fromAccountId: directFeePayment ? null : firstValue(record.fromAccountId, record.debitAccountId, record.payload?.fromAccountId, null),
     toAccountId: firstValue(record.toAccountId, record.creditAccountId, record.payload?.toAccountId, null),
     referenceId: firstValue(record.referenceId, record.externalReference, record.payload?.referenceId, null),
     verified: sourceType === RECORD_TYPES.VERIFIED_MARKET_EVENT || Boolean(record.verifiedAt || record.evidenceId || record.evidenceReferences?.length),
@@ -80,67 +47,35 @@ function normalizeTransaction(record, sourceType, index) {
 }
 
 function isCompleted(transaction) {
-  return ['COMPLETED', 'SETTLED', 'POSTED', 'EXECUTED', 'EVIDENCED', 'VERIFIED', 'CLOSED']
-    .some((state) => transaction.state.includes(state));
+  return ['COMPLETED', 'SETTLED', 'POSTED', 'EXECUTED', 'EVIDENCED', 'VERIFIED', 'CLOSED'].some((state) => transaction.state.includes(state));
 }
-
 function isPending(transaction) {
-  return ['PENDING', 'QUEUED', 'AUTHORIZED', 'SUBMITTED', 'PROCESSING', 'AVAILABLE']
-    .some((state) => transaction.state.includes(state));
+  return ['PENDING', 'QUEUED', 'AUTHORIZED', 'SUBMITTED', 'PROCESSING', 'AVAILABLE'].some((state) => transaction.state.includes(state));
 }
 
 export class PersistentMarketplaceService {
-  constructor(persistentDomain, seed = {}) {
-    this.persistentDomain = persistentDomain;
-    this.seed = seed;
-  }
-
-  get assets() {
-    return this.persistentDomain.list(RECORD_TYPES.ASSET_ACCOUNT);
-  }
-
-  get projects() {
-    return this.persistentDomain.list(RECORD_TYPES.PROJECT_ACCOUNT);
-  }
-
-  get completionWatch() {
-    return Array.isArray(this.seed.completionWatch) ? this.seed.completionWatch : [];
-  }
-
+  constructor(persistentDomain, seed = {}) { this.persistentDomain = persistentDomain; this.seed = seed; }
+  get assets() { return this.persistentDomain.list(RECORD_TYPES.ASSET_ACCOUNT); }
+  get projects() { return this.persistentDomain.list(RECORD_TYPES.PROJECT_ACCOUNT); }
+  get completionWatch() { return Array.isArray(this.seed.completionWatch) ? this.seed.completionWatch : []; }
   get activity() {
-    const lifecycle = this.persistentDomain.list(RECORD_TYPES.LIFECYCLE_EVENT)
-      .slice(-20)
-      .reverse()
-      .map((event) => ({
-        time: new Date(event.occurredAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-        kind: event.eventType,
-        label: event.eventType.replaceAll('_', ' '),
-        project: event.objectType === 'PROJECT_ACCOUNT' ? event.objectId : event.payload?.projectId || null,
-        amount: event.payload?.amount || null
-      }));
+    const lifecycle = this.persistentDomain.list(RECORD_TYPES.LIFECYCLE_EVENT).slice(-20).reverse().map((event) => ({
+      time: new Date(event.occurredAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+      kind: event.eventType,
+      label: event.eventType.replaceAll('_', ' '),
+      project: event.objectType === 'PROJECT_ACCOUNT' ? event.objectId : event.payload?.projectId || null,
+      amount: event.payload?.amount || null
+    }));
     return lifecycle.length ? lifecycle : (Array.isArray(this.seed.activity) ? this.seed.activity : []);
   }
-
   get transactions() {
-    const sources = [
-      RECORD_TYPES.LEDGER_ENTRY,
-      RECORD_TYPES.SRA_SETTLEMENT,
-      RECORD_TYPES.SRA_SETTLEMENT_RECORD,
-      RECORD_TYPES.SETTLEMENT_RAIL_INSTRUCTION,
-      RECORD_TYPES.TREASURY_PAYMENT_ORDER,
-      RECORD_TYPES.VERIFIED_MARKET_EVENT
-    ];
-
-    return sources
-      .flatMap((sourceType) => this.persistentDomain.list(sourceType)
-        .map((record, index) => normalizeTransaction(record, sourceType, index)))
-      .sort((left, right) => {
-        const leftTime = left.occurredAt ? new Date(left.occurredAt).getTime() : 0;
-        const rightTime = right.occurredAt ? new Date(right.occurredAt).getTime() : 0;
-        return rightTime - leftTime;
-      });
+    const sources = [RECORD_TYPES.LEDGER_ENTRY, RECORD_TYPES.SRA_SETTLEMENT, RECORD_TYPES.SRA_SETTLEMENT_RECORD, RECORD_TYPES.SETTLEMENT_RAIL_INSTRUCTION, RECORD_TYPES.TREASURY_PAYMENT_ORDER, RECORD_TYPES.VERIFIED_MARKET_EVENT];
+    return sources.flatMap((sourceType) => this.persistentDomain.list(sourceType).map((record, index) => normalizeTransaction(record, sourceType, index))).sort((left, right) => {
+      const leftTime = left.occurredAt ? new Date(left.occurredAt).getTime() : 0;
+      const rightTime = right.occurredAt ? new Date(right.occurredAt).getTime() : 0;
+      return rightTime - leftTime;
+    });
   }
-
   get transactionMarket() {
     const transactions = this.transactions;
     const completed = transactions.filter(isCompleted);
@@ -150,7 +85,6 @@ export class PersistentMarketplaceService {
     const verifiedVolume = verified.reduce((total, transaction) => total + transaction.amount, 0);
     const averageTransactionSize = completed.length ? totalVolume / completed.length : 0;
     const latestOccurredAt = transactions.find((transaction) => transaction.occurredAt)?.occurredAt || null;
-
     const volumeByKind = transactions.reduce((summary, transaction) => {
       const key = transaction.kind || 'UNCLASSIFIED';
       if (!summary[key]) summary[key] = { count: 0, volume: 0 };
@@ -158,7 +92,6 @@ export class PersistentMarketplaceService {
       summary[key].volume += transaction.amount;
       return summary;
     }, {});
-
     return {
       status: transactions.length ? 'ACTIVE' : 'READY',
       transactionCount: transactions.length,
@@ -173,48 +106,16 @@ export class PersistentMarketplaceService {
       recentTransactions: transactions.slice(0, 25)
     };
   }
-
-  get marketStatus() {
-    return 'LIVE';
-  }
-
-  get verifiedValue() {
-    return this.assets.reduce((total, asset) => total + number(asset.verifiedValue ?? asset.value), 0);
-  }
-
-  get projectedMarketplaceGain() {
-    return this.projects.reduce((total, project) => total + number(project.projectedGain), 0);
-  }
-
-  get activeProjects() {
-    return this.projects.filter((project) => project.status !== 'CLOSED').length;
-  }
-
-  get participatingAssets() {
-    return this.assets.length;
-  }
-
-  get openPositions() {
-    return this.persistentDomain.list(RECORD_TYPES.PARTICIPATION_POSITION)
-      .filter((position) => !['CLOSED', 'SETTLED', 'DISCHARGED'].includes(position.state)).length;
-  }
-
-  get completionCandidates() {
-    return this.projects.filter((project) => ['WATCH', 'ELIGIBLE', 'PENDING'].includes(project.completionState)).length;
-  }
-
-  get instrumentsActive() {
-    return this.projects.filter((project) => project.trueBill && project.trueBill.state !== 'CLOSED').length;
-  }
-
-  get completionNeed() {
-    return this.completionWatch.reduce((total, item) => total + number(item.gap), 0);
-  }
-
-  get completionReturn() {
-    return this.completionWatch.reduce((total, item) => total + number(item.platformReturn), 0);
-  }
-
+  get marketStatus() { return 'LIVE'; }
+  get verifiedValue() { return this.assets.reduce((total, asset) => total + number(asset.verifiedValue ?? asset.value), 0); }
+  get projectedMarketplaceGain() { return this.projects.reduce((total, project) => total + number(project.projectedGain), 0); }
+  get activeProjects() { return this.projects.filter((project) => project.status !== 'CLOSED').length; }
+  get participatingAssets() { return this.assets.length; }
+  get openPositions() { return this.persistentDomain.list(RECORD_TYPES.PARTICIPATION_POSITION).filter((position) => !['CLOSED', 'SETTLED', 'DISCHARGED'].includes(position.state)).length; }
+  get completionCandidates() { return this.projects.filter((project) => ['WATCH', 'ELIGIBLE', 'PENDING'].includes(project.completionState)).length; }
+  get instrumentsActive() { return this.projects.filter((project) => project.trueBill && project.trueBill.state !== 'CLOSED').length; }
+  get completionNeed() { return this.completionWatch.reduce((total, item) => total + number(item.gap), 0); }
+  get completionReturn() { return this.completionWatch.reduce((total, item) => total + number(item.platformReturn), 0); }
   snapshot() {
     return {
       marketStatus: this.marketStatus,
