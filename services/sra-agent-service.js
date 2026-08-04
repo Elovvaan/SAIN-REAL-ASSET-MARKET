@@ -1,9 +1,19 @@
-import OpenAI from 'openai';
-
 const DEFAULT_MODEL = process.env.OPENAI_MODEL || 'gpt-5.1';
+const RESPONSES_API_URL = 'https://api.openai.com/v1/responses';
 
 function compact(value, maxItems = 20) {
   return Array.isArray(value) ? value.slice(0, maxItems) : value;
+}
+
+function extractOutputText(response) {
+  if (typeof response?.output_text === 'string') return response.output_text;
+  const parts = [];
+  for (const item of response?.output || []) {
+    for (const content of item?.content || []) {
+      if (content?.type === 'output_text' && typeof content.text === 'string') parts.push(content.text);
+    }
+  }
+  return parts.join('\n').trim();
 }
 
 export class SraAgentService {
@@ -19,7 +29,8 @@ export class SraAgentService {
     homeFinancingService,
     settlementService,
     model = DEFAULT_MODEL,
-    client = null
+    client = null,
+    fetchImpl = globalThis.fetch
   }) {
     this.domain = persistentDomain;
     this.marketplace = marketplace;
@@ -32,11 +43,12 @@ export class SraAgentService {
     this.financing = homeFinancingService;
     this.settlement = settlementService;
     this.model = model;
-    this.client = client || (process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null);
+    this.client = client;
+    this.fetch = fetchImpl;
   }
 
   available() {
-    return Boolean(this.client);
+    return Boolean(this.client || process.env.OPENAI_API_KEY);
   }
 
   instructions() {
@@ -83,18 +95,45 @@ export class SraAgentService {
     return context;
   }
 
-  async chat(input) {
-    if (!this.client) {
+  async requestResponse(payload) {
+    if (this.client?.responses?.create) return this.client.responses.create(payload);
+
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
       const error = new Error('SRA agent is unavailable because OPENAI_API_KEY is not configured in the runtime environment.');
       error.statusCode = 503;
       throw error;
     }
+    if (typeof this.fetch !== 'function') {
+      const error = new Error('SRA agent is unavailable because the runtime does not provide fetch.');
+      error.statusCode = 503;
+      throw error;
+    }
 
+    const result = await this.fetch(RESPONSES_API_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const response = await result.json().catch(() => ({}));
+    if (!result.ok) {
+      const error = new Error(response?.error?.message || `OpenAI request failed with status ${result.status}.`);
+      error.statusCode = result.status >= 500 ? 502 : 400;
+      throw error;
+    }
+    return response;
+  }
+
+  async chat(input) {
     const message = typeof input?.message === 'string' ? input.message.trim() : '';
     if (!message) throw new Error('message is required.');
 
     const context = this.buildContext(input.scope || {});
-    const response = await this.client.responses.create({
+    const response = await this.requestResponse({
       model: this.model,
       instructions: this.instructions(),
       input: [
@@ -113,7 +152,7 @@ export class SraAgentService {
       agent: 'SANE',
       model: this.model,
       responseId: response.id,
-      message: response.output_text || '',
+      message: extractOutputText(response),
       contextScope: input.scope || {},
       writeAccess: 'DISABLED',
       approvalRequiredForStateChanges: true,
