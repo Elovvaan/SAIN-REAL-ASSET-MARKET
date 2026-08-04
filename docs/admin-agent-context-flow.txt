@@ -1,0 +1,3 @@
+Admin summary -> input.context -> liveAdministrativeContext -> SAIN response
+
+Connector status is authoritative for the connector. Downstream zero counts remain separate facts.
