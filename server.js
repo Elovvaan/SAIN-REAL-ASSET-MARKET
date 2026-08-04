@@ -48,8 +48,10 @@ bootstrap.get('/api/marketplace-listings/status', (_req, res) => {
 
 bootstrap.get('/api/marketplace-listings', (req, res) => {
   if (!marketplaceListingService) return res.status(503).json({ error: 'Marketplace Listing Layer is still initializing.' });
-  const listings = marketplaceListingService.list({ state: req.query.state, instrumentId: req.query.instrumentId });
-  return res.json({ listings, count: listings.length });
+  return res.json(marketplaceListingService.page(
+    { state: req.query.state, instrumentId: req.query.instrumentId },
+    { page: req.query.page, limit: req.query.limit }
+  ));
 });
 
 bootstrap.use(async (req, res, next) => {
