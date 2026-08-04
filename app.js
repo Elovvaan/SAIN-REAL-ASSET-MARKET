@@ -137,7 +137,7 @@ export async function createApp(options = {}) {
     treasuryService: platformTreasuryService,
     financialStatementsService,
     assetServicingService,
-    institutionBillingService,
+    institutionBillingService: institutionalBillingService,
     economicsService: platformEconomicsService,
     homeFinancingService,
     settlementService: sraSettlementService
