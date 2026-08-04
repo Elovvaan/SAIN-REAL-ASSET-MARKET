@@ -30,6 +30,7 @@ import { createEdxEnterpriseSdkRouter } from './routes/edx-enterprise-sdk-router
 import { createHomeFinancingRouter } from './routes/home-financing-router.js';
 import { createSraSettlementRouter } from './routes/sra-settlement-router.js';
 import { createObservationLayerRouter } from './routes/observation-layer-router.js';
+import { createFinancialRecordRouter } from './routes/financial-record-router.js';
 import { AccessService } from './services/access-service.js';
 import { CreativeFinanceService } from './services/creative-finance-service.js';
 import { ValueIntelligenceService } from './services/value-intelligence-service.js';
@@ -56,6 +57,7 @@ import { AssetServicingService } from './services/asset-servicing-service.js';
 import { PlatformTreasuryService } from './services/platform-treasury-service.js';
 import { FinancialStatementsService } from './services/financial-statements-service.js';
 import { ObservationLayerService } from './services/observation-layer-service.js';
+import { FinancialRecordService } from './services/financial-record-service.js';
 import { DatabaseService } from './services/database-service.js';
 import { PersistentDomainService, RECORD_TYPES } from './services/persistent-domain-service.js';
 import { PersistentMarketplaceService } from './services/persistent-marketplace-service.js';
@@ -112,6 +114,7 @@ export async function createApp(options = {}) {
   const creativeFinanceService = new CreativeFinanceService(marketplace, persistentDomain); await creativeFinanceService.initialize();
   const valueIntelligenceService = new ValueIntelligenceService(marketplace, persistentDomain); await valueIntelligenceService.initialize();
   const observationLayerService = new ObservationLayerService(persistentDomain);
+  const financialRecordService = new FinancialRecordService(persistentDomain);
   const edxConnectionService = new EdxConnectionService(persistentDomain);
   const edxPermissionService = new EdxPermissionService(persistentDomain);
   const edxExtractionService = new EdxExtractionService(persistentDomain, edxPermissionService);
@@ -159,6 +162,7 @@ export async function createApp(options = {}) {
   app.use('/api/platform-treasury', createPlatformTreasuryRouter(platformTreasuryService));
   app.use('/api/financial-statements', createFinancialStatementsRouter(financialStatementsService));
   app.use('/api/observations', createObservationLayerRouter(observationLayerService));
+  app.use('/api/financial-records', createFinancialRecordRouter(financialRecordService));
   app.use('/api/onboarding', onboardingRouter);
   app.use('/api/custody', createCustodyRouter());
   app.use('/api/sane', createSaneRouter(undefined, saneEdxOperationsService, sraAgentService));
@@ -177,7 +181,7 @@ export async function createApp(options = {}) {
   app.use('/api/sra-settlement', createSraSettlementRouter(sraSettlementService));
 
   app.get('/api/marketplace', (_req, res) => res.json(marketplace.snapshot()));
-  app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'SAIN Real Asset Market', version: 3, phase: 1 }));
+  app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'SAIN Real Asset Market', version: 3, phase: 3 }));
 
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api/')) return next();
@@ -187,5 +191,5 @@ export async function createApp(options = {}) {
 
   app.use((req, res) => res.status(404).json({ error: 'Not found.' }));
 
-  return { app, database, persistentDomain, marketplace, observationLayerService };
+  return { app, database, persistentDomain, marketplace, observationLayerService, financialRecordService };
 }
