@@ -10,6 +10,8 @@ export const RECORD_TYPES = Object.freeze({
   PROJECT_ACCOUNT: 'PROJECT_ACCOUNT',
   HOME_PROJECT: 'HOME_PROJECT',
   FUNDING_PLAN: 'FUNDING_PLAN',
+  FUNDING_INSTRUCTION: 'FUNDING_INSTRUCTION',
+  PAYMENT_RECEIPT: 'PAYMENT_RECEIPT',
   SRA_SETTLEMENT: 'SRA_SETTLEMENT',
   SRA_SETTLEMENT_RECORD: 'SRA_SETTLEMENT_RECORD',
   HOME_PARTICIPATION_PLAN: 'HOME_PARTICIPATION_PLAN',
@@ -69,7 +71,7 @@ export const RECORD_TYPES = Object.freeze({
 });
 
 function recordId(record) {
-  return record?.id || record?.applicationId || record?.evidencePackageId || record?.institutionalReviewId || record?.assetId || record?.projectId || record?.homeProjectId || record?.fundingPlanId || record?.settlementId || record?.settlementRecordId || record?.planId || record?.commitmentId || record?.adapterId || record?.instructionId || record?.connectionId || record?.paymentOrderId || record?.statementId || record?.feeCode || record?.scheduleId || record?.chargeId || record?.invoiceId || record?.accountId || record?.entryId || record?.profileId || record?.usageEventId || record?.billingRunId || record?.servicingAccountId || record?.obligationId || record?.servicingEventId || record?.forecastId || record?.exceptionId || record?.periodId || record?.statementSnapshotId || record?.offeringId || record?.subscriptionId || record?.packageId || record?.positionId || record?.structureId || record?.signalId || record?.eventId || record?.instrumentId || record?.connectorDefinitionId || record?.policyId || record?.extractionRequestId || record?.extractionResultId || record?.normalizedRecordId || record?.snapshotId || record?.valuePackageId || record?.publicationDecisionId || record?.projectionId || record?.intelligenceReportId || record?.sdkClientId || record?.webhookSubscriptionId || record?.eventStreamSubscriptionId || record?.outboundEventId || null;
+  return record?.id || record?.applicationId || record?.evidencePackageId || record?.institutionalReviewId || record?.assetId || record?.projectId || record?.homeProjectId || record?.fundingPlanId || record?.fundingInstructionId || record?.paymentReceiptId || record?.settlementId || record?.settlementRecordId || record?.planId || record?.commitmentId || record?.adapterId || record?.instructionId || record?.connectionId || record?.paymentOrderId || record?.statementId || record?.feeCode || record?.scheduleId || record?.chargeId || record?.invoiceId || record?.accountId || record?.entryId || record?.profileId || record?.usageEventId || record?.billingRunId || record?.servicingAccountId || record?.obligationId || record?.servicingEventId || record?.forecastId || record?.exceptionId || record?.periodId || record?.statementSnapshotId || record?.offeringId || record?.subscriptionId || record?.packageId || record?.positionId || record?.structureId || record?.signalId || record?.eventId || record?.instrumentId || record?.connectorDefinitionId || record?.policyId || record?.extractionRequestId || record?.extractionResultId || record?.normalizedRecordId || record?.snapshotId || record?.valuePackageId || record?.publicationDecisionId || record?.projectionId || record?.intelligenceReportId || record?.sdkClientId || record?.webhookSubscriptionId || record?.eventStreamSubscriptionId || record?.outboundEventId || null;
 }
 
 export class PersistentDomainService {
