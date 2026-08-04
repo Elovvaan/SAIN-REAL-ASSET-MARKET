@@ -3,7 +3,7 @@ const capacityCopy={
   ASSET_PROVIDER:{label:'Asset Provider',description:'Bring productive assets through V4V, manage Asset Accounts, and create projects.',actions:[['Start V4V','Present a productive asset and private evidence.','onboarding'],['My Asset Accounts','Open assets controlled by this identity.','assets'],['My Projects','Track projects, Verified Value, and completion.','projects']]},
   MARKET_PROFESSIONAL:{label:'Market Professional',description:'Offer capital, services, materials, equipment, or contract capacity.',actions:[['Marketplace','Find opportunities requiring your capacity.','marketplace'],['My Positions','Track commitments, deployment, and settlement.','positions'],['Projects','Review active work and milestones.','projects']]},
   INSTITUTIONAL_OPERATOR:{label:'Institutional Operator',description:'Operate V4V review, custody, Verified Value, settlement, setoff, and discharge.',actions:[]},
-  PLATFORM_ADMIN:{label:'Platform Administration',description:'Manage the SRA Platform Account and its connection to the parent platform.',actions:[]}
+  PLATFORM_ADMIN:{label:'Platform Administration',description:'Operate SRA through SAIN, inspect live platform records, prepare changes, and approve state-changing actions.',actions:[]}
 };
 
 async function activateCapacity(capacity){
@@ -25,8 +25,12 @@ function renderCapacityManager(){
 }
 
 function renderPlatformAccount(){
-  document.querySelector('#page-title').textContent='SRA Platform Account';
-  document.querySelector('#view-root').innerHTML=`<section class="panel"><div class="panel-header"><div><p class="eyebrow">ADMINISTRATIVE CONNECTION</p><h2>SRA Platform Account</h2><p>Internal connection between SRA marketplace operations and the parent platform.</p></div><span class="badge open">CONNECTED</span></div><div class="review-grid"><div class="review-block"><span>Platform identity</span><strong>SRA</strong></div><div class="review-block"><span>Parent relationship</span><strong>ACTIVE</strong></div><div class="review-block"><span>Operating account</span><strong>INTERNAL</strong></div><div class="review-block"><span>Marketplace status</span><strong>LIVE</strong></div><div class="review-block"><span>Capital allocation</span><strong>ADMIN CONTROLLED</strong></div><div class="review-block"><span>Interplatform settlement</span><strong>READY FOR DESIGN</strong></div></div></section>`;
+  if(typeof window.renderPlatformAdminWorkspace==='function'){
+    window.renderPlatformAdminWorkspace();
+    return;
+  }
+  document.querySelector('#page-title').textContent='Platform Administration';
+  document.querySelector('#view-root').innerHTML='<div class="loading-state">Loading SAIN Platform Administration…</div>';
 }
 
 function participantActions(capacity){return capacityCopy[capacity]?.actions||capacityCopy.UNIVERSAL.actions}
