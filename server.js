@@ -5,6 +5,7 @@ import { createCoinbasePublicMarketRouter } from './routes/coinbase-public-marke
 import { createPrivateAdminRouter, rejectPlatformAdminPublicSignin } from './routes/private-admin-router.js';
 import { CoinbasePublicMarketService } from './services/coinbase-public-market-service.js';
 import { CoinbaseTransactionAssetPipelineService } from './services/coinbase-transaction-asset-pipeline-service.js';
+import { MarketplaceListingService } from './services/marketplace-listing-service.js';
 
 const port = Number(process.env.PORT) || 3000;
 const bootstrap = express();
@@ -16,6 +17,8 @@ let coinbaseExtension = null;
 let privateAdminExtension = null;
 let coinbasePublicMarket = null;
 let coinbaseTransactionAssetPipeline = null;
+let marketplaceListingService = null;
+let marketplaceListingTimer = null;
 let database = null;
 let startupState = 'STARTING';
 let startupError = null;
@@ -32,37 +35,39 @@ bootstrap.get('/api/startup', (_req, res) => {
     startupError,
     coinbasePublicMarket: coinbasePublicMarket?.status?.() || null,
     coinbaseTransactionAssetPipeline: coinbaseTransactionAssetPipeline?.status?.() || null,
+    marketplaceListingPreparation: marketplaceListingService?.status?.() || null,
     startedAt,
     timestamp: new Date().toISOString()
   });
 });
 
+bootstrap.get('/api/marketplace-listings/status', (_req, res) => {
+  if (!marketplaceListingService) return res.status(503).json({ error: 'Marketplace Listing Layer is still initializing.' });
+  return res.json(marketplaceListingService.status());
+});
+
+bootstrap.get('/api/marketplace-listings', (req, res) => {
+  if (!marketplaceListingService) return res.status(503).json({ error: 'Marketplace Listing Layer is still initializing.' });
+  const listings = marketplaceListingService.list({ state: req.query.state, instrumentId: req.query.instrumentId });
+  return res.json({ listings, count: listings.length });
+});
+
 bootstrap.use(async (req, res, next) => {
-  if (privateAdminExtension && (req.path === '/admin' || req.path.startsWith('/admin/') || req.path.startsWith('/api/admin/'))) {
-    return privateAdminExtension(req, res, next);
-  }
-
-  if (database && req.method === 'POST' && req.path === '/api/access/signin') {
-    return rejectPlatformAdminPublicSignin(req, res, next, database);
-  }
-
-  if (database && req.method === 'POST' && ['/api/access/capacity', '/api/access/role'].includes(req.path) && String(req.body?.capacity || req.body?.role || '').toUpperCase() === 'PLATFORM_ADMIN') {
-    return res.status(403).json({ error: 'Platform Administration is available only through the private administration portal.' });
-  }
-
+  if (privateAdminExtension && (req.path === '/admin' || req.path.startsWith('/admin/') || req.path.startsWith('/api/admin/'))) return privateAdminExtension(req, res, next);
+  if (database && req.method === 'POST' && req.path === '/api/access/signin') return rejectPlatformAdminPublicSignin(req, res, next, database);
+  if (database && req.method === 'POST' && ['/api/access/capacity', '/api/access/role'].includes(req.path) && String(req.body?.capacity || req.body?.role || '').toUpperCase() === 'PLATFORM_ADMIN') return res.status(403).json({ error: 'Platform Administration is available only through the private administration portal.' });
   if (coinbaseExtension && req.path.startsWith('/api/connectors/coinbase-public')) return coinbaseExtension(req, res, next);
-
-  if (platformExtensions && (req.path.startsWith('/api/blockchain-accounts') || (req.method === 'POST' && req.path === '/api/access/funding/crypto-instructions'))) {
-    return platformExtensions(req, res, next);
-  }
-
+  if (platformExtensions && (req.path.startsWith('/api/blockchain-accounts') || (req.method === 'POST' && req.path === '/api/access/funding/crypto-instructions'))) return platformExtensions(req, res, next);
   if (platformApp) return platformApp(req, res, next);
   return res.status(503).json({ error: startupState === 'FAILED' ? 'The platform failed during initialization. Check /api/startup.' : 'The platform is still initializing.', startupState });
 });
 
 bootstrap.listen(port, '0.0.0.0', () => console.log(`SRA bootstrap server is listening on port ${port}`));
 
-function stopConnectors() { coinbasePublicMarket?.stop?.(); }
+function stopConnectors() {
+  coinbasePublicMarket?.stop?.();
+  if (marketplaceListingTimer) clearInterval(marketplaceListingTimer);
+}
 process.once('SIGTERM', stopConnectors);
 process.once('SIGINT', stopConnectors);
 
@@ -70,23 +75,22 @@ try {
   const created = await createApp();
   database = created.database;
   platformExtensions = await createUniversalAccountBlockchainRouter(created.persistentDomain, created.database);
-  coinbaseTransactionAssetPipeline = new CoinbaseTransactionAssetPipelineService({
-    observationLayerService: created.observationLayerService,
-    financialRecordService: created.financialRecordService,
-    persistentDomain: created.persistentDomain
-  });
-  coinbasePublicMarket = new CoinbasePublicMarketService({
-    observationLayerService: created.observationLayerService,
-    transactionAssetPipeline: coinbaseTransactionAssetPipeline
-  });
+  coinbaseTransactionAssetPipeline = new CoinbaseTransactionAssetPipelineService({ observationLayerService: created.observationLayerService, financialRecordService: created.financialRecordService, persistentDomain: created.persistentDomain });
+  marketplaceListingService = new MarketplaceListingService(created.persistentDomain);
+  coinbasePublicMarket = new CoinbasePublicMarketService({ observationLayerService: created.observationLayerService, transactionAssetPipeline: coinbaseTransactionAssetPipeline });
   coinbaseExtension = createCoinbasePublicMarketRouter(coinbasePublicMarket);
   privateAdminExtension = await createPrivateAdminRouter({ database: created.database, domain: created.persistentDomain, coinbasePublicMarket });
   coinbasePublicMarket.start();
-  setImmediate(() => {
-    coinbaseTransactionAssetPipeline.backfill()
-      .then((status) => console.log('Coinbase transaction asset backfill completed.', status))
-      .catch((error) => console.error('Coinbase transaction asset backfill failed:', error));
+  setImmediate(async () => {
+    try {
+      const assetStatus = await coinbaseTransactionAssetPipeline.backfill();
+      console.log('Coinbase transaction asset backfill completed.', assetStatus);
+      const listingStatus = await marketplaceListingService.backfill();
+      console.log('Marketplace listing preparation backfill completed.', listingStatus);
+    } catch (error) { console.error('Startup pipeline backfill failed:', error); }
   });
+  marketplaceListingTimer = setInterval(() => marketplaceListingService.backfill().catch((error) => console.error('Marketplace listing preparation cycle failed:', error)), 30000);
+  marketplaceListingTimer.unref?.();
   platformApp = created.app;
   startupState = 'READY';
   startupError = null;
