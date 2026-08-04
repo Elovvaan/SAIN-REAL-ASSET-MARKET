@@ -4,6 +4,7 @@ import { createUniversalAccountBlockchainRouter } from './routes/universal-accou
 import { createCoinbasePublicMarketRouter } from './routes/coinbase-public-market-router.js';
 import { createPrivateAdminRouter, rejectPlatformAdminPublicSignin } from './routes/private-admin-router.js';
 import { CoinbasePublicMarketService } from './services/coinbase-public-market-service.js';
+import { CoinbaseTransactionAssetPipelineService } from './services/coinbase-transaction-asset-pipeline-service.js';
 
 const port = Number(process.env.PORT) || 3000;
 const bootstrap = express();
@@ -14,6 +15,7 @@ let platformExtensions = null;
 let coinbaseExtension = null;
 let privateAdminExtension = null;
 let coinbasePublicMarket = null;
+let coinbaseTransactionAssetPipeline = null;
 let database = null;
 let startupState = 'STARTING';
 let startupError = null;
@@ -25,7 +27,14 @@ bootstrap.get('/api/health', (req, res, next) => {
 });
 
 bootstrap.get('/api/startup', (_req, res) => {
-  return res.status(startupState === 'FAILED' ? 500 : 200).json({ startupState, startupError, coinbasePublicMarket: coinbasePublicMarket?.status?.() || null, startedAt, timestamp: new Date().toISOString() });
+  return res.status(startupState === 'FAILED' ? 500 : 200).json({
+    startupState,
+    startupError,
+    coinbasePublicMarket: coinbasePublicMarket?.status?.() || null,
+    coinbaseTransactionAssetPipeline: coinbaseTransactionAssetPipeline?.status?.() || null,
+    startedAt,
+    timestamp: new Date().toISOString()
+  });
 });
 
 bootstrap.use(async (req, res, next) => {
@@ -61,10 +70,23 @@ try {
   const created = await createApp();
   database = created.database;
   platformExtensions = await createUniversalAccountBlockchainRouter(created.persistentDomain, created.database);
-  coinbasePublicMarket = new CoinbasePublicMarketService({ observationLayerService: created.observationLayerService });
+  coinbaseTransactionAssetPipeline = new CoinbaseTransactionAssetPipelineService({
+    observationLayerService: created.observationLayerService,
+    financialRecordService: created.financialRecordService,
+    persistentDomain: created.persistentDomain
+  });
+  coinbasePublicMarket = new CoinbasePublicMarketService({
+    observationLayerService: created.observationLayerService,
+    transactionAssetPipeline: coinbaseTransactionAssetPipeline
+  });
   coinbaseExtension = createCoinbasePublicMarketRouter(coinbasePublicMarket);
   privateAdminExtension = await createPrivateAdminRouter({ database: created.database, domain: created.persistentDomain, coinbasePublicMarket });
   coinbasePublicMarket.start();
+  setImmediate(() => {
+    coinbaseTransactionAssetPipeline.backfill()
+      .then((status) => console.log('Coinbase transaction asset backfill completed.', status))
+      .catch((error) => console.error('Coinbase transaction asset backfill failed:', error));
+  });
   platformApp = created.app;
   startupState = 'READY';
   startupError = null;
