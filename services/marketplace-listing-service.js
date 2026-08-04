@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
 import { RECORD_TYPES } from './persistent-domain-service.js';
 
+const LISTING_RECORD_TYPE = 'MARKETPLACE_LISTING';
+
 function requireText(value, field) {
   const text = String(value || '').trim();
   if (!text) throw new Error(`${field} is required.`);
@@ -14,18 +16,28 @@ function finitePositive(value, field) {
 }
 
 export class MarketplaceListingService {
-  constructor(persistentDomain) { this.persistentDomain = persistentDomain; }
+  constructor(persistentDomain, options = {}) {
+    this.persistentDomain = persistentDomain;
+    this.enabled = String(options.environment?.MARKETPLACE_LISTING_PREPARATION_ENABLED ?? process.env.MARKETPLACE_LISTING_PREPARATION_ENABLED ?? 'true').toLowerCase() !== 'false';
+    this.backfillLimit = Number(options.environment?.MARKETPLACE_LISTING_BACKFILL_LIMIT ?? process.env.MARKETPLACE_LISTING_BACKFILL_LIMIT ?? 5000);
+    this.prepared = 0;
+    this.failed = 0;
+    this.backfillState = 'NOT_STARTED';
+    this.lastPreparedAt = null;
+    this.lastError = null;
+  }
 
   list(filters = {}) {
-    return this.persistentDomain.list(RECORD_TYPES.MARKETPLACE_LISTING)
+    return this.persistentDomain.list(LISTING_RECORD_TYPE)
       .filter((listing) => !filters.state || listing.state === filters.state)
       .filter((listing) => !filters.instrumentId || listing.instrumentId === filters.instrumentId)
       .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
   }
 
-  get(listingId) { return this.persistentDomain.get(RECORD_TYPES.MARKETPLACE_LISTING, listingId); }
+  get(listingId) { return this.persistentDomain.get(LISTING_RECORD_TYPE, listingId); }
 
-  async prepareFromInstrument(instrumentId, input = {}, actorId = 'SAIN_AGENT') {
+  async prepareFromInstrument(instrumentId, input = {}, actorId = 'SAIN_MARKETPLACE_LISTING_ENGINE') {
+    if (!this.enabled) return { listing: null, created: false, reason: 'LISTING_PREPARATION_DISABLED' };
     const instrument = this.persistentDomain.get(RECORD_TYPES.SRA_INSTRUMENT, instrumentId);
     if (!instrument) throw new Error('Instrument not found.');
     if (!['DRAFT', 'RECORDED', 'ACTIVE', 'RESTRICTED'].includes(instrument.state)) throw new Error('Instrument is not available for listing preparation.');
@@ -48,36 +60,13 @@ export class MarketplaceListingService {
       seller: input.seller || instrument.issuer,
       quantity: principalQuantity,
       unit: instrument.denomination?.symbol || 'SRA',
-      pricing: {
-        state: 'NOT_SET',
-        method: input.pricingMethod || null,
-        askingPrice: input.askingPrice == null ? null : finitePositive(input.askingPrice, 'askingPrice'),
-        currency: input.currency || 'USD',
-        verifiedValueReference: input.verifiedValueReference || instrument.financialRecordId
-      },
-      access: {
-        state: 'NOT_CONFIGURED',
-        eligibilityRule: input.eligibilityRule || null,
-        minimumOrder: input.minimumOrder == null ? null : finitePositive(input.minimumOrder, 'minimumOrder'),
-        maximumOrder: input.maximumOrder == null ? null : finitePositive(input.maximumOrder, 'maximumOrder')
-      },
-      readiness: {
-        instrumentReviewed: false,
-        pricingApproved: false,
-        accessRulesApproved: false,
-        transactionRouteConnected: false,
-        settlementRouteConnected: false
-      },
-      blockers: [
-        'ADMINISTRATIVE_INSTRUMENT_REVIEW_REQUIRED',
-        'LISTING_PRICE_REQUIRED',
-        'MARKET_ACCESS_RULES_REQUIRED',
-        'TRANSACTION_ROUTE_REQUIRED',
-        'SETTLEMENT_ROUTE_REQUIRED'
-      ],
+      pricing: { state: 'NOT_SET', method: null, askingPrice: null, currency: 'USD', verifiedValueReference: instrument.financialRecordId },
+      access: { state: 'NOT_CONFIGURED', eligibilityRule: null, minimumOrder: null, maximumOrder: null },
+      readiness: { instrumentReviewed: false, pricingApproved: false, accessRulesApproved: false, transactionRouteConnected: false, settlementRouteConnected: false },
+      blockers: ['ADMINISTRATIVE_INSTRUMENT_REVIEW_REQUIRED', 'LISTING_PRICE_REQUIRED', 'MARKET_ACCESS_RULES_REQUIRED', 'TRANSACTION_ROUTE_REQUIRED', 'SETTLEMENT_ROUTE_REQUIRED'],
       sourceLineage: instrument.sourceLineage,
       state: 'PREPARED',
-      statusHistory: [{ state: 'PREPARED', actorId, occurredAt: now, reason: input.reason || 'Marketplace listing prepared from draft SRA Instrument.' }],
+      statusHistory: [{ state: 'PREPARED', actorId, occurredAt: now, reason: 'Marketplace listing prepared from SRA Instrument.' }],
       phase: 6,
       version: 1,
       createdBy: actorId,
@@ -85,9 +74,29 @@ export class MarketplaceListingService {
       updatedAt: now
     };
 
-    await this.persistentDomain.put(RECORD_TYPES.MARKETPLACE_LISTING, listingId, listing, { actorId, eventType: 'MARKETPLACE_LISTING_PREPARED' });
-    await this.persistentDomain.lifecycle({ objectType: RECORD_TYPES.MARKETPLACE_LISTING, objectId: listingId, eventType: 'INSTRUMENT_MARKETPLACE_LISTING_PREPARED', actorId, payload: { instrumentId, quantity: principalQuantity, unit: listing.unit } });
+    await this.persistentDomain.put(LISTING_RECORD_TYPE, listingId, listing, { actorId, eventType: 'MARKETPLACE_LISTING_PREPARED' });
+    await this.persistentDomain.lifecycle({ objectType: LISTING_RECORD_TYPE, objectId: listingId, eventType: 'INSTRUMENT_MARKETPLACE_LISTING_PREPARED', actorId, payload: { instrumentId, quantity: principalQuantity, unit: listing.unit } });
+    this.prepared += 1;
+    this.lastPreparedAt = now;
     return { listing, created: true };
+  }
+
+  async backfill() {
+    if (!this.enabled || this.backfillState === 'RUNNING') return this.status();
+    this.backfillState = 'RUNNING';
+    const instruments = this.persistentDomain.list(RECORD_TYPES.SRA_INSTRUMENT)
+      .filter((instrument) => ['DRAFT', 'RECORDED', 'ACTIVE', 'RESTRICTED'].includes(instrument.state))
+      .slice(0, Number.isFinite(this.backfillLimit) && this.backfillLimit > 0 ? this.backfillLimit : 5000);
+    for (const instrument of instruments) {
+      try { await this.prepareFromInstrument(instrument.instrumentId); }
+      catch (error) { this.failed += 1; this.lastError = { instrumentId: instrument.instrumentId, message: error?.message || String(error), at: new Date().toISOString() }; }
+    }
+    this.backfillState = 'COMPLETED';
+    return this.status();
+  }
+
+  status() {
+    return { enabled: this.enabled, state: this.enabled ? 'ACTIVE' : 'DISABLED', prepared: this.prepared, failed: this.failed, backfillState: this.backfillState, lastPreparedAt: this.lastPreparedAt, lastError: this.lastError, ...this.summary() };
   }
 
   summary() {
