@@ -1,5 +1,5 @@
 (() => {
-  const PUBLIC_HOME_VERSION = 'V18';
+  const PUBLIC_HOME_VERSION = 'V19';
   const originalFetch = window.fetch.bind(window);
 
   const leftCards = [
@@ -9,9 +9,9 @@
   ];
 
   const rightCards = [
-    ['Financial Assets','Learn how recognized assets move through the platform.','How do financial assets work here?'],
-    ['SRA Coin','Understand the marketplace coin and where it fits.','Explain the SRA coin and its purpose.'],
-    ['Institutional Operations','See how documents, assets, accounts, and activity connect.','Explain how the institution operates.']
+    ['Financial Assets','Learn how recognized financial relationships become assets on SRA.','How do financial assets work here?'],
+    ['SRA Coin','Understand the platform-recognized digital financial asset and where it fits.','Explain the SRA Coin Position and its purpose.'],
+    ['How Value Enters SRA','Follow the path from authorized source data to Financial Record, Verified Value, Coin Position, instrument, and marketplace.','Show me how value enters SRA and becomes a financial asset.']
   ];
 
   function isSignedOut() {
@@ -68,7 +68,7 @@
 
     const firstMessage = document.querySelector('#chat-log .sane-message');
     if (firstMessage) {
-      firstMessage.textContent = 'Welcome to the Living Marketplace. I am SAIN. I can help you understand Verified Value, explore opportunities, compare projects, explain the platform, or decide what to do next. What would you like to accomplish?';
+      firstMessage.textContent = 'Welcome to the Living Marketplace. SRA connects authorized transaction and asset data to recognized financial assets. Source activity moves through Observation, Recognition, Financial Record, Verified Value, SRA Coin representation, instrument formation, and marketplace participation. What would you like to understand or accomplish?';
     }
 
     document.querySelectorAll('[data-public-prompt]').forEach(button => {
