@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { Router } from 'express';
 import { AccessService } from '../services/access-service.js';
 import { PlatformLedgerService } from '../services/platform-ledger-service.js';
+import { BaseUsdcVerificationService } from '../services/base-usdc-verification-service.js';
 import { RECORD_TYPES } from '../services/persistent-domain-service.js';
 
 function readCookie(req, name) {
@@ -18,11 +19,11 @@ function amount(value) { const parsed = Number(value); return Number.isFinite(pa
 function id(prefix) { return `${prefix}-${crypto.randomUUID().split('-')[0].toUpperCase()}`; }
 function now() { return new Date().toISOString(); }
 function isCompleted(transaction) {
-  return ['COMPLETED', 'SETTLED', 'POSTED', 'EXECUTED', 'EVIDENCED', 'VERIFIED', 'CLOSED']
+  return ['COMPLETED', 'SETTLED', 'POSTED', 'EXECUTED', 'EVIDENCED', 'VERIFIED', 'CLOSED', 'CONFIRMED']
     .some((state) => String(transaction.state || '').toUpperCase().includes(state));
 }
 function isPending(transaction) {
-  return ['PENDING', 'QUEUED', 'AUTHORIZED', 'SUBMITTED', 'PROCESSING', 'AVAILABLE']
+  return ['PENDING', 'QUEUED', 'AUTHORIZED', 'SUBMITTED', 'PROCESSING', 'AVAILABLE', 'AWAITING']
     .some((state) => String(transaction.state || '').toUpperCase().includes(state));
 }
 function participantVault(session, transactions = []) {
@@ -43,9 +44,6 @@ function participantVault(session, transactions = []) {
     if (completed && direction === 'OUTGOING') outgoing += amount(transaction.amount);
     return { ...transaction, direction, completed };
   });
-  const completed = activity.filter((transaction) => transaction.completed);
-  const pending = activity.filter(isPending);
-  const verified = activity.filter((transaction) => transaction.verified);
   return {
     accountId: session.universalAccountId,
     participantId: session.id,
@@ -59,9 +57,9 @@ function participantVault(session, transactions = []) {
     incomingTotal: amount(incoming),
     outgoingTotal: amount(outgoing),
     transactionCount: activity.length,
-    completedTransactionCount: completed.length,
-    pendingTransactionCount: pending.length,
-    verifiedTransactionCount: verified.length,
+    completedTransactionCount: activity.filter((item) => item.completed).length,
+    pendingTransactionCount: activity.filter(isPending).length,
+    verifiedTransactionCount: activity.filter((item) => item.verified).length,
     transactions: activity.slice(0, 50)
   };
 }
@@ -85,16 +83,87 @@ function fundingProjection(record) {
     rail: record.rail,
     state: record.state,
     invoiceId: record.invoiceId || null,
+    receivingAddress: record.receivingAddress || null,
+    network: record.network || null,
+    asset: record.asset || null,
     externalReference: record.externalReference || null,
     createdAt: record.createdAt,
     confirmedAt: record.confirmedAt || null
   };
 }
 
+async function recordParticipantFunding({ domain, ledger, record, actorId, externalReference, blockchainVerification = null }) {
+  await ensureFundingLedgerAccounts(domain, ledger);
+  const ledgerEntry = await ledger.post({
+    referenceType: 'FUNDING_INSTRUCTION',
+    referenceId: record.fundingInstructionId,
+    eventType: 'PARTICIPANT_FUNDS_RECEIVED',
+    description: `Participant funds received for ${record.accountId}`,
+    currency: record.currency,
+    lines: [
+      { accountId: 'GL-CASH-PARTICIPANT-FUNDS', debit: record.amount },
+      { accountId: 'GL-PARTICIPANT-FUNDS-LIABILITY', credit: record.amount }
+    ]
+  }, actorId);
+  const confirmedAt = now();
+  const updated = {
+    ...record,
+    state: 'CONFIRMED',
+    externalReference,
+    transactionHash: blockchainVerification?.transactionHash || record.transactionHash || null,
+    blockchainVerification,
+    ledgerEntryId: ledgerEntry.entryId,
+    confirmedBy: actorId,
+    confirmedAt,
+    updatedAt: confirmedAt
+  };
+  await domain.put(RECORD_TYPES.FUNDING_INSTRUCTION, record.fundingInstructionId, updated, { actorId, eventType: 'EXTERNAL_FUNDS_CONFIRMED' });
+  const receipt = {
+    paymentReceiptId: id('RCPT'),
+    fundingInstructionId: record.fundingInstructionId,
+    purpose: record.purpose,
+    participantId: record.participantId,
+    accountId: record.accountId,
+    amount: record.amount,
+    currency: record.currency,
+    rail: record.rail,
+    externalReference,
+    transactionHash: blockchainVerification?.transactionHash || null,
+    network: blockchainVerification?.network || null,
+    asset: blockchainVerification?.asset || null,
+    blockchainVerification,
+    ledgerEntryId: ledgerEntry.entryId,
+    state: 'RECORDED',
+    recordedAt: confirmedAt,
+    createdAt: confirmedAt
+  };
+  await domain.put(RECORD_TYPES.PAYMENT_RECEIPT, receipt.paymentReceiptId, receipt, { actorId, eventType: 'PAYMENT_RECEIPT_RECORDED' });
+  const eventId = id('VME');
+  await domain.put(RECORD_TYPES.VERIFIED_MARKET_EVENT, eventId, {
+    eventId,
+    eventType: blockchainVerification ? 'CRYPTO_PARTICIPANT_FUNDS_CONFIRMED' : 'PARTICIPANT_FUNDS_CONFIRMED',
+    participantId: record.participantId,
+    fromAccountId: blockchainVerification?.fromAddress || 'EXTERNAL_SOURCE',
+    toAccountId: record.accountId,
+    amount: record.amount,
+    currency: record.currency,
+    state: 'VERIFIED',
+    verified: true,
+    referenceId: record.fundingInstructionId,
+    evidenceId: receipt.paymentReceiptId,
+    transactionHash: blockchainVerification?.transactionHash || null,
+    verifiedAt: confirmedAt,
+    occurredAt: confirmedAt,
+    createdAt: confirmedAt
+  }, { actorId, eventType: 'VERIFIED_FUNDS_EVENT_RECORDED' });
+  return { updated, receipt, ledgerEntry };
+}
+
 export function createAccessRouter(marketplace, service = new AccessService()) {
   const router = Router();
   const domain = marketplace.persistentDomain;
   const ledger = domain ? new PlatformLedgerService(domain) : null;
+  const baseUsdc = new BaseUsdcVerificationService();
 
   async function sessionFor(req) { return service.getSession(readCookie(req, 'sra_session')); }
   async function requireSession(req, res) {
@@ -125,7 +194,6 @@ export function createAccessRouter(marketplace, service = new AccessService()) {
       return res.json({ vault: participantVault(session, marketplace.transactions || []) });
     } catch { return res.status(500).json({ error: 'Asset Vault lookup failed.' }); }
   });
-
   router.get('/funding/instructions', async (req, res) => {
     try {
       const session = await requireSession(req, res); if (!session) return;
@@ -152,6 +220,58 @@ export function createAccessRouter(marketplace, service = new AccessService()) {
       await domain.put(RECORD_TYPES.FUNDING_INSTRUCTION, record.fundingInstructionId, record, { actorId: session.id, eventType: 'VAULT_FUNDING_INSTRUCTION_CREATED' });
       res.status(201).json({ instruction: fundingProjection(record), balanceCredited: false });
     } catch (error) { res.status(400).json({ error: error.message || 'Funding instruction could not be created.' }); }
+  });
+
+  router.post('/funding/crypto-instructions', async (req, res) => {
+    try {
+      const session = await requireSession(req, res); if (!session) return;
+      const requestedAmount = amount(req.body?.amount);
+      if (requestedAmount <= 0) return res.status(400).json({ error: 'Funding amount must be greater than zero.' });
+      const receivingAddress = String(process.env.SRA_BASE_USDC_RECEIVING_ADDRESS || '').trim();
+      if (!receivingAddress) return res.status(503).json({ error: 'Crypto funding is not configured yet.' });
+      const record = {
+        fundingInstructionId: id('CRYPTO'), purpose: 'ASSET_VAULT_FUNDING', participantId: session.id,
+        accountId: session.universalAccountId, amount: requestedAmount, currency: 'USD', rail: 'CRYPTO',
+        network: 'BASE', asset: 'USDC', receivingAddress,
+        destinationType: 'SEGREGATED_PARTICIPANT_FUNDS', state: 'AWAITING_BLOCKCHAIN_TRANSFER',
+        createdBy: session.id, createdAt: now(), updatedAt: now()
+      };
+      await domain.put(RECORD_TYPES.FUNDING_INSTRUCTION, record.fundingInstructionId, record, { actorId: session.id, eventType: 'CRYPTO_FUNDING_INSTRUCTION_CREATED' });
+      res.status(201).json({ instruction: fundingProjection(record), balanceCredited: false });
+    } catch (error) { res.status(400).json({ error: error.message || 'Crypto funding instruction could not be created.' }); }
+  });
+
+  router.post('/funding/crypto-instructions/:instructionId/verify', async (req, res) => {
+    try {
+      const session = await requireSession(req, res); if (!session) return;
+      const record = domain.get(RECORD_TYPES.FUNDING_INSTRUCTION, req.params.instructionId);
+      if (!record) return res.status(404).json({ error: 'Crypto funding instruction not found.' });
+      if (record.participantId !== session.id && record.accountId !== session.universalAccountId) return res.status(403).json({ error: 'That instruction does not belong to this account.' });
+      if (record.rail !== 'CRYPTO' || record.network !== 'BASE' || record.asset !== 'USDC') return res.status(409).json({ error: 'That instruction is not a Base USDC funding instruction.' });
+      if (record.state === 'CONFIRMED') return res.status(409).json({ error: 'That funding instruction is already confirmed.' });
+      const transactionHash = String(req.body?.transactionHash || '').trim().toLowerCase();
+      const duplicate = domain.list(RECORD_TYPES.PAYMENT_RECEIPT).find((receipt) => String(receipt.transactionHash || '').toLowerCase() === transactionHash);
+      if (duplicate) return res.status(409).json({ error: 'That blockchain transaction has already been used.', paymentReceiptId: duplicate.paymentReceiptId });
+      const verification = await baseUsdc.verifyTransfer({
+        transactionHash,
+        expectedRecipient: record.receivingAddress,
+        expectedAmount: record.amount
+      });
+      if (!verification.verified) {
+        const updated = { ...record, state: verification.state, transactionHash, lastVerification: verification, updatedAt: now() };
+        await domain.put(RECORD_TYPES.FUNDING_INSTRUCTION, record.fundingInstructionId, updated, { actorId: session.id, eventType: 'CRYPTO_FUNDING_VERIFICATION_UPDATED' });
+        return res.status(202).json({ instruction: fundingProjection(updated), verification, balanceCredited: false });
+      }
+      const result = await recordParticipantFunding({
+        domain,
+        ledger,
+        record: { ...record, transactionHash },
+        actorId: session.id,
+        externalReference: verification.transactionHash,
+        blockchainVerification: verification
+      });
+      return res.json({ instruction: fundingProjection(result.updated), receipt: result.receipt, verification, balanceCredited: true });
+    } catch (error) { return res.status(400).json({ error: error.message || 'Crypto funding could not be verified.' }); }
   });
 
   router.post('/funding/fee-instructions', async (req, res) => {
@@ -181,30 +301,21 @@ export function createAccessRouter(marketplace, service = new AccessService()) {
       if (session.activeCapacity !== 'PLATFORM_ADMIN') return res.status(403).json({ error: 'Platform Administration authorization is required to confirm outside funds.' });
       const record = domain.get(RECORD_TYPES.FUNDING_INSTRUCTION, req.params.instructionId);
       if (!record) return res.status(404).json({ error: 'Funding instruction not found.' });
+      if (record.rail === 'CRYPTO') return res.status(409).json({ error: 'Crypto funding must be verified through the blockchain verification endpoint.' });
       if (record.state === 'CONFIRMED') return res.status(409).json({ error: 'Funding instruction is already confirmed.' });
       const externalReference = String(req.body?.externalReference || '').trim();
       if (!externalReference) return res.status(400).json({ error: 'An external transfer reference is required.' });
-      await ensureFundingLedgerAccounts(domain, ledger);
-      let ledgerEntry;
       if (record.purpose === 'ASSET_VAULT_FUNDING') {
-        ledgerEntry = await ledger.post({
-          referenceType: 'FUNDING_INSTRUCTION', referenceId: record.fundingInstructionId,
-          eventType: 'PARTICIPANT_FUNDS_RECEIVED', description: `Participant funds received for ${record.accountId}`,
-          currency: record.currency,
-          lines: [
-            { accountId: 'GL-CASH-PARTICIPANT-FUNDS', debit: record.amount },
-            { accountId: 'GL-PARTICIPANT-FUNDS-LIABILITY', credit: record.amount }
-          ]
-        }, session.id);
-      } else {
-        const invoice = domain.get(RECORD_TYPES.FEE_INVOICE, record.invoiceId);
-        if (!invoice) return res.status(404).json({ error: 'Linked fee invoice not found.' });
-        ledgerEntry = await ledger.recordInvoicePayment({ invoiceId: invoice.invoiceId, amount: record.amount, cashAccountId: 'GL-CASH-OPERATING', currency: record.currency }, session.id);
-        await domain.put(RECORD_TYPES.FEE_INVOICE, invoice.invoiceId, { ...invoice, state: 'PAID', paidAt: now(), paymentReference: externalReference, updatedAt: now() }, { actorId: session.id, eventType: 'FEE_INVOICE_PAID' });
-        for (const chargeId of invoice.chargeIds || []) {
-          const charge = domain.get(RECORD_TYPES.FEE_CHARGE, chargeId);
-          if (charge) await domain.put(RECORD_TYPES.FEE_CHARGE, chargeId, { ...charge, state: 'PAID', paidAt: now(), updatedAt: now() }, { actorId: session.id, eventType: 'FEE_CHARGE_PAID' });
-        }
+        const result = await recordParticipantFunding({ domain, ledger, record, actorId: session.id, externalReference });
+        return res.json({ instruction: fundingProjection(result.updated), receipt: result.receipt, balanceCredited: true });
+      }
+      const invoice = domain.get(RECORD_TYPES.FEE_INVOICE, record.invoiceId);
+      if (!invoice) return res.status(404).json({ error: 'Linked fee invoice not found.' });
+      const ledgerEntry = await ledger.recordInvoicePayment({ invoiceId: invoice.invoiceId, amount: record.amount, cashAccountId: 'GL-CASH-OPERATING', currency: record.currency }, session.id);
+      await domain.put(RECORD_TYPES.FEE_INVOICE, invoice.invoiceId, { ...invoice, state: 'PAID', paidAt: now(), paymentReference: externalReference, updatedAt: now() }, { actorId: session.id, eventType: 'FEE_INVOICE_PAID' });
+      for (const chargeId of invoice.chargeIds || []) {
+        const charge = domain.get(RECORD_TYPES.FEE_CHARGE, chargeId);
+        if (charge) await domain.put(RECORD_TYPES.FEE_CHARGE, chargeId, { ...charge, state: 'PAID', paidAt: now(), updatedAt: now() }, { actorId: session.id, eventType: 'FEE_CHARGE_PAID' });
       }
       const confirmedAt = now();
       const updated = { ...record, state: 'CONFIRMED', externalReference, ledgerEntryId: ledgerEntry.entryId, confirmedBy: session.id, confirmedAt, updatedAt: confirmedAt };
@@ -217,16 +328,13 @@ export function createAccessRouter(marketplace, service = new AccessService()) {
       await domain.put(RECORD_TYPES.PAYMENT_RECEIPT, receipt.paymentReceiptId, receipt, { actorId: session.id, eventType: 'PAYMENT_RECEIPT_RECORDED' });
       const eventId = id('VME');
       await domain.put(RECORD_TYPES.VERIFIED_MARKET_EVENT, eventId, {
-        eventId,
-        eventType: record.purpose === 'ASSET_VAULT_FUNDING' ? 'PARTICIPANT_FUNDS_CONFIRMED' : 'PLATFORM_FEE_PAYMENT_CONFIRMED',
-        participantId: record.participantId,
-        fromAccountId: record.purpose === 'PLATFORM_FEE_PAYMENT' ? record.accountId : 'EXTERNAL_SOURCE',
-        toAccountId: record.purpose === 'ASSET_VAULT_FUNDING' ? record.accountId : 'GL-CASH-OPERATING',
-        amount: record.amount, currency: record.currency, state: 'VERIFIED', referenceId: record.fundingInstructionId,
+        eventId, eventType: 'PLATFORM_FEE_PAYMENT_CONFIRMED', participantId: record.participantId,
+        fromAccountId: record.accountId, toAccountId: 'GL-CASH-OPERATING', amount: record.amount,
+        currency: record.currency, state: 'VERIFIED', verified: true, referenceId: record.fundingInstructionId,
         evidenceId: receipt.paymentReceiptId, verifiedAt: confirmedAt, occurredAt: confirmedAt, createdAt: confirmedAt
       }, { actorId: session.id, eventType: 'VERIFIED_FUNDS_EVENT_RECORDED' });
-      res.json({ instruction: fundingProjection(updated), receipt, balanceCredited: record.purpose === 'ASSET_VAULT_FUNDING' });
-    } catch (error) { res.status(400).json({ error: error.message || 'External funds could not be confirmed.' }); }
+      return res.json({ instruction: fundingProjection(updated), receipt, balanceCredited: false });
+    } catch (error) { return res.status(400).json({ error: error.message || 'External funds could not be confirmed.' }); }
   });
 
   router.post('/signup', async (req, res) => {
@@ -256,4 +364,4 @@ export function createAccessRouter(marketplace, service = new AccessService()) {
   });
   return router;
 }
-export { readCookie, participantVault, fundingProjection };
+export { readCookie, participantVault, fundingProjection, recordParticipantFunding };
