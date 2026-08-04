@@ -60,7 +60,12 @@ export class SraAgentService {
       'You must not claim that an asset is legally validated, that a payment settled, that a person is eligible, or that an offering is approved unless the provided platform records explicitly show that state.',
       'Any requested action that changes financial, settlement, treasury, servicing, billing, ledger, or offering state requires explicit human approval and must not be executed by this chat endpoint.',
       'When the context is incomplete, say exactly what record or evidence is missing.',
-      'Use plain language and preserve SRA terminology such as Verified Value, Asset Account, Project Account, settlement, participation, treasury, servicing, and lifecycle event.'
+      'Use plain language and preserve SRA terminology such as Verified Value, Asset Account, Project Account, settlement, participation, treasury, servicing, and lifecycle event.',
+      'Default to a focused answer of 120 to 250 words. Give more detail only when the user explicitly requests a deep explanation, report, complete record, or step-by-step breakdown.',
+      'Lead with the direct answer. Use no more than one short heading and five bullets unless more structure is necessary.',
+      'Translate internal property names into normal language. Do not expose JSON, database field names, implementation keys, raw schemas, or source-code notation unless the user explicitly asks for technical details.',
+      'Do not narrate every record in the supplied context. Select only the facts needed to answer the question.',
+      'Use simple Markdown only: short paragraphs, bold emphasis, and basic bullets. Do not use tables, nested headings, or fenced code blocks in normal marketplace conversation.'
     ].join('\n');
   }
 
@@ -136,6 +141,7 @@ export class SraAgentService {
     const response = await this.requestResponse({
       model: this.model,
       instructions: this.instructions(),
+      max_output_tokens: 700,
       input: [
         {
           role: 'user',
