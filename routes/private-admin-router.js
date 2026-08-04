@@ -9,10 +9,10 @@ function readCookie(req, name) {
 }
 function setAdminCookie(res, token) {
   const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
-  res.setHeader('Set-Cookie', `sra_admin_session=${encodeURIComponent(token)}; Path=/admin; HttpOnly; SameSite=Strict; Max-Age=14400${secure}`);
+  res.setHeader('Set-Cookie', `sra_admin_session=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=14400${secure}`);
 }
 function clearAdminCookie(res) {
-  res.setHeader('Set-Cookie', 'sra_admin_session=; Path=/admin; HttpOnly; SameSite=Strict; Max-Age=0');
+  res.setHeader('Set-Cookie', 'sra_admin_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0');
 }
 function hasAdminCapacity(session) {
   return Boolean(session?.capacities?.some((capacity) => capacity.id === 'PLATFORM_ADMIN'));
