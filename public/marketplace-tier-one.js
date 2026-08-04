@@ -74,7 +74,7 @@
       </section>
 
       <section class="tier-one-coin-card" aria-label="SRA Coin access">
-        <div class="tier-one-coin-mark">SRA</div>
+        <div class="tier-one-coin-mark"><img src="/brand-logo" alt="SRA — SAIN Real Asset Market"></div>
         <div>
           <p class="eyebrow">UNIVERSAL ACCOUNT ACCESS</p>
           <h2>SRA Coin</h2>
