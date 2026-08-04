@@ -5,6 +5,90 @@ function number(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function firstValue(...values) {
+  return values.find((value) => value !== undefined && value !== null && value !== '');
+}
+
+function occurredAt(record) {
+  return firstValue(
+    record.occurredAt,
+    record.completedAt,
+    record.settledAt,
+    record.executedAt,
+    record.postedAt,
+    record.createdAt,
+    record.updatedAt
+  ) || null;
+}
+
+function transactionAmount(record) {
+  return number(firstValue(
+    record.amount,
+    record.settlementAmount,
+    record.executedAmount,
+    record.value,
+    record.payload?.amount,
+    record.payload?.settlementAmount,
+    record.payload?.value
+  ));
+}
+
+function transactionCurrency(record) {
+  return firstValue(record.currency, record.payload?.currency, 'USD');
+}
+
+function transactionState(record) {
+  return String(firstValue(record.state, record.status, record.eventType, 'RECORDED')).toUpperCase();
+}
+
+function transactionKind(record, sourceType) {
+  return firstValue(record.transactionType, record.kind, record.eventType, record.type, sourceType);
+}
+
+function transactionId(record, sourceType, index) {
+  return firstValue(
+    record.transactionId,
+    record.entryId,
+    record.settlementId,
+    record.settlementRecordId,
+    record.instructionId,
+    record.paymentOrderId,
+    record.eventId,
+    record.id,
+    `${sourceType}-${index + 1}`
+  );
+}
+
+function normalizeTransaction(record, sourceType, index) {
+  return {
+    transactionId: transactionId(record, sourceType, index),
+    sourceType,
+    kind: transactionKind(record, sourceType),
+    state: transactionState(record),
+    amount: transactionAmount(record),
+    currency: transactionCurrency(record),
+    occurredAt: occurredAt(record),
+    assetId: firstValue(record.assetId, record.payload?.assetId, null),
+    projectId: firstValue(record.projectId, record.payload?.projectId, null),
+    participantId: firstValue(record.participantId, record.ownerId, record.payload?.participantId, null),
+    fromAccountId: firstValue(record.fromAccountId, record.debitAccountId, record.payload?.fromAccountId, null),
+    toAccountId: firstValue(record.toAccountId, record.creditAccountId, record.payload?.toAccountId, null),
+    referenceId: firstValue(record.referenceId, record.externalReference, record.payload?.referenceId, null),
+    verified: sourceType === RECORD_TYPES.VERIFIED_MARKET_EVENT || Boolean(record.verifiedAt || record.evidenceId || record.evidenceReferences?.length),
+    rawState: firstValue(record.state, record.status, null)
+  };
+}
+
+function isCompleted(transaction) {
+  return ['COMPLETED', 'SETTLED', 'POSTED', 'EXECUTED', 'EVIDENCED', 'VERIFIED', 'CLOSED']
+    .some((state) => transaction.state.includes(state));
+}
+
+function isPending(transaction) {
+  return ['PENDING', 'QUEUED', 'AUTHORIZED', 'SUBMITTED', 'PROCESSING', 'AVAILABLE']
+    .some((state) => transaction.state.includes(state));
+}
+
 export class PersistentMarketplaceService {
   constructor(persistentDomain, seed = {}) {
     this.persistentDomain = persistentDomain;
@@ -35,6 +119,59 @@ export class PersistentMarketplaceService {
         amount: event.payload?.amount || null
       }));
     return lifecycle.length ? lifecycle : (Array.isArray(this.seed.activity) ? this.seed.activity : []);
+  }
+
+  get transactions() {
+    const sources = [
+      RECORD_TYPES.LEDGER_ENTRY,
+      RECORD_TYPES.SRA_SETTLEMENT,
+      RECORD_TYPES.SRA_SETTLEMENT_RECORD,
+      RECORD_TYPES.SETTLEMENT_RAIL_INSTRUCTION,
+      RECORD_TYPES.TREASURY_PAYMENT_ORDER,
+      RECORD_TYPES.VERIFIED_MARKET_EVENT
+    ];
+
+    return sources
+      .flatMap((sourceType) => this.persistentDomain.list(sourceType)
+        .map((record, index) => normalizeTransaction(record, sourceType, index)))
+      .sort((left, right) => {
+        const leftTime = left.occurredAt ? new Date(left.occurredAt).getTime() : 0;
+        const rightTime = right.occurredAt ? new Date(right.occurredAt).getTime() : 0;
+        return rightTime - leftTime;
+      });
+  }
+
+  get transactionMarket() {
+    const transactions = this.transactions;
+    const completed = transactions.filter(isCompleted);
+    const pending = transactions.filter(isPending);
+    const verified = transactions.filter((transaction) => transaction.verified);
+    const totalVolume = completed.reduce((total, transaction) => total + transaction.amount, 0);
+    const verifiedVolume = verified.reduce((total, transaction) => total + transaction.amount, 0);
+    const averageTransactionSize = completed.length ? totalVolume / completed.length : 0;
+    const latestOccurredAt = transactions.find((transaction) => transaction.occurredAt)?.occurredAt || null;
+
+    const volumeByKind = transactions.reduce((summary, transaction) => {
+      const key = transaction.kind || 'UNCLASSIFIED';
+      if (!summary[key]) summary[key] = { count: 0, volume: 0 };
+      summary[key].count += 1;
+      summary[key].volume += transaction.amount;
+      return summary;
+    }, {});
+
+    return {
+      status: transactions.length ? 'ACTIVE' : 'READY',
+      transactionCount: transactions.length,
+      completedTransactionCount: completed.length,
+      pendingTransactionCount: pending.length,
+      verifiedTransactionCount: verified.length,
+      totalVolume,
+      verifiedVolume,
+      averageTransactionSize,
+      latestOccurredAt,
+      volumeByKind,
+      recentTransactions: transactions.slice(0, 25)
+    };
   }
 
   get marketStatus() {
@@ -90,6 +227,7 @@ export class PersistentMarketplaceService {
       instrumentsActive: this.instrumentsActive,
       completionNeed: this.completionNeed,
       completionReturn: this.completionReturn,
+      transactionMarket: this.transactionMarket,
       assets: this.assets,
       projects: this.projects,
       completionWatch: this.completionWatch,
