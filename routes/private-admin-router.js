@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import express, { Router } from 'express';
 import { AccessService } from '../services/access-service.js';
 import { RECORD_TYPES } from '../services/persistent-domain-service.js';
@@ -14,10 +15,21 @@ function setAdminCookie(res, token) {
 function clearAdminCookie(res) {
   res.setHeader('Set-Cookie', 'sra_admin_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0');
 }
-function hasAdminCapacity(session) {
-  return Boolean(session?.capacities?.some((capacity) => capacity.id === 'PLATFORM_ADMIN'));
+function hasAdminCapacity(subject) {
+  return Boolean(subject?.capacities?.some((capacity) => (typeof capacity === 'string' ? capacity : capacity.id) === 'PLATFORM_ADMIN'));
+}
+function isDemoIdentity(subject) {
+  return String(subject?.email || '').toLowerCase().endsWith('@sra.demo');
+}
+function isRealAdministrator(subject) {
+  return hasAdminCapacity(subject) && !isDemoIdentity(subject);
 }
 function count(domain, type) { return domain.list(type).length; }
+function safeEqual(left, right) {
+  const a = Buffer.from(String(left || ''));
+  const b = Buffer.from(String(right || ''));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
 
 export async function createPrivateAdminRouter({ database, domain, coinbasePublicMarket = null }) {
   const access = new AccessService({ database });
@@ -25,9 +37,24 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
   const router = Router();
   router.use(express.json({ limit: '256kb' }));
 
+  async function persistedUsers() {
+    return database ? database.listUsers() : [...access.users.values()];
+  }
+  async function realAdministrators() {
+    return (await persistedUsers()).filter(isRealAdministrator);
+  }
+  async function bootstrapState() {
+    const administrators = await realAdministrators();
+    return {
+      initialized: administrators.length > 0,
+      setupAvailable: administrators.length === 0 && Boolean(process.env.SRA_ADMIN_SETUP_CODE),
+      setupCodeConfigured: Boolean(process.env.SRA_ADMIN_SETUP_CODE),
+      administratorCount: administrators.length
+    };
+  }
   async function adminSession(req) {
     const session = await access.getSession(readCookie(req, 'sra_admin_session'));
-    return session?.activeCapacity === 'PLATFORM_ADMIN' && hasAdminCapacity(session) ? session : null;
+    return session?.activeCapacity === 'PLATFORM_ADMIN' && isRealAdministrator(session) ? session : null;
   }
   async function requireAdmin(req, res) {
     const session = await adminSession(req);
@@ -35,10 +62,39 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
     return session;
   }
 
+  router.get('/api/admin/bootstrap-status', async (_req, res) => {
+    return res.json({ ...(await bootstrapState()), portal: 'PRIVATE_PLATFORM_ADMINISTRATION' });
+  });
+
+  router.post('/api/admin/bootstrap', async (req, res) => {
+    try {
+      const state = await bootstrapState();
+      if (state.initialized) return res.status(409).json({ error: 'Platform Administration has already been initialized.' });
+      if (!state.setupCodeConfigured) return res.status(503).json({ error: 'One-time administrator setup is not enabled. Configure SRA_ADMIN_SETUP_CODE in Railway.' });
+      if (!safeEqual(req.body?.setupCode, process.env.SRA_ADMIN_SETUP_CODE)) return res.status(403).json({ error: 'The one-time setup code is incorrect.' });
+      if (String(req.body?.password || '') !== String(req.body?.confirmPassword || '')) return res.status(400).json({ error: 'Password confirmation does not match.' });
+      const user = await access.createUser({
+        displayName: req.body?.displayName,
+        email: req.body?.email,
+        password: req.body?.password,
+        capacities: ['UNIVERSAL', 'PLATFORM_ADMIN']
+      });
+      if (database) await database.audit({ actorId: user.id, eventType: 'PLATFORM_ADMINISTRATION_INITIALIZED', objectType: 'PLATFORM_ADMIN', objectId: user.id });
+      const result = await access.signin({ email: user.email, password: req.body?.password });
+      const session = await access.switchRole(result.token, 'PLATFORM_ADMIN');
+      setAdminCookie(res, result.token);
+      return res.status(201).json({ initialized: true, authenticated: true, session, portal: 'PRIVATE_PLATFORM_ADMINISTRATION' });
+    } catch (error) {
+      return res.status(400).json({ error: error.message || 'Platform Administration initialization failed.' });
+    }
+  });
+
   router.post('/api/admin/signin', async (req, res) => {
     try {
+      const state = await bootstrapState();
+      if (!state.initialized) return res.status(409).json({ error: 'Create the first Platform Administrator before signing in.', requiresInitialization: true });
       const result = await access.signin(req.body || {});
-      if (!hasAdminCapacity(result.session)) {
+      if (!isRealAdministrator(result.session)) {
         await access.signout(result.token);
         return res.status(403).json({ error: 'This identity is not authorized for Platform Administration.' });
       }
@@ -52,7 +108,7 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
 
   router.get('/api/admin/session', async (req, res) => {
     const session = await adminSession(req);
-    return res.json({ authenticated: Boolean(session), session, portal: 'PRIVATE_PLATFORM_ADMINISTRATION' });
+    return res.json({ authenticated: Boolean(session), session, bootstrap: await bootstrapState(), portal: 'PRIVATE_PLATFORM_ADMINISTRATION' });
   });
 
   router.post('/api/admin/signout', async (req, res) => {
