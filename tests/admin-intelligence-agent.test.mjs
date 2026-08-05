@@ -10,6 +10,7 @@ class MemoryDomain {
 
 function trueBillRecords() {
   return {
+    SRA_PRODUCT_DEFINITION: [],
     SRA_INSTRUMENT: [{ instrumentId: 'INS-TB-1', instrumentFamily: 'TRUE_BILL', state: 'ISSUED' }],
     MARKETPLACE_LISTING: [{ listingId: 'LIST-1', instrumentId: 'INS-TB-1', state: 'PUBLISHED' }],
     PARTICIPATION_POSITION: [],
@@ -52,6 +53,40 @@ test('agent reports when a product lifecycle has not started', async () => {
   assert.equal(response.nextAction.authority, 'ADMIN_APPROVAL_REQUIRED');
 });
 
+test('agent discovers a registered product by its human name and uses its instrument families', async () => {
+  const records = trueBillRecords();
+  records.SRA_PRODUCT_DEFINITION.push({
+    productDefinitionId: 'CUSTOM-BILL',
+    productCode: 'CUSTOM_BILL',
+    name: 'Community Funding Bill',
+    instrumentFamilies: ['TRUE_BILL'],
+    state: 'ACTIVE',
+  });
+  const agent = new AdminIntelligenceAgentService({ domain: new MemoryDomain(records) });
+  const response = await agent.ask({ question: 'Where is the Community Funding Bill right now?' }, { id: 'ADMIN-1' });
+  assert.equal(response.productCode, 'CUSTOM_BILL');
+  assert.equal(response.data.instrumentCount, 1);
+  assert.deepEqual(response.data.instrumentFamilies, ['TRUE_BILL']);
+  assert.match(response.answer, /CUSTOM_BILL/);
+});
+
+test('agent includes registered custom products in approval discovery', async () => {
+  const records = trueBillRecords();
+  records.SRA_PRODUCT_DEFINITION.push({
+    productDefinitionId: 'CUSTOM-BILL',
+    productCode: 'CUSTOM_BILL',
+    name: 'Community Funding Bill',
+    instrumentFamilies: ['TRUE_BILL'],
+    state: 'ACTIVE',
+  });
+  records.PARTICIPATION_POSITION.push({ positionId: 'PART-1', instrumentId: 'INS-TB-1', listingId: 'LIST-1', participantId: 'USER-1', state: 'ACTIVE' });
+  records.FUNDING_MARKETPLACE_COMMITMENT.push({ commitmentId: 'COM-1', instrumentId: 'INS-TB-1', listingId: 'LIST-1', participantId: 'USER-1', state: 'COMMITTED' });
+  const agent = new AdminIntelligenceAgentService({ domain: new MemoryDomain(records) });
+  const response = await agent.ask({ question: 'What needs my approval?' }, { id: 'ADMIN-1' });
+  assert.equal(response.status, 'APPROVAL_REQUIRED');
+  assert.equal(response.pendingActions.some((item) => item.productCode === 'CUSTOM_BILL' && item.stage === 'allocation'), true);
+});
+
 test('agent answers platform summary and capability questions', async () => {
   const records = trueBillRecords();
   const agent = new AdminIntelligenceAgentService({ domain: new MemoryDomain(records) });
@@ -62,6 +97,7 @@ test('agent answers platform summary and capability questions', async () => {
   assert.equal(capabilities.intent, 'CAPABILITIES');
   assert.equal(capabilities.capabilities.mode, 'AUTONOMOUS_READ_AND_REASON');
   assert.equal(capabilities.capabilities.writeAuthority, 'HUMAN_IN_THE_LOOP');
+  assert.equal(capabilities.capabilities.can.includes('DISCOVER_REGISTERED_PRODUCTS'), true);
 });
 
 test('agent audits each authenticated answer', async () => {
