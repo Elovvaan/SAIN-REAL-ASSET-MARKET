@@ -1,6 +1,8 @@
 import express from 'express';
 import crypto from 'node:crypto';
 
+const CONFIRMATION_TYPE = 'FUNDING_MARKETPLACE_SETTLEMENT_CONFIRMATION';
+
 function actorId(req) {
   return req.sraOperationsAuth?.actorId || req.sraIdentity?.actorId || null;
 }
@@ -31,7 +33,19 @@ function handle(res, error) {
   return res.status(status).json({ error: error.message, code: error.code || 'FUNDING_MARKETPLACE_SETTLEMENT_ERROR', assessment: error.assessment || null });
 }
 
+function installConfirmationIdentityGuard(service) {
+  const domain = service?.domain;
+  if (!domain || domain.__settlementConfirmationIdentityGuard) return;
+  const atomicPut = domain.atomicPut.bind(domain);
+  domain.atomicPut = (changes = []) => atomicPut(changes.map((change) => {
+    if (change?.type !== CONFIRMATION_TYPE || !change?.id) return change;
+    return { ...change, payload: { id: change.id, ...(change.payload || {}) } };
+  }));
+  domain.__settlementConfirmationIdentityGuard = true;
+}
+
 export function createFundingMarketplaceSettlementRouter(service) {
+  installConfirmationIdentityGuard(service);
   const router = express.Router();
 
   router.get('/status', (_req, res) => res.json(service.status()));
