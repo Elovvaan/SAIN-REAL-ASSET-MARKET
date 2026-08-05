@@ -1,4 +1,8 @@
 import { RECORD_TYPES } from './persistent-domain-service.js';
+import { PlatformDataHygieneService, MOCK_ASSET_IDS, MOCK_PROJECT_IDS } from './platform-data-hygiene-service.js';
+
+const MOCK_ASSET_ID_SET = new Set(MOCK_ASSET_IDS);
+const MOCK_PROJECT_ID_SET = new Set(MOCK_PROJECT_IDS);
 
 function number(value) {
   const parsed = Number(value);
@@ -54,9 +58,25 @@ function isPending(transaction) {
 }
 
 export class PersistentMarketplaceService {
-  constructor(persistentDomain, seed = {}) { this.persistentDomain = persistentDomain; this.seed = seed; }
-  get assets() { return this.persistentDomain.list(RECORD_TYPES.ASSET_ACCOUNT); }
-  get projects() { return this.persistentDomain.list(RECORD_TYPES.PROJECT_ACCOUNT); }
+  constructor(persistentDomain, seed = {}) {
+    this.persistentDomain = persistentDomain;
+    this.seed = seed;
+    this.dataHygiene = new PlatformDataHygieneService(persistentDomain);
+    this.dataHygieneState = 'STARTING';
+    queueMicrotask(() => {
+      void this.dataHygiene.run()
+        .then(() => { this.dataHygieneState = 'CURRENT'; })
+        .catch(() => { this.dataHygieneState = 'FAILED'; });
+    });
+  }
+  get assets() {
+    return this.persistentDomain.list(RECORD_TYPES.ASSET_ACCOUNT)
+      .filter((asset) => !MOCK_ASSET_ID_SET.has(asset.assetId || asset.id));
+  }
+  get projects() {
+    return this.persistentDomain.list(RECORD_TYPES.PROJECT_ACCOUNT)
+      .filter((project) => !MOCK_PROJECT_ID_SET.has(project.projectId || project.id));
+  }
   get completionWatch() { return Array.isArray(this.seed.completionWatch) ? this.seed.completionWatch : []; }
   get activity() {
     const lifecycle = this.persistentDomain.list(RECORD_TYPES.LIFECYCLE_EVENT).slice(-20).reverse().map((event) => ({
@@ -119,6 +139,8 @@ export class PersistentMarketplaceService {
   snapshot() {
     return {
       marketStatus: this.marketStatus,
+      dataHygieneState: this.dataHygieneState,
+      nativeSraPar: { unit: 'SRA', quoteCurrency: 'USD', parValue: 1, policy: 'FIXED_PAR' },
       verifiedValue: this.verifiedValue,
       projectedMarketplaceGain: this.projectedMarketplaceGain,
       activeProjects: this.activeProjects,
