@@ -102,8 +102,22 @@ export async function dependencyHealth({ database, startupState, connectors = {}
   const checks = [];
   try {
     const db = await database?.health?.();
-    checks.push({ id: 'DATABASE', status: db?.persistent ? 'PASS' : 'FAIL', detail: db || null });
-  } catch (error) { checks.push({ id: 'DATABASE', status: 'FAIL', error: error.message }); }
+    const databaseReady = Boolean(db?.ready);
+    checks.push({ id: 'DATABASE', status: databaseReady ? 'PASS' : 'FAIL', detail: db || null });
+    if (databaseReady && db?.persistent === false) {
+      checks.push({
+        id: 'DATABASE_PERSISTENCE',
+        status: 'WARN',
+        detail: {
+          mode: db.mode,
+          persistent: false,
+          message: 'The database service is ready in memory fallback mode. Configure DATABASE_URL for durable persistence.'
+        }
+      });
+    }
+  } catch (error) {
+    checks.push({ id: 'DATABASE', status: 'FAIL', error: error.message });
+  }
   checks.push({ id: 'APPLICATION_STARTUP', status: startupState === 'READY' ? 'PASS' : 'FAIL', detail: startupState });
   for (const [id, service] of Object.entries(connectors)) {
     try { const state = service?.status?.() || null; checks.push({ id, status: state ? 'PASS' : 'WARN', detail: state }); }
