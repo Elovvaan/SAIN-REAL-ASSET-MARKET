@@ -18,12 +18,13 @@
     "test:admin-agent": "node --test --test-concurrency=1 tests/admin-intelligence-agent.test.mjs",
     "test:platform-asset": "node --test --test-concurrency=1 tests/native-platform-asset.test.mjs",
     "test:admin-platform-asset-ui": "node --test --test-concurrency=1 tests/admin-native-platform-asset-ui.test.mjs",
+    "test:financial-history": "node --test --test-concurrency=1 tests/financial-history-service.test.mjs",
     "test:edx": "node --test --test-concurrency=1 test/edx-pipeline.test.js",
     "test:funding": "node --test --test-concurrency=1 test/funding-engine.integration.test.js",
     "test:load": "node scripts/load-qualification.mjs",
     "backup:create": "node scripts/backup-database.mjs",
     "restore:verify": "node scripts/verify-restore.mjs",
-    "test:integration": "npm run test:security && npm run test:transaction-safety && npm run test:settlement && npm run test:runtime && npm run test:lifecycle && npm run test:products && npm run test:production-routing && npm run test:admin-agent && npm run test:platform-asset && npm run test:admin-platform-asset-ui && node --test --test-concurrency=1 test/edx-pipeline.test.js test/funding-engine.integration.test.js"
+    "test:integration": "npm run test:security && npm run test:transaction-safety && npm run test:settlement && npm run test:runtime && npm run test:lifecycle && npm run test:products && npm run test:production-routing && npm run test:admin-agent && npm run test:platform-asset && npm run test:admin-platform-asset-ui && npm run test:financial-history && node --test --test-concurrency=1 test/edx-pipeline.test.js test/funding-engine.integration.test.js"
   },
   "engines": { "node": ">=20" },
   "dependencies": { "express": "^4.21.2", "multer": "^1.4.5-lts.1", "openai": "^5.20.0", "pg": "^8.13.1", "ws": "^8.18.3" },
