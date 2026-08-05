@@ -28,12 +28,17 @@ export class ProductionReadinessService {
       {
         id: 'OPERATIONS_AUTHORIZATION',
         status: 'PASS',
-        detail: 'Funding and marketplace write paths require an authorized staff role.',
+        detail: 'Funding and marketplace writes are authorized from current server-side sessions and capacities.',
       },
       {
-        id: 'IDEMPOTENCY',
+        id: 'DURABLE_IDEMPOTENCY',
+        status: database.persistent ? 'PASS' : 'FAIL',
+        detail: database.persistent ? 'Idempotency responses and active resource locks are shared through PostgreSQL across instances and restarts.' : 'Durable idempotency requires PostgreSQL.',
+      },
+      {
+        id: 'CRITICAL_TRANSITION_ATOMICITY',
         status: 'WARN',
-        detail: 'Instance-level idempotency is active; durable cross-instance idempotency is not yet implemented.',
+        detail: 'Critical multi-record lifecycle transitions still require explicit database transaction boundaries.',
       },
     ];
     const failed = checks.filter((check) => check.status === 'FAIL');
