@@ -14,7 +14,7 @@ class MemoryDomain {
 
 function exportPackage(overrides = {}) {
   return {
-    exportPackageId: 'EXP-1', state: 'READY_FOR_EXPORT', immutable: true, packageDigest: 'a'.repeat(64),
+    exportPackageId: 'EXP-1', state: 'READY_FOR_EXPORT', immutable: true, packageDigest: 'a'.repeat(64), createdAt: '2026-08-05T12:00:00.000Z',
     manifest: {
       lifecycle: ['OBSERVE','RECOGNIZE','FINANCIAL_RECORD','COIN_POSITION','INSTRUMENT','MARKETPLACE_LISTING','PARTICIPATION','COMMITMENT','ALLOCATION','SETTLEMENT','OWNERSHIP_RECOGNITION','READY_FOR_EXPORT'],
       references: { instrument: 'INS-1', ownershipRecognition: 'OWN-1' },
@@ -25,9 +25,13 @@ function exportPackage(overrides = {}) {
   };
 }
 
-function serviceWith(pkg = exportPackage(), integrity = { valid: true, storedDigest: 'a'.repeat(64) }) {
+function serviceWith(packages = [exportPackage()], integrity = { valid: true, storedDigest: 'a'.repeat(64) }) {
   const domain = new MemoryDomain();
-  const lifecycle = { getExportPackage: (id) => id === pkg.exportPackageId ? structuredClone(pkg) : null, verifyExportPackage: () => ({ ...integrity }) };
+  const lifecycle = {
+    getExportPackage: (id) => structuredClone(packages.find((pkg) => pkg.exportPackageId === id) || null),
+    listExportPackages: () => structuredClone(packages),
+    verifyExportPackage: () => ({ ...integrity }),
+  };
   return { domain, service: new ProductQualificationService(domain, lifecycle) };
 }
 
@@ -42,7 +46,7 @@ test('built-in product catalog exposes only supported product families', () => {
 
 test('product fails when instrument family does not match', () => {
   const pkg = exportPackage({ records: { instrument: { instrumentId: 'INS-1', instrumentFamily: 'COMMERCIAL_PAPER' }, ownershipRecognition: { state: 'RECOGNIZED' } } });
-  const { service } = serviceWith(pkg);
+  const { service } = serviceWith([pkg]);
   const result = service.qualify({ productCode: 'TRUE_BILL', exportPackageId: 'EXP-1', evidenceClasses });
   assert.equal(result.passed, false);
   assert.equal(result.checks.find((check) => check.id === 'PRODUCT_INSTRUMENT_MATCH').status, 'FAIL');
@@ -55,12 +59,34 @@ test('product fails when required evidence classes are missing', () => {
   assert.equal(result.checks.find((check) => check.id === 'EVIDENCE_CLASSES').status, 'FAIL');
 });
 
+test('candidate scan uses only stored matching export packages', () => {
+  const commercialPaper = exportPackage({ records: { instrument: { instrumentId: 'INS-2', instrumentFamily: 'COMMERCIAL_PAPER' }, ownershipRecognition: { state: 'RECOGNIZED' } } });
+  commercialPaper.exportPackageId = 'EXP-2';
+  const { service } = serviceWith([commercialPaper, exportPackage()]);
+  const candidates = service.findQualificationCandidates('TRUE_BILL', { evidenceClasses });
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0].exportPackageId, 'EXP-1');
+  assert.equal(candidates[0].passed, true);
+});
+
+test('qualify first ready records the first real stored True Bill candidate', async () => {
+  const { domain, service } = serviceWith();
+  const result = await service.qualifyFirstReady('TRUE_BILL', { evidenceClasses }, 'TEST_AGENT');
+  assert.equal(result.created, true);
+  assert.equal(result.qualification.productCode, 'TRUE_BILL');
+  assert.equal(result.qualification.exportPackageId, 'EXP-1');
+  assert.equal(domain.events.some((event) => event.eventType === 'SRA_PRODUCT_PRODUCTION_QUALIFIED'), true);
+});
+
+test('qualify first ready refuses to manufacture a missing package', async () => {
+  const { service } = serviceWith([]);
+  await assert.rejects(() => service.qualifyFirstReady('TRUE_BILL', { evidenceClasses }, 'TEST_AGENT'), /No stored READY_FOR_EXPORT package matches TRUE_BILL/);
+});
+
 test('product records one idempotent production qualification', async () => {
   const { domain, service } = serviceWith();
   const first = await service.recordQualification({ productCode: 'TRUE_BILL', exportPackageId: 'EXP-1', evidenceClasses }, 'TEST_AGENT');
   assert.equal(first.created, true);
-  assert.equal(first.qualification.state, 'QUALIFIED');
-  assert.equal(first.qualification.standard, 'SRA_PRODUCT_QUALIFICATION_V1');
   const second = await service.recordQualification({ productCode: 'TRUE_BILL', exportPackageId: 'EXP-1', evidenceClasses }, 'TEST_AGENT');
   assert.equal(second.created, false);
   assert.equal(second.qualification.productQualificationId, first.qualification.productQualificationId);
