@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import express, { Router } from 'express';
 import { AccessService } from '../services/access-service.js';
+import { MarketplaceListingService } from '../services/marketplace-listing-service.js';
 import { RECORD_TYPES } from '../services/persistent-domain-service.js';
 
 function readCookie(req, name) {
@@ -33,6 +34,7 @@ function safeEqual(left, right) {
 
 export async function createPrivateAdminRouter({ database, domain, coinbasePublicMarket = null }) {
   const access = new AccessService({ database });
+  const marketplaceListings = new MarketplaceListingService(domain);
   await access.initialize();
   const router = Router();
   router.use(express.json({ limit: '256kb' }));
@@ -120,6 +122,14 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
   router.get('/api/admin/summary', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
     const coinbase = coinbasePublicMarket?.status?.() || null;
+    const listingStatus = marketplaceListings.status();
+    const listings = marketplaceListings.list();
+    const blockedListings = listings.filter((listing) => Array.isArray(listing.blockers) && listing.blockers.length > 0).length;
+    const readyListings = listings.filter((listing) => Array.isArray(listing.blockers) && listing.blockers.length === 0).length;
+    const blockerCounts = {};
+    for (const listing of listings) {
+      for (const blocker of listing.blockers || []) blockerCounts[blocker] = (blockerCounts[blocker] || 0) + 1;
+    }
     return res.json({
       generatedAt: new Date().toISOString(),
       administrator: { id: session.id, displayName: session.displayName, capacity: session.activeCapacity },
@@ -129,16 +139,29 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
         financialRecords: count(domain, RECORD_TYPES.FINANCIAL_RECORD),
         coinPositions: count(domain, RECORD_TYPES.COIN_POSITION),
         instruments: count(domain, RECORD_TYPES.SRA_INSTRUMENT),
+        marketplaceListings: listingStatus.listingCount || 0,
+        marketplaceListingsPrepared: listingStatus.byState?.PREPARED || 0,
+        marketplaceListingsPublished: listingStatus.byState?.PUBLISHED || listingStatus.byState?.ACTIVE || 0,
+        marketplaceListingsBlocked: blockedListings,
+        marketplaceListingsReady: readyListings,
+        marketplaceListingStoredRecords: listingStatus.storedRecordCount || listingStatus.listingCount || 0,
+        marketplaceListingDuplicates: listingStatus.supersededDuplicateCount || 0,
         transactions: count(domain, RECORD_TYPES.SRA_TRANSACTION),
         fundingInstructions: count(domain, RECORD_TYPES.FUNDING_INSTRUCTION),
         treasuryWallets: count(domain, RECORD_TYPES.TREASURY_CRYPTO_WALLET),
         treasuryActivity: count(domain, RECORD_TYPES.TREASURY_CRYPTO_ACTIVITY)
       },
+      marketplaceListings: {
+        ...listingStatus,
+        blockedListings,
+        readyListings,
+        blockerCounts
+      },
       connectors: { coinbasePublicMarket: coinbase },
       approvalBoundary: {
         agentWriteAccess: 'DISABLED',
         stateChangesRequireApproval: true,
-        protectedAreas: ['FINANCIAL_RECORDS','RECOGNITION','COIN_POSITIONS','INSTRUMENTS','TRANSACTIONS','TREASURY','SETTLEMENT','CONNECTORS','ACCOUNT_AUTHORITY']
+        protectedAreas: ['FINANCIAL_RECORDS','RECOGNITION','COIN_POSITIONS','INSTRUMENTS','MARKETPLACE_LISTINGS','TRANSACTIONS','TREASURY','SETTLEMENT','CONNECTORS','ACCOUNT_AUTHORITY']
       }
     });
   });
