@@ -62,6 +62,31 @@ export const RECORD_TYPES = Object.freeze({
   SRA_INSTRUMENT: 'SRA_INSTRUMENT',
   SRA_TRANSACTION: 'SRA_TRANSACTION',
   PROTECTION_INSTRUMENT: 'PROTECTION_INSTRUMENT',
+  FUNDING_OPPORTUNITY: 'FUNDING_OPPORTUNITY',
+  FUNDING_OPPORTUNITY_EVIDENCE: 'FUNDING_OPPORTUNITY_EVIDENCE',
+  FUNDING_OPPORTUNITY_VERIFICATION_REQUEST: 'FUNDING_OPPORTUNITY_VERIFICATION_REQUEST',
+  FUNDING_OPPORTUNITY_VERIFICATION_FINDING: 'FUNDING_OPPORTUNITY_VERIFICATION_FINDING',
+  FUNDING_OPPORTUNITY_VERIFICATION_DECISION: 'FUNDING_OPPORTUNITY_VERIFICATION_DECISION',
+  FUNDING_OPPORTUNITY_VALUE_PREPARATION: 'FUNDING_OPPORTUNITY_VALUE_PREPARATION',
+  FUNDING_MODEL_ASSESSMENT: 'FUNDING_MODEL_ASSESSMENT',
+  FUNDING_MODEL_SELECTION: 'FUNDING_MODEL_SELECTION',
+  FUNDING_INSTRUMENT_SELECTION_REQUEST: 'FUNDING_INSTRUMENT_SELECTION_REQUEST',
+  FUNDING_INSTRUMENT_SELECTION: 'FUNDING_INSTRUMENT_SELECTION',
+  FUNDING_INSTRUMENT_DRAFT_REVIEW: 'FUNDING_INSTRUMENT_DRAFT_REVIEW',
+  FUNDING_INSTRUMENT_ISSUANCE_REQUEST: 'FUNDING_INSTRUMENT_ISSUANCE_REQUEST',
+  FUNDING_INSTRUMENT_ISSUANCE_REVIEW: 'FUNDING_INSTRUMENT_ISSUANCE_REVIEW',
+  FUNDING_INSTRUMENT_ISSUANCE_AUTHORIZATION: 'FUNDING_INSTRUMENT_ISSUANCE_AUTHORIZATION',
+  FUNDING_MARKETPLACE_PREPARATION: 'FUNDING_MARKETPLACE_PREPARATION',
+  FUNDING_MARKETPLACE_PUBLICATION_REVIEW: 'FUNDING_MARKETPLACE_PUBLICATION_REVIEW',
+  FUNDING_MARKETPLACE_PUBLICATION_AUTHORIZATION: 'FUNDING_MARKETPLACE_PUBLICATION_AUTHORIZATION',
+  FUNDING_MARKETPLACE_COMMITMENT_WINDOW: 'FUNDING_MARKETPLACE_COMMITMENT_WINDOW',
+  FUNDING_MARKETPLACE_COMMITMENT: 'FUNDING_MARKETPLACE_COMMITMENT',
+  FUNDING_MARKETPLACE_ALLOCATION_REVIEW: 'FUNDING_MARKETPLACE_ALLOCATION_REVIEW',
+  FUNDING_MARKETPLACE_POSITION: 'FUNDING_MARKETPLACE_POSITION',
+  FUNDING_MARKETPLACE_SETTLEMENT_PREPARATION: 'FUNDING_MARKETPLACE_SETTLEMENT_PREPARATION',
+  FUNDING_MARKETPLACE_SETTLEMENT_REVIEW: 'FUNDING_MARKETPLACE_SETTLEMENT_REVIEW',
+  FUNDING_MARKETPLACE_SETTLEMENT_AUTHORIZATION: 'FUNDING_MARKETPLACE_SETTLEMENT_AUTHORIZATION',
+  MARKETPLACE_LISTING: 'MARKETPLACE_LISTING',
   EDX_CONNECTOR_DEFINITION: 'EDX_CONNECTOR_DEFINITION',
   EDX_ENTERPRISE_CONNECTION: 'EDX_ENTERPRISE_CONNECTION',
   EDX_EXTRACTION_POLICY: 'EDX_EXTRACTION_POLICY',
@@ -81,7 +106,7 @@ export const RECORD_TYPES = Object.freeze({
 });
 
 function recordId(record) {
-  return record?.id || record?.applicationId || record?.evidencePackageId || record?.institutionalReviewId || record?.assetId || record?.projectId || record?.homeProjectId || record?.fundingPlanId || record?.fundingInstructionId || record?.paymentReceiptId || record?.settlementId || record?.settlementRecordId || record?.planId || record?.commitmentId || record?.adapterId || record?.instructionId || record?.connectionId || record?.paymentOrderId || record?.statementId || record?.walletId || record?.activityId || record?.feeCode || record?.scheduleId || record?.chargeId || record?.invoiceId || record?.accountId || record?.entryId || record?.profileId || record?.usageEventId || record?.billingRunId || record?.servicingAccountId || record?.obligationId || record?.servicingEventId || record?.forecastId || record?.exceptionId || record?.periodId || record?.statementSnapshotId || record?.offeringId || record?.subscriptionId || record?.packageId || record?.positionId || record?.structureId || record?.signalId || record?.eventId || record?.observationId || record?.recognitionId || record?.financialRecordId || record?.financialAccountId || record?.coinAccountId || record?.coinPositionId || record?.instrumentId || record?.transactionId || record?.connectorDefinitionId || record?.policyId || record?.extractionRequestId || record?.extractionResultId || record?.normalizedRecordId || record?.snapshotId || record?.valuePackageId || record?.publicationDecisionId || record?.projectionId || record?.intelligenceReportId || record?.sdkClientId || record?.webhookSubscriptionId || record?.eventStreamSubscriptionId || record?.outboundEventId || null;
+  return record?.id || record?.applicationId || record?.evidencePackageId || record?.institutionalReviewId || record?.assetId || record?.projectId || record?.homeProjectId || record?.fundingPlanId || record?.fundingInstructionId || record?.paymentReceiptId || record?.settlementId || record?.settlementRecordId || record?.planId || record?.commitmentId || record?.adapterId || record?.instructionId || record?.connectionId || record?.paymentOrderId || record?.statementId || record?.walletId || record?.activityId || record?.feeCode || record?.scheduleId || record?.chargeId || record?.invoiceId || record?.accountId || record?.entryId || record?.profileId || record?.usageEventId || record?.billingRunId || record?.servicingAccountId || record?.obligationId || record?.servicingEventId || record?.forecastId || record?.exceptionId || record?.periodId || record?.statementSnapshotId || record?.offeringId || record?.subscriptionId || record?.packageId || record?.positionId || record?.structureId || record?.signalId || record?.eventId || record?.observationId || record?.recognitionId || record?.financialRecordId || record?.financialAccountId || record?.coinAccountId || record?.coinPositionId || record?.instrumentId || record?.transactionId || record?.opportunityId || record?.opportunityEvidenceId || record?.evidenceId || record?.verificationRequestId || record?.verificationFindingId || record?.verificationDecisionId || record?.preparationId || record?.assessmentId || record?.selectionId || record?.instrumentSelectionRequestId || record?.instrumentSelectionId || record?.reviewId || record?.issuanceRequestId || record?.issuanceReviewId || record?.issuanceAuthorizationId || record?.marketplacePreparationId || record?.publicationReviewId || record?.publicationAuthorizationId || record?.windowId || record?.allocationReviewId || record?.settlementPreparationId || record?.settlementReviewId || record?.settlementAuthorizationId || record?.listingId || record?.connectorDefinitionId || record?.policyId || record?.extractionRequestId || record?.extractionResultId || record?.normalizedRecordId || record?.snapshotId || record?.valuePackageId || record?.publicationDecisionId || record?.projectionId || record?.intelligenceReportId || record?.sdkClientId || record?.webhookSubscriptionId || record?.eventStreamSubscriptionId || record?.outboundEventId || null;
 }
 
 export class PersistentDomainService {
