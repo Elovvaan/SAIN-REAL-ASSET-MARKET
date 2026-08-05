@@ -121,8 +121,18 @@
     }
   }
 
+  function loadHybridAdmin() {
+    if (document.querySelector('script[data-hybrid-liquidity-admin]')) return;
+    const script = document.createElement('script');
+    script.src = '/admin/hybrid-liquidity-admin.js';
+    script.defer = true;
+    script.dataset.hybridLiquidityAdmin = 'true';
+    document.head.append(script);
+  }
+
   const observer = new MutationObserver(() => { if (document.querySelector('#admin-view:not(.hidden)')) { ensurePanel(); } });
   window.addEventListener('DOMContentLoaded', () => {
+    loadHybridAdmin();
     observer.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] });
     setTimeout(() => { ensurePanel(); void load(); }, 350);
     timer = setInterval(() => { if (document.querySelector('#admin-view:not(.hidden)')) void load(); }, 15000);
