@@ -4,6 +4,7 @@ import { HybridLiquidityMarketService } from '../services/hybrid-liquidity-marke
 import { SraCoreEventBus } from '../services/sra-core-event-bus.js';
 import { SraCoreServicesHeartbeat } from '../services/sra-core-services-heartbeat.js';
 import { createSraCoreEngineRegistry } from '../services/sra-core-engine-registry.js';
+import { buildSraCoreOperationalBrief } from '../services/sra-core-operational-brief-service.js';
 
 function actorId(req) {
   return req.sraIdentity?.actorId || req.headers['x-sra-actor-id'] || req.body?.actorId || null;
@@ -49,6 +50,11 @@ export function createSaneRouter(service = new SaneSkillService(), edxOperations
   router.get('/core-services/status', (_req, res) => {
     if (!coreHeartbeat) return res.status(503).json({ error: 'SRA Core Services are unavailable.' });
     return res.json(coreHeartbeat.status());
+  });
+
+  router.get('/core-services/brief', (_req, res) => {
+    if (!coreHeartbeat) return res.status(503).json({ error: 'SRA Core Services are unavailable.' });
+    return res.json(buildSraCoreOperationalBrief(coreHeartbeat.status()));
   });
 
   router.get('/core-services/cycles', (_req, res) => {
