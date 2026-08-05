@@ -37,8 +37,8 @@ export class ProductionReadinessService {
       },
       {
         id: 'CRITICAL_TRANSITION_ATOMICITY',
-        status: 'WARN',
-        detail: 'Critical multi-record lifecycle transitions still require explicit database transaction boundaries.',
+        status: database.persistent ? 'PASS' : 'FAIL',
+        detail: database.persistent ? 'Issuance, publication, commitments, allocation, settlement preparation, settlement, ownership recognition, lifecycle records, and audit events use atomic PostgreSQL batches.' : 'Critical transition atomicity requires PostgreSQL.',
       },
     ];
     const failed = checks.filter((check) => check.status === 'FAIL');
