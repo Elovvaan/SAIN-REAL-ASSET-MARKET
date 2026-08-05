@@ -1,89 +1,66 @@
 (() => {
-  const PHASES = [
-    ['Opportunity Intake', '/api/funding/status'],
-    ['Verification', '/api/funding-verification/status'],
-    ['Value Preparation', '/api/funding-value/status'],
-    ['Model Selection', '/api/funding-model/status'],
-    ['Instrument Selection', '/api/funding-instrument/status'],
-    ['Instrument Review', '/api/funding-instrument-review/status'],
-    ['Issuance', '/api/funding-instrument-issuance/status'],
-    ['Marketplace Preparation', '/api/funding-marketplace/status'],
-    ['Publication', '/api/funding-marketplace-publication/status'],
-    ['Commitments', '/api/funding-marketplace-commitment/status'],
-    ['Allocation', '/api/funding-marketplace-allocation/status'],
-    ['Settlement', '/api/funding-marketplace-settlement/status'],
-    ['On-Chain Projection', '/api/on-chain/status'],
-  ];
-
   const esc = (value) => String(value ?? '')
     .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;').replaceAll("'", '&#039;');
+  const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 
   function style() {
     if (document.querySelector('#funding-operations-style')) return;
     const node = document.createElement('style');
     node.id = 'funding-operations-style';
     node.textContent = `
-      .funding-ops{display:grid;gap:16px}.funding-ops-hero{padding:22px;border:1px solid rgba(255,255,255,.12);border-radius:18px;background:linear-gradient(145deg,rgba(255,255,255,.05),rgba(255,255,255,.015))}.funding-ops-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.funding-phase-card{padding:16px;border:1px solid rgba(255,255,255,.1);border-radius:14px;background:rgba(255,255,255,.025)}.funding-phase-head{display:flex;justify-content:space-between;gap:12px}.funding-phase-card small{display:block;opacity:.7;margin-top:8px}.funding-phase-state{font-size:11px;padding:5px 8px;border-radius:999px;background:rgba(255,255,255,.08)}.funding-phase-state.good{background:rgba(45,190,120,.15);color:#7de0a9}.funding-phase-state.bad{background:rgba(220,80,80,.15);color:#ff9d9d}.funding-ops-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}.funding-ops-table{padding:18px;border:1px solid rgba(255,255,255,.1);border-radius:16px;background:rgba(255,255,255,.02)}.funding-ops-list{display:grid;gap:10px;margin-top:12px}.funding-ops-row{display:grid;grid-template-columns:1fr auto;gap:12px;padding:12px;border-radius:12px;background:rgba(255,255,255,.035)}.funding-ops-row span{opacity:.72}.funding-ops-empty{padding:16px;opacity:.7}@media(max-width:800px){.funding-ops-grid{grid-template-columns:1fr}}`;
+      .funding-ops{display:grid;gap:16px}.funding-ops-hero,.funding-ops-panel{padding:20px;border:1px solid rgba(255,255,255,.12);border-radius:18px;background:rgba(255,255,255,.025)}.funding-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:16px}.funding-metric{padding:14px;border-radius:13px;background:rgba(255,255,255,.04)}.funding-metric strong{display:block;font-size:21px}.funding-metric span{font-size:12px;opacity:.7}.funding-ops-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.funding-phase-card{padding:15px;border:1px solid rgba(255,255,255,.1);border-radius:14px;background:rgba(255,255,255,.025)}.funding-phase-head,.funding-panel-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.funding-phase-card small{display:block;opacity:.7;margin-top:8px}.funding-phase-state{font-size:11px;padding:5px 8px;border-radius:999px;background:rgba(45,190,120,.15);color:#7de0a9}.funding-ops-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}.funding-ops-list{display:grid;gap:10px;margin-top:12px}.funding-ops-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;padding:13px;border-radius:12px;background:rgba(255,255,255,.035)}.funding-ops-row span{display:block;opacity:.72;font-size:12px;margin-top:4px}.funding-next{font-size:12px;text-align:right}.funding-intake-modal{display:none;padding:18px;border:1px solid rgba(215,166,42,.35);border-radius:16px;background:rgba(215,166,42,.06)}.funding-intake-modal.open{display:block}.funding-intake-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}.funding-intake-grid input,.funding-intake-grid select,.funding-intake-grid textarea{width:100%;box-sizing:border-box;padding:11px;border:1px solid rgba(255,255,255,.15);border-radius:10px;background:#101010;color:#fff}.funding-intake-grid textarea{grid-column:1/-1;min-height:86px}.funding-intake-result{margin-top:10px;font-size:13px}.funding-ops-empty{padding:16px;opacity:.7}@media(max-width:800px){.funding-ops-grid,.funding-metrics,.funding-intake-grid{grid-template-columns:1fr}.funding-ops-row{grid-template-columns:1fr}.funding-next{text-align:left}}`;
     document.head.append(node);
   }
 
-  async function getJson(path) {
-    const response = await fetch(path, { headers: { accept: 'application/json' } });
+  async function request(path, options = {}) {
+    const response = await fetch(path, { headers: { accept: 'application/json', 'content-type': 'application/json', ...(options.headers || {}) }, ...options });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || `${response.status} ${response.statusText}`);
     return payload;
   }
 
-  async function loadPhaseStatuses() {
-    return Promise.all(PHASES.map(async ([label, path], index) => {
-      const started = performance.now();
-      try {
-        const body = await getJson(path);
-        return { index: index + 1, label, path, ok: true, ms: Math.round(performance.now() - started), body };
-      } catch (error) {
-        return { index: index + 1, label, path, ok: false, ms: Math.round(performance.now() - started), error: error.message };
-      }
-    }));
-  }
-
-  async function loadOpportunities() {
-    try {
-      const payload = await getJson('/api/funding/opportunities');
-      return payload.records || [];
-    } catch {
-      return [];
-    }
-  }
-
   function phaseCard(item) {
-    const count = item.ok
-      ? Object.entries(item.body || {}).find(([key, value]) => key !== 'service' && key !== 'purpose' && typeof value === 'number')?.[1]
-      : null;
-    return `<article class="funding-phase-card">
-      <div class="funding-phase-head"><div><p class="eyebrow">PHASE ${item.index}</p><strong>${esc(item.label)}</strong></div><span class="funding-phase-state ${item.ok ? 'good' : 'bad'}">${item.ok ? 'READY' : 'CHECK'}</span></div>
-      <small>${item.ok ? `${esc(item.body?.purpose || item.body?.service || 'Operational')} · ${item.ms}ms${count == null ? '' : ` · ${count} records`}` : esc(item.error)}</small>
-    </article>`;
+    const statuses = Object.entries(item.statusCounts || {}).slice(0, 3).map(([key, count]) => `${key}: ${count}`).join(' · ');
+    return `<article class="funding-phase-card"><div class="funding-phase-head"><div><p class="eyebrow">PHASE ${item.phaseNumber}</p><strong>${esc(item.phase.replaceAll('_', ' '))}</strong></div><span class="funding-phase-state">READY</span></div><small>${item.count} records${statuses ? ` · ${esc(statuses)}` : ''}</small></article>`;
   }
 
-  function opportunityRow(record) {
-    return `<div class="funding-ops-row"><div><strong>${esc(record.title || record.opportunityId)}</strong><span>${esc(record.opportunityId)} · ${esc(record.opportunityType || 'Opportunity')}</span></div><div><strong>${esc(record.status || 'UNKNOWN')}</strong><span>${esc(record.fundingPhase || '')}</span></div></div>`;
+  function queueRow(item) {
+    const amount = Number(item.requestedAmount || 0);
+    return `<div class="funding-ops-row"><div><strong>${esc(item.title || item.opportunityId)}</strong><span>${esc(item.opportunityId)} · ${esc(item.opportunityType || 'Opportunity')} · ${amount ? money.format(amount) : 'Amount pending'}</span><span>${esc(item.status || 'UNKNOWN')} · ${esc(item.fundingPhase || '')}</span></div><div class="funding-next"><strong>${esc(item.nextAction?.label || 'Review')}</strong><span>${esc(item.nextAction?.queue || '')}</span></div></div>`;
+  }
+
+  function intakeForm() {
+    return `<section class="funding-intake-modal" id="funding-intake-modal"><div class="funding-panel-head"><div><p class="eyebrow">REAL WORKFLOW</p><h3>Start a funding opportunity</h3><p>Capture the customer request directly into Phase 1.</p></div><button class="secondary-button" type="button" id="funding-intake-close">Close</button></div><form id="funding-opportunity-form" class="funding-intake-grid"><input name="applicantParticipantId" placeholder="Applicant participant ID" required><input name="title" placeholder="Opportunity title" required><select name="opportunityType" required><option value="">Opportunity type</option><option value="PLATFORM">Platform</option><option value="PROJECT">Project</option><option value="CONSTRUCTION">Construction</option><option value="EQUIPMENT">Equipment</option><option value="WORKING_CAPITAL">Working capital</option><option value="INVOICE">Invoice</option></select><select name="purpose" required><option value="">Purpose</option><option value="BUILD">Build</option><option value="DEVELOP">Develop</option><option value="EXPAND">Expand</option><option value="PURCHASE">Purchase</option><option value="WORKING_CAPITAL">Working capital</option><option value="REFINANCE">Refinance</option></select><input name="requestedAmount" type="number" min="1" step="0.01" placeholder="Requested amount" required><select name="currency"><option value="USD">USD</option></select><textarea name="description" placeholder="Describe what is being funded and the expected result."></textarea><button class="primary-button" type="submit">Create opportunity record</button><div class="funding-intake-result" id="funding-intake-result"></div></form></section>`;
   }
 
   async function render(root) {
-    root.innerHTML = `<div class="loading-state">Loading funding operations…</div>`;
-    const [phases, opportunities] = await Promise.all([loadPhaseStatuses(), loadOpportunities()]);
-    const ready = phases.filter((item) => item.ok).length;
-    root.innerHTML = `<section class="funding-ops">
-      <div class="funding-ops-hero"><p class="eyebrow">FUNDING ENGINE OPERATIONS</p><h2>One lifecycle, twelve controlled phases</h2><p>${ready} of ${phases.length} service boundaries are responding. This workspace turns the engine into one operational view instead of separate backend routes.</p><div class="funding-ops-actions"><button class="primary-button" id="funding-ops-refresh">Refresh engine</button><button class="secondary-button" id="funding-ops-new">Start opportunity intake</button></div></div>
-      <div class="funding-ops-grid">${phases.map(phaseCard).join('')}</div>
-      <section class="funding-ops-table"><div><p class="eyebrow">ACTIVE WORK</p><h3>Funding opportunities</h3></div><div class="funding-ops-list">${opportunities.length ? opportunities.map(opportunityRow).join('') : '<div class="funding-ops-empty">No funding opportunities have been created yet.</div>'}</div></section>
-    </section>`;
-    root.querySelector('#funding-ops-refresh')?.addEventListener('click', () => render(root));
-    root.querySelector('#funding-ops-new')?.addEventListener('click', () => {
-      document.querySelector('[data-view="projects"]')?.click();
-      window.dispatchEvent(new CustomEvent('sra:funding-opportunity-intake'));
-    });
+    root.innerHTML = '<div class="loading-state">Loading funding operations…</div>';
+    try {
+      const dashboard = await request('/api/funding-operations/dashboard');
+      const metrics = dashboard.metrics || {};
+      root.innerHTML = `<section class="funding-ops"><div class="funding-ops-hero"><p class="eyebrow">FUNDING ENGINE OPERATIONS</p><h2>Move each opportunity through one controlled lifecycle</h2><p>The operations queue now identifies the next real action for every customer funding request.</p><div class="funding-metrics"><div class="funding-metric"><strong>${metrics.opportunities || 0}</strong><span>Funding opportunities</span></div><div class="funding-metric"><strong>${money.format(metrics.totalRequested || 0)}</strong><span>Total requested</span></div><div class="funding-metric"><strong>${metrics.activeQueueItems || 0}</strong><span>Active queue items</span></div><div class="funding-metric"><strong>${metrics.liveListings || 0}</strong><span>Live listings</span></div><div class="funding-metric"><strong>${metrics.confirmedCommitments || 0}</strong><span>Confirmed commitments</span></div><div class="funding-metric"><strong>${metrics.recognizedPositions || 0}</strong><span>Recognized positions</span></div></div><div class="funding-ops-actions"><button class="primary-button" id="funding-ops-new">Start opportunity intake</button><button class="secondary-button" id="funding-ops-refresh">Refresh operations</button></div></div>${intakeForm()}<div class="funding-ops-grid">${(dashboard.phases || []).map(phaseCard).join('')}</div><section class="funding-ops-panel"><div class="funding-panel-head"><div><p class="eyebrow">OPERATIONS QUEUE</p><h3>What needs to happen next</h3></div><span>${dashboard.queue?.length || 0} records</span></div><div class="funding-ops-list">${dashboard.queue?.length ? dashboard.queue.map(queueRow).join('') : '<div class="funding-ops-empty">No funding opportunities have been created yet.</div>'}</div></section></section>`;
+
+      const modal = root.querySelector('#funding-intake-modal');
+      root.querySelector('#funding-ops-new')?.addEventListener('click', () => modal?.classList.add('open'));
+      root.querySelector('#funding-intake-close')?.addEventListener('click', () => modal?.classList.remove('open'));
+      root.querySelector('#funding-ops-refresh')?.addEventListener('click', () => render(root));
+      root.querySelector('#funding-opportunity-form')?.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const result = root.querySelector('#funding-intake-result');
+        const values = Object.fromEntries(new FormData(event.currentTarget));
+        try {
+          const record = await request('/api/funding/opportunities', { method: 'POST', body: JSON.stringify({ ...values, requestedAmount: Number(values.requestedAmount), relatedParticipantIds: [values.applicantParticipantId] }) });
+          result.innerHTML = `<strong>Created ${esc(record.opportunityId)}</strong> · ${esc(record.status)}. The opportunity is now in Phase 1 intake.`;
+          event.currentTarget.reset();
+          setTimeout(() => render(root), 900);
+        } catch (error) {
+          result.textContent = error.message;
+        }
+      });
+    } catch (error) {
+      root.innerHTML = `<div class="funding-ops-panel"><strong>Funding Operations could not load.</strong><p>${esc(error.message)}</p></div>`;
+    }
   }
 
   function activate() {
@@ -93,13 +70,11 @@
     button.addEventListener('click', () => {
       document.querySelectorAll('.nav-item').forEach((item) => item.classList.remove('active'));
       button.classList.add('active');
-      const title = document.querySelector('#page-title');
-      const contextTitle = document.querySelector('#context-title');
+      document.querySelector('#page-title').textContent = 'Funding Operations';
+      document.querySelector('#context-title').textContent = 'Funding Operations';
       const status = document.querySelector('#context-status');
-      const root = document.querySelector('#view-root');
-      if (title) title.textContent = 'Funding Operations';
-      if (contextTitle) contextTitle.textContent = 'Funding Operations';
       if (status) { status.textContent = 'LIVE'; status.className = 'badge open'; }
+      const root = document.querySelector('#view-root');
       if (root) render(root);
     });
   }
