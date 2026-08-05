@@ -11,9 +11,13 @@
     "test:security": "node --test --test-concurrency=1 tests/operations-authorization.test.mjs",
     "test:transaction-safety": "node --test --test-concurrency=1 tests/transaction-safety.test.mjs",
     "test:settlement": "node --test --test-concurrency=1 tests/verified-settlement.test.mjs",
+    "test:runtime": "node --test --test-concurrency=1 tests/production-runtime.test.mjs",
     "test:edx": "node --test --test-concurrency=1 test/edx-pipeline.test.js",
     "test:funding": "node --test --test-concurrency=1 test/funding-engine.integration.test.js",
-    "test:integration": "npm run test:security && npm run test:transaction-safety && npm run test:settlement && node --test --test-concurrency=1 test/edx-pipeline.test.js test/funding-engine.integration.test.js"
+    "test:load": "node scripts/load-qualification.mjs",
+    "backup:create": "node scripts/backup-database.mjs",
+    "restore:verify": "node scripts/verify-restore.mjs",
+    "test:integration": "npm run test:security && npm run test:transaction-safety && npm run test:settlement && npm run test:runtime && node --test --test-concurrency=1 test/edx-pipeline.test.js test/funding-engine.integration.test.js"
   },
   "engines": {
     "node": ">=20"
