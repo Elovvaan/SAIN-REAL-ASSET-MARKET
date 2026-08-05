@@ -40,7 +40,7 @@ export class AccessService {
     const persistedSessions = this.database ? await this.database.listSessions() : [];
     persistedUsers.forEach((user) => this.users.set(user.email, user));
     persistedSessions.forEach((session) => this.sessions.set(session.tokenHash, session));
-    if (!this.users.size) await this.seedDemoUsers();
+    if (!this.users.size && process.env.NODE_ENV !== 'production') await this.seedDemoUsers();
   }
 
   async seedDemoUsers() {
