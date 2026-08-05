@@ -1,4 +1,5 @@
 import { scanProductLifecycleProgress } from './product-lifecycle-progress-service.js';
+import { explainSraAdministrativeState } from './admin-state-explanation-service.js';
 
 const PRODUCT_DEFINITION = 'SRA_PRODUCT_DEFINITION';
 
@@ -153,9 +154,12 @@ export class AdminIntelligenceAgentService {
         'ANSWER_PLATFORM_STATUS',
         'DISCOVER_REGISTERED_PRODUCTS',
         'TRACE_PRODUCT_LIFECYCLES',
+        'EXPLAIN_ASSET_EXPORTABILITY',
+        'TRACE_ASSET_RELATIONSHIPS',
         'IDENTIFY_BLOCKERS',
         'RECOMMEND_NEXT_ACTION',
         'IDENTIFY_APPROVAL_BOUNDARIES',
+        'SIMULATE_APPROVAL_IMPACT_READ_ONLY',
         'CITE_INTERNAL_RECORDS',
       ],
       cannotWithoutApproval: [
@@ -209,22 +213,26 @@ export class AdminIntelligenceAgentService {
     const question = cleanQuestion(input.question);
     const requestedCode = input.productCode ? String(input.productCode).toUpperCase() : null;
     const productCode = requestedCode || detectProduct(this.domain, question);
-    const detectedIntent = intent(question, productCode);
+    let detectedIntent = intent(question, productCode);
     let result;
 
-    if (detectedIntent === 'PRODUCT_LIFECYCLE') {
+    const administrativeExplanation = explainSraAdministrativeState(this.domain, question);
+    if (administrativeExplanation) {
+      detectedIntent = administrativeExplanation.intent;
+      result = administrativeExplanation;
+    } else if (detectedIntent === 'PRODUCT_LIFECYCLE') {
       const progress = scanProductLifecycleProgress(this.domain, productCode);
       result = { ...productAnswer(progress), data: progress };
     } else if (detectedIntent === 'PLATFORM_SUMMARY') result = this.platformSummary();
     else if (detectedIntent === 'APPROVALS') result = this.approvalSummary();
     else if (detectedIntent === 'CAPABILITIES') {
       result = {
-        answer: 'I can discover registered SRA products, read operational records, trace product lifecycles, identify blockers, explain the next action, and tell you when administrator approval is required. I do not perform protected financial state changes without approval.',
+        answer: 'I can discover registered SRA products, read operational records, trace product and instrument lifecycles, explain exportability and relationships, identify blockers, simulate approval impact without writing, and tell you when administrator approval is required. I do not perform protected financial state changes without approval.',
         status: 'AVAILABLE', capabilities: this.capabilities(), blockers: [], references: [], nextAction: null,
       };
     } else {
       result = {
-        answer: 'I could not identify the product or operational subject in that question. Name the product or ask for platform status, blockers, next actions, or pending approvals.',
+        answer: 'I could not identify the product or operational subject in that question. Name the product or instrument, or ask for platform status, lifecycle, exportability, relationships, blockers, next actions, or pending approvals.',
         status: 'NEEDS_CONTEXT', blockers: ['QUESTION_NOT_RESOLVED'], references: [], nextAction: null,
       };
     }
@@ -242,8 +250,8 @@ export class AdminIntelligenceAgentService {
         actorId: actor.id || 'SRA_PLATFORM_ADMIN',
         eventType: 'ADMIN_AGENT_QUESTION_ANSWERED',
         objectType: 'SRA_ADMIN_INTELLIGENCE_AGENT',
-        objectId: productCode || detectedIntent,
-        payload: { intent: detectedIntent, productCode, status: response.status, referenceCount: response.references?.length || 0 },
+        objectId: response.subject?.reference || productCode || detectedIntent,
+        payload: { intent: detectedIntent, productCode, status: response.status, referenceCount: response.references?.length || 0, readOnlySimulation: Boolean(response.simulation?.readOnly) },
       });
     }
     return response;
