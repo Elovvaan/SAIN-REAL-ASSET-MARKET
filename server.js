@@ -4,10 +4,12 @@ import { createUniversalAccountBlockchainRouter } from './routes/universal-accou
 import { createCoinbasePublicMarketRouter } from './routes/coinbase-public-market-router.js';
 import { createPrivateAdminRouter, rejectPlatformAdminPublicSignin } from './routes/private-admin-router.js';
 import { createOnChainProjectionRouter } from './routes/on-chain-projection-router.js';
+import { createFundingOpportunityRouter } from './routes/funding-opportunity-router.js';
 import { CoinbasePublicMarketService } from './services/coinbase-public-market-service.js';
 import { CoinbaseTransactionAssetPipelineService } from './services/coinbase-transaction-asset-pipeline-service.js';
 import { MarketplaceListingService } from './services/marketplace-listing-service.js';
 import { OnChainProjectionService } from './services/on-chain-projection-service.js';
+import { FundingOpportunityIntakeService } from './services/funding-opportunity-intake-service.js';
 
 const port = Number(process.env.PORT) || 3000;
 const bootstrap = express();
@@ -18,7 +20,9 @@ let platformExtensions = null;
 let coinbaseExtension = null;
 let privateAdminExtension = null;
 let onChainProjectionExtension = null;
+let fundingOpportunityExtension = null;
 let onChainProjectionService = null;
+let fundingOpportunityService = null;
 let coinbasePublicMarket = null;
 let coinbaseTransactionAssetPipeline = null;
 let marketplaceListingService = null;
@@ -41,6 +45,7 @@ bootstrap.get('/api/startup', (_req, res) => {
     coinbaseTransactionAssetPipeline: coinbaseTransactionAssetPipeline?.status?.() || null,
     marketplaceListingPreparation: marketplaceListingService?.status?.() || null,
     onChainProjection: onChainProjectionService?.status?.() || null,
+    fundingOpportunityIntake: fundingOpportunityService?.status?.() || null,
     startedAt,
     timestamp: new Date().toISOString()
   });
@@ -63,6 +68,7 @@ bootstrap.use(async (req, res, next) => {
   if (privateAdminExtension && (req.path === '/admin' || req.path.startsWith('/admin/') || req.path.startsWith('/api/admin/'))) return privateAdminExtension(req, res, next);
   if (database && req.method === 'POST' && req.path === '/api/access/signin') return rejectPlatformAdminPublicSignin(req, res, next, database);
   if (database && req.method === 'POST' && ['/api/access/capacity', '/api/access/role'].includes(req.path) && String(req.body?.capacity || req.body?.role || '').toUpperCase() === 'PLATFORM_ADMIN') return res.status(403).json({ error: 'Platform Administration is available only through the private administration portal.' });
+  if (fundingOpportunityExtension && req.path.startsWith('/api/funding')) return fundingOpportunityExtension(req, res, next);
   if (onChainProjectionExtension && req.path.startsWith('/api/on-chain')) return onChainProjectionExtension(req, res, next);
   if (coinbaseExtension && req.path.startsWith('/api/connectors/coinbase-public')) return coinbaseExtension(req, res, next);
   if (platformExtensions && (req.path.startsWith('/api/blockchain-accounts') || (req.method === 'POST' && req.path === '/api/access/funding/crypto-instructions'))) return platformExtensions(req, res, next);
@@ -83,6 +89,9 @@ try {
   const created = await createApp();
   database = created.database;
   platformExtensions = await createUniversalAccountBlockchainRouter(created.persistentDomain, created.database);
+  fundingOpportunityService = new FundingOpportunityIntakeService(created.persistentDomain);
+  await fundingOpportunityService.initialize();
+  fundingOpportunityExtension = createFundingOpportunityRouter(fundingOpportunityService);
   onChainProjectionService = new OnChainProjectionService(created.persistentDomain);
   await onChainProjectionService.initialize();
   onChainProjectionExtension = createOnChainProjectionRouter(onChainProjectionService);
