@@ -1,5 +1,7 @@
 import { scanProductLifecycleProgress } from './product-lifecycle-progress-service.js';
 
+const PRODUCT_DEFINITION = 'SRA_PRODUCT_DEFINITION';
+
 const PRODUCT_ALIASES = Object.freeze({
   'TRUE BILL': 'TRUE_BILL',
   'TRUE_BILL': 'TRUE_BILL',
@@ -26,7 +28,9 @@ const STAGE_LABELS = Object.freeze({
   exportPackage: 'ready-for-export packaging',
 });
 
-const PROTECTED_STAGES = new Set(['instrument', 'listing', 'allocation', 'settlement', 'ownershipRecognition', 'exportPackage']);
+const PROTECTED_STAGES = new Set([
+  'instrument', 'listing', 'allocation', 'settlement', 'ownershipRecognition', 'exportPackage',
+]);
 
 function cleanQuestion(value) {
   const question = String(value || '').trim();
@@ -35,12 +39,47 @@ function cleanQuestion(value) {
   return question;
 }
 
-function detectProduct(question) {
-  const upper = question.toUpperCase().replace(/[_-]+/g, ' ');
+function normalizedLabel(value) {
+  return String(value || '')
+    .toUpperCase()
+    .replace(/[_-]+/g, ' ')
+    .replace(/[^A-Z0-9 ]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function activeProductDefinitions(domain) {
+  return domain.list(PRODUCT_DEFINITION)
+    .filter((record) => String(record?.state || '').toUpperCase() === 'ACTIVE')
+    .filter((record) => String(record?.productCode || '').trim());
+}
+
+function productIndex(domain) {
+  const index = new Map();
   for (const [label, code] of Object.entries(PRODUCT_ALIASES)) {
-    if (upper.includes(label.replace(/[_-]+/g, ' '))) return code;
+    index.set(normalizedLabel(label), String(code).toUpperCase());
   }
-  return null;
+  for (const definition of activeProductDefinitions(domain)) {
+    const code = String(definition.productCode).toUpperCase();
+    index.set(normalizedLabel(code), code);
+    if (definition.name) index.set(normalizedLabel(definition.name), code);
+  }
+  return index;
+}
+
+function detectProduct(domain, question) {
+  const normalizedQuestion = normalizedLabel(question);
+  const matches = [...productIndex(domain).entries()]
+    .filter(([label]) => label && normalizedQuestion.includes(label))
+    .sort((left, right) => right[0].length - left[0].length);
+  return matches[0]?.[1] || null;
+}
+
+function allProductCodes(domain) {
+  return [...new Set([
+    ...Object.values(PRODUCT_ALIASES).map((value) => String(value).toUpperCase()),
+    ...activeProductDefinitions(domain).map((record) => String(record.productCode).toUpperCase()),
+  ])];
 }
 
 function intent(question, productCode) {
@@ -54,12 +93,9 @@ function intent(question, productCode) {
 
 function nextActionFor(chain) {
   if (!chain) return null;
-  if (!chain.firstMissing) return {
-    stage: null,
-    label: 'No internal lifecycle stage is missing.',
-    authority: 'NONE',
-    autonomous: true,
-  };
+  if (!chain.firstMissing) {
+    return { stage: null, label: 'No internal lifecycle stage is missing.', authority: 'NONE', autonomous: true };
+  }
   const protectedAction = PROTECTED_STAGES.has(chain.firstMissing);
   return {
     stage: chain.firstMissing,
@@ -72,7 +108,7 @@ function nextActionFor(chain) {
 function productAnswer(progress) {
   if (!progress.instrumentCount) {
     return {
-      answer: `SRA does not currently contain a ${progress.productCode} instrument. The lifecycle has not started for this product.`,
+      answer: `SRA does not currently contain an instrument for ${progress.productCode}. The lifecycle has not started for this product.`,
       status: 'NOT_STARTED',
       blockers: ['NO_INSTRUMENT'],
       nextAction: {
@@ -84,7 +120,6 @@ function productAnswer(progress) {
       references: [],
     };
   }
-
   const lead = progress.chains[0];
   const completed = lead.completedStages.map((stage) => STAGE_LABELS[stage] || stage);
   const missing = lead.firstMissing;
@@ -92,7 +127,7 @@ function productAnswer(progress) {
     ? `It has completed ${completed.join(', ')}. The first missing stage is ${STAGE_LABELS[missing] || missing}.`
     : 'It has completed every internal lifecycle stage and is ready for export.';
   return {
-    answer: `SRA found ${progress.instrumentCount} ${progress.productCode} instrument${progress.instrumentCount === 1 ? '' : 's'}. The furthest chain is ${lead.instrumentId}. ${stageText}`,
+    answer: `SRA found ${progress.instrumentCount} instrument${progress.instrumentCount === 1 ? '' : 's'} for ${progress.productCode} across ${progress.instrumentFamilies.join(', ')}. The furthest chain is ${lead.instrumentId}. ${stageText}`,
     status: lead.readyForExport ? 'READY_FOR_EXPORT' : 'IN_PROGRESS',
     blockers: missing ? [`MISSING_${String(missing).replace(/([A-Z])/g, '_$1').toUpperCase()}`] : [],
     nextAction: nextActionFor(lead),
@@ -116,6 +151,7 @@ export class AdminIntelligenceAgentService {
       writeAuthority: 'HUMAN_IN_THE_LOOP',
       can: [
         'ANSWER_PLATFORM_STATUS',
+        'DISCOVER_REGISTERED_PRODUCTS',
         'TRACE_PRODUCT_LIFECYCLES',
         'IDENTIFY_BLOCKERS',
         'RECOMMEND_NEXT_ACTION',
@@ -134,8 +170,7 @@ export class AdminIntelligenceAgentService {
   }
 
   platformSummary() {
-    const snapshot = this.domain.snapshot();
-    const counts = snapshot?.counts || {};
+    const counts = this.domain.snapshot()?.counts || {};
     const lifecycleTypes = [
       'MARKET_OBSERVATION', 'RECOGNITION_ASSESSMENT', 'FINANCIAL_RECORD', 'COIN_POSITION',
       'SRA_INSTRUMENT', 'MARKETPLACE_LISTING', 'PARTICIPATION_POSITION',
@@ -146,24 +181,17 @@ export class AdminIntelligenceAgentService {
     const total = Object.values(selected).reduce((sum, value) => sum + Number(value || 0), 0);
     return {
       answer: `SRA is reading ${total} records across the internal asset lifecycle. It currently has ${selected.SRA_INSTRUMENT} instruments, ${selected.MARKETPLACE_LISTING} marketplace listings, ${selected.SRA_SETTLEMENT_RECORD} settlement records, ${selected.OWNERSHIP_RECOGNITION} ownership recognitions, and ${selected.EXPORT_PACKAGE} export-ready packages.`,
-      status: 'AVAILABLE',
-      counts: selected,
-      nextAction: null,
-      blockers: [],
-      references: [],
+      status: 'AVAILABLE', counts: selected, nextAction: null, blockers: [], references: [],
     };
   }
 
   approvalSummary() {
-    const products = Object.values(PRODUCT_ALIASES).filter((value, index, array) => array.indexOf(value) === index);
     const pending = [];
-    for (const productCode of products) {
+    for (const productCode of allProductCodes(this.domain)) {
       const progress = scanProductLifecycleProgress(this.domain, productCode);
       const lead = progress.chains[0];
       const action = nextActionFor(lead);
-      if (action?.authority === 'ADMIN_APPROVAL_REQUIRED') {
-        pending.push({ productCode, instrumentId: lead.instrumentId, ...action });
-      }
+      if (action?.authority === 'ADMIN_APPROVAL_REQUIRED') pending.push({ productCode, instrumentId: lead.instrumentId, ...action });
     }
     return {
       answer: pending.length
@@ -179,41 +207,30 @@ export class AdminIntelligenceAgentService {
 
   async ask(input = {}, actor = {}) {
     const question = cleanQuestion(input.question);
-    const productCode = input.productCode ? String(input.productCode).toUpperCase() : detectProduct(question);
+    const requestedCode = input.productCode ? String(input.productCode).toUpperCase() : null;
+    const productCode = requestedCode || detectProduct(this.domain, question);
     const detectedIntent = intent(question, productCode);
     let result;
 
     if (detectedIntent === 'PRODUCT_LIFECYCLE') {
       const progress = scanProductLifecycleProgress(this.domain, productCode);
       result = { ...productAnswer(progress), data: progress };
-    } else if (detectedIntent === 'PLATFORM_SUMMARY') {
-      result = this.platformSummary();
-    } else if (detectedIntent === 'APPROVALS') {
-      result = this.approvalSummary();
-    } else if (detectedIntent === 'CAPABILITIES') {
+    } else if (detectedIntent === 'PLATFORM_SUMMARY') result = this.platformSummary();
+    else if (detectedIntent === 'APPROVALS') result = this.approvalSummary();
+    else if (detectedIntent === 'CAPABILITIES') {
       result = {
-        answer: 'I can read SRA operational records, trace product lifecycles, identify blockers, explain the next action, and tell you when administrator approval is required. I do not perform protected financial state changes without approval.',
-        status: 'AVAILABLE',
-        capabilities: this.capabilities(),
-        blockers: [],
-        references: [],
-        nextAction: null,
+        answer: 'I can discover registered SRA products, read operational records, trace product lifecycles, identify blockers, explain the next action, and tell you when administrator approval is required. I do not perform protected financial state changes without approval.',
+        status: 'AVAILABLE', capabilities: this.capabilities(), blockers: [], references: [], nextAction: null,
       };
     } else {
       result = {
         answer: 'I could not identify the product or operational subject in that question. Name the product or ask for platform status, blockers, next actions, or pending approvals.',
-        status: 'NEEDS_CONTEXT',
-        blockers: ['QUESTION_NOT_RESOLVED'],
-        references: [],
-        nextAction: null,
+        status: 'NEEDS_CONTEXT', blockers: ['QUESTION_NOT_RESOLVED'], references: [], nextAction: null,
       };
     }
 
     const response = {
-      agent: 'SRA_ADMIN_INTELLIGENCE_AGENT',
-      question,
-      intent: detectedIntent,
-      productCode,
+      agent: 'SRA_ADMIN_INTELLIGENCE_AGENT', question, intent: detectedIntent, productCode,
       authorityMode: 'HUMAN_IN_THE_LOOP',
       actor: { id: actor.id || null, displayName: actor.displayName || null },
       answeredAt: new Date().toISOString(),
