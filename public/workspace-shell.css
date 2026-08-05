@@ -3,6 +3,12 @@ body:not(.access-public) .context-workspace{display:none}
 body.workspace-open:not(.access-public) .operating-workspace{grid-template-columns:minmax(420px,1.12fr) minmax(360px,.88fr)}
 body.workspace-open:not(.access-public) .context-workspace{display:flex;min-height:0;height:max-content;align-self:start}
 body.workspace-open:not(.access-public) .view-root{overflow:visible;max-height:none;padding:16px}
+body.workspace-open:not(.access-public):has(.live-terminal) .operating-workspace{grid-template-columns:minmax(0,1fr);align-items:start}
+body.workspace-open:not(.access-public):has(.live-terminal) .sane-workspace,
+body.workspace-open:not(.access-public):has(.live-terminal) .context-workspace{width:100%;max-width:none}
+body.workspace-open:not(.access-public):has(.live-terminal) .context-workspace{grid-column:1;display:flex}
+body.workspace-open:not(.access-public):has(.live-terminal) .terminal-summary h2{font-size:0;line-height:1.15}
+body.workspace-open:not(.access-public):has(.live-terminal) .terminal-summary h2::after{content:'SRA Market Instruments';font-size:22px;line-height:1.15}
 .workspace-overview{display:grid;gap:16px}
 .workspace-overview-intro{border:1px solid var(--line);border-radius:16px;padding:18px;background:linear-gradient(145deg,rgba(215,166,42,.08),rgba(255,255,255,.02))}
 .workspace-overview-intro h2{margin-bottom:8px;font-size:22px}
