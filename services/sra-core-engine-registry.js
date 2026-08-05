@@ -1,4 +1,5 @@
 import { RECORD_TYPES } from './persistent-domain-service.js';
+import { ListingReadinessPolicyService } from './listing-readiness-policy-service.js';
 
 export function createSraCoreEngineRegistry({ marketplaceListingService = null } = {}) {
   return [
@@ -33,13 +34,20 @@ export function createSraCoreEngineRegistry({ marketplaceListingService = null }
       },
     },
     {
+      name: 'POLICY_ENGINE',
+      async run({ domain }) {
+        return new ListingReadinessPolicyService(domain).apply('SRA_CORE_POLICY_ENGINE');
+      },
+    },
+    {
       name: 'MARKET_ENGINE',
       async run({ domain }) {
         const listings = domain.list(RECORD_TYPES.MARKETPLACE_LISTING);
         return {
           listings: listings.length,
           live: listings.filter((item) => ['PUBLISHED', 'ACTIVE'].includes(item.state)).length,
-          prepared: listings.filter((item) => item.state === 'PREPARED').length,
+          ready: listings.filter((item) => item.state === 'PREPARED' && item.status === 'READY_FOR_PUBLICATION_APPROVAL').length,
+          prepared: listings.filter((item) => item.state === 'PREPARED' && item.status !== 'READY_FOR_PUBLICATION_APPROVAL').length,
           marketplaceStatus: marketplaceListingService?.status?.() || null,
         };
       },
