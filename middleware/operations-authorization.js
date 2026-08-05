@@ -1,3 +1,6 @@
+import { DatabaseService } from '../services/database-service.js';
+import { AccessService } from '../services/access-service.js';
+
 const STAFF_ROLES = new Set([
   'PLATFORM_ADMIN',
   'OPERATIONS_ADMIN',
@@ -12,14 +15,15 @@ const STAFF_ROLES = new Set([
 ]);
 
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+let accessServicePromise = null;
 
-function parseRoles(req) {
-  const header = req.get('x-sra-roles') || req.get('x-sra-role') || '';
-  const bodyRole = req.body?.role || req.body?.capacity || '';
-  return [...new Set(`${header},${bodyRole}`
-    .split(',')
-    .map((role) => role.trim().toUpperCase())
-    .filter(Boolean))];
+function readCookie(req, name) {
+  const cookie = req.headers.cookie || '';
+  const entry = cookie
+    .split(';')
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${name}=`));
+  return entry ? decodeURIComponent(entry.slice(name.length + 1)) : '';
 }
 
 function isProtectedOperationsPath(path) {
@@ -41,30 +45,75 @@ function isProtectedOperationsPath(path) {
   ].some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
 }
 
-function isReadOnlyIntelligenceRequest(req) {
-  return req.path.startsWith('/api/sain/intelligence') && req.method === 'GET';
+function requiredRoles(path) {
+  if (path.startsWith('/api/funding-verification')) return new Set(['PLATFORM_ADMIN', 'OPERATIONS_ADMIN', 'VERIFICATION_REVIEWER', 'FUNDING_OPERATIONS']);
+  if (path.startsWith('/api/funding-instrument-review')) return new Set(['PLATFORM_ADMIN', 'OPERATIONS_ADMIN', 'INSTRUMENT_REVIEWER', 'FUNDING_OPERATIONS']);
+  if (path.startsWith('/api/funding-instrument-issuance')) return new Set(['PLATFORM_ADMIN', 'OPERATIONS_ADMIN', 'ISSUANCE_REVIEWER', 'FUNDING_OPERATIONS']);
+  if (path.startsWith('/api/funding-marketplace-settlement')) return new Set(['PLATFORM_ADMIN', 'OPERATIONS_ADMIN', 'SETTLEMENT_OPERATOR']);
+  if (path.startsWith('/api/funding-marketplace')) return new Set(['PLATFORM_ADMIN', 'OPERATIONS_ADMIN', 'MARKETPLACE_OPERATOR', 'FUNDING_OPERATIONS']);
+  return STAFF_ROLES;
 }
 
-export function authorizeOperationsRequest(req, res, next) {
+async function accessService() {
+  if (!accessServicePromise) {
+    accessServicePromise = (async () => {
+      const database = new DatabaseService();
+      await database.initialize();
+      const service = new AccessService({ database });
+      await service.initialize();
+      return service;
+    })();
+  }
+  return accessServicePromise;
+}
+
+export async function authorizeOperationsRequest(req, res, next) {
   if (!isProtectedOperationsPath(req.path)) return next();
   if (!WRITE_METHODS.has(req.method)) return next();
-  if (isReadOnlyIntelligenceRequest(req)) return next();
 
-  const roles = parseRoles(req);
-  const allowed = roles.some((role) => STAFF_ROLES.has(role));
-  if (!allowed) {
-    return res.status(403).json({
-      error: 'This operation requires an authorized SRA staff role.',
-      code: 'SRA_OPERATIONS_ROLE_REQUIRED',
-      requiredRoles: [...STAFF_ROLES],
+  try {
+    const token = readCookie(req, 'sra_session');
+    const session = token ? await (await accessService()).getSession(token) : null;
+    if (!session) {
+      return res.status(401).json({
+        error: 'An active authenticated SRA session is required.',
+        code: 'SRA_AUTHENTICATION_REQUIRED',
+      });
+    }
+
+    const roles = [...new Set([
+      session.activeCapacity,
+      ...(session.capacities || []).map((capacity) => capacity.id || capacity),
+      ...(session.roles || []).map((role) => role.id || role),
+    ].filter(Boolean).map((role) => String(role).toUpperCase()))];
+
+    const required = requiredRoles(req.path);
+    if (!roles.some((role) => required.has(role))) {
+      return res.status(403).json({
+        error: 'The authenticated account is not authorized for this SRA operation.',
+        code: 'SRA_SERVER_ROLE_REQUIRED',
+        requiredRoles: [...required],
+      });
+    }
+
+    req.sraIdentity = {
+      actorId: session.id,
+      universalAccountId: session.universalAccountId,
+      email: session.email,
+      activeCapacity: session.activeCapacity,
+    };
+    req.sraOperationsAuth = {
+      actorId: session.id,
+      roles,
+      source: 'SERVER_SESSION',
+    };
+    return next();
+  } catch {
+    return res.status(500).json({
+      error: 'SRA could not validate the authenticated session.',
+      code: 'SRA_SESSION_VALIDATION_FAILED',
     });
   }
-
-  req.sraOperationsAuth = {
-    actorId: req.get('x-sra-actor-id') || req.body?.actorId || null,
-    roles,
-  };
-  return next();
 }
 
 export { STAFF_ROLES as SRA_OPERATIONS_STAFF_ROLES };
