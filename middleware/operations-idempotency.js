@@ -59,8 +59,7 @@ function resourceKey(req, currentFingerprint) {
   ];
   const bodyId = identifiers.map((field) => req.body?.[field]).find(Boolean);
   const pathId = req.path.split('/').find((segment) => /^[A-Za-z]{1,20}-[A-Za-z0-9-]{2,}$/.test(segment));
-  const root = req.path.split('/').filter(Boolean).slice(0, 3).join(':') || 'operation';
-  return `${root}:${bodyId || pathId || `${actorId(req) || 'anonymous'}:${currentFingerprint}`}`;
+  return `SRA:${bodyId || pathId || `${actorId(req) || 'anonymous'}:${currentFingerprint}`}`;
 }
 
 async function defaultDatabase() {
@@ -94,10 +93,7 @@ export function createOperationsIdempotency({ databaseProvider = defaultDatabase
       });
 
       if (claim.state === 'CONFLICT') {
-        return res.status(409).json({
-          error: 'The idempotency key has already been used for a different request.',
-          code: 'SRA_IDEMPOTENCY_KEY_CONFLICT',
-        });
+        return res.status(409).json({ error: 'The idempotency key has already been used for a different request.', code: 'SRA_IDEMPOTENCY_KEY_CONFLICT' });
       }
       if (claim.state === 'REPLAY') {
         res.set('x-sra-idempotent-replay', 'true');
@@ -105,39 +101,43 @@ export function createOperationsIdempotency({ databaseProvider = defaultDatabase
         return res.status(claim.statusCode || 200).json(claim.body);
       }
       if (claim.state === 'IN_PROGRESS') {
-        return res.status(409).json({
-          error: 'An identical operation is already being processed.',
-          code: 'SRA_OPERATION_IN_PROGRESS',
-          retryAfterMs: 500,
-        });
+        return res.status(409).json({ error: 'An identical operation is already being processed.', code: 'SRA_OPERATION_IN_PROGRESS', retryAfterMs: 500 });
       }
       if (claim.state === 'RESOURCE_BUSY') {
-        return res.status(409).json({
-          error: 'Another operation is currently changing the same SRA resource.',
-          code: 'SRA_RESOURCE_OPERATION_IN_PROGRESS',
-          resourceKey: claim.resourceKey,
-          retryAfterMs: 500,
-        });
+        return res.status(409).json({ error: 'Another operation is currently changing the same SRA resource.', code: 'SRA_RESOURCE_OPERATION_IN_PROGRESS', resourceKey: claim.resourceKey, retryAfterMs: 500 });
       }
 
       let finalized = false;
+      let finalizing = false;
       const originalJson = res.json.bind(res);
       res.json = (body) => {
+        if (finalizing || finalized) return res;
+        finalizing = true;
         const statusCode = res.statusCode || 200;
-        finalized = true;
-        if (statusCode >= 200 && statusCode < 300) {
-          res.set('x-sra-idempotency-key', key);
-          database.completeIdempotency({ key, fingerprint: currentFingerprint, statusCode, body })
-            .catch((error) => console.error('Durable idempotency completion failed:', error));
-        } else {
-          database.releaseIdempotency(key)
-            .catch((error) => console.error('Durable idempotency release failed:', error));
-        }
-        return originalJson(body);
+        void (async () => {
+          try {
+            if (statusCode >= 200 && statusCode < 300) {
+              const stored = await database.completeIdempotency({ key, fingerprint: currentFingerprint, statusCode, body });
+              if (!stored) throw new Error('Durable idempotency record was not completed.');
+              res.set('x-sra-idempotency-key', key);
+            } else {
+              await database.releaseIdempotency(key);
+            }
+            finalized = true;
+            originalJson(body);
+          } catch (error) {
+            console.error('Durable idempotency finalization failed:', error);
+            await database.releaseIdempotency(key).catch(() => {});
+            if (!res.headersSent) res.status(503);
+            finalized = true;
+            originalJson({ error: 'SRA could not durably finalize this operation.', code: 'SRA_TRANSACTION_FINALIZATION_FAILED' });
+          }
+        })();
+        return res;
       };
 
       const releaseUnfinished = () => {
-        if (!finalized) database.releaseIdempotency(key)
+        if (!finalized && !finalizing) database.releaseIdempotency(key)
           .catch((error) => console.error('Durable idempotency cleanup failed:', error));
       };
       res.once('close', releaseUnfinished);
@@ -147,10 +147,7 @@ export function createOperationsIdempotency({ databaseProvider = defaultDatabase
       return next();
     } catch (error) {
       console.error('Durable idempotency claim failed:', error);
-      return res.status(503).json({
-        error: 'SRA could not secure this operation for durable processing.',
-        code: 'SRA_TRANSACTION_SAFETY_UNAVAILABLE',
-      });
+      return res.status(503).json({ error: 'SRA could not secure this operation for durable processing.', code: 'SRA_TRANSACTION_SAFETY_UNAVAILABLE' });
     }
   };
 }
