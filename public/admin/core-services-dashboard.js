@@ -37,22 +37,12 @@
     document.querySelector('#core-services-state').textContent = String(brief.state || 'UNKNOWN').replaceAll('_', ' ');
     const heartbeat = brief.heartbeat || {};
     document.querySelector('#core-heartbeat-summary').innerHTML = [
-      ['Scheduler', heartbeat.schedulerState || 'UNKNOWN'],
-      ['Cycles', number(heartbeat.cycleCount)],
-      ['Completed engines', number(heartbeat.completedEngines)],
-      ['Failed engines', number(heartbeat.failedEngines)],
-      ['Latest cycle', when(heartbeat.completedAt)]
+      ['Scheduler', heartbeat.schedulerState || 'UNKNOWN'], ['Cycles', number(heartbeat.cycleCount)], ['Completed engines', number(heartbeat.completedEngines)], ['Failed engines', number(heartbeat.failedEngines)], ['Latest cycle', when(heartbeat.completedAt)]
     ].map(([label, value]) => card(label, value)).join('');
-
     const movement = brief.movement || {};
     document.querySelector('#core-movement-summary').innerHTML = [
-      ['Observations', number(movement.observations)],
-      ['Coin Positions', number(movement.coinPositions)],
-      ['Instruments', number(movement.instruments)],
-      ['Live listings', number(movement.liveListings)],
-      ['Prepared listings', number(movement.preparedListings)]
+      ['Observations', number(movement.observations)], ['Coin Positions', number(movement.coinPositions)], ['Instruments', number(movement.instruments)], ['Live listings', number(movement.liveListings)], ['Prepared listings', number(movement.preparedListings)]
     ].map(([label, value]) => card(label, value)).join('');
-
     document.querySelector('#core-engine-list').innerHTML = (brief.engines || []).map((engine) => `<div style="padding:9px;border:1px solid ${engine.state === 'FAILED' ? '#6b2c2c' : '#1f3925'};border-radius:9px;display:flex;justify-content:space-between;gap:10px"><div><strong>${engine.name.replaceAll('_', ' ')}</strong>${engine.error ? `<div style="color:#e69b9b;font-size:11px">${engine.error}</div>` : ''}</div><span style="color:${engine.state === 'FAILED' ? '#ef8f8f' : '#75d18a'}">${engine.state}</span></div>`).join('') || '<div style="color:#89a78f">Waiting for the first completed cycle.</div>';
     document.querySelector('#core-services-reply').textContent = brief.reply || '';
     document.querySelector('#core-services-attention').innerHTML = (brief.attention || []).map((item) => `<div style="padding:8px;border-radius:8px;background:#101a12;color:#d6c995">${item}</div>`).join('') || '<div style="color:#75d18a">No core-services exception is currently reported.</div>';
@@ -69,22 +59,27 @@
 
   async function runCycle() {
     const button = document.querySelector('#run-core-services-cycle');
-    button.disabled = true;
-    button.textContent = 'Running cycle...';
+    button.disabled = true; button.textContent = 'Running cycle...';
     try {
       const result = await request('/api/sane/core-services/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trigger: 'ADMIN_DASHBOARD' }) });
       window.append?.(`SRA Core Services cycle ${result.cycleId || ''} completed with state ${result.state || result.reason}.`, 'agent');
       await load();
-    } catch (error) {
-      document.querySelector('#core-services-message').textContent = error.message;
-    } finally {
-      button.disabled = false;
-      button.textContent = 'Run cycle now';
-    }
+    } catch (error) { document.querySelector('#core-services-message').textContent = error.message; }
+    finally { button.disabled = false; button.textContent = 'Run cycle now'; }
+  }
+
+  function loadPolicyControls() {
+    if (document.querySelector('script[data-listing-readiness-policy]')) return;
+    const script = document.createElement('script');
+    script.src = '/admin/listing-readiness-policy-ui.js';
+    script.defer = true;
+    script.dataset.listingReadinessPolicy = 'true';
+    document.head.append(script);
   }
 
   const observer = new MutationObserver(() => ensurePanel());
   window.addEventListener('DOMContentLoaded', () => {
+    loadPolicyControls();
     observer.observe(document.body, { childList: true, subtree: true });
     setTimeout(() => { ensurePanel(); void load(); }, 700);
     timer = setInterval(() => { if (document.querySelector('#admin-view:not(.hidden)')) void load(); }, 15000);
