@@ -3,6 +3,7 @@ import express, { Router } from 'express';
 import { AccessService } from '../services/access-service.js';
 import { MarketplaceListingService } from '../services/marketplace-listing-service.js';
 import { ListingReadinessBatchService } from '../services/listing-readiness-batch-service.js';
+import { ListingPublicationBatchService } from '../services/listing-publication-batch-service.js';
 import { AdminIntelligenceAgentService } from '../services/admin-intelligence-agent-service.js';
 import { RECORD_TYPES } from '../services/persistent-domain-service.js';
 
@@ -34,6 +35,7 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
   const access = new AccessService({ database });
   const marketplaceListings = new MarketplaceListingService(domain);
   const listingReadinessBatch = new ListingReadinessBatchService(domain);
+  const listingPublicationBatch = new ListingPublicationBatchService(domain);
   const intelligenceAgent = new AdminIntelligenceAgentService({ domain, database });
   await access.initialize();
   const router = Router();
@@ -123,9 +125,23 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
     if (String(req.body?.approval || '').toUpperCase() !== 'APPROVE') return res.status(409).json({ error: 'Explicit administrator approval is required.', code: 'SRA_LISTING_READINESS_BATCH_APPROVAL_REQUIRED', requiredApproval: 'APPROVE', preview: listingReadinessBatch.preview(req.body || {}) });
     try {
       const result = await listingReadinessBatch.approve(req.body || {}, session.id);
-      if (database?.audit) await database.audit({ actorId: session.id, eventType: 'SRA_LISTING_READINESS_BATCH_APPROVED', objectType: 'SRA_LISTING_READINESS_BATCH', objectId: result.batchId, payload: { updatedListingCount: result.updatedListingCount, publicationExecuted: false } });
+      if (database?.audit) await database.audit({ actorId: session.id, eventType: 'SRA_LISTING_READINESS_BATCH_APPROVED', objectType: 'SRA_LISTING_READINESS_BATCH', objectId: result.batchId, payload: { updatedListingCount: result.updatedListingCount, unitPrice: result.policy?.unitPrice, publicationExecuted: false } });
       return res.status(201).json(result);
     } catch (error) { return res.status(422).json({ error: error.message, code: 'SRA_LISTING_READINESS_BATCH_FAILED' }); }
+  });
+
+  router.get('/api/admin/listing-publication-batch', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    return res.json({ status: listingPublicationBatch.status(), preview: listingPublicationBatch.preview() });
+  });
+  router.post('/api/admin/listing-publication-batch/approve', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    if (String(req.body?.approval || '').toUpperCase() !== 'APPROVE') return res.status(409).json({ error: 'Explicit administrator publication approval is required.', code: 'SRA_LISTING_PUBLICATION_BATCH_APPROVAL_REQUIRED', requiredApproval: 'APPROVE', preview: listingPublicationBatch.preview() });
+    try {
+      const result = await listingPublicationBatch.approve(req.body || {}, session.id);
+      if (database?.audit) await database.audit({ actorId: session.id, eventType: 'SRA_LISTING_PUBLICATION_BATCH_APPROVED', objectType: 'SRA_LISTING_PUBLICATION_BATCH', objectId: result.batchId, payload: { publishedListingCount: result.publishedListingCount, transactionsCreated: 0, settlementExecuted: false } });
+      return res.status(201).json(result);
+    } catch (error) { return res.status(422).json({ error: error.message, code: 'SRA_LISTING_PUBLICATION_BATCH_FAILED' }); }
   });
 
   router.get('/api/admin/summary', async (req, res) => {
@@ -134,17 +150,18 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
     const listingStatus = marketplaceListings.status();
     const listings = marketplaceListings.list();
     const blockedListings = listings.filter((listing) => Array.isArray(listing.blockers) && listing.blockers.length > 0).length;
-    const readyListings = listings.filter((listing) => Array.isArray(listing.blockers) && listing.blockers.length === 0).length;
+    const readyListings = listings.filter((listing) => listing.status === 'READY_FOR_PUBLICATION_APPROVAL' && listing.state === 'PREPARED').length;
     const blockerCounts = {};
     for (const listing of listings) for (const blocker of listing.blockers || []) blockerCounts[blocker] = (blockerCounts[blocker] || 0) + 1;
     return res.json({
       generatedAt: new Date().toISOString(),
       administrator: { id: session.id, displayName: session.displayName, capacity: session.activeCapacity },
       platform: {
-        observations: count(domain, RECORD_TYPES.MARKET_OBSERVATION), recognitionAssessments: count(domain, RECORD_TYPES.RECOGNITION_ASSESSMENT), financialRecords: count(domain, RECORD_TYPES.FINANCIAL_RECORD), coinPositions: count(domain, RECORD_TYPES.COIN_POSITION), instruments: count(domain, RECORD_TYPES.SRA_INSTRUMENT), marketplaceListings: listingStatus.listingCount || 0, marketplaceListingsPrepared: listingStatus.byState?.PREPARED || 0, marketplaceListingsPublished: listingStatus.byState?.PUBLISHED || listingStatus.byState?.ACTIVE || 0, marketplaceListingsBlocked: blockedListings, marketplaceListingsReady: readyListings, marketplaceListingStoredRecords: listingStatus.storedRecordCount || listingStatus.listingCount || 0, marketplaceListingDuplicates: listingStatus.supersededDuplicateCount || 0, transactions: count(domain, RECORD_TYPES.SRA_TRANSACTION), fundingInstructions: count(domain, RECORD_TYPES.FUNDING_INSTRUCTION), treasuryWallets: count(domain, RECORD_TYPES.TREASURY_CRYPTO_WALLET), treasuryActivity: count(domain, RECORD_TYPES.TREASURY_CRYPTO_ACTIVITY)
+        observations: count(domain, RECORD_TYPES.MARKET_OBSERVATION), recognitionAssessments: count(domain, RECORD_TYPES.RECOGNITION_ASSESSMENT), financialRecords: count(domain, RECORD_TYPES.FINANCIAL_RECORD), coinPositions: count(domain, RECORD_TYPES.COIN_POSITION), instruments: count(domain, RECORD_TYPES.SRA_INSTRUMENT), marketplaceListings: listingStatus.listingCount || 0, marketplaceListingsPrepared: listingStatus.byState?.PREPARED || 0, marketplaceListingsPublished: (listingStatus.byState?.PUBLISHED || 0) + (listingStatus.byState?.ACTIVE || 0), marketplaceListingsBlocked: blockedListings, marketplaceListingsReady: readyListings, marketplaceListingStoredRecords: listingStatus.storedRecordCount || listingStatus.listingCount || 0, marketplaceListingDuplicates: listingStatus.supersededDuplicateCount || 0, transactions: count(domain, RECORD_TYPES.SRA_TRANSACTION), fundingInstructions: count(domain, RECORD_TYPES.FUNDING_INSTRUCTION), treasuryWallets: count(domain, RECORD_TYPES.TREASURY_CRYPTO_WALLET), treasuryActivity: count(domain, RECORD_TYPES.TREASURY_CRYPTO_ACTIVITY)
       },
       marketplaceListings: { ...listingStatus, blockedListings, readyListings, blockerCounts },
       listingReadinessBatch: listingReadinessBatch.status(),
+      listingPublicationBatch: listingPublicationBatch.status(),
       nativePlatformAsset: nativePlatformAsset?.status?.() || { state: 'UNAVAILABLE' },
       connectors: { coinbasePublicMarket: coinbase },
       adminIntelligenceAgent: intelligenceAgent.capabilities(),
