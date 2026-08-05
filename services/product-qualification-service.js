@@ -77,6 +77,25 @@ export class ProductQualificationService {
     ];
     return { product, exportPackage, integrity, checks, passed: checks.every((check) => check.status === 'PASS'), evidenceIds, evidenceClasses, actorId };
   }
+  findQualificationCandidates(productCode, input = {}) {
+    const code = upper(productCode, 'productCode');
+    const product = this.getProduct(code);
+    if (!product || product.state !== 'ACTIVE') throw new Error('Active product definition was not found.');
+    const packages = this.internalLifecycle.listExportPackages({ state: 'READY_FOR_EXPORT' });
+    return packages.map((exportPackage) => {
+      const assessment = this.qualify({ productCode: code, exportPackageId: exportPackage.exportPackageId, evidenceIds: input.evidenceIds || [], evidenceClasses: input.evidenceClasses || [] }, input.actorId || 'SRA_PLATFORM');
+      return {
+        exportPackageId: exportPackage.exportPackageId,
+        instrumentId: exportPackage.manifest?.references?.instrument || null,
+        instrumentFamily: String(exportPackage.manifest?.records?.instrument?.instrumentFamily || exportPackage.manifest?.records?.instrument?.instrumentType || '').toUpperCase() || null,
+        ownershipRecognitionId: exportPackage.manifest?.references?.ownershipRecognition || null,
+        createdAt: exportPackage.createdAt,
+        passed: assessment.passed,
+        failedChecks: assessment.checks.filter((check) => check.status === 'FAIL').map((check) => check.id),
+        checks: assessment.checks,
+      };
+    }).filter((candidate) => product.instrumentFamilies.includes(candidate.instrumentFamily)).sort((a, b) => Number(b.passed) - Number(a.passed) || String(b.createdAt).localeCompare(String(a.createdAt)));
+  }
   async recordQualification(input = {}, actorId = 'SRA_PLATFORM') {
     const assessment = this.qualify(input, actorId);
     const existing = this.domain.list(PRODUCT_QUALIFICATION).find((r) => r.productCode === assessment.product.productCode && r.exportPackageId === assessment.exportPackage.exportPackageId && r.state === 'QUALIFIED');
@@ -87,6 +106,19 @@ export class ProductQualificationService {
     await this.domain.put(PRODUCT_QUALIFICATION, qualificationId, record, { actorId, eventType: 'SRA_PRODUCT_QUALIFIED' });
     await this.domain.lifecycle({ objectType: PRODUCT_QUALIFICATION, objectId: qualificationId, eventType: 'SRA_PRODUCT_PRODUCTION_QUALIFIED', actorId, payload: { productCode: record.productCode, exportPackageId: record.exportPackageId, packageDigest: record.packageDigest } });
     return { qualification: record, created: true, assessment };
+  }
+  async qualifyFirstReady(productCode, input = {}, actorId = 'SRA_PLATFORM') {
+    const code = upper(productCode, 'productCode');
+    const candidates = this.findQualificationCandidates(code, { ...input, actorId });
+    const ready = candidates.find((candidate) => candidate.passed);
+    if (!ready) {
+      const reason = candidates.length ? `No stored ${code} export package passed all product checks.` : `No stored READY_FOR_EXPORT package matches ${code}.`;
+      const error = new Error(reason);
+      error.code = 'SRA_PRODUCT_NO_READY_CANDIDATE';
+      error.candidates = candidates;
+      throw error;
+    }
+    return this.recordQualification({ productCode: code, exportPackageId: ready.exportPackageId, evidenceIds: input.evidenceIds || [], evidenceClasses: input.evidenceClasses || [] }, actorId);
   }
   listQualifications(filters = {}) { return this.domain.list(PRODUCT_QUALIFICATION).filter((r) => !filters.productCode || r.productCode === String(filters.productCode).toUpperCase()).filter((r) => !filters.state || r.state === String(filters.state).toUpperCase()).sort((a, b) => String(b.qualifiedAt).localeCompare(String(a.qualifiedAt))); }
   getQualification(qualificationId) { return this.domain.get(PRODUCT_QUALIFICATION, qualificationId); }
