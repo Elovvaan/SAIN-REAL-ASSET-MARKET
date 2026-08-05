@@ -9,9 +9,10 @@
     "dev": "node --watch server.js",
     "test": "node --test --test-concurrency=1",
     "test:security": "node --test --test-concurrency=1 tests/operations-authorization.test.mjs",
+    "test:transaction-safety": "node --test --test-concurrency=1 tests/transaction-safety.test.mjs",
     "test:edx": "node --test --test-concurrency=1 test/edx-pipeline.test.js",
     "test:funding": "node --test --test-concurrency=1 test/funding-engine.integration.test.js",
-    "test:integration": "npm run test:security && node --test --test-concurrency=1 test/edx-pipeline.test.js test/funding-engine.integration.test.js"
+    "test:integration": "npm run test:security && npm run test:transaction-safety && node --test --test-concurrency=1 test/edx-pipeline.test.js test/funding-engine.integration.test.js"
   },
   "engines": {
     "node": ">=20"
