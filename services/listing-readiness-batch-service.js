@@ -32,7 +32,8 @@ export class ListingReadinessBatchService {
 
   preview(input = {}) {
     const listings = this.eligibleListings();
-    const askingPriceMethod = String(input.askingPriceMethod || 'RECORDED_TRANSACTION_VALUE').toUpperCase();
+    const askingPriceMethod = String(input.askingPriceMethod || 'ADMIN_APPROVED_SRA_USD_UNIT_PRICE').toUpperCase();
+    const unitPrice = finitePositive(input.unitPrice || 1, 'unitPrice');
     const eligibilityRule = String(input.eligibilityRule || 'SRA_REGISTERED_PARTICIPANTS').toUpperCase();
     const transactionRouteId = String(input.transactionRouteId || 'SRA_INTERNAL_MARKETPLACE').toUpperCase();
     const settlementRouteId = String(input.settlementRouteId || 'SRA_INTERNAL_SETTLEMENT').toUpperCase();
@@ -41,13 +42,14 @@ export class ListingReadinessBatchService {
       action: 'LISTING_READINESS_BATCH_PREVIEW',
       readOnly: true,
       eligibleListingCount: listings.length,
+      market: 'SRA / USD',
       scope: {
         listingIds: listings.map((listing) => listing.listingId),
         listingState: 'PREPARED',
         excludesNativePlatformAsset: true,
       },
-      policy: { askingPriceMethod, eligibilityRule, minimumOrder, transactionRouteId, settlementRouteId },
-      effect: 'Clear the five standard readiness blockers and mark covered listings READY_FOR_PUBLICATION_APPROVAL.',
+      policy: { askingPriceMethod, unitPrice, currency: 'USD', eligibilityRule, minimumOrder, transactionRouteId, settlementRouteId },
+      effect: 'Apply the approved SRA / USD unit price, clear the five standard readiness blockers, and mark covered listings READY_FOR_PUBLICATION_APPROVAL.',
       doesNot: ['PUBLISH_LISTINGS', 'CREATE_TRANSACTIONS', 'ALLOCATE_POSITIONS', 'SETTLE_VALUE', 'RECOGNIZE_OWNERSHIP', 'CREATE_EXPORT_PACKAGES'],
       approvalRequired: true,
     };
@@ -63,12 +65,15 @@ export class ListingReadinessBatchService {
     for (const listingId of preview.scope.listingIds) {
       const listing = this.domain.get(LISTING_TYPE, listingId);
       if (!listing || listing.state !== 'PREPARED') continue;
-      const instrument = this.domain.get('SRA_INSTRUMENT', listing.instrumentId);
-      const askingPrice = Number(listing.pricing?.askingPrice || instrument?.denomination?.principalQuantity || listing.quantity || 0);
-      if (!Number.isFinite(askingPrice) || askingPrice <= 0) continue;
       const next = {
         ...listing,
-        pricing: { ...(listing.pricing || {}), state: 'CONFIGURED', method: preview.policy.askingPriceMethod, askingPrice, currency: listing.pricing?.currency || 'USD' },
+        pricing: {
+          ...(listing.pricing || {}),
+          state: 'CONFIGURED',
+          method: preview.policy.askingPriceMethod,
+          askingPrice: preview.policy.unitPrice,
+          currency: 'USD',
+        },
         access: { ...(listing.access || {}), state: 'CONFIGURED', eligibilityRule: preview.policy.eligibilityRule, minimumOrder: preview.policy.minimumOrder },
         transactionRouteId: preview.policy.transactionRouteId,
         settlementRouteId: preview.policy.settlementRouteId,
