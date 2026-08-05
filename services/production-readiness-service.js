@@ -1,4 +1,5 @@
 import { InternalLifecycleService } from './internal-lifecycle-service.js';
+import { ProductQualificationService } from './product-qualification-service.js';
 
 export class ProductionReadinessService {
   constructor({ database, domain, intelligence }) {
@@ -6,27 +7,24 @@ export class ProductionReadinessService {
     this.domain = domain;
     this.intelligence = intelligence;
     this.internalLifecycle = new InternalLifecycleService(domain);
+    this.productQualification = new ProductQualificationService(domain, this.internalLifecycle);
   }
 
-  inspectInternalLifecycle(references = {}) {
-    return this.internalLifecycle.inspect(references);
-  }
+  inspectInternalLifecycle(references = {}) { return this.internalLifecycle.inspect(references); }
+  recognizeOwnership(input = {}, actorId = 'SRA_PLATFORM') { return this.internalLifecycle.recognizeOwnership(input, actorId); }
+  createExportPackage(input = {}, actorId = 'SRA_PLATFORM') { return this.internalLifecycle.createExportPackage(input, actorId); }
+  listExportPackages(filters = {}) { return this.internalLifecycle.listExportPackages(filters); }
+  getExportPackage(exportPackageId) { return this.internalLifecycle.getExportPackage(exportPackageId); }
+  verifyExportPackage(exportPackageId) { return this.internalLifecycle.verifyExportPackage(exportPackageId); }
 
-  recognizeOwnership(input = {}, actorId = 'SRA_PLATFORM') {
-    return this.internalLifecycle.recognizeOwnership(input, actorId);
-  }
-
-  createExportPackage(input = {}, actorId = 'SRA_PLATFORM') {
-    return this.internalLifecycle.createExportPackage(input, actorId);
-  }
-
-  listExportPackages(filters = {}) {
-    return this.internalLifecycle.listExportPackages(filters);
-  }
-
-  getExportPackage(exportPackageId) {
-    return this.internalLifecycle.getExportPackage(exportPackageId);
-  }
+  productQualificationStatus() { return this.productQualification.status(); }
+  listProducts(filters = {}) { return this.productQualification.listProducts(filters); }
+  getProduct(productCode) { return this.productQualification.getProduct(productCode); }
+  registerProduct(input = {}, actorId = 'SRA_PLATFORM') { return this.productQualification.registerProduct(input, actorId); }
+  assessProduct(input = {}, actorId = 'SRA_PLATFORM') { return this.productQualification.qualify(input, actorId); }
+  qualifyProduct(input = {}, actorId = 'SRA_PLATFORM') { return this.productQualification.recordQualification(input, actorId); }
+  listProductQualifications(filters = {}) { return this.productQualification.listQualifications(filters); }
+  getProductQualification(qualificationId) { return this.productQualification.getQualification(qualificationId); }
 
   async assess() {
     const database = await this.database.health();
@@ -36,20 +34,17 @@ export class ProductionReadinessService {
     const backupScheduled = String(process.env.SRA_BACKUP_SCHEDULED || '').toLowerCase() === 'true';
     const restoreQualifiedAt = process.env.SRA_RESTORE_QUALIFIED_AT || null;
     const loadQualifiedAt = process.env.SRA_LOAD_QUALIFIED_AT || null;
-    const internalTypes = [
-      'MARKET_OBSERVATION', 'RECOGNITION_ASSESSMENT', 'FINANCIAL_RECORD', 'COIN_POSITION',
-      'SRA_INSTRUMENT', 'MARKETPLACE_LISTING', 'PARTICIPATION_POSITION',
-      'FUNDING_MARKETPLACE_COMMITMENT', 'FUNDING_MARKETPLACE_POSITION',
-      'SRA_SETTLEMENT_RECORD', 'OWNERSHIP_RECOGNITION', 'EXPORT_PACKAGE'
-    ];
+    const internalTypes = ['MARKET_OBSERVATION','RECOGNITION_ASSESSMENT','FINANCIAL_RECORD','COIN_POSITION','SRA_INSTRUMENT','MARKETPLACE_LISTING','PARTICIPATION_POSITION','FUNDING_MARKETPLACE_COMMITMENT','FUNDING_MARKETPLACE_POSITION','SRA_SETTLEMENT_RECORD','OWNERSHIP_RECOGNITION','EXPORT_PACKAGE'];
     const missingInternalTypes = internalTypes.filter((type) => !(type in counts));
     const internalBoundaryReady = missingInternalTypes.length === 0;
+    const productStatus = this.productQualification.status();
 
     const checks = [
       { id:'DATABASE_PERSISTENCE', phase:2, status:database.persistent?'PASS':'FAIL', detail:database.persistent?'PostgreSQL persistence is active.':'The platform is using memory fallback and will not preserve production records across restarts.' },
       { id:'DOMAIN_HYDRATION', phase:2, status:Object.keys(counts).length>0?'PASS':'FAIL', detail:`${Object.keys(counts).length} registered record types are available to the persistent domain.` },
       { id:'SRA_INTERNAL_LIFECYCLE', phase:3, status:internalBoundaryReady?'PASS':'FAIL', detail:internalBoundaryReady?'SRA contains every internal record class from observation through ownership recognition and export packaging.':`Missing internal lifecycle record classes: ${missingInternalTypes.join(', ')}.` },
       { id:'CANONICAL_EXPORT_BOUNDARY', phase:3, status:internalBoundaryReady?'PASS':'FAIL', detail:'Production readiness ends when SRA creates a complete immutable READY_FOR_EXPORT package. External adapters are optional translators beyond this boundary.' },
+      { id:'PRODUCT_QUALIFICATION_STANDARD', phase:5, status:'PASS', detail:`SRA_PRODUCT_QUALIFICATION_V1 is active for ${productStatus.activeProducts} product definitions. A product qualifies only against an integrity-valid export package, matching instrument family, required evidence, complete lifecycle, settlement, and ownership recognition.` },
       { id:'OPERATIONS_INTELLIGENCE', phase:1, status:intelligence?'PASS':'FAIL', detail:intelligence?`Operational health is ${intelligence.status} with score ${intelligence.score}.`:'SAIN Operations Intelligence is unavailable.' },
       { id:'OPERATIONS_AUTHORIZATION', phase:1, status:'PASS', detail:'Funding and marketplace writes are authorized from current server-side sessions and capacities.' },
       { id:'DURABLE_IDEMPOTENCY', phase:2, status:database.persistent?'PASS':'FAIL', detail:database.persistent?'Idempotency responses and active resource locks are shared through PostgreSQL across instances and restarts.':'Durable idempotency requires PostgreSQL.' },
@@ -64,24 +59,11 @@ export class ProductionReadinessService {
       { id:'RESTORE_QUALIFICATION', phase:4, status:restoreQualifiedAt?'PASS':'FAIL', detail:restoreQualifiedAt?`Database restore qualified at ${restoreQualifiedAt}.`:'Run npm run restore:verify against a disposable database, then set SRA_RESTORE_QUALIFIED_AT.' },
       { id:'LOAD_QUALIFICATION', phase:4, status:loadQualifiedAt?'PASS':'FAIL', detail:loadQualifiedAt?`Load qualification passed at ${loadQualifiedAt}.`:'Run npm run test:load against Railway, then set SRA_LOAD_QUALIFIED_AT.' },
       { id:'RECOVERY_RUNBOOK', phase:4, status:'PASS', detail:'The repository includes the production recovery and incident-response runbook.' },
-      { id:'FINAL_RELEASE_QUALIFICATION', phase:5, status:'WARN', detail:'Phase 5 remains open: all release tests and final browser qualification must pass with no unresolved warnings.' },
+      { id:'FINAL_RELEASE_QUALIFICATION', phase:5, status:'WARN', detail:'Phase 5 remains open: each offered product must record a passing qualification and final browser qualification must pass with no unresolved warnings.' },
     ];
-    const failed=checks.filter((check)=>check.status==='FAIL');
-    const warnings=checks.filter((check)=>check.status==='WARN');
-    const completed=[];
+    const failed=checks.filter((check)=>check.status==='FAIL'); const warnings=checks.filter((check)=>check.status==='WARN'); const completed=[];
     for (let phase=1; phase<=4; phase+=1) if (!checks.some((check)=>check.phase===phase&&check.status!=='PASS')) completed.push(phase);
     const currentProductionPhase=completed.includes(4)?5:completed.includes(3)?4:completed.includes(2)?3:completed.includes(1)?2:1;
-    return {
-      generatedAt:new Date().toISOString(),
-      productionBoundary:'SRA_READY_FOR_EXPORT',
-      externalAdaptersRequiredForCore:false,
-      completedProductionPhases:completed,
-      currentProductionPhase,
-      totalProductionPhases:5,
-      readyForCustomerPilot:failed.length===0&&warnings.length===0,
-      readyForMultiInstanceScale:failed.length===0&&warnings.length===0,
-      status:failed.length?'NOT_READY':warnings.length?'PRODUCTION_HARDENING_IN_PROGRESS':'READY',
-      checks,database,operationalHealth:intelligence,
-    };
+    return { generatedAt:new Date().toISOString(), productionBoundary:'SRA_READY_FOR_EXPORT', externalAdaptersRequiredForCore:false, productQualification:productStatus, completedProductionPhases:completed, currentProductionPhase, totalProductionPhases:5, readyForCustomerPilot:failed.length===0&&warnings.length===0, readyForMultiInstanceScale:failed.length===0&&warnings.length===0, status:failed.length?'NOT_READY':warnings.length?'PRODUCTION_HARDENING_IN_PROGRESS':'READY', checks,database,operationalHealth:intelligence };
   }
 }
