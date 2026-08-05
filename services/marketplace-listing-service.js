@@ -34,13 +34,25 @@ function canonicalByInstrument(records) {
 export class MarketplaceListingService {
   constructor(persistentDomain, options = {}) {
     this.persistentDomain = persistentDomain;
-    this.enabled = String(options.environment?.MARKETPLACE_LISTING_PREPARATION_ENABLED ?? process.env.MARKETPLACE_LISTING_PREPARATION_ENABLED ?? 'true').toLowerCase() !== 'false';
-    this.backfillLimit = Number(options.environment?.MARKETPLACE_LISTING_BACKFILL_LIMIT ?? process.env.MARKETPLACE_LISTING_BACKFILL_LIMIT ?? 5000);
+    this.environment = options.environment || process.env;
+    this.enabled = String(this.environment.MARKETPLACE_LISTING_PREPARATION_ENABLED ?? 'true').toLowerCase() !== 'false';
+    this.backfillLimit = Number(this.environment.MARKETPLACE_LISTING_BACKFILL_LIMIT ?? 5000);
+    this.cycleIntervalMs = Math.max(5000, Number(this.environment.MARKETPLACE_LISTING_CYCLE_INTERVAL_MS ?? 15000));
+    this.autoStart = String(options.autoStart ?? this.environment.MARKETPLACE_LISTING_AUTO_START ?? 'true').toLowerCase() !== 'false';
     this.prepared = 0;
     this.failed = 0;
     this.backfillState = 'NOT_STARTED';
+    this.cycleState = this.autoStart && this.enabled ? 'STARTING' : 'STOPPED';
     this.lastPreparedAt = null;
+    this.lastCycleAt = null;
     this.lastError = null;
+    this.timer = null;
+
+    if (this.autoStart && this.enabled) {
+      queueMicrotask(() => {
+        void this.startPreparationCycle();
+      });
+    }
   }
 
   rawList() {
@@ -118,22 +130,67 @@ export class MarketplaceListingService {
     return { listing, created: true };
   }
 
+  pendingInstruments() {
+    const listedInstrumentIds = new Set(this.list().map((listing) => listing.instrumentId));
+    return this.persistentDomain.list(RECORD_TYPES.SRA_INSTRUMENT)
+      .filter((instrument) => ['DRAFT', 'RECORDED', 'ACTIVE', 'RESTRICTED'].includes(instrument.state))
+      .filter((instrument) => !listedInstrumentIds.has(instrument.instrumentId));
+  }
+
   async backfill() {
     if (!this.enabled || this.backfillState === 'RUNNING') return this.status();
     this.backfillState = 'RUNNING';
-    const instruments = this.persistentDomain.list(RECORD_TYPES.SRA_INSTRUMENT)
-      .filter((instrument) => ['DRAFT', 'RECORDED', 'ACTIVE', 'RESTRICTED'].includes(instrument.state))
+    this.lastCycleAt = new Date().toISOString();
+    const instruments = this.pendingInstruments()
       .slice(0, Number.isFinite(this.backfillLimit) && this.backfillLimit > 0 ? this.backfillLimit : 5000);
     for (const instrument of instruments) {
       try { await this.prepareFromInstrument(instrument.instrumentId); }
-      catch (error) { this.failed += 1; this.lastError = { instrumentId: instrument.instrumentId, message: error?.message || String(error), at: new Date().toISOString() }; }
+      catch (error) {
+        this.failed += 1;
+        this.lastError = { instrumentId: instrument.instrumentId, message: error?.message || String(error), at: new Date().toISOString() };
+      }
     }
     this.backfillState = 'COMPLETED';
     return this.status();
   }
 
+  async startPreparationCycle() {
+    if (!this.enabled) {
+      this.cycleState = 'DISABLED';
+      return this.status();
+    }
+    if (this.timer) return this.status();
+    this.cycleState = 'RUNNING';
+    await this.backfill();
+    this.timer = setInterval(() => {
+      void this.backfill();
+    }, this.cycleIntervalMs);
+    this.timer.unref?.();
+    return this.status();
+  }
+
+  stopPreparationCycle() {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+    this.cycleState = 'STOPPED';
+    return this.status();
+  }
+
   status() {
-    return { enabled: this.enabled, state: this.enabled ? 'ACTIVE' : 'DISABLED', prepared: this.prepared, failed: this.failed, backfillState: this.backfillState, lastPreparedAt: this.lastPreparedAt, lastError: this.lastError, ...this.summary() };
+    return {
+      enabled: this.enabled,
+      state: this.enabled ? 'ACTIVE' : 'DISABLED',
+      prepared: this.prepared,
+      failed: this.failed,
+      backfillState: this.backfillState,
+      cycleState: this.cycleState,
+      cycleIntervalMs: this.cycleIntervalMs,
+      pendingInstrumentCount: this.pendingInstruments().length,
+      lastPreparedAt: this.lastPreparedAt,
+      lastCycleAt: this.lastCycleAt,
+      lastError: this.lastError,
+      ...this.summary()
+    };
   }
 
   summary() {
