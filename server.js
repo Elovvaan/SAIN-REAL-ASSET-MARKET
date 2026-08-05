@@ -41,6 +41,7 @@ import { FundingMarketplaceSettlementService } from './services/funding-marketpl
 import { FundingOperationsService } from './services/funding-operations-service.js';
 import { SainOperationsIntelligenceService } from './services/sain-operations-intelligence-service.js';
 import { ProductionReadinessService } from './services/production-readiness-service.js';
+import { NativePlatformAssetService } from './services/native-platform-asset-service.js';
 
 const port = Number(process.env.PORT) || 3000;
 const bootstrap = express();
@@ -86,6 +87,7 @@ let fundingMarketplaceSettlementService = null;
 let fundingOperationsService = null;
 let sainOperationsIntelligenceService = null;
 let productionReadinessService = null;
+let nativePlatformAssetService = null;
 let coinbasePublicMarket = null;
 let coinbaseTransactionAssetPipeline = null;
 let marketplaceListingService = null;
@@ -99,59 +101,22 @@ bootstrap.get('/api/health', async (_req, res) => {
   const dependencies = await dependencyHealth({ database, startupState });
   return res.status(dependencies.status === 'READY' ? 200 : 503).json({ status: dependencies.status === 'READY' ? 'ok' : 'degraded', service: 'SAIN Real Asset Market', startupState, startedAt, timestamp: new Date().toISOString() });
 });
-
 bootstrap.get('/api/production/dependencies', async (_req, res) => {
   const report = await dependencyHealth({ database, startupState, connectors: { COINBASE_PUBLIC_MARKET: coinbasePublicMarket, MARKETPLACE_LISTING: marketplaceListingService, ON_CHAIN_PROJECTION: onChainProjectionService } });
   return res.status(report.status === 'READY' ? 200 : 503).json(report);
 });
-
 bootstrap.get('/api/production/metrics', (_req, res) => res.json(runtimeMetrics()));
-
 bootstrap.post('/api/production/alerts/test', async (req, res) => {
   await emitOperationalAlert({ severity: 'TEST', event: 'SRA_ALERT_TEST', requestId: req.sraRequestId, actorId: req.sraIdentity?.actorId || null, at: new Date().toISOString() });
   return res.json({ delivered: Boolean(process.env.SRA_ALERT_WEBHOOK_URL), requestId: req.sraRequestId });
 });
-
-bootstrap.get('/api/startup', (_req, res) => {
-  return res.status(startupState === 'FAILED' ? 500 : 200).json({
-    startupState, startupError,
-    coinbasePublicMarket: coinbasePublicMarket?.status?.() || null,
-    coinbaseTransactionAssetPipeline: coinbaseTransactionAssetPipeline?.status?.() || null,
-    marketplaceListingPreparation: marketplaceListingService?.status?.() || null,
-    onChainProjection: onChainProjectionService?.status?.() || null,
-    fundingOpportunityIntake: fundingOpportunityService?.status?.() || null,
-    fundingOpportunityVerification: fundingVerificationService?.status?.() || null,
-    fundingOpportunityValuePreparation: fundingValuePreparationService?.status?.() || null,
-    fundingModelSelection: fundingModelSelectionService?.status?.() || null,
-    fundingInstrumentSelection: fundingInstrumentSelectionService?.status?.() || null,
-    fundingInstrumentReview: fundingInstrumentReviewService?.status?.() || null,
-    fundingInstrumentIssuance: fundingInstrumentIssuanceService?.status?.() || null,
-    fundingMarketplacePreparation: fundingMarketplacePreparationService?.status?.() || null,
-    fundingMarketplacePublication: fundingMarketplacePublicationService?.status?.() || null,
-    fundingMarketplaceCommitment: fundingMarketplaceCommitmentService?.status?.() || null,
-    fundingMarketplaceAllocation: fundingMarketplaceAllocationService?.status?.() || null,
-    fundingMarketplaceSettlement: fundingMarketplaceSettlementService?.status?.() || null,
-    fundingOperations: fundingOperationsService?.status?.() || null,
-    sainOperationsIntelligence: sainOperationsIntelligenceService?.status?.() || null,
-    productionReadiness: productionReadinessService ? 'AVAILABLE' : null,
-    observability: { requestTracing: true, structuredLogging: true, rateLimiting: true, alertsConfigured: Boolean(process.env.SRA_ALERT_WEBHOOK_URL) },
-    startedAt, timestamp: new Date().toISOString()
-  });
-});
-
-bootstrap.get('/api/marketplace-listings/status', (_req, res) => {
-  if (!marketplaceListingService) return res.status(503).json({ error: 'Marketplace Listing Layer is still initializing.' });
-  return res.json(marketplaceListingService.status());
-});
-bootstrap.get('/api/marketplace-listings', (req, res) => {
-  if (!marketplaceListingService) return res.status(503).json({ error: 'Marketplace Listing Layer is still initializing.' });
-  return res.json(marketplaceListingService.page({ state: req.query.state, instrumentId: req.query.instrumentId }, { page: req.query.page, limit: req.query.limit }));
-});
+bootstrap.get('/api/startup', (_req, res) => res.status(startupState === 'FAILED' ? 500 : 200).json({ startupState, startupError, nativePlatformAsset: nativePlatformAssetService?.status?.() || null, startedAt, timestamp: new Date().toISOString() }));
+bootstrap.get('/api/marketplace-listings/status', (_req, res) => marketplaceListingService ? res.json(marketplaceListingService.status()) : res.status(503).json({ error: 'Marketplace Listing Layer is still initializing.' }));
+bootstrap.get('/api/marketplace-listings', (req, res) => marketplaceListingService ? res.json(marketplaceListingService.page({ state: req.query.state, instrumentId: req.query.instrumentId }, { page: req.query.page, limit: req.query.limit })) : res.status(503).json({ error: 'Marketplace Listing Layer is still initializing.' }));
 
 bootstrap.use(async (req, res, next) => {
   if (privateAdminExtension && (req.path === '/admin' || req.path.startsWith('/admin/') || req.path.startsWith('/api/admin/'))) return privateAdminExtension(req, res, next);
   if (database && req.method === 'POST' && req.path === '/api/access/signin') return rejectPlatformAdminPublicSignin(req, res, next, database);
-  if (database && req.method === 'POST' && ['/api/access/capacity', '/api/access/role'].includes(req.path) && String(req.body?.capacity || req.body?.role || '').toUpperCase() === 'PLATFORM_ADMIN') return res.status(403).json({ error: 'Platform Administration is available only through the private administration portal.' });
   if (productionReadinessExtension && req.path.startsWith('/api/production')) return productionReadinessExtension(req, res, next);
   if (sainOperationsIntelligenceExtension && req.path.startsWith('/api/sain/intelligence')) return sainOperationsIntelligenceExtension(req, res, next);
   if (fundingOperationsExtension && req.path.startsWith('/api/funding-operations')) return fundingOperationsExtension(req, res, next);
@@ -178,19 +143,8 @@ const server = bootstrap.listen(port, '0.0.0.0', () => console.log(JSON.stringif
 server.requestTimeout = Number(process.env.SRA_REQUEST_TIMEOUT_MS) || 30000;
 server.headersTimeout = Number(process.env.SRA_HEADERS_TIMEOUT_MS) || 35000;
 server.keepAliveTimeout = Number(process.env.SRA_KEEP_ALIVE_TIMEOUT_MS) || 5000;
-
 function stopConnectors() { coinbasePublicMarket?.stop?.(); if (marketplaceListingTimer) clearInterval(marketplaceListingTimer); }
-async function shutdown(signal) {
-  startupState = 'STOPPING';
-  console.log(JSON.stringify({ level: 'info', event: 'GRACEFUL_SHUTDOWN_STARTED', signal }));
-  stopConnectors();
-  server.close(async () => {
-    try { await database?.pool?.end?.(); } catch {}
-    console.log(JSON.stringify({ level: 'info', event: 'GRACEFUL_SHUTDOWN_COMPLETED', signal }));
-    process.exit(0);
-  });
-  setTimeout(() => process.exit(1), Number(process.env.SRA_SHUTDOWN_TIMEOUT_MS) || 15000).unref();
-}
+async function shutdown(signal) { startupState = 'STOPPING'; stopConnectors(); server.close(async () => { try { await database?.pool?.end?.(); } catch {} process.exit(0); }); setTimeout(() => process.exit(1), 15000).unref(); }
 process.once('SIGTERM', () => void shutdown('SIGTERM'));
 process.once('SIGINT', () => void shutdown('SIGINT'));
 
@@ -214,36 +168,20 @@ try {
   sainOperationsIntelligenceService = new SainOperationsIntelligenceService(created.persistentDomain); await sainOperationsIntelligenceService.initialize(); sainOperationsIntelligenceExtension = createSainOperationsIntelligenceRouter(sainOperationsIntelligenceService);
   productionReadinessService = new ProductionReadinessService({ database: created.database, domain: created.persistentDomain, intelligence: sainOperationsIntelligenceService });
   productionReadinessExtension = createProductionReadinessRouter({ readinessService: productionReadinessService, database: created.database });
+  nativePlatformAssetService = new NativePlatformAssetService(created.persistentDomain, productionReadinessService.internalLifecycle);
   onChainProjectionService = new OnChainProjectionService(created.persistentDomain); await onChainProjectionService.initialize(); onChainProjectionExtension = createOnChainProjectionRouter(onChainProjectionService);
   coinbaseTransactionAssetPipeline = new CoinbaseTransactionAssetPipelineService({ observationLayerService: created.observationLayerService, financialRecordService: created.financialRecordService, persistentDomain: created.persistentDomain });
   marketplaceListingService = new MarketplaceListingService(created.persistentDomain);
   coinbasePublicMarket = new CoinbasePublicMarketService({ observationLayerService: created.observationLayerService, transactionAssetPipeline: coinbaseTransactionAssetPipeline });
   coinbaseExtension = createCoinbasePublicMarketRouter(coinbasePublicMarket);
-  privateAdminExtension = await createPrivateAdminRouter({ database: created.database, domain: created.persistentDomain, coinbasePublicMarket });
+  privateAdminExtension = await createPrivateAdminRouter({ database: created.database, domain: created.persistentDomain, coinbasePublicMarket, nativePlatformAsset: nativePlatformAssetService });
   coinbasePublicMarket.start();
-  setImmediate(async () => {
-    try {
-      const assetStatus = await coinbaseTransactionAssetPipeline.backfill();
-      console.log(JSON.stringify({ level: 'info', event: 'COINBASE_BACKFILL_COMPLETED', status: assetStatus }));
-      const listingStatus = await marketplaceListingService.backfill();
-      console.log(JSON.stringify({ level: 'info', event: 'LISTING_BACKFILL_COMPLETED', status: listingStatus }));
-    } catch (error) {
-      console.error(JSON.stringify({ level: 'error', event: 'STARTUP_BACKFILL_FAILED', message: error.message }));
-      void emitOperationalAlert({ severity: 'ERROR', event: 'STARTUP_BACKFILL_FAILED', message: error.message, at: new Date().toISOString() });
-    }
-  });
-  marketplaceListingTimer = setInterval(() => marketplaceListingService.backfill().catch((error) => {
-    console.error(JSON.stringify({ level: 'error', event: 'LISTING_BACKFILL_CYCLE_FAILED', message: error.message }));
-    void emitOperationalAlert({ severity: 'ERROR', event: 'LISTING_BACKFILL_CYCLE_FAILED', message: error.message, at: new Date().toISOString() });
-  }), 30000);
-  marketplaceListingTimer.unref?.();
   platformApp = created.app;
   startupState = 'READY';
   startupError = null;
-  console.log(JSON.stringify({ level: 'info', event: 'PLATFORM_INITIALIZATION_COMPLETED', startedAt }));
+  console.log(JSON.stringify({ level: 'info', event: 'PLATFORM_INITIALIZATION_COMPLETED', nativePlatformAsset: nativePlatformAssetService.status(), startedAt }));
 } catch (error) {
   startupState = 'FAILED';
-  startupError = { name: error?.name || 'Error', message: error?.message || 'Unknown startup error', stack: process.env.NODE_ENV === 'production' ? undefined : error?.stack };
+  startupError = { name: error?.name || 'Error', message: error?.message || 'Unknown startup error' };
   console.error(JSON.stringify({ level: 'error', event: 'PLATFORM_INITIALIZATION_FAILED', error: startupError }));
-  void emitOperationalAlert({ severity: 'CRITICAL', event: 'PLATFORM_INITIALIZATION_FAILED', error: startupError, at: new Date().toISOString() });
 }
