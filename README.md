@@ -19,6 +19,19 @@ The current prototype includes:
 
 The current data is representative prototype data. It is intentionally structured around the committed `SRA_MASTER_ARCHITECTURE.md` so the visual build remains connected to the official platform architecture.
 
+## Current Architecture Phases
+
+- Enterprise Data Exchange Phase 1
+- Optional Settlement and Cross-Platform Routing
+- Market Circulation Guardrail
+- SRA On-Chain Projection Layer
+
+The On-Chain Projection Layer is defined in:
+
+`docs/architecture/sra-on-chain-projection-layer.md`
+
+Its initial target is a controlled Solana representation of an existing SRA platform funding instrument. SRA remains the authoritative instrument, participant, ownership, Verified Value, settlement, and lifecycle system. The blockchain representation is downstream of the existing SRA instrument and must return through reconciliation.
+
 ## Run Locally
 
 ```bash
@@ -40,3 +53,5 @@ The repository includes `railway.json` and uses the Railway-provided `PORT` envi
 ## Repository Rule
 
 `SRA_MASTER_ARCHITECTURE.md` is the current architectural source of truth for SRA. The implementation should follow that document and should not redefine Verified Value or import unrelated architecture from outside the repository.
+
+Supporting phase documents under `docs/architecture/` define approved implementation boundaries for their respective phases and must remain consistent with the master architecture.
