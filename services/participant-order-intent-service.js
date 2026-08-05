@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 
-export const ORDER_INTENT_RECORD_TYPE = 'SRA_ORDER_INTENT';
+export const ORDER_INTENT_RECORD_TYPE = 'SRA_TRANSACTION';
 
 function now() { return new Date().toISOString(); }
 function id() { return `ORD-${crypto.randomUUID().toUpperCase()}`; }
@@ -28,24 +28,11 @@ export class ParticipantOrderIntentService {
     if (!['MARKET', 'LIMIT'].includes(orderType)) throw new Error('orderType must be MARKET or LIMIT.');
     const quantity = positive(input.quantity, 'quantity');
     if (quantity > Number(listing.quantity || 0)) throw new Error('quantity exceeds the listing quantity currently available.');
-    const unitPrice = orderType === 'LIMIT'
-      ? positive(input.limitPrice, 'limitPrice')
-      : positive(listing.pricing?.askingPrice || listing.unitPrice, 'market unit price');
-    const estimatedNotional = quantity * unitPrice;
+    const unitPrice = orderType === 'LIMIT' ? positive(input.limitPrice, 'limitPrice') : positive(listing.pricing?.askingPrice || listing.unitPrice, 'market unit price');
     return {
-      action: 'ORDER_INTENT_PREVIEW',
-      readOnly: true,
-      participantId: participantId || null,
-      listingId: listing.listingId,
-      instrumentId: listing.instrumentId,
-      market: 'SRA / USD',
-      side,
-      orderType,
-      quantity,
-      unit: listing.unit || 'SRA',
-      unitPrice,
-      quoteCurrency: 'USD',
-      estimatedNotional,
+      action: 'ORDER_INTENT_PREVIEW', readOnly: true, participantId: participantId || null,
+      listingId: listing.listingId, instrumentId: listing.instrumentId, market: 'SRA / USD', side, orderType,
+      quantity, unit: listing.unit || 'SRA', unitPrice, quoteCurrency: 'USD', estimatedNotional: quantity * unitPrice,
       listingState: listing.state,
       effect: 'Create a queued participant order intent for later matching and authorization review.',
       doesNot: ['MATCH_ORDER', 'ALLOCATE_POSITION', 'MOVE_BALANCE', 'SETTLE_VALUE', 'TRANSFER_OWNERSHIP', 'CREATE_EXPORT_PACKAGE'],
@@ -59,7 +46,9 @@ export class ParticipantOrderIntentService {
     const createdAt = now();
     const orderIntentId = id();
     const record = {
+      transactionId: orderIntentId,
       orderIntentId,
+      transactionType: 'PARTICIPANT_ORDER_INTENT',
       participantId,
       listingId: preview.listingId,
       instrumentId: preview.instrumentId,
@@ -87,12 +76,12 @@ export class ParticipantOrderIntentService {
 
   listForParticipant(participantId) {
     return this.domain.list(ORDER_INTENT_RECORD_TYPE)
-      .filter((item) => !participantId || item.participantId === participantId)
+      .filter((item) => item.transactionType === 'PARTICIPANT_ORDER_INTENT' && (!participantId || item.participantId === participantId))
       .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
   }
 
   status() {
-    const intents = this.domain.list(ORDER_INTENT_RECORD_TYPE);
+    const intents = this.domain.list(ORDER_INTENT_RECORD_TYPE).filter((item) => item.transactionType === 'PARTICIPANT_ORDER_INTENT');
     return {
       orderIntentCount: intents.length,
       queuedForReview: intents.filter((item) => item.state === 'QUEUED_FOR_ORDER_REVIEW').length,
