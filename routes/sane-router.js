@@ -5,6 +5,7 @@ import { SraCoreEventBus } from '../services/sra-core-event-bus.js';
 import { SraCoreServicesHeartbeat } from '../services/sra-core-services-heartbeat.js';
 import { createSraCoreEngineRegistry } from '../services/sra-core-engine-registry.js';
 import { buildSraCoreOperationalBrief } from '../services/sra-core-operational-brief-service.js';
+import { ListingReadinessPolicyService } from '../services/listing-readiness-policy-service.js';
 
 function actorId(req) {
   return req.sraIdentity?.actorId || req.headers['x-sra-actor-id'] || req.body?.actorId || null;
@@ -14,6 +15,7 @@ export function createSaneRouter(service = new SaneSkillService(), edxOperations
   const router = Router();
   const domain = edxOperationsService?.domain || null;
   const hybridLiquidity = domain ? new HybridLiquidityMarketService(domain) : null;
+  const listingReadinessPolicy = domain ? new ListingReadinessPolicyService(domain) : null;
   const coreHeartbeat = domain ? new SraCoreServicesHeartbeat({
     domain,
     eventBus: new SraCoreEventBus({
@@ -69,6 +71,34 @@ export function createSaneRouter(service = new SaneSkillService(), edxOperations
     if (!coreHeartbeat) return res.status(503).json({ error: 'SRA Core Services are unavailable.' });
     try { return res.json(await coreHeartbeat.runCycle(req.body?.trigger || 'ADMIN_REQUEST')); }
     catch (error) { return res.status(422).json({ error: error.message, code: 'SRA_CORE_CYCLE_FAILED' }); }
+  });
+
+  router.get('/core-services/readiness-policy', (_req, res) => {
+    if (!listingReadinessPolicy) return res.status(503).json({ error: 'Listing readiness policy service is unavailable.' });
+    return res.json({ status: listingReadinessPolicy.status(), preview: listingReadinessPolicy.preview() });
+  });
+
+  router.post('/core-services/readiness-policy/preview', (req, res) => {
+    if (!listingReadinessPolicy) return res.status(503).json({ error: 'Listing readiness policy service is unavailable.' });
+    try { return res.json(listingReadinessPolicy.preview(req.body || {})); }
+    catch (error) { return res.status(422).json({ error: error.message, code: 'SRA_READINESS_POLICY_PREVIEW_FAILED' }); }
+  });
+
+  router.post('/core-services/readiness-policy/approve', async (req, res) => {
+    if (!listingReadinessPolicy) return res.status(503).json({ error: 'Listing readiness policy service is unavailable.' });
+    if (String(req.body?.approval || '').toUpperCase() !== 'APPROVE') return res.status(409).json({ error: 'Explicit administrator approval is required.', requiredApproval: 'APPROVE' });
+    try {
+      const policy = await listingReadinessPolicy.approve(req.body || {}, actorId(req) || 'SRA_PLATFORM_ADMIN');
+      const cycle = coreHeartbeat ? await coreHeartbeat.runCycle('READINESS_POLICY_APPROVED') : null;
+      return res.status(201).json({ policy, cycle, status: listingReadinessPolicy.status() });
+    } catch (error) { return res.status(422).json({ error: error.message, code: 'SRA_READINESS_POLICY_APPROVAL_FAILED' }); }
+  });
+
+  router.post('/core-services/readiness-policy/disable', async (req, res) => {
+    if (!listingReadinessPolicy) return res.status(503).json({ error: 'Listing readiness policy service is unavailable.' });
+    if (String(req.body?.approval || '').toUpperCase() !== 'DISABLE') return res.status(409).json({ error: 'Explicit administrator disable instruction is required.', requiredApproval: 'DISABLE' });
+    try { return res.json({ policy: await listingReadinessPolicy.disable(actorId(req) || 'SRA_PLATFORM_ADMIN'), status: listingReadinessPolicy.status() }); }
+    catch (error) { return res.status(422).json({ error: error.message, code: 'SRA_READINESS_POLICY_DISABLE_FAILED' }); }
   });
 
   router.get('/hybrid-liquidity/status', (_req, res) => {
