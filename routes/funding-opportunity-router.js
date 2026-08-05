@@ -50,6 +50,24 @@ export function createFundingOpportunityRouter(service) {
     }
   });
 
+  router.get('/opportunities/:opportunityId/evidence', (req, res) => {
+    try {
+      const opportunity = service.get(req.params.opportunityId);
+      if (!opportunity) return res.status(404).json({ error: 'Funding opportunity was not found.' });
+      return res.json({ records: service.listEvidence(req.params.opportunityId) });
+    } catch (error) {
+      return handle(res, error);
+    }
+  });
+
+  router.post('/opportunities/:opportunityId/evidence', async (req, res) => {
+    try {
+      return res.status(201).json(await service.registerEvidence(req.params.opportunityId, req.body, actorId(req)));
+    } catch (error) {
+      return handle(res, error);
+    }
+  });
+
   router.get('/opportunities/:opportunityId/completeness', (req, res) => {
     try {
       return res.json(service.assessCompleteness(req.params.opportunityId));
@@ -61,6 +79,24 @@ export function createFundingOpportunityRouter(service) {
   router.post('/opportunities/:opportunityId/complete-intake', async (req, res) => {
     try {
       return res.json(await service.completeIntake(req.params.opportunityId, actorId(req)));
+    } catch (error) {
+      return handle(res, error);
+    }
+  });
+
+  router.get('/opportunities/:opportunityId/verification-requests', (req, res) => {
+    try {
+      const opportunity = service.get(req.params.opportunityId);
+      if (!opportunity) return res.status(404).json({ error: 'Funding opportunity was not found.' });
+      return res.json({ records: service.listVerificationRequests(req.params.opportunityId) });
+    } catch (error) {
+      return handle(res, error);
+    }
+  });
+
+  router.post('/opportunities/:opportunityId/verification-requests', async (req, res) => {
+    try {
+      return res.status(201).json(await service.createVerificationRequest(req.params.opportunityId, req.body, actorId(req)));
     } catch (error) {
       return handle(res, error);
     }
