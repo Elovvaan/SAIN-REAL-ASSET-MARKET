@@ -47,6 +47,8 @@ CREATE TABLE IF NOT EXISTS sra_audit_events (
 CREATE INDEX IF NOT EXISTS sra_sessions_expires_at_idx ON sra_sessions (expires_at);
 CREATE INDEX IF NOT EXISTS sra_domain_records_type_idx ON sra_domain_records (record_type);
 CREATE INDEX IF NOT EXISTS sra_audit_events_object_idx ON sra_audit_events (object_type, object_id);
+CREATE INDEX IF NOT EXISTS sra_audit_events_occurred_idx ON sra_audit_events (occurred_at DESC);
+CREATE INDEX IF NOT EXISTS sra_audit_events_type_idx ON sra_audit_events (event_type, occurred_at DESC);
 `;
 
 function clone(value) {
@@ -160,10 +162,63 @@ export class DatabaseService {
   async audit({ actorId = null, eventType, objectType = null, objectId = null, payload = {} }) {
     const event = { actorId, eventType, objectType, objectId, payload, occurredAt: new Date().toISOString() };
     if (!this.pool) { this.memory.audit.push(clone(event)); return event; }
-    await this.pool.query(
-      'INSERT INTO sra_audit_events (actor_id, event_type, object_type, object_id, payload) VALUES ($1, $2, $3, $4, $5::jsonb)',
+    const result = await this.pool.query(
+      'INSERT INTO sra_audit_events (actor_id, event_type, object_type, object_id, payload) VALUES ($1, $2, $3, $4, $5::jsonb) RETURNING event_id, occurred_at',
       [actorId, eventType, objectType, objectId, JSON.stringify(payload)]
     );
-    return event;
+    return { ...event, eventId: result.rows[0].event_id, occurredAt: result.rows[0].occurred_at };
+  }
+
+  async listAuditEvents({ actorId = null, eventType = null, objectType = null, objectId = null, since = null, limit = 100 } = {}) {
+    const boundedLimit = Math.min(500, Math.max(1, Number(limit) || 100));
+    if (!this.pool) {
+      return this.memory.audit
+        .filter((event) => !actorId || event.actorId === actorId)
+        .filter((event) => !eventType || event.eventType === eventType)
+        .filter((event) => !objectType || event.objectType === objectType)
+        .filter((event) => !objectId || event.objectId === objectId)
+        .filter((event) => !since || new Date(event.occurredAt) >= new Date(since))
+        .slice(-boundedLimit)
+        .reverse()
+        .map(clone);
+    }
+    const where = [];
+    const values = [];
+    const add = (sql, value) => { values.push(value); where.push(sql.replace('?', `$${values.length}`)); };
+    if (actorId) add('actor_id = ?', actorId);
+    if (eventType) add('event_type = ?', eventType);
+    if (objectType) add('object_type = ?', objectType);
+    if (objectId) add('object_id = ?', objectId);
+    if (since) add('occurred_at >= ?', new Date(since));
+    values.push(boundedLimit);
+    const result = await this.pool.query(
+      `SELECT event_id, actor_id, event_type, object_type, object_id, payload, occurred_at
+       FROM sra_audit_events
+       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+       ORDER BY occurred_at DESC
+       LIMIT $${values.length}`,
+      values
+    );
+    return result.rows.map((row) => ({
+      eventId: row.event_id,
+      actorId: row.actor_id,
+      eventType: row.event_type,
+      objectType: row.object_type,
+      objectId: row.object_id,
+      payload: row.payload,
+      occurredAt: row.occurred_at,
+    }));
+  }
+
+  async auditSummary({ since = null } = {}) {
+    const events = await this.listAuditEvents({ since, limit: 500 });
+    const byType = {};
+    const byActor = {};
+    for (const event of events) {
+      byType[event.eventType] = (byType[event.eventType] || 0) + 1;
+      const actor = event.actorId || 'SYSTEM';
+      byActor[actor] = (byActor[actor] || 0) + 1;
+    }
+    return { total: events.length, byType, byActor, newest: events[0]?.occurredAt || null, oldest: events.at(-1)?.occurredAt || null };
   }
 }
