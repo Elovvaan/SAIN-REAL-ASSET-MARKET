@@ -52,29 +52,16 @@
         <div class="topbar-brand"><img class="topbar-logo" src="/brand-logo" alt="SRA"><div><p class="eyebrow">PRODUCTIVE ASSET NETWORK</p><h1 id="page-title">Marketplace</h1></div></div>
         <div class="top-actions"><span class="market-pill"><span class="status-dot"></span> Market Live</span></div>
       </header>
-
       <section class="heartbeat" aria-label="Live market heartbeat"><span class="heartbeat-label">LIVE</span><div class="heartbeat-track" id="heartbeat-track">Verified Value is moving through the network…</div></section>
-
       <section class="operating-workspace" aria-label="SRA operating workspace">
         <section class="sane-workspace" aria-label="SAIN conversation">
-          <div class="sane-workspace-header">
-            <div class="sane-orb"><img src="/brand-logo" alt="SRA — SAIN Real Asset Market"><span class="status-dot"></span></div>
-            <div><p class="eyebrow">YOUR MARKETPLACE GUIDE</p><h2 id="sane-workspace-title">What are you trying to accomplish?</h2></div>
-          </div>
+          <div class="sane-workspace-header"><div class="sane-orb"><img src="/brand-logo" alt="SRA — SAIN Real Asset Market"><span class="status-dot"></span></div><div><p class="eyebrow">YOUR MARKETPLACE GUIDE</p><h2 id="sane-workspace-title">What are you trying to accomplish?</h2></div></div>
           <div class="chat-context" id="chat-context">Ask SAIN to find, compare, explain, prepare, or navigate the current workspace.</div>
           <div class="chat-log" id="chat-log"><div class="message sane-message">What would you like to accomplish in the marketplace today?</div></div>
-          <div class="quick-prompts" id="quick-prompts">
-            <button data-prompt="Show me opportunities I can participate in.">Find opportunities</button>
-            <button data-prompt="Compare the current projects for me.">Compare projects</button>
-            <button data-prompt="Show me my current positions.">My positions</button>
-          </div>
+          <div class="quick-prompts" id="quick-prompts"><button data-prompt="Show me opportunities I can participate in.">Find opportunities</button><button data-prompt="Compare the current projects for me.">Compare projects</button><button data-prompt="Show me my current positions.">My positions</button></div>
           <div class="chat-composer"><label class="sr-only" for="sane-input">Message SAIN</label><textarea id="sane-input" rows="2" placeholder="Message SAIN..."></textarea><button id="send-message" class="primary-button">Send</button></div>
         </section>
-
-        <aside class="context-workspace" aria-label="Contextual workspace">
-          <div class="context-header"><div><p class="eyebrow">CURRENT WORKSPACE</p><h2 id="context-title">Marketplace</h2></div><span class="badge open" id="context-status">LIVE</span></div>
-          <section id="view-root" class="view-root" aria-live="polite"><div class="loading-state">Loading SAIN Real Assets…</div></section>
-        </aside>
+        <aside class="context-workspace" aria-label="Contextual workspace"><div class="context-header"><div><p class="eyebrow">CURRENT WORKSPACE</p><h2 id="context-title">Marketplace</h2></div><span class="badge open" id="context-status">LIVE</span></div><section id="view-root" class="view-root" aria-live="polite"><div class="loading-state">Loading SAIN Real Assets…</div></section></aside>
       </section>
     </main>
   </div>
@@ -97,6 +84,7 @@
   <script src="/home-project-workspace.js" defer></script>
   <script src="/institution-workspace-loader.js" defer></script>
   <script src="/transaction-market-ui.js" defer></script>
+  <script src="/order-intent-ui.js" defer></script>
   <script src="/live-market-publication-sync.js" defer></script>
   <script src="/live-asset-vault.js" defer></script>
   <script src="/funding-intake-ui.js" defer></script>
