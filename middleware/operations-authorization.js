@@ -54,7 +54,7 @@ function requiredRoles(path) {
   return STAFF_ROLES;
 }
 
-async function accessService() {
+async function defaultAccessService() {
   if (!accessServicePromise) {
     accessServicePromise = (async () => {
       const database = new DatabaseService();
@@ -67,53 +67,57 @@ async function accessService() {
   return accessServicePromise;
 }
 
-export async function authorizeOperationsRequest(req, res, next) {
-  if (!isProtectedOperationsPath(req.path)) return next();
-  if (!WRITE_METHODS.has(req.method)) return next();
+export function createOperationsAuthorization({ accessServiceProvider = defaultAccessService } = {}) {
+  return async function authorizeOperationsRequest(req, res, next) {
+    if (!isProtectedOperationsPath(req.path)) return next();
+    if (!WRITE_METHODS.has(req.method)) return next();
 
-  try {
-    const token = readCookie(req, 'sra_session');
-    const session = token ? await (await accessService()).getSession(token) : null;
-    if (!session) {
-      return res.status(401).json({
-        error: 'An active authenticated SRA session is required.',
-        code: 'SRA_AUTHENTICATION_REQUIRED',
+    try {
+      const token = readCookie(req, 'sra_session');
+      const service = await accessServiceProvider();
+      const session = token ? await service.getSession(token) : null;
+      if (!session) {
+        return res.status(401).json({
+          error: 'An active authenticated SRA session is required.',
+          code: 'SRA_AUTHENTICATION_REQUIRED',
+        });
+      }
+
+      const roles = [...new Set([
+        session.activeCapacity,
+        ...(session.capacities || []).map((capacity) => capacity.id || capacity),
+        ...(session.roles || []).map((role) => role.id || role),
+      ].filter(Boolean).map((role) => String(role).toUpperCase()))];
+
+      const required = requiredRoles(req.path);
+      if (!roles.some((role) => required.has(role))) {
+        return res.status(403).json({
+          error: 'The authenticated account is not authorized for this SRA operation.',
+          code: 'SRA_SERVER_ROLE_REQUIRED',
+          requiredRoles: [...required],
+        });
+      }
+
+      req.sraIdentity = {
+        actorId: session.id,
+        universalAccountId: session.universalAccountId,
+        email: session.email,
+        activeCapacity: session.activeCapacity,
+      };
+      req.sraOperationsAuth = {
+        actorId: session.id,
+        roles,
+        source: 'SERVER_SESSION',
+      };
+      return next();
+    } catch {
+      return res.status(500).json({
+        error: 'SRA could not validate the authenticated session.',
+        code: 'SRA_SESSION_VALIDATION_FAILED',
       });
     }
-
-    const roles = [...new Set([
-      session.activeCapacity,
-      ...(session.capacities || []).map((capacity) => capacity.id || capacity),
-      ...(session.roles || []).map((role) => role.id || role),
-    ].filter(Boolean).map((role) => String(role).toUpperCase()))];
-
-    const required = requiredRoles(req.path);
-    if (!roles.some((role) => required.has(role))) {
-      return res.status(403).json({
-        error: 'The authenticated account is not authorized for this SRA operation.',
-        code: 'SRA_SERVER_ROLE_REQUIRED',
-        requiredRoles: [...required],
-      });
-    }
-
-    req.sraIdentity = {
-      actorId: session.id,
-      universalAccountId: session.universalAccountId,
-      email: session.email,
-      activeCapacity: session.activeCapacity,
-    };
-    req.sraOperationsAuth = {
-      actorId: session.id,
-      roles,
-      source: 'SERVER_SESSION',
-    };
-    return next();
-  } catch {
-    return res.status(500).json({
-      error: 'SRA could not validate the authenticated session.',
-      code: 'SRA_SESSION_VALIDATION_FAILED',
-    });
-  }
+  };
 }
 
+export const authorizeOperationsRequest = createOperationsAuthorization();
 export { STAFF_ROLES as SRA_OPERATIONS_STAFF_ROLES };
