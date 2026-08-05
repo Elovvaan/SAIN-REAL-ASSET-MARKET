@@ -8,6 +8,7 @@ import { buildSraCoreOperationalBrief } from '../services/sra-core-operational-b
 import { ListingReadinessPolicyService } from '../services/listing-readiness-policy-service.js';
 import { PublicationDecisionQueueService } from '../services/publication-decision-queue-service.js';
 import { ParticipantOrderIntentService } from '../services/participant-order-intent-service.js';
+import { OrderReviewMatchingService } from '../services/order-review-matching-service.js';
 
 function actorId(req) {
   return req.sraIdentity?.actorId || req.headers['x-sra-actor-id'] || req.body?.actorId || null;
@@ -20,6 +21,7 @@ export function createSaneRouter(service = new SaneSkillService(), edxOperations
   const listingReadinessPolicy = domain ? new ListingReadinessPolicyService(domain) : null;
   const publicationDecisionQueue = domain ? new PublicationDecisionQueueService(domain) : null;
   const participantOrderIntents = domain ? new ParticipantOrderIntentService(domain) : null;
+  const orderReviewMatching = domain ? new OrderReviewMatchingService(domain) : null;
   const coreHeartbeat = domain ? new SraCoreServicesHeartbeat({
     domain,
     eventBus: new SraCoreEventBus({ onDeliveryError: ({ eventType, error }) => console.error(JSON.stringify({ level: 'error', event: 'SRA_CORE_EVENT_SUBSCRIBER_FAILED', eventType, error: error?.message || String(error) })) }),
@@ -52,6 +54,21 @@ export function createSaneRouter(service = new SaneSkillService(), edxOperations
     if (!participant) return res.status(401).json({ error: 'An authenticated participant identity is required.' });
     return res.json({ orderIntents: participantOrderIntents.listForParticipant(participant), status: participantOrderIntents.status() });
   });
+
+  router.get('/order-review/queue', (_req, res) => orderReviewMatching ? res.json(orderReviewMatching.status()) : res.status(503).json({ error: 'Order review and matching service is unavailable.' }));
+  router.post('/order-review/preview', (req, res) => {
+    if (!orderReviewMatching) return res.status(503).json({ error: 'Order review and matching service is unavailable.' });
+    try { return res.json(orderReviewMatching.preview(req.body || {})); }
+    catch (error) { return res.status(422).json({ error: error.message, code: 'SRA_ORDER_MATCH_PREVIEW_FAILED' }); }
+  });
+  router.post('/order-review/approve', async (req, res) => {
+    if (!orderReviewMatching) return res.status(503).json({ error: 'Order review and matching service is unavailable.' });
+    const administrator = actorId(req);
+    if (!administrator) return res.status(401).json({ error: 'An authenticated administrator identity is required.' });
+    try { return res.status(201).json(await orderReviewMatching.approve(req.body || {}, administrator)); }
+    catch (error) { return res.status(422).json({ error: error.message, code: 'SRA_ORDER_MATCH_APPROVAL_FAILED' }); }
+  });
+  router.get('/order-review/reviews', (_req, res) => orderReviewMatching ? res.json({ reviews: orderReviewMatching.reviews(), status: orderReviewMatching.status() }) : res.status(503).json({ error: 'Order review and matching service is unavailable.' }));
 
   router.get('/core-services/status', (_req, res) => coreHeartbeat ? res.json(coreHeartbeat.status()) : res.status(503).json({ error: 'SRA Core Services are unavailable.' }));
   router.get('/core-services/brief', (_req, res) => coreHeartbeat ? res.json(buildSraCoreOperationalBrief(coreHeartbeat.status())) : res.status(503).json({ error: 'SRA Core Services are unavailable.' }));
