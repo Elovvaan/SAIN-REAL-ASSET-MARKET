@@ -19,7 +19,7 @@
     "test:platform-asset": "node --test --test-concurrency=1 tests/native-platform-asset.test.mjs",
     "test:admin-platform-asset-ui": "node --test --test-concurrency=1 tests/admin-native-platform-asset-ui.test.mjs",
     "test:financial-history": "node --test --test-concurrency=1 tests/financial-history-service.test.mjs",
-    "test:relationships": "node --test --test-concurrency=1 tests/asset-relationship-ledger.test.mjs",
+    "test:relationships": "node --test --test-concurrency=1 tests/asset-relationship-ledger.test.mjs tests/asset-relationship-router-authorization.test.mjs",
     "test:edx": "node --test --test-concurrency=1 test/edx-pipeline.test.js",
     "test:funding": "node --test --test-concurrency=1 test/funding-engine.integration.test.js",
     "test:load": "node scripts/load-qualification.mjs",
