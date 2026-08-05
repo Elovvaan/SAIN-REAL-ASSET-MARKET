@@ -1,0 +1,31 @@
+name: production-smoke
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/production-smoke-check.mjs'
+      - '.github/workflows/production-smoke.yml'
+      - 'server.js'
+      - 'routes/production-readiness-router.js'
+      - 'services/production-readiness-service.js'
+      - 'services/product-qualification-service.js'
+  workflow_dispatch:
+  schedule:
+    - cron: '17 * * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  live-production-api:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Check deployed SRA production API
+        env:
+          SRA_PRODUCTION_URL: https://sain-real-asset-market-production.up.railway.app
+        run: node scripts/production-smoke-check.mjs
