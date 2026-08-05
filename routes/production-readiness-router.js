@@ -19,12 +19,20 @@ export function createProductionReadinessRouter({ readinessService, database }) 
 
   router.get('/products/status', (_req, res) => res.json(readinessService.productQualificationStatus()));
   router.get('/products', (req, res) => res.json({ products: readinessService.listProducts({ state: req.query.state || null, category: req.query.category || null }) }));
-  router.get('/products/:productCode', (req, res) => { const product = readinessService.getProduct(req.params.productCode); if (!product) return res.status(404).json({ error: 'Product definition not found.', code: 'SRA_PRODUCT_NOT_FOUND' }); return res.json(product); });
   router.post('/products', async (req, res) => { try { return res.status(201).json(await readinessService.registerProduct(req.body || {}, actorId(req))); } catch (error) { return res.status(400).json({ error: error.message, code: 'SRA_PRODUCT_REGISTRATION_FAILED' }); } });
   router.post('/products/qualifications/assess', (req, res) => { try { const result = readinessService.assessProduct(req.body || {}, actorId(req)); return res.status(result.passed ? 200 : 422).json(result); } catch (error) { return res.status(400).json({ error: error.message, code: 'SRA_PRODUCT_ASSESSMENT_FAILED' }); } });
   router.post('/products/qualifications', async (req, res) => { try { const result = await readinessService.qualifyProduct(req.body || {}, actorId(req)); return res.status(result.created ? 201 : 200).json(result); } catch (error) { return res.status(422).json({ error: error.message, code: 'SRA_PRODUCT_QUALIFICATION_FAILED' }); } });
   router.get('/products/qualifications/records', (req, res) => res.json({ qualifications: readinessService.listProductQualifications({ productCode: req.query.productCode || null, state: req.query.state || null }) }));
   router.get('/products/qualifications/records/:qualificationId', (req, res) => { const record = readinessService.getProductQualification(req.params.qualificationId); if (!record) return res.status(404).json({ error: 'Product qualification not found.', code: 'SRA_PRODUCT_QUALIFICATION_NOT_FOUND' }); return res.json(record); });
+  router.get('/products/:productCode/qualification-candidates', (req, res) => {
+    try { return res.json({ productCode: String(req.params.productCode).toUpperCase(), candidates: readinessService.findProductQualificationCandidates(req.params.productCode, { evidenceIds: req.query.evidenceId ? [req.query.evidenceId] : [], evidenceClasses: req.query.evidenceClass ? String(req.query.evidenceClass).split(',') : [] }) }); }
+    catch (error) { return res.status(400).json({ error: error.message, code: 'SRA_PRODUCT_CANDIDATE_SCAN_FAILED' }); }
+  });
+  router.post('/products/:productCode/qualify-first-ready', async (req, res) => {
+    try { const result = await readinessService.qualifyFirstReadyProduct(req.params.productCode, req.body || {}, actorId(req)); return res.status(result.created ? 201 : 200).json(result); }
+    catch (error) { return res.status(422).json({ error: error.message, code: error.code || 'SRA_PRODUCT_NO_READY_CANDIDATE', candidates: error.candidates || [] }); }
+  });
+  router.get('/products/:productCode', (req, res) => { const product = readinessService.getProduct(req.params.productCode); if (!product) return res.status(404).json({ error: 'Product definition not found.', code: 'SRA_PRODUCT_NOT_FOUND' }); return res.json(product); });
 
   router.get('/audit/events', async (req, res) => {
     if (!staff(req)) return res.status(403).json({ error: 'Audit access requires Platform Admin, Operations Admin, or Auditor role.', code: 'SRA_AUDIT_ROLE_REQUIRED' });
