@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SRA Admin Intelligence Agent</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: #07111f; color: #e8eef7; }
+    main { width: min(980px, 94vw); margin: 0 auto; padding: 28px 0 48px; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+    h1 { margin: 0; font-size: clamp(1.35rem, 3vw, 2rem); }
+    .sub { color: #9fb0c5; margin-top: 6px; }
+    a { color: #90c7ff; text-decoration: none; }
+    .panel { border: 1px solid #24354c; border-radius: 18px; background: #0d1929; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,.25); }
+    #messages { min-height: 460px; max-height: 65vh; overflow-y: auto; padding: 22px; display: flex; flex-direction: column; gap: 14px; }
+    .message { max-width: 86%; padding: 13px 15px; border-radius: 16px; line-height: 1.45; white-space: pre-wrap; }
+    .user { align-self: flex-end; background: #1f5f99; }
+    .agent { align-self: flex-start; background: #17263a; border: 1px solid #2b425e; }
+    .meta { display: block; margin-top: 10px; color: #9fb0c5; font-size: .78rem; }
+    .action { margin-top: 10px; padding: 10px; border-radius: 10px; background: #0c1522; border: 1px solid #344b68; }
+    form { display: grid; grid-template-columns: 1fr auto; gap: 12px; padding: 16px; border-top: 1px solid #24354c; }
+    textarea { width: 100%; min-height: 54px; max-height: 160px; resize: vertical; border: 1px solid #344b68; border-radius: 12px; background: #081321; color: inherit; padding: 13px; font: inherit; }
+    button { border: 0; border-radius: 12px; padding: 0 20px; font-weight: 700; background: #e1aa3b; color: #111820; cursor: pointer; }
+    button:disabled { opacity: .55; cursor: wait; }
+    .prompts { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
+    .prompt { border: 1px solid #344b68; background: #101e30; color: #cbd8e8; border-radius: 999px; padding: 8px 12px; cursor: pointer; }
+    .status { padding: 10px 14px; border-radius: 999px; background: #102237; color: #9fd0ff; font-size: .82rem; }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>SRA Admin Intelligence Agent</h1>
+      <div class="sub">Autonomous operational reading and reasoning. Protected state changes remain human-approved.</div>
+    </div>
+    <div><span id="status" class="status">Checking session…</span> · <a href="/admin/">Dashboard</a></div>
+  </header>
+
+  <div class="prompts">
+    <button class="prompt" type="button">Where is my first True Bill?</button>
+    <button class="prompt" type="button">What is blocking the True Bill?</button>
+    <button class="prompt" type="button">What needs my approval?</button>
+    <button class="prompt" type="button">How is the platform doing?</button>
+  </div>
+
+  <section class="panel">
+    <div id="messages">
+      <div class="message agent">Ask me about SRA’s internal product lifecycles, blockers, next actions, approval boundaries, or platform status.</div>
+    </div>
+    <form id="query-form">
+      <textarea id="question" aria-label="Question" placeholder="Ask SRA what is happening internally…" required></textarea>
+      <button id="send" type="submit">Ask SRA</button>
+    </form>
+  </section>
+</main>
+<script>
+  const messages = document.getElementById('messages');
+  const question = document.getElementById('question');
+  const send = document.getElementById('send');
+  const status = document.getElementById('status');
+
+  function addMessage(text, type, response) {
+    const node = document.createElement('div');
+    node.className = `message ${type}`;
+    node.textContent = text;
+    if (response?.nextAction) {
+      const action = document.createElement('div');
+      action.className = 'action';
+      action.textContent = `Next: ${response.nextAction.label} Authority: ${response.nextAction.authority}.`;
+      node.appendChild(action);
+    }
+    if (response) {
+      const meta = document.createElement('span');
+      meta.className = 'meta';
+      const refs = Array.isArray(response.references) ? response.references.length : 0;
+      meta.textContent = `${response.status} · ${response.intent} · ${refs} internal record reference${refs === 1 ? '' : 's'}`;
+      node.appendChild(meta);
+    }
+    messages.appendChild(node);
+    messages.scrollTop = messages.scrollHeight;
+  }
+
+  async function checkSession() {
+    const response = await fetch('/api/admin/session', { credentials: 'same-origin' });
+    const body = await response.json();
+    if (!body.authenticated) {
+      status.textContent = 'Authentication required';
+      addMessage('Sign in through the private administration portal before using the agent.', 'agent');
+      send.disabled = true;
+      return;
+    }
+    status.textContent = `Authenticated: ${body.session.displayName || body.session.email}`;
+  }
+
+  async function ask(text) {
+    addMessage(text, 'user');
+    send.disabled = true;
+    try {
+      const response = await fetch('/api/admin/agent/query', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ question: text })
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || 'The agent could not answer.');
+      addMessage(body.answer, 'agent', body);
+    } catch (error) {
+      addMessage(error.message, 'agent');
+    } finally {
+      send.disabled = false;
+      question.focus();
+    }
+  }
+
+  document.getElementById('query-form').addEventListener('submit', (event) => {
+    event.preventDefault();
+    const text = question.value.trim();
+    if (!text) return;
+    question.value = '';
+    void ask(text);
+  });
+  document.querySelectorAll('.prompt').forEach((button) => button.addEventListener('click', () => void ask(button.textContent)));
+  void checkSession();
+</script>
+</body>
+</html>
