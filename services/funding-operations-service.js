@@ -1,8 +1,13 @@
 const RECORDS = Object.freeze({
   OPPORTUNITY: 'FUNDING_OPPORTUNITY',
+  EVIDENCE: 'FUNDING_OPPORTUNITY_EVIDENCE',
   VERIFICATION_REQUEST: 'FUNDING_OPPORTUNITY_VERIFICATION_REQUEST',
+  VERIFICATION_FINDING: 'FUNDING_OPPORTUNITY_VERIFICATION_FINDING',
+  VERIFICATION_DECISION: 'FUNDING_OPPORTUNITY_VERIFICATION_DECISION',
   VALUE_PREPARATION: 'FUNDING_OPPORTUNITY_VALUE_PREPARATION',
+  MODEL_ASSESSMENT: 'FUNDING_MODEL_ASSESSMENT',
   MODEL_SELECTION: 'FUNDING_MODEL_SELECTION',
+  INSTRUMENT_REQUEST: 'FUNDING_INSTRUMENT_SELECTION_REQUEST',
   INSTRUMENT_SELECTION: 'FUNDING_INSTRUMENT_SELECTION',
   INSTRUMENT: 'SRA_INSTRUMENT',
   INSTRUMENT_REVIEW: 'FUNDING_INSTRUMENT_DRAFT_REVIEW',
@@ -34,11 +39,10 @@ function newest(records, limit = 25) {
 }
 
 function actionFor(opportunity) {
-  const status = opportunity.status || 'UNKNOWN';
   const map = {
     INTAKE_IN_PROGRESS: ['Complete intake', 'INTAKE'],
     INTAKE_COMPLETE: ['Create verification request', 'VERIFICATION'],
-    PENDING_VERIFICATION: ['Start verification', 'VERIFICATION'],
+    PENDING_VERIFICATION: ['Create verification request', 'VERIFICATION'],
     VERIFICATION_IN_PROGRESS: ['Complete verification findings', 'VERIFICATION'],
     MORE_EVIDENCE_REQUIRED: ['Register additional evidence', 'EVIDENCE_REMEDIATION'],
     VERIFIED: ['Prepare Verified Value package', 'VALUE_PREPARATION'],
@@ -53,14 +57,16 @@ function actionFor(opportunity) {
     ALLOCATION_CREATED: ['Prepare settlement', 'SETTLEMENT'],
     POSITION_SETTLED: ['Lifecycle monitoring', 'LIFECYCLE'],
   };
-  const [label, queue] = map[status] || ['Review opportunity', 'GENERAL_REVIEW'];
+  const [label, queue] = map[opportunity.status] || ['Review opportunity', 'GENERAL_REVIEW'];
   return { label, queue };
 }
 
+function related(records, opportunityId) {
+  return records.filter((record) => record.opportunityId === opportunityId);
+}
+
 export class FundingOperationsService {
-  constructor(persistentDomain) {
-    this.domain = persistentDomain;
-  }
+  constructor(persistentDomain) { this.domain = persistentDomain; }
 
   async initialize() {
     await this.domain.hydrate(Object.values(RECORDS));
@@ -105,6 +111,50 @@ export class FundingOperationsService {
       }));
   }
 
+  opportunityDetail(opportunityId) {
+    const opportunity = this.domain.get(RECORDS.OPPORTUNITY, opportunityId);
+    if (!opportunity) return null;
+    const evidence = related(this.domain.list(RECORDS.EVIDENCE), opportunityId);
+    const verificationRequests = related(this.domain.list(RECORDS.VERIFICATION_REQUEST), opportunityId);
+    const requestIds = new Set(verificationRequests.map((record) => record.verificationRequestId));
+    const verificationFindings = this.domain.list(RECORDS.VERIFICATION_FINDING).filter((record) => requestIds.has(record.verificationRequestId));
+    const verificationDecisions = related(this.domain.list(RECORDS.VERIFICATION_DECISION), opportunityId);
+    const preparations = related(this.domain.list(RECORDS.VALUE_PREPARATION), opportunityId);
+    const modelAssessments = related(this.domain.list(RECORDS.MODEL_ASSESSMENT), opportunityId);
+    const modelSelections = related(this.domain.list(RECORDS.MODEL_SELECTION), opportunityId);
+    const instrumentRequests = related(this.domain.list(RECORDS.INSTRUMENT_REQUEST), opportunityId);
+    const instrumentSelections = related(this.domain.list(RECORDS.INSTRUMENT_SELECTION), opportunityId);
+    const instruments = related(this.domain.list(RECORDS.INSTRUMENT), opportunityId);
+    const listings = related(this.domain.list(RECORDS.LISTING), opportunityId);
+    const commitments = related(this.domain.list(RECORDS.COMMITMENT), opportunityId);
+    const positions = related(this.domain.list(RECORDS.POSITION), opportunityId);
+    const settlements = related(this.domain.list(RECORDS.SETTLEMENT_PREPARATION), opportunityId);
+
+    return {
+      opportunity,
+      nextAction: actionFor(opportunity),
+      intake: {
+        completeness: opportunity.completeness || null,
+        evidence,
+        supportingDocumentIds: opportunity.supportingDocumentIds || [],
+        relatedAgreementIds: opportunity.relatedAgreementIds || [],
+        sourceTransactionIds: opportunity.sourceTransactionIds || [],
+      },
+      verification: { requests: verificationRequests, findings: verificationFindings, decisions: verificationDecisions },
+      valuePreparation: preparations,
+      modelAssessments,
+      modelSelections,
+      instrumentRequests,
+      instrumentSelections,
+      instruments,
+      listings,
+      commitments,
+      positions,
+      settlements,
+      timeline: opportunity.history || [],
+    };
+  }
+
   dashboard() {
     const opportunities = this.domain.list(RECORDS.OPPORTUNITY);
     const queue = this.queue();
@@ -114,7 +164,6 @@ export class FundingOperationsService {
       acc[key] = (acc[key] || 0) + 1;
       return acc;
     }, {});
-
     return {
       generatedAt: new Date().toISOString(),
       metrics: {
