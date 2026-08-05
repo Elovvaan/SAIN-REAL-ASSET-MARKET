@@ -44,11 +44,34 @@ CREATE TABLE IF NOT EXISTS sra_audit_events (
   occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS sra_idempotency_keys (
+  idempotency_key TEXT PRIMARY KEY,
+  fingerprint TEXT NOT NULL,
+  actor_id TEXT,
+  resource_key TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('PROCESSING', 'COMPLETED')),
+  response_status INTEGER,
+  response_body JSONB,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS sra_operation_locks (
+  resource_key TEXT PRIMARY KEY,
+  idempotency_key TEXT NOT NULL,
+  actor_id TEXT,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE INDEX IF NOT EXISTS sra_sessions_expires_at_idx ON sra_sessions (expires_at);
 CREATE INDEX IF NOT EXISTS sra_domain_records_type_idx ON sra_domain_records (record_type);
 CREATE INDEX IF NOT EXISTS sra_audit_events_object_idx ON sra_audit_events (object_type, object_id);
 CREATE INDEX IF NOT EXISTS sra_audit_events_occurred_idx ON sra_audit_events (occurred_at DESC);
 CREATE INDEX IF NOT EXISTS sra_audit_events_type_idx ON sra_audit_events (event_type, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS sra_idempotency_expires_idx ON sra_idempotency_keys (expires_at);
+CREATE INDEX IF NOT EXISTS sra_operation_locks_expires_idx ON sra_operation_locks (expires_at);
 `;
 
 function clone(value) {
@@ -65,7 +88,9 @@ export class DatabaseService {
       sessions: new Map(),
       documents: new Map(),
       records: new Map(),
-      audit: []
+      audit: [],
+      idempotency: new Map(),
+      operationLocks: new Map(),
     };
   }
 
@@ -80,6 +105,8 @@ export class DatabaseService {
     });
     await this.pool.query(SCHEMA);
     await this.pool.query('DELETE FROM sra_sessions WHERE expires_at < NOW()');
+    await this.pool.query('DELETE FROM sra_operation_locks WHERE expires_at < NOW()');
+    await this.pool.query('DELETE FROM sra_idempotency_keys WHERE expires_at < NOW()');
     return { mode: this.mode, ready: true };
   }
 
@@ -157,6 +184,120 @@ export class DatabaseService {
     }
     const result = await this.pool.query('SELECT payload FROM sra_domain_records WHERE record_type = $1 ORDER BY created_at', [recordType]);
     return result.rows.map((row) => row.payload);
+  }
+
+  async claimIdempotency({ key, fingerprint, actorId = null, resourceKey, ttlMs }) {
+    const expiresAt = new Date(Date.now() + ttlMs);
+    if (!this.pool) {
+      const now = Date.now();
+      for (const [storedKey, entry] of this.memory.idempotency.entries()) if (new Date(entry.expiresAt).getTime() <= now) this.memory.idempotency.delete(storedKey);
+      for (const [storedKey, entry] of this.memory.operationLocks.entries()) if (new Date(entry.expiresAt).getTime() <= now) this.memory.operationLocks.delete(storedKey);
+      const existing = this.memory.idempotency.get(key);
+      if (existing) {
+        if (existing.fingerprint !== fingerprint) return { state: 'CONFLICT' };
+        if (existing.state === 'COMPLETED') return { state: 'REPLAY', statusCode: existing.responseStatus, body: clone(existing.responseBody) };
+        return { state: 'IN_PROGRESS' };
+      }
+      const lock = this.memory.operationLocks.get(resourceKey);
+      if (lock) return { state: 'RESOURCE_BUSY', resourceKey };
+      this.memory.operationLocks.set(resourceKey, { key, actorId, expiresAt: expiresAt.toISOString() });
+      this.memory.idempotency.set(key, { key, fingerprint, actorId, resourceKey, state: 'PROCESSING', expiresAt: expiresAt.toISOString() });
+      return { state: 'CLAIMED' };
+    }
+
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('DELETE FROM sra_operation_locks WHERE expires_at < NOW()');
+      await client.query('DELETE FROM sra_idempotency_keys WHERE expires_at < NOW()');
+      const existing = await client.query(
+        'SELECT fingerprint, state, response_status, response_body FROM sra_idempotency_keys WHERE idempotency_key = $1 FOR UPDATE',
+        [key]
+      );
+      if (existing.rows[0]) {
+        await client.query('COMMIT');
+        const row = existing.rows[0];
+        if (row.fingerprint !== fingerprint) return { state: 'CONFLICT' };
+        if (row.state === 'COMPLETED') return { state: 'REPLAY', statusCode: row.response_status, body: row.response_body };
+        return { state: 'IN_PROGRESS' };
+      }
+      const lock = await client.query(
+        `INSERT INTO sra_operation_locks (resource_key, idempotency_key, actor_id, expires_at)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (resource_key) DO NOTHING
+         RETURNING resource_key`,
+        [resourceKey, key, actorId, expiresAt]
+      );
+      if (!lock.rowCount) {
+        await client.query('ROLLBACK');
+        return { state: 'RESOURCE_BUSY', resourceKey };
+      }
+      await client.query(
+        `INSERT INTO sra_idempotency_keys (idempotency_key, fingerprint, actor_id, resource_key, state, expires_at)
+         VALUES ($1, $2, $3, $4, 'PROCESSING', $5)`,
+        [key, fingerprint, actorId, resourceKey, expiresAt]
+      );
+      await client.query('COMMIT');
+      return { state: 'CLAIMED' };
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {});
+      if (error?.code === '23505') return { state: 'IN_PROGRESS' };
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async completeIdempotency({ key, fingerprint, statusCode, body }) {
+    if (!this.pool) {
+      const entry = this.memory.idempotency.get(key);
+      if (!entry || entry.fingerprint !== fingerprint) return false;
+      entry.state = 'COMPLETED';
+      entry.responseStatus = statusCode;
+      entry.responseBody = clone(body);
+      this.memory.operationLocks.delete(entry.resourceKey);
+      return true;
+    }
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await client.query(
+        `UPDATE sra_idempotency_keys
+         SET state = 'COMPLETED', response_status = $3, response_body = $4::jsonb, updated_at = NOW()
+         WHERE idempotency_key = $1 AND fingerprint = $2 AND state = 'PROCESSING'
+         RETURNING resource_key`,
+        [key, fingerprint, statusCode, JSON.stringify(body)]
+      );
+      if (result.rows[0]) await client.query('DELETE FROM sra_operation_locks WHERE resource_key = $1 AND idempotency_key = $2', [result.rows[0].resource_key, key]);
+      await client.query('COMMIT');
+      return Boolean(result.rowCount);
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async releaseIdempotency(key) {
+    if (!this.pool) {
+      const entry = this.memory.idempotency.get(key);
+      if (entry) this.memory.operationLocks.delete(entry.resourceKey);
+      this.memory.idempotency.delete(key);
+      return;
+    }
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await client.query("DELETE FROM sra_idempotency_keys WHERE idempotency_key = $1 AND state = 'PROCESSING' RETURNING resource_key", [key]);
+      if (result.rows[0]) await client.query('DELETE FROM sra_operation_locks WHERE resource_key = $1 AND idempotency_key = $2', [result.rows[0].resource_key, key]);
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async audit({ actorId = null, eventType, objectType = null, objectId = null, payload = {} }) {
