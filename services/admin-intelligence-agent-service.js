@@ -1,5 +1,5 @@
 import { scanProductLifecycleProgress } from './product-lifecycle-progress-service.js';
-import { explainSraAdministrativeState } from './admin-state-explanation-service.js';
+import { explainAdminState } from './admin-state-explanation-service.js';
 
 const PRODUCT_DEFINITION = 'SRA_PRODUCT_DEFINITION';
 
@@ -154,13 +154,13 @@ export class AdminIntelligenceAgentService {
         'ANSWER_PLATFORM_STATUS',
         'DISCOVER_REGISTERED_PRODUCTS',
         'TRACE_PRODUCT_LIFECYCLES',
-        'EXPLAIN_ASSET_EXPORTABILITY',
-        'TRACE_ASSET_RELATIONSHIPS',
         'IDENTIFY_BLOCKERS',
         'RECOMMEND_NEXT_ACTION',
         'IDENTIFY_APPROVAL_BOUNDARIES',
-        'SIMULATE_APPROVAL_IMPACT_READ_ONLY',
         'CITE_INTERNAL_RECORDS',
+        'EXPLAIN_ASSET_EXPORTABILITY',
+        'TRACE_ASSET_RELATIONSHIPS',
+        'SIMULATE_APPROVAL_IMPACT',
       ],
       cannotWithoutApproval: [
         'ISSUE_INSTRUMENT',
@@ -174,18 +174,32 @@ export class AdminIntelligenceAgentService {
   }
 
   platformSummary() {
-    const counts = this.domain.snapshot()?.counts || {};
-    const lifecycleTypes = [
-      'MARKET_OBSERVATION', 'RECOGNITION_ASSESSMENT', 'FINANCIAL_RECORD', 'COIN_POSITION',
-      'SRA_INSTRUMENT', 'MARKETPLACE_LISTING', 'PARTICIPATION_POSITION',
-      'FUNDING_MARKETPLACE_COMMITMENT', 'FUNDING_MARKETPLACE_POSITION',
-      'SRA_SETTLEMENT_RECORD', 'OWNERSHIP_RECOGNITION', 'EXPORT_PACKAGE',
-    ];
-    const selected = Object.fromEntries(lifecycleTypes.map((type) => [type, counts[type] || 0]));
-    const total = Object.values(selected).reduce((sum, value) => sum + Number(value || 0), 0);
+    const snapshotAt = new Date().toISOString();
+    const selected = {
+      MARKET_OBSERVATION: this.domain.list('MARKET_OBSERVATION').length,
+      RECOGNITION_ASSESSMENT: this.domain.list('RECOGNITION_ASSESSMENT').length,
+      FINANCIAL_RECORD: this.domain.list('FINANCIAL_RECORD').length,
+      COIN_POSITION: this.domain.list('COIN_POSITION').length,
+      SRA_INSTRUMENT: this.domain.list('SRA_INSTRUMENT').length,
+      MARKETPLACE_LISTING: this.domain.list('MARKETPLACE_LISTING').length,
+      PARTICIPATION_POSITION: this.domain.list('PARTICIPATION_POSITION').length,
+      FUNDING_MARKETPLACE_COMMITMENT: this.domain.list('FUNDING_MARKETPLACE_COMMITMENT').length,
+      FUNDING_MARKETPLACE_POSITION: this.domain.list('FUNDING_MARKETPLACE_POSITION').length,
+      SRA_SETTLEMENT_RECORD: this.domain.list('SRA_SETTLEMENT_RECORD').length,
+      OWNERSHIP_RECOGNITION: this.domain.list('OWNERSHIP_RECOGNITION').length,
+      EXPORT_PACKAGE: this.domain.list('EXPORT_PACKAGE').length,
+    };
+    const lifecycleTotal = Object.values(selected).reduce((sum, value) => sum + Number(value || 0), 0);
     return {
-      answer: `SRA is reading ${total} records across the internal asset lifecycle. It currently has ${selected.SRA_INSTRUMENT} instruments, ${selected.MARKETPLACE_LISTING} marketplace listings, ${selected.SRA_SETTLEMENT_RECORD} settlement records, ${selected.OWNERSHIP_RECOGNITION} ownership recognitions, and ${selected.EXPORT_PACKAGE} export-ready packages.`,
-      status: 'AVAILABLE', counts: selected, nextAction: null, blockers: [], references: [],
+      answer: `Live SRA snapshot as of ${snapshotAt}: ${selected.MARKET_OBSERVATION} observations, ${selected.RECOGNITION_ASSESSMENT} recognitions, ${selected.FINANCIAL_RECORD} financial records, ${selected.COIN_POSITION} Coin Positions, ${selected.SRA_INSTRUMENT} instruments, ${selected.MARKETPLACE_LISTING} marketplace listings, ${selected.SRA_SETTLEMENT_RECORD} settlement records, ${selected.OWNERSHIP_RECOGNITION} ownership recognitions, and ${selected.EXPORT_PACKAGE} export-ready packages. This snapshot contains ${lifecycleTotal} stage records in total; that total is a sum across lifecycle stages, not a count of unique assets.`,
+      status: 'AVAILABLE',
+      snapshotAt,
+      counts: selected,
+      lifecycleTotal,
+      countMeaning: 'SUM_OF_STAGE_RECORDS_NOT_UNIQUE_ASSETS',
+      nextAction: null,
+      blockers: [],
+      references: [],
     };
   }
 
@@ -211,28 +225,48 @@ export class AdminIntelligenceAgentService {
 
   async ask(input = {}, actor = {}) {
     const question = cleanQuestion(input.question);
+    const stateExplanation = explainAdminState(this.domain, question);
+    if (stateExplanation) {
+      const response = {
+        agent: 'SRA_ADMIN_INTELLIGENCE_AGENT',
+        question,
+        intent: stateExplanation.intent,
+        productCode: null,
+        authorityMode: 'HUMAN_IN_THE_LOOP',
+        actor: { id: actor.id || null, displayName: actor.displayName || null },
+        answeredAt: new Date().toISOString(),
+        ...stateExplanation,
+      };
+      if (this.database?.audit) {
+        await this.database.audit({
+          actorId: actor.id || 'SRA_PLATFORM_ADMIN',
+          eventType: 'ADMIN_AGENT_QUESTION_ANSWERED',
+          objectType: 'SRA_ADMIN_INTELLIGENCE_AGENT',
+          objectId: stateExplanation.subject?.reference || stateExplanation.intent,
+          payload: { intent: stateExplanation.intent, status: response.status, referenceCount: response.references?.length || 0, readOnlySimulation: Boolean(response.simulation?.readOnly) },
+        });
+      }
+      return response;
+    }
+
     const requestedCode = input.productCode ? String(input.productCode).toUpperCase() : null;
     const productCode = requestedCode || detectProduct(this.domain, question);
-    let detectedIntent = intent(question, productCode);
+    const detectedIntent = intent(question, productCode);
     let result;
 
-    const administrativeExplanation = explainSraAdministrativeState(this.domain, question);
-    if (administrativeExplanation) {
-      detectedIntent = administrativeExplanation.intent;
-      result = administrativeExplanation;
-    } else if (detectedIntent === 'PRODUCT_LIFECYCLE') {
+    if (detectedIntent === 'PRODUCT_LIFECYCLE') {
       const progress = scanProductLifecycleProgress(this.domain, productCode);
       result = { ...productAnswer(progress), data: progress };
     } else if (detectedIntent === 'PLATFORM_SUMMARY') result = this.platformSummary();
     else if (detectedIntent === 'APPROVALS') result = this.approvalSummary();
     else if (detectedIntent === 'CAPABILITIES') {
       result = {
-        answer: 'I can discover registered SRA products, read operational records, trace product and instrument lifecycles, explain exportability and relationships, identify blockers, simulate approval impact without writing, and tell you when administrator approval is required. I do not perform protected financial state changes without approval.',
+        answer: 'I can discover registered SRA products, read operational records, trace product lifecycles, identify blockers, explain asset exportability and relationships, simulate approval impact without writing state, and tell you when administrator approval is required. I do not perform protected financial state changes without approval.',
         status: 'AVAILABLE', capabilities: this.capabilities(), blockers: [], references: [], nextAction: null,
       };
     } else {
       result = {
-        answer: 'I could not identify the product or operational subject in that question. Name the product or instrument, or ask for platform status, lifecycle, exportability, relationships, blockers, next actions, or pending approvals.',
+        answer: 'I could not identify the product or operational subject in that question. Name the product or instrument, or ask for platform status, blockers, relationships, next actions, or pending approvals.',
         status: 'NEEDS_CONTEXT', blockers: ['QUESTION_NOT_RESOLVED'], references: [], nextAction: null,
       };
     }
@@ -250,8 +284,8 @@ export class AdminIntelligenceAgentService {
         actorId: actor.id || 'SRA_PLATFORM_ADMIN',
         eventType: 'ADMIN_AGENT_QUESTION_ANSWERED',
         objectType: 'SRA_ADMIN_INTELLIGENCE_AGENT',
-        objectId: response.subject?.reference || productCode || detectedIntent,
-        payload: { intent: detectedIntent, productCode, status: response.status, referenceCount: response.references?.length || 0, readOnlySimulation: Boolean(response.simulation?.readOnly) },
+        objectId: productCode || detectedIntent,
+        payload: { intent: detectedIntent, productCode, status: response.status, referenceCount: response.references?.length || 0 },
       });
     }
     return response;
