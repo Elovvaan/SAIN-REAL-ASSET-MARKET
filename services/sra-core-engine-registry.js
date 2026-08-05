@@ -1,33 +1,41 @@
+import { RECORD_TYPES } from './persistent-domain-service.js';
+
 export function createSraCoreEngineRegistry({ marketplaceListingService = null } = {}) {
   return [
     {
       name: 'RECOGNITION_ENGINE',
       async run({ domain }) {
-        return { recordsObserved: domain.list('OBSERVATION').length, recognitionRecords: domain.list('RECOGNITION_ASSESSMENT').length };
+        return {
+          recordsObserved: domain.list(RECORD_TYPES.MARKET_OBSERVATION).length,
+          recognitionRecords: domain.list(RECORD_TYPES.RECOGNITION_ASSESSMENT).length,
+        };
       },
     },
     {
       name: 'VERIFIED_VALUE_ENGINE',
       async run({ domain }) {
-        return { financialRecords: domain.list('FINANCIAL_RECORD').length, coinPositions: domain.list('COIN_POSITION').length };
+        return {
+          financialRecords: domain.list(RECORD_TYPES.FINANCIAL_RECORD).length,
+          coinPositions: domain.list(RECORD_TYPES.COIN_POSITION).length,
+        };
       },
     },
     {
       name: 'INSTRUMENT_ENGINE',
       async run({ domain }) {
-        return { instruments: domain.list('SRA_INSTRUMENT').length };
+        return { instruments: domain.list(RECORD_TYPES.SRA_INSTRUMENT).length };
       },
     },
     {
       name: 'RELATIONSHIP_ENGINE',
       async run({ domain }) {
-        return { relationships: domain.list('ASSET_RELATIONSHIP').length };
+        return { relationships: domain.list(RECORD_TYPES.ASSET_RELATIONSHIP).length };
       },
     },
     {
       name: 'MARKET_ENGINE',
       async run({ domain }) {
-        const listings = domain.list('MARKETPLACE_LISTING');
+        const listings = domain.list(RECORD_TYPES.MARKETPLACE_LISTING);
         return {
           listings: listings.length,
           live: listings.filter((item) => ['PUBLISHED', 'ACTIVE'].includes(item.state)).length,
