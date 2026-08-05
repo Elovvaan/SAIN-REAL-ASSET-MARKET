@@ -24,13 +24,13 @@
     const totals = {
       Listings: Number(status.listingCount || 0),
       Live: Number(status.byState?.PUBLISHED || 0) + Number(status.byState?.ACTIVE || 0),
+      Ready: Number(status.readyListings || 0),
       Prepared: Number(status.byState?.PREPARED || 0)
     };
     document.querySelectorAll('.terminal-kpis > div').forEach((card) => {
       const label = card.querySelector('span')?.textContent?.trim();
       const value = card.querySelector('strong');
       if (value && Object.hasOwn(totals, label)) value.textContent = totals[label].toLocaleString();
-      if (label === 'Ready' && value) value.textContent = 'See admin';
     });
     const shown = document.querySelector('.market-watch .terminal-panel-head span');
     if (shown) shown.title = 'The table shows up to 100 records. Header totals represent the complete marketplace.';
@@ -64,6 +64,12 @@
     if (button.disabled) return;
     const ticket = button.closest('.order-ticket');
     const terminal = button.closest('.live-terminal');
+    const selectedState = terminal?.querySelector('.instrument-chart .terminal-panel-head > span')?.textContent?.trim().toUpperCase() || '';
+    if (selectedState && !['LIVE', 'PUBLISHED', 'ACTIVE'].includes(selectedState)) {
+      button.textContent = 'Awaiting Market Authorization';
+      setTimeout(() => { button.textContent = `Review ${orderSide === 'BUY' ? 'Buy' : 'Sell'} Order with SAIN`; }, 1800);
+      return;
+    }
     const quantity = Number(ticket?.querySelector('#market-order-quantity')?.value || 0);
     const orderType = ticket?.querySelector('select')?.value || 'Market';
     const limitInputs = ticket?.querySelectorAll('input[type="number"]') || [];
@@ -81,6 +87,15 @@
     if (input) input.value = prompt;
     document.querySelector('#send-message')?.click();
     document.querySelector('.sane-workspace')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function loadHybridMarketView() {
+    if (document.querySelector('script[data-hybrid-liquidity-market]')) return;
+    const script = document.createElement('script');
+    script.src = '/hybrid-liquidity-market.js';
+    script.defer = true;
+    script.dataset.hybridLiquidityMarket = 'true';
+    document.head.append(script);
   }
 
   function start() {
@@ -116,6 +131,7 @@
   window.addEventListener('focus', () => void refreshPublishedInventory());
   window.addEventListener('sra:marketplace-refreshed', async () => patchTruthfulCounts(await marketplaceStatus()));
   window.addEventListener('DOMContentLoaded', () => {
+    loadHybridMarketView();
     start();
     setTimeout(refreshPublishedInventory, 800);
   });
