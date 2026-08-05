@@ -33,7 +33,7 @@ function safeEqual(left, right) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
-export async function createPrivateAdminRouter({ database, domain, coinbasePublicMarket = null }) {
+export async function createPrivateAdminRouter({ database, domain, coinbasePublicMarket = null, nativePlatformAsset = null }) {
   const access = new AccessService({ database });
   const marketplaceListings = new MarketplaceListingService(domain);
   const intelligenceAgent = new AdminIntelligenceAgentService({ domain, database });
@@ -77,12 +77,7 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
       if (!state.setupCodeConfigured) return res.status(503).json({ error: 'One-time administrator setup is not enabled. Configure SRA_ADMIN_SETUP_CODE in Railway.' });
       if (!safeEqual(req.body?.setupCode, process.env.SRA_ADMIN_SETUP_CODE)) return res.status(403).json({ error: 'The one-time setup code is incorrect.' });
       if (String(req.body?.password || '') !== String(req.body?.confirmPassword || '')) return res.status(400).json({ error: 'Password confirmation does not match.' });
-      const user = await access.createUser({
-        displayName: req.body?.displayName,
-        email: req.body?.email,
-        password: req.body?.password,
-        capacities: ['UNIVERSAL', 'PLATFORM_ADMIN']
-      });
+      const user = await access.createUser({ displayName: req.body?.displayName, email: req.body?.email, password: req.body?.password, capacities: ['UNIVERSAL', 'PLATFORM_ADMIN'] });
       if (database) await database.audit({ actorId: user.id, eventType: 'PLATFORM_ADMINISTRATION_INITIALIZED', objectType: 'PLATFORM_ADMIN', objectId: user.id });
       const result = await access.signin({ email: user.email, password: req.body?.password });
       const session = await access.switchRole(result.token, 'PLATFORM_ADMIN');
@@ -128,10 +123,28 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
 
   router.post('/api/admin/agent/query', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
+    try { return res.json(await intelligenceAgent.ask(req.body || {}, session)); }
+    catch (error) { return res.status(400).json({ error: error.message, code: 'SRA_ADMIN_AGENT_QUERY_FAILED' }); }
+  });
+
+  router.get('/api/admin/platform-asset', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    if (!nativePlatformAsset) return res.status(503).json({ error: 'Native platform asset service is unavailable.' });
+    return res.json(nativePlatformAsset.status());
+  });
+
+  router.post('/api/admin/platform-asset/bootstrap', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    if (!nativePlatformAsset) return res.status(503).json({ error: 'Native platform asset service is unavailable.' });
+    if (String(req.body?.approval || '').toUpperCase() !== 'APPROVE') {
+      return res.status(409).json({ error: 'Explicit administrator approval is required.', code: 'SRA_PLATFORM_ASSET_APPROVAL_REQUIRED', requiredApproval: 'APPROVE', status: nativePlatformAsset.status() });
+    }
     try {
-      return res.json(await intelligenceAgent.ask(req.body || {}, session));
+      const result = await nativePlatformAsset.bootstrap(req.body || {}, session.id);
+      if (database?.audit) await database.audit({ actorId: session.id, eventType: 'SRA_NATIVE_PLATFORM_ASSET_BOOTSTRAP_APPROVED', objectType: 'SRA_PLATFORM_ASSET', objectId: result.status.platformAssetCode, payload: { created: result.created, exportPackageId: result.status.references.exportPackageId || null } });
+      return res.status(result.created ? 201 : 200).json(result);
     } catch (error) {
-      return res.status(400).json({ error: error.message, code: 'SRA_ADMIN_AGENT_QUERY_FAILED' });
+      return res.status(422).json({ error: error.message, code: 'SRA_NATIVE_PLATFORM_ASSET_BOOTSTRAP_FAILED' });
     }
   });
 
@@ -143,44 +156,18 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
     const blockedListings = listings.filter((listing) => Array.isArray(listing.blockers) && listing.blockers.length > 0).length;
     const readyListings = listings.filter((listing) => Array.isArray(listing.blockers) && listing.blockers.length === 0).length;
     const blockerCounts = {};
-    for (const listing of listings) {
-      for (const blocker of listing.blockers || []) blockerCounts[blocker] = (blockerCounts[blocker] || 0) + 1;
-    }
+    for (const listing of listings) for (const blocker of listing.blockers || []) blockerCounts[blocker] = (blockerCounts[blocker] || 0) + 1;
     return res.json({
       generatedAt: new Date().toISOString(),
       administrator: { id: session.id, displayName: session.displayName, capacity: session.activeCapacity },
       platform: {
-        observations: count(domain, RECORD_TYPES.MARKET_OBSERVATION),
-        recognitionAssessments: count(domain, RECORD_TYPES.RECOGNITION_ASSESSMENT),
-        financialRecords: count(domain, RECORD_TYPES.FINANCIAL_RECORD),
-        coinPositions: count(domain, RECORD_TYPES.COIN_POSITION),
-        instruments: count(domain, RECORD_TYPES.SRA_INSTRUMENT),
-        marketplaceListings: listingStatus.listingCount || 0,
-        marketplaceListingsPrepared: listingStatus.byState?.PREPARED || 0,
-        marketplaceListingsPublished: listingStatus.byState?.PUBLISHED || listingStatus.byState?.ACTIVE || 0,
-        marketplaceListingsBlocked: blockedListings,
-        marketplaceListingsReady: readyListings,
-        marketplaceListingStoredRecords: listingStatus.storedRecordCount || listingStatus.listingCount || 0,
-        marketplaceListingDuplicates: listingStatus.supersededDuplicateCount || 0,
-        transactions: count(domain, RECORD_TYPES.SRA_TRANSACTION),
-        fundingInstructions: count(domain, RECORD_TYPES.FUNDING_INSTRUCTION),
-        treasuryWallets: count(domain, RECORD_TYPES.TREASURY_CRYPTO_WALLET),
-        treasuryActivity: count(domain, RECORD_TYPES.TREASURY_CRYPTO_ACTIVITY)
+        observations: count(domain, RECORD_TYPES.MARKET_OBSERVATION), recognitionAssessments: count(domain, RECORD_TYPES.RECOGNITION_ASSESSMENT), financialRecords: count(domain, RECORD_TYPES.FINANCIAL_RECORD), coinPositions: count(domain, RECORD_TYPES.COIN_POSITION), instruments: count(domain, RECORD_TYPES.SRA_INSTRUMENT), marketplaceListings: listingStatus.listingCount || 0, marketplaceListingsPrepared: listingStatus.byState?.PREPARED || 0, marketplaceListingsPublished: listingStatus.byState?.PUBLISHED || listingStatus.byState?.ACTIVE || 0, marketplaceListingsBlocked: blockedListings, marketplaceListingsReady: readyListings, marketplaceListingStoredRecords: listingStatus.storedRecordCount || listingStatus.listingCount || 0, marketplaceListingDuplicates: listingStatus.supersededDuplicateCount || 0, transactions: count(domain, RECORD_TYPES.SRA_TRANSACTION), fundingInstructions: count(domain, RECORD_TYPES.FUNDING_INSTRUCTION), treasuryWallets: count(domain, RECORD_TYPES.TREASURY_CRYPTO_WALLET), treasuryActivity: count(domain, RECORD_TYPES.TREASURY_CRYPTO_ACTIVITY)
       },
-      marketplaceListings: {
-        ...listingStatus,
-        blockedListings,
-        readyListings,
-        blockerCounts
-      },
+      marketplaceListings: { ...listingStatus, blockedListings, readyListings, blockerCounts },
+      nativePlatformAsset: nativePlatformAsset?.status?.() || { state: 'UNAVAILABLE' },
       connectors: { coinbasePublicMarket: coinbase },
       adminIntelligenceAgent: intelligenceAgent.capabilities(),
-      approvalBoundary: {
-        agentWriteAccess: 'HUMAN_IN_THE_LOOP',
-        autonomousReadAndReason: true,
-        stateChangesRequireApproval: true,
-        protectedAreas: ['FINANCIAL_RECORDS','RECOGNITION','COIN_POSITIONS','INSTRUMENTS','MARKETPLACE_LISTINGS','TRANSACTIONS','TREASURY','SETTLEMENT','OWNERSHIP_RECOGNITION','EXPORT_PACKAGING','CONNECTORS','ACCOUNT_AUTHORITY']
-      }
+      approvalBoundary: { agentWriteAccess: 'HUMAN_IN_THE_LOOP', autonomousReadAndReason: true, stateChangesRequireApproval: true, protectedAreas: ['FINANCIAL_RECORDS','RECOGNITION','COIN_POSITIONS','INSTRUMENTS','MARKETPLACE_LISTINGS','TRANSACTIONS','TREASURY','SETTLEMENT','OWNERSHIP_RECOGNITION','EXPORT_PACKAGING','CONNECTORS','ACCOUNT_AUTHORITY'] }
     });
   });
 
@@ -197,8 +184,6 @@ export async function rejectPlatformAdminPublicSignin(req, res, next, database) 
     const isAdmin = hasAdminCapacity(result.session);
     await access.signout(result.token);
     if (isAdmin) return res.status(403).json({ error: 'Platform Administration identities must sign in through the private administration portal.' });
-  } catch {
-    // Let the normal public sign-in endpoint return its standard credential response.
-  }
+  } catch {}
   return next();
 }
