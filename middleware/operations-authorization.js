@@ -15,7 +15,7 @@ const STAFF_ROLES = new Set([
 ]);
 
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
-let accessServicePromise = null;
+let databasePromise = null;
 
 function readCookie(req, name) {
   const cookie = req.headers.cookie || '';
@@ -54,17 +54,21 @@ function requiredRoles(path) {
   return STAFF_ROLES;
 }
 
-async function defaultAccessService() {
-  if (!accessServicePromise) {
-    accessServicePromise = (async () => {
+async function productionDatabase() {
+  if (!databasePromise) {
+    databasePromise = (async () => {
       const database = new DatabaseService();
       await database.initialize();
-      const service = new AccessService({ database });
-      await service.initialize();
-      return service;
+      return database;
     })();
   }
-  return accessServicePromise;
+  return databasePromise;
+}
+
+async function defaultAccessService() {
+  const service = new AccessService({ database: await productionDatabase() });
+  await service.initialize();
+  return service;
 }
 
 export function createOperationsAuthorization({ accessServiceProvider = defaultAccessService } = {}) {
