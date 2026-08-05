@@ -8,6 +8,12 @@ export class ProductionReadinessService {
     this.intelligence = intelligence;
     this.internalLifecycle = new InternalLifecycleService(domain);
     this.productQualification = new ProductQualificationService(domain, this.internalLifecycle);
+    this.initialization = this.productQualification.initialize();
+  }
+
+  async ready() {
+    await this.initialization;
+    return this;
   }
 
   inspectInternalLifecycle(references = {}) { return this.internalLifecycle.inspect(references); }
@@ -17,18 +23,19 @@ export class ProductionReadinessService {
   getExportPackage(exportPackageId) { return this.internalLifecycle.getExportPackage(exportPackageId); }
   verifyExportPackage(exportPackageId) { return this.internalLifecycle.verifyExportPackage(exportPackageId); }
 
-  productQualificationStatus() { return this.productQualification.status(); }
-  listProducts(filters = {}) { return this.productQualification.listProducts(filters); }
-  getProduct(productCode) { return this.productQualification.getProduct(productCode); }
-  registerProduct(input = {}, actorId = 'SRA_PLATFORM') { return this.productQualification.registerProduct(input, actorId); }
-  assessProduct(input = {}, actorId = 'SRA_PLATFORM') { return this.productQualification.qualify(input, actorId); }
-  findProductQualificationCandidates(productCode, input = {}) { return this.productQualification.findQualificationCandidates(productCode, input); }
-  qualifyProduct(input = {}, actorId = 'SRA_PLATFORM') { return this.productQualification.recordQualification(input, actorId); }
-  qualifyFirstReadyProduct(productCode, input = {}, actorId = 'SRA_PLATFORM') { return this.productQualification.qualifyFirstReady(productCode, input, actorId); }
-  listProductQualifications(filters = {}) { return this.productQualification.listQualifications(filters); }
-  getProductQualification(qualificationId) { return this.productQualification.getQualification(qualificationId); }
+  async productQualificationStatus() { await this.ready(); return this.productQualification.status(); }
+  async listProducts(filters = {}) { await this.ready(); return this.productQualification.listProducts(filters); }
+  async getProduct(productCode) { await this.ready(); return this.productQualification.getProduct(productCode); }
+  async registerProduct(input = {}, actorId = 'SRA_PLATFORM') { await this.ready(); return this.productQualification.registerProduct(input, actorId); }
+  async assessProduct(input = {}, actorId = 'SRA_PLATFORM') { await this.ready(); return this.productQualification.qualify(input, actorId); }
+  async findProductQualificationCandidates(productCode, input = {}) { await this.ready(); return this.productQualification.findQualificationCandidates(productCode, input); }
+  async qualifyProduct(input = {}, actorId = 'SRA_PLATFORM') { await this.ready(); return this.productQualification.recordQualification(input, actorId); }
+  async qualifyFirstReadyProduct(productCode, input = {}, actorId = 'SRA_PLATFORM') { await this.ready(); return this.productQualification.qualifyFirstReady(productCode, input, actorId); }
+  async listProductQualifications(filters = {}) { await this.ready(); return this.productQualification.listQualifications(filters); }
+  async getProductQualification(qualificationId) { await this.ready(); return this.productQualification.getQualification(qualificationId); }
 
   async assess() {
+    await this.ready();
     const database = await this.database.health();
     const intelligence = this.intelligence?.health?.() || null;
     const counts = this.domain.snapshot().counts;

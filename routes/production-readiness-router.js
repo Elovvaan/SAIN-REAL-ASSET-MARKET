@@ -9,6 +9,13 @@ function actorId(req) { return req.get('x-sra-actor-id') || req.body?.actorId ||
 export function createProductionReadinessRouter({ readinessService, database }) {
   const router = express.Router();
 
+  router.use((req, _res, next) => {
+    const prefix = '/api/production';
+    if (req.url === prefix) req.url = '/';
+    else if (req.url.startsWith(`${prefix}/`)) req.url = req.url.slice(prefix.length);
+    return next();
+  });
+
   router.get('/readiness', async (_req, res) => { try { return res.json(await readinessService.assess()); } catch (error) { return res.status(500).json({ error: error.message, code: 'PRODUCTION_READINESS_FAILED' }); } });
   router.post('/internal-lifecycle/inspect', (req, res) => { try { return res.json(readinessService.inspectInternalLifecycle(req.body?.references || req.body || {})); } catch (error) { return res.status(400).json({ error: error.message, code: 'SRA_INTERNAL_LIFECYCLE_INSPECTION_FAILED' }); } });
   router.post('/internal-lifecycle/ownership-recognitions', async (req, res) => { try { const result = await readinessService.recognizeOwnership(req.body || {}, actorId(req)); return res.status(result.created ? 201 : 200).json(result); } catch (error) { return res.status(400).json({ error: error.message, code: 'SRA_OWNERSHIP_RECOGNITION_FAILED' }); } });
@@ -17,22 +24,22 @@ export function createProductionReadinessRouter({ readinessService, database }) 
   router.get('/internal-lifecycle/export-packages/:exportPackageId', (req, res) => { const record = readinessService.getExportPackage(req.params.exportPackageId); if (!record) return res.status(404).json({ error: 'Export package not found.', code: 'SRA_EXPORT_PACKAGE_NOT_FOUND' }); return res.json(record); });
   router.get('/internal-lifecycle/export-packages/:exportPackageId/integrity', (req, res) => { const result = readinessService.verifyExportPackage(req.params.exportPackageId); return res.status(result.valid ? 200 : 409).json(result); });
 
-  router.get('/products/status', (_req, res) => res.json(readinessService.productQualificationStatus()));
-  router.get('/products', (req, res) => res.json({ products: readinessService.listProducts({ state: req.query.state || null, category: req.query.category || null }) }));
+  router.get('/products/status', async (_req, res) => res.json(await readinessService.productQualificationStatus()));
+  router.get('/products', async (req, res) => res.json({ products: await readinessService.listProducts({ state: req.query.state || null, category: req.query.category || null }) }));
   router.post('/products', async (req, res) => { try { return res.status(201).json(await readinessService.registerProduct(req.body || {}, actorId(req))); } catch (error) { return res.status(400).json({ error: error.message, code: 'SRA_PRODUCT_REGISTRATION_FAILED' }); } });
-  router.post('/products/qualifications/assess', (req, res) => { try { const result = readinessService.assessProduct(req.body || {}, actorId(req)); return res.status(result.passed ? 200 : 422).json(result); } catch (error) { return res.status(400).json({ error: error.message, code: 'SRA_PRODUCT_ASSESSMENT_FAILED' }); } });
+  router.post('/products/qualifications/assess', async (req, res) => { try { const result = await readinessService.assessProduct(req.body || {}, actorId(req)); return res.status(result.passed ? 200 : 422).json(result); } catch (error) { return res.status(400).json({ error: error.message, code: 'SRA_PRODUCT_ASSESSMENT_FAILED' }); } });
   router.post('/products/qualifications', async (req, res) => { try { const result = await readinessService.qualifyProduct(req.body || {}, actorId(req)); return res.status(result.created ? 201 : 200).json(result); } catch (error) { return res.status(422).json({ error: error.message, code: 'SRA_PRODUCT_QUALIFICATION_FAILED' }); } });
-  router.get('/products/qualifications/records', (req, res) => res.json({ qualifications: readinessService.listProductQualifications({ productCode: req.query.productCode || null, state: req.query.state || null }) }));
-  router.get('/products/qualifications/records/:qualificationId', (req, res) => { const record = readinessService.getProductQualification(req.params.qualificationId); if (!record) return res.status(404).json({ error: 'Product qualification not found.', code: 'SRA_PRODUCT_QUALIFICATION_NOT_FOUND' }); return res.json(record); });
-  router.get('/products/:productCode/qualification-candidates', (req, res) => {
-    try { return res.json({ productCode: String(req.params.productCode).toUpperCase(), candidates: readinessService.findProductQualificationCandidates(req.params.productCode, { evidenceIds: req.query.evidenceId ? [req.query.evidenceId] : [], evidenceClasses: req.query.evidenceClass ? String(req.query.evidenceClass).split(',') : [] }) }); }
+  router.get('/products/qualifications/records', async (req, res) => res.json({ qualifications: await readinessService.listProductQualifications({ productCode: req.query.productCode || null, state: req.query.state || null }) }));
+  router.get('/products/qualifications/records/:qualificationId', async (req, res) => { const record = await readinessService.getProductQualification(req.params.qualificationId); if (!record) return res.status(404).json({ error: 'Product qualification not found.', code: 'SRA_PRODUCT_QUALIFICATION_NOT_FOUND' }); return res.json(record); });
+  router.get('/products/:productCode/qualification-candidates', async (req, res) => {
+    try { return res.json({ productCode: String(req.params.productCode).toUpperCase(), candidates: await readinessService.findProductQualificationCandidates(req.params.productCode, { evidenceIds: req.query.evidenceId ? [req.query.evidenceId] : [], evidenceClasses: req.query.evidenceClass ? String(req.query.evidenceClass).split(',') : [] }) }); }
     catch (error) { return res.status(400).json({ error: error.message, code: 'SRA_PRODUCT_CANDIDATE_SCAN_FAILED' }); }
   });
   router.post('/products/:productCode/qualify-first-ready', async (req, res) => {
     try { const result = await readinessService.qualifyFirstReadyProduct(req.params.productCode, req.body || {}, actorId(req)); return res.status(result.created ? 201 : 200).json(result); }
     catch (error) { return res.status(422).json({ error: error.message, code: error.code || 'SRA_PRODUCT_NO_READY_CANDIDATE', candidates: error.candidates || [] }); }
   });
-  router.get('/products/:productCode', (req, res) => { const product = readinessService.getProduct(req.params.productCode); if (!product) return res.status(404).json({ error: 'Product definition not found.', code: 'SRA_PRODUCT_NOT_FOUND' }); return res.json(product); });
+  router.get('/products/:productCode', async (req, res) => { const product = await readinessService.getProduct(req.params.productCode); if (!product) return res.status(404).json({ error: 'Product definition not found.', code: 'SRA_PRODUCT_NOT_FOUND' }); return res.json(product); });
 
   router.get('/audit/events', async (req, res) => {
     if (!staff(req)) return res.status(403).json({ error: 'Audit access requires Platform Admin, Operations Admin, or Auditor role.', code: 'SRA_AUDIT_ROLE_REQUIRED' });
