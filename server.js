@@ -21,6 +21,7 @@ import { createSainOperationsIntelligenceRouter } from './routes/sain-operations
 import { createProductionReadinessRouter } from './routes/production-readiness-router.js';
 import { authorizeOperationsRequest } from './middleware/operations-authorization.js';
 import { operationsIdempotency } from './middleware/operations-idempotency.js';
+import { productionRuntime, runtimeMetrics, dependencyHealth, emitOperationalAlert } from './middleware/production-runtime.js';
 import { CoinbasePublicMarketService } from './services/coinbase-public-market-service.js';
 import { CoinbaseTransactionAssetPipelineService } from './services/coinbase-transaction-asset-pipeline-service.js';
 import { MarketplaceListingService } from './services/marketplace-listing-service.js';
@@ -43,7 +44,9 @@ import { ProductionReadinessService } from './services/production-readiness-serv
 
 const port = Number(process.env.PORT) || 3000;
 const bootstrap = express();
-bootstrap.use(express.json({ limit: '1mb' }));
+bootstrap.set('trust proxy', 1);
+bootstrap.use(express.json({ limit: process.env.SRA_JSON_LIMIT || '1mb' }));
+bootstrap.use(productionRuntime);
 bootstrap.use(authorizeOperationsRequest);
 bootstrap.use(operationsIdempotency);
 
@@ -92,15 +95,26 @@ let startupState = 'STARTING';
 let startupError = null;
 let startedAt = new Date().toISOString();
 
-bootstrap.get('/api/health', (req, res, next) => {
-  if (platformApp) return platformApp(req, res, next);
-  return res.status(200).json({ status: startupState === 'FAILED' ? 'degraded' : 'starting', service: 'SAIN Real Asset Market', bootstrap: true, startupState, startupError, startedAt, timestamp: new Date().toISOString() });
+bootstrap.get('/api/health', async (_req, res) => {
+  const dependencies = await dependencyHealth({ database, startupState });
+  return res.status(dependencies.status === 'READY' ? 200 : 503).json({ status: dependencies.status === 'READY' ? 'ok' : 'degraded', service: 'SAIN Real Asset Market', startupState, startedAt, timestamp: new Date().toISOString() });
+});
+
+bootstrap.get('/api/production/dependencies', async (_req, res) => {
+  const report = await dependencyHealth({ database, startupState, connectors: { COINBASE_PUBLIC_MARKET: coinbasePublicMarket, MARKETPLACE_LISTING: marketplaceListingService, ON_CHAIN_PROJECTION: onChainProjectionService } });
+  return res.status(report.status === 'READY' ? 200 : 503).json(report);
+});
+
+bootstrap.get('/api/production/metrics', (_req, res) => res.json(runtimeMetrics()));
+
+bootstrap.post('/api/production/alerts/test', async (req, res) => {
+  await emitOperationalAlert({ severity: 'TEST', event: 'SRA_ALERT_TEST', requestId: req.sraRequestId, actorId: req.sraIdentity?.actorId || null, at: new Date().toISOString() });
+  return res.json({ delivered: Boolean(process.env.SRA_ALERT_WEBHOOK_URL), requestId: req.sraRequestId });
 });
 
 bootstrap.get('/api/startup', (_req, res) => {
   return res.status(startupState === 'FAILED' ? 500 : 200).json({
-    startupState,
-    startupError,
+    startupState, startupError,
     coinbasePublicMarket: coinbasePublicMarket?.status?.() || null,
     coinbaseTransactionAssetPipeline: coinbaseTransactionAssetPipeline?.status?.() || null,
     marketplaceListingPreparation: marketplaceListingService?.status?.() || null,
@@ -120,8 +134,8 @@ bootstrap.get('/api/startup', (_req, res) => {
     fundingOperations: fundingOperationsService?.status?.() || null,
     sainOperationsIntelligence: sainOperationsIntelligenceService?.status?.() || null,
     productionReadiness: productionReadinessService ? 'AVAILABLE' : null,
-    startedAt,
-    timestamp: new Date().toISOString()
+    observability: { requestTracing: true, structuredLogging: true, rateLimiting: true, alertsConfigured: Boolean(process.env.SRA_ALERT_WEBHOOK_URL) },
+    startedAt, timestamp: new Date().toISOString()
   });
 });
 
@@ -129,13 +143,9 @@ bootstrap.get('/api/marketplace-listings/status', (_req, res) => {
   if (!marketplaceListingService) return res.status(503).json({ error: 'Marketplace Listing Layer is still initializing.' });
   return res.json(marketplaceListingService.status());
 });
-
 bootstrap.get('/api/marketplace-listings', (req, res) => {
   if (!marketplaceListingService) return res.status(503).json({ error: 'Marketplace Listing Layer is still initializing.' });
-  return res.json(marketplaceListingService.page(
-    { state: req.query.state, instrumentId: req.query.instrumentId },
-    { page: req.query.page, limit: req.query.limit }
-  ));
+  return res.json(marketplaceListingService.page({ state: req.query.state, instrumentId: req.query.instrumentId }, { page: req.query.page, limit: req.query.limit }));
 });
 
 bootstrap.use(async (req, res, next) => {
@@ -164,66 +174,47 @@ bootstrap.use(async (req, res, next) => {
   return res.status(503).json({ error: startupState === 'FAILED' ? 'The platform failed during initialization. Check /api/startup.' : 'The platform is still initializing.', startupState });
 });
 
-bootstrap.listen(port, '0.0.0.0', () => console.log(`SRA bootstrap server is listening on port ${port}`));
+const server = bootstrap.listen(port, '0.0.0.0', () => console.log(JSON.stringify({ level: 'info', event: 'SERVER_LISTENING', port, service: 'SAIN_REAL_ASSET_MARKET' })));
+server.requestTimeout = Number(process.env.SRA_REQUEST_TIMEOUT_MS) || 30000;
+server.headersTimeout = Number(process.env.SRA_HEADERS_TIMEOUT_MS) || 35000;
+server.keepAliveTimeout = Number(process.env.SRA_KEEP_ALIVE_TIMEOUT_MS) || 5000;
 
-function stopConnectors() {
-  coinbasePublicMarket?.stop?.();
-  if (marketplaceListingTimer) clearInterval(marketplaceListingTimer);
+function stopConnectors() { coinbasePublicMarket?.stop?.(); if (marketplaceListingTimer) clearInterval(marketplaceListingTimer); }
+async function shutdown(signal) {
+  startupState = 'STOPPING';
+  console.log(JSON.stringify({ level: 'info', event: 'GRACEFUL_SHUTDOWN_STARTED', signal }));
+  stopConnectors();
+  server.close(async () => {
+    try { await database?.pool?.end?.(); } catch {}
+    console.log(JSON.stringify({ level: 'info', event: 'GRACEFUL_SHUTDOWN_COMPLETED', signal }));
+    process.exit(0);
+  });
+  setTimeout(() => process.exit(1), Number(process.env.SRA_SHUTDOWN_TIMEOUT_MS) || 15000).unref();
 }
-process.once('SIGTERM', stopConnectors);
-process.once('SIGINT', stopConnectors);
+process.once('SIGTERM', () => void shutdown('SIGTERM'));
+process.once('SIGINT', () => void shutdown('SIGINT'));
 
 try {
   const created = await createApp();
   database = created.database;
   platformExtensions = await createUniversalAccountBlockchainRouter(created.persistentDomain, created.database);
-  fundingOpportunityService = new FundingOpportunityIntakeService(created.persistentDomain);
-  await fundingOpportunityService.initialize();
-  fundingOpportunityExtension = createFundingOpportunityRouter(fundingOpportunityService);
-  fundingVerificationService = new FundingOpportunityVerificationService(created.persistentDomain);
-  await fundingVerificationService.initialize();
-  fundingVerificationExtension = createFundingOpportunityVerificationRouter(fundingVerificationService);
-  fundingValuePreparationService = new FundingOpportunityValuePreparationService(created.persistentDomain);
-  await fundingValuePreparationService.initialize();
-  fundingValuePreparationExtension = createFundingOpportunityValuePreparationRouter(fundingValuePreparationService);
-  fundingModelSelectionService = new FundingModelSelectionService(created.persistentDomain);
-  await fundingModelSelectionService.initialize();
-  fundingModelSelectionExtension = createFundingModelSelectionRouter(fundingModelSelectionService);
-  fundingInstrumentSelectionService = new FundingInstrumentSelectionService(created.persistentDomain);
-  await fundingInstrumentSelectionService.initialize();
-  fundingInstrumentSelectionExtension = createFundingInstrumentSelectionRouter(fundingInstrumentSelectionService);
-  fundingInstrumentReviewService = new FundingInstrumentReviewService(created.persistentDomain);
-  await fundingInstrumentReviewService.initialize();
-  fundingInstrumentReviewExtension = createFundingInstrumentReviewRouter(fundingInstrumentReviewService);
-  fundingInstrumentIssuanceService = new FundingInstrumentIssuanceService(created.persistentDomain);
-  await fundingInstrumentIssuanceService.initialize();
-  fundingInstrumentIssuanceExtension = createFundingInstrumentIssuanceRouter(fundingInstrumentIssuanceService);
-  fundingMarketplacePreparationService = new FundingMarketplacePreparationService(created.persistentDomain);
-  await fundingMarketplacePreparationService.initialize();
-  fundingMarketplacePreparationExtension = createFundingMarketplacePreparationRouter(fundingMarketplacePreparationService);
-  fundingMarketplacePublicationService = new FundingMarketplacePublicationService(created.persistentDomain);
-  await fundingMarketplacePublicationService.initialize();
-  fundingMarketplacePublicationExtension = createFundingMarketplacePublicationRouter(fundingMarketplacePublicationService);
-  fundingMarketplaceCommitmentService = new FundingMarketplaceCommitmentService(created.persistentDomain);
-  await fundingMarketplaceCommitmentService.initialize();
-  fundingMarketplaceCommitmentExtension = createFundingMarketplaceCommitmentRouter(fundingMarketplaceCommitmentService);
-  fundingMarketplaceAllocationService = new FundingMarketplaceAllocationService(created.persistentDomain);
-  await fundingMarketplaceAllocationService.initialize();
-  fundingMarketplaceAllocationExtension = createFundingMarketplaceAllocationRouter(fundingMarketplaceAllocationService);
-  fundingMarketplaceSettlementService = new FundingMarketplaceSettlementService(created.persistentDomain);
-  await fundingMarketplaceSettlementService.initialize();
-  fundingMarketplaceSettlementExtension = createFundingMarketplaceSettlementRouter(fundingMarketplaceSettlementService);
-  fundingOperationsService = new FundingOperationsService(created.persistentDomain);
-  await fundingOperationsService.initialize();
-  fundingOperationsExtension = createFundingOperationsRouter(fundingOperationsService);
-  sainOperationsIntelligenceService = new SainOperationsIntelligenceService(created.persistentDomain);
-  await sainOperationsIntelligenceService.initialize();
-  sainOperationsIntelligenceExtension = createSainOperationsIntelligenceRouter(sainOperationsIntelligenceService);
+  fundingOpportunityService = new FundingOpportunityIntakeService(created.persistentDomain); await fundingOpportunityService.initialize(); fundingOpportunityExtension = createFundingOpportunityRouter(fundingOpportunityService);
+  fundingVerificationService = new FundingOpportunityVerificationService(created.persistentDomain); await fundingVerificationService.initialize(); fundingVerificationExtension = createFundingOpportunityVerificationRouter(fundingVerificationService);
+  fundingValuePreparationService = new FundingOpportunityValuePreparationService(created.persistentDomain); await fundingValuePreparationService.initialize(); fundingValuePreparationExtension = createFundingOpportunityValuePreparationRouter(fundingValuePreparationService);
+  fundingModelSelectionService = new FundingModelSelectionService(created.persistentDomain); await fundingModelSelectionService.initialize(); fundingModelSelectionExtension = createFundingModelSelectionRouter(fundingModelSelectionService);
+  fundingInstrumentSelectionService = new FundingInstrumentSelectionService(created.persistentDomain); await fundingInstrumentSelectionService.initialize(); fundingInstrumentSelectionExtension = createFundingInstrumentSelectionRouter(fundingInstrumentSelectionService);
+  fundingInstrumentReviewService = new FundingInstrumentReviewService(created.persistentDomain); await fundingInstrumentReviewService.initialize(); fundingInstrumentReviewExtension = createFundingInstrumentReviewRouter(fundingInstrumentReviewService);
+  fundingInstrumentIssuanceService = new FundingInstrumentIssuanceService(created.persistentDomain); await fundingInstrumentIssuanceService.initialize(); fundingInstrumentIssuanceExtension = createFundingInstrumentIssuanceRouter(fundingInstrumentIssuanceService);
+  fundingMarketplacePreparationService = new FundingMarketplacePreparationService(created.persistentDomain); await fundingMarketplacePreparationService.initialize(); fundingMarketplacePreparationExtension = createFundingMarketplacePreparationRouter(fundingMarketplacePreparationService);
+  fundingMarketplacePublicationService = new FundingMarketplacePublicationService(created.persistentDomain); await fundingMarketplacePublicationService.initialize(); fundingMarketplacePublicationExtension = createFundingMarketplacePublicationRouter(fundingMarketplacePublicationService);
+  fundingMarketplaceCommitmentService = new FundingMarketplaceCommitmentService(created.persistentDomain); await fundingMarketplaceCommitmentService.initialize(); fundingMarketplaceCommitmentExtension = createFundingMarketplaceCommitmentRouter(fundingMarketplaceCommitmentService);
+  fundingMarketplaceAllocationService = new FundingMarketplaceAllocationService(created.persistentDomain); await fundingMarketplaceAllocationService.initialize(); fundingMarketplaceAllocationExtension = createFundingMarketplaceAllocationRouter(fundingMarketplaceAllocationService);
+  fundingMarketplaceSettlementService = new FundingMarketplaceSettlementService(created.persistentDomain); await fundingMarketplaceSettlementService.initialize(); fundingMarketplaceSettlementExtension = createFundingMarketplaceSettlementRouter(fundingMarketplaceSettlementService);
+  fundingOperationsService = new FundingOperationsService(created.persistentDomain); await fundingOperationsService.initialize(); fundingOperationsExtension = createFundingOperationsRouter(fundingOperationsService);
+  sainOperationsIntelligenceService = new SainOperationsIntelligenceService(created.persistentDomain); await sainOperationsIntelligenceService.initialize(); sainOperationsIntelligenceExtension = createSainOperationsIntelligenceRouter(sainOperationsIntelligenceService);
   productionReadinessService = new ProductionReadinessService({ database: created.database, domain: created.persistentDomain, intelligence: sainOperationsIntelligenceService });
   productionReadinessExtension = createProductionReadinessRouter({ readinessService: productionReadinessService, database: created.database });
-  onChainProjectionService = new OnChainProjectionService(created.persistentDomain);
-  await onChainProjectionService.initialize();
-  onChainProjectionExtension = createOnChainProjectionRouter(onChainProjectionService);
+  onChainProjectionService = new OnChainProjectionService(created.persistentDomain); await onChainProjectionService.initialize(); onChainProjectionExtension = createOnChainProjectionRouter(onChainProjectionService);
   coinbaseTransactionAssetPipeline = new CoinbaseTransactionAssetPipelineService({ observationLayerService: created.observationLayerService, financialRecordService: created.financialRecordService, persistentDomain: created.persistentDomain });
   marketplaceListingService = new MarketplaceListingService(created.persistentDomain);
   coinbasePublicMarket = new CoinbasePublicMarketService({ observationLayerService: created.observationLayerService, transactionAssetPipeline: coinbaseTransactionAssetPipeline });
@@ -233,19 +224,26 @@ try {
   setImmediate(async () => {
     try {
       const assetStatus = await coinbaseTransactionAssetPipeline.backfill();
-      console.log('Coinbase transaction asset backfill completed.', assetStatus);
+      console.log(JSON.stringify({ level: 'info', event: 'COINBASE_BACKFILL_COMPLETED', status: assetStatus }));
       const listingStatus = await marketplaceListingService.backfill();
-      console.log('Marketplace listing preparation backfill completed.', listingStatus);
-    } catch (error) { console.error('Startup pipeline backfill failed:', error); }
+      console.log(JSON.stringify({ level: 'info', event: 'LISTING_BACKFILL_COMPLETED', status: listingStatus }));
+    } catch (error) {
+      console.error(JSON.stringify({ level: 'error', event: 'STARTUP_BACKFILL_FAILED', message: error.message }));
+      void emitOperationalAlert({ severity: 'ERROR', event: 'STARTUP_BACKFILL_FAILED', message: error.message, at: new Date().toISOString() });
+    }
   });
-  marketplaceListingTimer = setInterval(() => marketplaceListingService.backfill().catch((error) => console.error('Marketplace listing preparation cycle failed:', error)), 30000);
+  marketplaceListingTimer = setInterval(() => marketplaceListingService.backfill().catch((error) => {
+    console.error(JSON.stringify({ level: 'error', event: 'LISTING_BACKFILL_CYCLE_FAILED', message: error.message }));
+    void emitOperationalAlert({ severity: 'ERROR', event: 'LISTING_BACKFILL_CYCLE_FAILED', message: error.message, at: new Date().toISOString() });
+  }), 30000);
   marketplaceListingTimer.unref?.();
   platformApp = created.app;
   startupState = 'READY';
   startupError = null;
-  console.log('SRA platform initialization completed.');
+  console.log(JSON.stringify({ level: 'info', event: 'PLATFORM_INITIALIZATION_COMPLETED', startedAt }));
 } catch (error) {
   startupState = 'FAILED';
   startupError = { name: error?.name || 'Error', message: error?.message || 'Unknown startup error', stack: process.env.NODE_ENV === 'production' ? undefined : error?.stack };
-  console.error('SRA platform initialization failed:', error);
+  console.error(JSON.stringify({ level: 'error', event: 'PLATFORM_INITIALIZATION_FAILED', error: startupError }));
+  void emitOperationalAlert({ severity: 'CRITICAL', event: 'PLATFORM_INITIALIZATION_FAILED', error: startupError, at: new Date().toISOString() });
 }
