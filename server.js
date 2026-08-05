@@ -18,6 +18,7 @@ import { createFundingMarketplaceAllocationRouter } from './routes/funding-marke
 import { createFundingMarketplaceSettlementRouter } from './routes/funding-marketplace-settlement-router.js';
 import { createFundingOperationsRouter } from './routes/funding-operations-router.js';
 import { createSainOperationsIntelligenceRouter } from './routes/sain-operations-intelligence-router.js';
+import { createProductionReadinessRouter } from './routes/production-readiness-router.js';
 import { authorizeOperationsRequest } from './middleware/operations-authorization.js';
 import { operationsIdempotency } from './middleware/operations-idempotency.js';
 import { CoinbasePublicMarketService } from './services/coinbase-public-market-service.js';
@@ -38,6 +39,7 @@ import { FundingMarketplaceAllocationService } from './services/funding-marketpl
 import { FundingMarketplaceSettlementService } from './services/funding-marketplace-settlement-service.js';
 import { FundingOperationsService } from './services/funding-operations-service.js';
 import { SainOperationsIntelligenceService } from './services/sain-operations-intelligence-service.js';
+import { ProductionReadinessService } from './services/production-readiness-service.js';
 
 const port = Number(process.env.PORT) || 3000;
 const bootstrap = express();
@@ -64,6 +66,7 @@ let fundingMarketplaceAllocationExtension = null;
 let fundingMarketplaceSettlementExtension = null;
 let fundingOperationsExtension = null;
 let sainOperationsIntelligenceExtension = null;
+let productionReadinessExtension = null;
 let onChainProjectionService = null;
 let fundingOpportunityService = null;
 let fundingVerificationService = null;
@@ -79,6 +82,7 @@ let fundingMarketplaceAllocationService = null;
 let fundingMarketplaceSettlementService = null;
 let fundingOperationsService = null;
 let sainOperationsIntelligenceService = null;
+let productionReadinessService = null;
 let coinbasePublicMarket = null;
 let coinbaseTransactionAssetPipeline = null;
 let marketplaceListingService = null;
@@ -115,6 +119,7 @@ bootstrap.get('/api/startup', (_req, res) => {
     fundingMarketplaceSettlement: fundingMarketplaceSettlementService?.status?.() || null,
     fundingOperations: fundingOperationsService?.status?.() || null,
     sainOperationsIntelligence: sainOperationsIntelligenceService?.status?.() || null,
+    productionReadiness: productionReadinessService ? 'AVAILABLE' : null,
     startedAt,
     timestamp: new Date().toISOString()
   });
@@ -137,6 +142,7 @@ bootstrap.use(async (req, res, next) => {
   if (privateAdminExtension && (req.path === '/admin' || req.path.startsWith('/admin/') || req.path.startsWith('/api/admin/'))) return privateAdminExtension(req, res, next);
   if (database && req.method === 'POST' && req.path === '/api/access/signin') return rejectPlatformAdminPublicSignin(req, res, next, database);
   if (database && req.method === 'POST' && ['/api/access/capacity', '/api/access/role'].includes(req.path) && String(req.body?.capacity || req.body?.role || '').toUpperCase() === 'PLATFORM_ADMIN') return res.status(403).json({ error: 'Platform Administration is available only through the private administration portal.' });
+  if (productionReadinessExtension && req.path.startsWith('/api/production')) return productionReadinessExtension(req, res, next);
   if (sainOperationsIntelligenceExtension && req.path.startsWith('/api/sain/intelligence')) return sainOperationsIntelligenceExtension(req, res, next);
   if (fundingOperationsExtension && req.path.startsWith('/api/funding-operations')) return fundingOperationsExtension(req, res, next);
   if (fundingMarketplaceSettlementExtension && req.path.startsWith('/api/funding-marketplace-settlement')) return fundingMarketplaceSettlementExtension(req, res, next);
@@ -213,6 +219,8 @@ try {
   sainOperationsIntelligenceService = new SainOperationsIntelligenceService(created.persistentDomain);
   await sainOperationsIntelligenceService.initialize();
   sainOperationsIntelligenceExtension = createSainOperationsIntelligenceRouter(sainOperationsIntelligenceService);
+  productionReadinessService = new ProductionReadinessService({ database: created.database, domain: created.persistentDomain, intelligence: sainOperationsIntelligenceService });
+  productionReadinessExtension = createProductionReadinessRouter({ readinessService: productionReadinessService, database: created.database });
   onChainProjectionService = new OnChainProjectionService(created.persistentDomain);
   await onChainProjectionService.initialize();
   onChainProjectionExtension = createOnChainProjectionRouter(onChainProjectionService);
