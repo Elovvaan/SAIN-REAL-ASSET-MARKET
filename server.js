@@ -18,6 +18,7 @@ import { createFundingMarketplaceAllocationRouter } from './routes/funding-marke
 import { createFundingMarketplaceSettlementRouter } from './routes/funding-marketplace-settlement-router.js';
 import { createFundingOperationsRouter } from './routes/funding-operations-router.js';
 import { createSainOperationsIntelligenceRouter } from './routes/sain-operations-intelligence-router.js';
+import { authorizeOperationsRequest } from './middleware/operations-authorization.js';
 import { CoinbasePublicMarketService } from './services/coinbase-public-market-service.js';
 import { CoinbaseTransactionAssetPipelineService } from './services/coinbase-transaction-asset-pipeline-service.js';
 import { MarketplaceListingService } from './services/marketplace-listing-service.js';
@@ -40,6 +41,7 @@ import { SainOperationsIntelligenceService } from './services/sain-operations-in
 const port = Number(process.env.PORT) || 3000;
 const bootstrap = express();
 bootstrap.use(express.json({ limit: '1mb' }));
+bootstrap.use(authorizeOperationsRequest);
 
 let platformApp = null;
 let platformExtensions = null;
