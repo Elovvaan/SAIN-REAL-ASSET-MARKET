@@ -7,6 +7,7 @@ import { createOnChainProjectionRouter } from './routes/on-chain-projection-rout
 import { createFundingOpportunityRouter } from './routes/funding-opportunity-router.js';
 import { createFundingOpportunityVerificationRouter } from './routes/funding-opportunity-verification-router.js';
 import { createFundingOpportunityValuePreparationRouter } from './routes/funding-opportunity-value-preparation-router.js';
+import { createFundingModelSelectionRouter } from './routes/funding-model-selection-router.js';
 import { CoinbasePublicMarketService } from './services/coinbase-public-market-service.js';
 import { CoinbaseTransactionAssetPipelineService } from './services/coinbase-transaction-asset-pipeline-service.js';
 import { MarketplaceListingService } from './services/marketplace-listing-service.js';
@@ -14,6 +15,7 @@ import { OnChainProjectionService } from './services/on-chain-projection-service
 import { FundingOpportunityIntakeService } from './services/funding-opportunity-intake-service.js';
 import { FundingOpportunityVerificationService } from './services/funding-opportunity-verification-service.js';
 import { FundingOpportunityValuePreparationService } from './services/funding-opportunity-value-preparation-service.js';
+import { FundingModelSelectionService } from './services/funding-model-selection-service.js';
 
 const port = Number(process.env.PORT) || 3000;
 const bootstrap = express();
@@ -27,10 +29,12 @@ let onChainProjectionExtension = null;
 let fundingOpportunityExtension = null;
 let fundingVerificationExtension = null;
 let fundingValuePreparationExtension = null;
+let fundingModelSelectionExtension = null;
 let onChainProjectionService = null;
 let fundingOpportunityService = null;
 let fundingVerificationService = null;
 let fundingValuePreparationService = null;
+let fundingModelSelectionService = null;
 let coinbasePublicMarket = null;
 let coinbaseTransactionAssetPipeline = null;
 let marketplaceListingService = null;
@@ -56,6 +60,7 @@ bootstrap.get('/api/startup', (_req, res) => {
     fundingOpportunityIntake: fundingOpportunityService?.status?.() || null,
     fundingOpportunityVerification: fundingVerificationService?.status?.() || null,
     fundingOpportunityValuePreparation: fundingValuePreparationService?.status?.() || null,
+    fundingModelSelection: fundingModelSelectionService?.status?.() || null,
     startedAt,
     timestamp: new Date().toISOString()
   });
@@ -78,6 +83,7 @@ bootstrap.use(async (req, res, next) => {
   if (privateAdminExtension && (req.path === '/admin' || req.path.startsWith('/admin/') || req.path.startsWith('/api/admin/'))) return privateAdminExtension(req, res, next);
   if (database && req.method === 'POST' && req.path === '/api/access/signin') return rejectPlatformAdminPublicSignin(req, res, next, database);
   if (database && req.method === 'POST' && ['/api/access/capacity', '/api/access/role'].includes(req.path) && String(req.body?.capacity || req.body?.role || '').toUpperCase() === 'PLATFORM_ADMIN') return res.status(403).json({ error: 'Platform Administration is available only through the private administration portal.' });
+  if (fundingModelSelectionExtension && req.path.startsWith('/api/funding-model')) return fundingModelSelectionExtension(req, res, next);
   if (fundingValuePreparationExtension && req.path.startsWith('/api/funding-value')) return fundingValuePreparationExtension(req, res, next);
   if (fundingVerificationExtension && req.path.startsWith('/api/funding-verification')) return fundingVerificationExtension(req, res, next);
   if (fundingOpportunityExtension && req.path.startsWith('/api/funding')) return fundingOpportunityExtension(req, res, next);
@@ -110,6 +116,9 @@ try {
   fundingValuePreparationService = new FundingOpportunityValuePreparationService(created.persistentDomain);
   await fundingValuePreparationService.initialize();
   fundingValuePreparationExtension = createFundingOpportunityValuePreparationRouter(fundingValuePreparationService);
+  fundingModelSelectionService = new FundingModelSelectionService(created.persistentDomain);
+  await fundingModelSelectionService.initialize();
+  fundingModelSelectionExtension = createFundingModelSelectionRouter(fundingModelSelectionService);
   onChainProjectionService = new OnChainProjectionService(created.persistentDomain);
   await onChainProjectionService.initialize();
   onChainProjectionExtension = createOnChainProjectionRouter(onChainProjectionService);
