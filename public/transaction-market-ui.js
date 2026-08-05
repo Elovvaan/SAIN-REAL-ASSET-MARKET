@@ -17,22 +17,32 @@
     if (listing?.status === 'READY_FOR_PUBLICATION_APPROVAL' || (!listing?.blockers?.length && listing?.state === 'PREPARED')) return 'READY';
     return String(listing?.state || 'PREPARED');
   }
-  function symbol(listing) {
-    const title = String(listing?.title || listing?.instrumentId || 'SRA');
-    const product = title.match(/BTC|ETH|SOL|USDC|SRA/i)?.[0];
-    return (product || listing?.unit || 'SRA').toUpperCase();
+  function marketIdentity(listing) {
+    const base = String(listing?.unit || listing?.marketIdentity?.base || 'SRA').toUpperCase();
+    const quote = String(listing?.pricing?.currency || listing?.marketIdentity?.quote || 'USD').toUpperCase();
+    return `${base} / ${quote}`;
+  }
+  function recordOrigin(listing) {
+    const explicit = listing?.recordOrigin || {};
+    const lineage = listing?.sourceLineage || {};
+    const source = lineage?.source || {};
+    return {
+      provider: explicit.provider || source.provider || source.sourceMarket || source.market || lineage.provider || 'SRA platform record',
+      connector: explicit.connector || source.connector || source.connectorId || lineage.connectorId || 'Recorded source adapter',
+      recordType: explicit.recordType || source.recordType || source.sourceRecordType || lineage.recordType || 'Verified record',
+      reference: explicit.reference || source.reference || source.sourceReference || source.productId || lineage.reference || listing?.observationId || 'Recorded lineage',
+      observedAt: explicit.observedAt || source.observedAt || source.sourceTimestamp || lineage.observedAt || null
+    };
   }
 
   async function loadListings() {
-    const response = await fetch(`/api/marketplace-listings?page=1&limit=100`);
+    const response = await fetch('/api/marketplace-listings?page=1&limit=100');
     if (!response.ok) throw new Error('The live marketplace inventory could not be loaded.');
     const payload = await response.json();
     marketState.listings = payload.listings || [];
     marketState.total = Number(payload.total || marketState.listings.length);
     marketState.refreshedAt = new Date();
-    if (!marketState.selected || !marketState.listings.some(x => x.listingId === marketState.selected)) {
-      marketState.selected = marketState.listings[0]?.listingId || null;
-    }
+    if (!marketState.selected || !marketState.listings.some(x => x.listingId === marketState.selected)) marketState.selected = marketState.listings[0]?.listingId || null;
     return payload;
   }
 
@@ -40,7 +50,8 @@
     const q = marketState.query.trim().toLowerCase();
     return marketState.listings.filter((listing) => {
       const stateMatch = marketState.state === 'ALL' || status(listing) === marketState.state;
-      const text = `${listing.listingId} ${listing.instrumentId} ${listing.title} ${listing.unit}`.toLowerCase();
+      const origin = recordOrigin(listing);
+      const text = `${marketIdentity(listing)} ${listing.listingId} ${listing.instrumentId} ${listing.title} ${origin.provider} ${origin.connector} ${origin.recordType} ${origin.reference}`.toLowerCase();
       return stateMatch && (!q || text.includes(q));
     });
   }
@@ -56,9 +67,10 @@
       const active = listing.listingId === marketState.selected ? ' active' : '';
       const p = price(listing);
       const badge = status(listing);
+      const origin = recordOrigin(listing);
       return `<button class="market-row${active}" data-listing-id="${esc(listing.listingId)}">
-        <span class="market-symbol"><strong>${esc(symbol(listing))}</strong><small>${esc(String(listing.instrumentId || '').slice(0, 18))}</small></span>
-        <span><strong>${p ? usd.format(p) : 'Terms pending'}</strong><small>Unit price</small></span>
+        <span class="market-symbol"><strong>${esc(marketIdentity(listing))}</strong><small>${esc(origin.provider)} · ${esc(origin.reference)}</small></span>
+        <span><strong>${p ? usd.format(p) : 'Terms pending'}</strong><small>USD unit price</small></span>
         <span><strong>${esc(number.format(available(listing)))}</strong><small>${esc(listing.unit || 'SRA')} available</small></span>
         <span><strong>${esc(badge)}</strong><small>${esc((listing.blockers || []).length ? `${listing.blockers.length} controls` : 'Market ready')}</small></span>
       </button>`;
@@ -68,8 +80,7 @@
   function depthRows(listing) {
     const base = price(listing) || Number(listing?.pricing?.referenceValue || 1);
     const qty = Math.max(available(listing), 1);
-    const levels = [3, 2, 1, 0, -1, -2, -3];
-    return levels.map((offset) => {
+    return [3, 2, 1, 0, -1, -2, -3].map((offset) => {
       const ask = offset > 0;
       const levelPrice = Math.max(0.00000001, base * (1 + offset * 0.001));
       const levelQty = qty * (1 + Math.abs(offset) * 0.18) / 12;
@@ -81,6 +92,20 @@
     const activity = window.state?.marketplace?.activity || [];
     if (!activity.length) return '<div class="terminal-empty compact">No executed SRA market activity yet.</div>';
     return activity.slice(0, 8).map(item => `<div class="tape-row"><span>${esc(item.label || 'Market event')}</span><strong>${item.amount ? usd.format(item.amount) : esc(item.state || 'RECORDED')}</strong></div>`).join('');
+  }
+
+  function originPanel(listing) {
+    const origin = recordOrigin(listing);
+    return `<section class="record-origin-panel">
+      <div class="terminal-panel-head"><strong>Record Origin</strong><span>Traceable</span></div>
+      <div class="record-origin-grid">
+        <div><span>Provider</span><strong>${esc(origin.provider)}</strong></div>
+        <div><span>Connector</span><strong>${esc(origin.connector)}</strong></div>
+        <div><span>Record type</span><strong>${esc(origin.recordType)}</strong></div>
+        <div><span>Reference</span><strong>${esc(origin.reference)}</strong></div>
+      </div>
+      <small>The origin identifies where the recorded information came from. It does not change the traded market identity, which remains ${esc(marketIdentity(listing))}.</small>
+    </section>`;
   }
 
   function orderTicket(listing) {
@@ -105,15 +130,16 @@
     const prepared = marketState.listings.filter(x => status(x) === 'PREPARED').length;
     return `<section class="live-terminal">
       <header class="terminal-summary">
-        <div><p class="eyebrow">SRA LIVE MARKET</p><h2>Transaction-Backed Instruments</h2><span>Real marketplace inventory formed from recognized records and Coin Positions.</span></div>
+        <div><p class="eyebrow">SRA LIVE MARKET</p><h2>SRA Market Instruments</h2><span>SRA-denominated marketplace inventory priced in USD and linked to traceable record origins.</span></div>
         <div class="terminal-kpis"><div><strong>${marketState.total.toLocaleString()}</strong><span>Listings</span></div><div><strong>${live}</strong><span>Live</span></div><div><strong>${ready}</strong><span>Ready</span></div><div><strong>${prepared}</strong><span>Prepared</span></div></div>
       </header>
-      <div class="terminal-toolbar"><input id="market-search" value="${esc(marketState.query)}" placeholder="Search symbol, listing, or instrument"><select id="market-state-filter"><option value="ALL">All states</option><option value="LIVE">Live</option><option value="READY">Ready</option><option value="PREPARED">Prepared</option></select><button id="market-refresh">Refresh</button><span>Updated ${marketState.refreshedAt ? marketState.refreshedAt.toLocaleTimeString() : 'now'}</span></div>
+      <div class="terminal-toolbar"><input id="market-search" value="${esc(marketState.query)}" placeholder="Search market, listing, instrument, or origin"><select id="market-state-filter"><option value="ALL">All states</option><option value="LIVE">Live</option><option value="READY">Ready</option><option value="PREPARED">Prepared</option></select><button id="market-refresh">Refresh</button><span>Updated ${marketState.refreshedAt ? marketState.refreshedAt.toLocaleTimeString() : 'now'}</span></div>
       <div class="terminal-grid">
-        <section class="market-watch"><div class="terminal-panel-head"><strong>Market Watch</strong><span>${filtered().length} shown</span></div><div class="market-table-head"><span>Instrument</span><span>Price</span><span>Quantity</span><span>Status</span></div><div class="market-rows">${marketRows()}</div></section>
-        <section class="instrument-chart"><div class="terminal-panel-head"><div><strong>${esc(symbol(listing))} / ${esc(listing.unit || 'SRA')}</strong><small>${esc(listing.listingId)}</small></div><span>${esc(status(listing))}</span></div><div class="chart-price"><strong>${price(listing) ? usd.format(price(listing)) : 'Price pending'}</strong><span>${esc(listing.title || listing.instrumentId)}</span></div><div class="market-chart" aria-label="Recorded value chart"><div class="chart-grid"></div><svg viewBox="0 0 700 260" preserveAspectRatio="none"><polyline points="0,205 70,175 140,188 210,132 280,148 350,102 420,118 490,74 560,91 630,45 700,58" fill="none" stroke="currentColor" stroke-width="4" vector-effect="non-scaling-stroke"/></svg><div class="chart-label">Recorded value path · not a price prediction</div></div><div class="instrument-details"><div><span>Instrument</span><strong>${esc(listing.instrumentId)}</strong></div><div><span>Available</span><strong>${number.format(available(listing))} ${esc(listing.unit || 'SRA')}</strong></div><div><span>Pricing method</span><strong>${esc(listing.pricing?.method || 'Awaiting approved terms')}</strong></div><div><span>Access</span><strong>${esc(listing.access?.eligibilityRule || listing.access?.state || 'Controlled')}</strong></div></div></section>
+        <section class="market-watch"><div class="terminal-panel-head"><strong>Market Watch</strong><span>${filtered().length} shown</span></div><div class="market-table-head"><span>Market</span><span>Price</span><span>Quantity</span><span>Status</span></div><div class="market-rows">${marketRows()}</div></section>
+        <section class="instrument-chart"><div class="terminal-panel-head"><div><strong>${esc(marketIdentity(listing))}</strong><small>${esc(listing.listingId)}</small></div><span>${esc(status(listing))}</span></div><div class="chart-price"><strong>${price(listing) ? usd.format(price(listing)) : 'Price pending'}</strong><span>${esc(listing.title || listing.instrumentId)}</span></div><div class="market-chart" aria-label="Recorded value chart"><div class="chart-grid"></div><svg viewBox="0 0 700 260" preserveAspectRatio="none"><polyline points="0,205 70,175 140,188 210,132 280,148 350,102 420,118 490,74 560,91 630,45 700,58" fill="none" stroke="currentColor" stroke-width="4" vector-effect="non-scaling-stroke"/></svg><div class="chart-label">Recorded value path · not a price prediction</div></div><div class="instrument-details"><div><span>Instrument</span><strong>${esc(listing.instrumentId)}</strong></div><div><span>Coin Position</span><strong>${esc(listing.coinPositionId || 'Linked through lineage')}</strong></div><div><span>Available</span><strong>${number.format(available(listing))} ${esc(listing.unit || 'SRA')}</strong></div><div><span>Pricing method</span><strong>${esc(listing.pricing?.method || 'Awaiting approved terms')}</strong></div><div><span>Access</span><strong>${esc(listing.access?.eligibilityRule || listing.access?.state || 'Controlled')}</strong></div></div></section>
         <section class="market-depth"><div class="terminal-panel-head"><strong>Market Depth</strong><span>Indicative</span></div><div class="depth-head"><span>Price</span><span>Quantity</span><span>Side</span></div>${depthRows(listing)}<div class="terminal-panel-head tape-head"><strong>Market Tape</strong><span>Recorded</span></div>${activityRows()}</section>
         ${orderTicket(listing)}
+        ${originPanel(listing)}
       </div>
     </section>`;
   }
