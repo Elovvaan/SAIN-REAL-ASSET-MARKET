@@ -168,15 +168,15 @@ export async function createApp(options = {}) {
   app.use('/api/sane', createSaneRouter(undefined, saneEdxOperationsService, sraAgentService));
   app.use('/api/creative-finance', createCreativeFinanceRouter(creativeFinanceService));
   app.use('/api/value-intelligence', createValueIntelligenceRouter(valueIntelligenceService));
-  app.use('/api/edx', createEdxConnectionRouter(edxConnectionService));
-  app.use('/api/edx', createEdxPermissionRouter(edxPermissionService));
-  app.use('/api/edx', createEdxExtractionRouter(edxExtractionService));
-  app.use('/api/edx', createEdxNormalizationRouter(edxNormalizationService));
-  app.use('/api/edx', createEdxSnapshotRouter(edxSnapshotService));
-  app.use('/api/edx', createEdxValuePackageRouter(edxValuePackageService));
-  app.use('/api/edx', createEdxMarketplacePublisherRouter(edxMarketplacePublisherService));
-  app.use('/api/edx', createEdxDashboardIntelligenceRouter(edxDashboardIntelligenceService));
-  app.use('/api/edx', createEdxEnterpriseSdkRouter(edxEnterpriseSdkService));
+  app.use('/api/edx/connections', createEdxConnectionRouter(edxConnectionService));
+  app.use('/api/edx/permissions', createEdxPermissionRouter(edxPermissionService));
+  app.use('/api/edx/extractions', createEdxExtractionRouter(edxExtractionService));
+  app.use('/api/edx/normalization', createEdxNormalizationRouter(edxNormalizationService));
+  app.use('/api/edx/snapshots', createEdxSnapshotRouter(edxSnapshotService));
+  app.use('/api/edx/value-packages', createEdxValuePackageRouter(edxValuePackageService));
+  app.use('/api/edx/marketplace', createEdxMarketplacePublisherRouter(edxMarketplacePublisherService));
+  app.use('/api/edx/intelligence', createEdxDashboardIntelligenceRouter(edxDashboardIntelligenceService));
+  app.use('/api/edx/sdk', createEdxEnterpriseSdkRouter(edxEnterpriseSdkService));
   app.use('/api/home-financing', createHomeFinancingRouter(homeFinancingService));
   app.use('/api/sra-settlement', createSraSettlementRouter(sraSettlementService));
 
@@ -191,5 +191,5 @@ export async function createApp(options = {}) {
 
   app.use((req, res) => res.status(404).json({ error: 'Not found.' }));
 
-  return { app, database, persistentDomain, marketplace, observationLayerService, financialRecordService };
+  return { app, database, persistentDomain, marketplace, observationLayerService, financialRecordService, accessService };
 }
