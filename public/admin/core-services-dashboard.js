@@ -2,6 +2,7 @@
   let timer = null;
 
   const number = (value) => Number(value || 0).toLocaleString();
+  const money = (value) => Number(value || 0).toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
   const when = (value) => value ? new Date(value).toLocaleString() : 'Waiting';
 
   async function request(url, options) {
@@ -22,18 +23,26 @@
         <div><h4 style="margin:0 0 8px">Engine cycle</h4><div id="core-engine-list" style="display:grid;gap:7px"></div></div>
         <div><h4 style="margin:0 0 8px">Operational explanation</h4><p id="core-services-reply" style="color:#c5d8c8"></p><div id="core-services-attention" style="display:grid;gap:6px"></div><p id="core-services-next" style="color:#9ab5a0"></p></div>
       </div>
+      <div id="publication-decision-queue" style="margin-top:14px;padding:14px;border:1px solid #43542a;border-radius:12px;background:#0c1409">
+        <div style="display:flex;justify-content:space-between;gap:12px"><div><h4 style="margin:0">Publication Decision Queue</h4><p id="publication-queue-reply" style="margin:4px 0;color:#c8d6b0"></p></div><strong id="publication-queue-state" style="color:#d6c86d">CHECKING</strong></div>
+        <div id="publication-queue-summary" style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:10px 0"></div>
+        <div style="display:flex;gap:9px;flex-wrap:wrap"><button id="refresh-publication-queue">Refresh queue</button><button id="approve-publication-queue" class="primary">Authorize current valid set</button></div>
+        <p id="publication-queue-message" style="color:#9ab5a0"></p>
+      </div>
       <div style="display:flex;gap:9px;flex-wrap:wrap;margin-top:14px"><button id="refresh-core-services">Refresh pulse</button><button id="run-core-services-cycle" class="primary">Run cycle now</button></div>
       <p id="core-services-message" style="color:#9ab5a0">Loading the latest platform cycle.</p>
     </section>`);
     document.querySelector('#refresh-core-services').addEventListener('click', load);
     document.querySelector('#run-core-services-cycle').addEventListener('click', runCycle);
+    document.querySelector('#refresh-publication-queue').addEventListener('click', load);
+    document.querySelector('#approve-publication-queue').addEventListener('click', approvePublicationQueue);
   }
 
   function card(label, value) {
     return `<div style="padding:10px;border:1px solid #1f3925;border-radius:10px"><span style="display:block;color:#89a78f;font-size:10px">${label}</span><strong style="font-size:17px">${value}</strong></div>`;
   }
 
-  function render(brief) {
+  function render(brief, queue) {
     document.querySelector('#core-services-state').textContent = String(brief.state || 'UNKNOWN').replaceAll('_', ' ');
     const heartbeat = brief.heartbeat || {};
     document.querySelector('#core-heartbeat-summary').innerHTML = [
@@ -48,13 +57,42 @@
     document.querySelector('#core-services-attention').innerHTML = (brief.attention || []).map((item) => `<div style="padding:8px;border-radius:8px;background:#101a12;color:#d6c995">${item}</div>`).join('') || '<div style="color:#75d18a">No core-services exception is currently reported.</div>';
     document.querySelector('#core-services-next').textContent = brief.nextAction || '';
     document.querySelector('#core-services-message').textContent = heartbeat.latestCycleId ? `Latest cycle ${heartbeat.latestCycleId}` : 'Waiting for the first cycle.';
+
+    document.querySelector('#publication-queue-state').textContent = String(queue.queueState || 'UNKNOWN').replaceAll('_', ' ');
+    document.querySelector('#publication-queue-reply').textContent = queue.reply || '';
+    document.querySelector('#publication-queue-summary').innerHTML = [
+      ['Ready listings', number(queue.eligibleListingCount)], ['Instruments', number(queue.instrumentCount)], ['SRA quantity', number(queue.totalQuantity)], ['Indicative value', money(queue.totalIndicativeValue)]
+    ].map(([label, value]) => card(label, value)).join('');
+    const button = document.querySelector('#approve-publication-queue');
+    button.disabled = Number(queue.eligibleListingCount || 0) === 0;
+    document.querySelector('#publication-queue-message').textContent = queue.nextAction || '';
   }
 
   async function load() {
     ensurePanel();
     if (!document.querySelector('#sra-core-services-dashboard')) return;
-    try { render(await request('/api/sane/core-services/brief')); }
-    catch (error) { document.querySelector('#core-services-message').textContent = error.message; }
+    try {
+      const [brief, queue] = await Promise.all([
+        request('/api/sane/core-services/brief'),
+        request('/api/sane/core-services/publication-queue'),
+      ]);
+      render(brief, queue);
+    } catch (error) { document.querySelector('#core-services-message').textContent = error.message; }
+  }
+
+  async function approvePublicationQueue() {
+    const queue = await request('/api/sane/core-services/publication-queue');
+    const count = Number(queue.eligibleListingCount || 0);
+    if (!count || !confirm(`Publish the current valid set of ${number(count)} SRA / USD listings? This does not create orders or settlement.`)) return;
+    const button = document.querySelector('#approve-publication-queue');
+    button.disabled = true; button.textContent = 'Publishing valid set...';
+    try {
+      const result = await request('/api/admin/listing-publication-batch/approve', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ approval: 'APPROVE' }) });
+      window.append?.(`Publication batch ${result.batchId}: ${number(result.publishedListingCount)} listings are now LIVE.`, 'agent');
+      await load();
+      await window.loadSummary?.();
+    } catch (error) { document.querySelector('#publication-queue-message').textContent = error.message; }
+    finally { button.textContent = 'Authorize current valid set'; }
   }
 
   async function runCycle() {

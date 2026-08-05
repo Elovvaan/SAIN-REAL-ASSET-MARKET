@@ -6,6 +6,7 @@ import { SraCoreServicesHeartbeat } from '../services/sra-core-services-heartbea
 import { createSraCoreEngineRegistry } from '../services/sra-core-engine-registry.js';
 import { buildSraCoreOperationalBrief } from '../services/sra-core-operational-brief-service.js';
 import { ListingReadinessPolicyService } from '../services/listing-readiness-policy-service.js';
+import { PublicationDecisionQueueService } from '../services/publication-decision-queue-service.js';
 
 function actorId(req) {
   return req.sraIdentity?.actorId || req.headers['x-sra-actor-id'] || req.body?.actorId || null;
@@ -16,6 +17,7 @@ export function createSaneRouter(service = new SaneSkillService(), edxOperations
   const domain = edxOperationsService?.domain || null;
   const hybridLiquidity = domain ? new HybridLiquidityMarketService(domain) : null;
   const listingReadinessPolicy = domain ? new ListingReadinessPolicyService(domain) : null;
+  const publicationDecisionQueue = domain ? new PublicationDecisionQueueService(domain) : null;
   const coreHeartbeat = domain ? new SraCoreServicesHeartbeat({
     domain,
     eventBus: new SraCoreEventBus({
@@ -71,6 +73,11 @@ export function createSaneRouter(service = new SaneSkillService(), edxOperations
     if (!coreHeartbeat) return res.status(503).json({ error: 'SRA Core Services are unavailable.' });
     try { return res.json(await coreHeartbeat.runCycle(req.body?.trigger || 'ADMIN_REQUEST')); }
     catch (error) { return res.status(422).json({ error: error.message, code: 'SRA_CORE_CYCLE_FAILED' }); }
+  });
+
+  router.get('/core-services/publication-queue', (_req, res) => {
+    if (!publicationDecisionQueue) return res.status(503).json({ error: 'Publication decision queue is unavailable.' });
+    return res.json(publicationDecisionQueue.explain());
   });
 
   router.get('/core-services/readiness-policy', (_req, res) => {
