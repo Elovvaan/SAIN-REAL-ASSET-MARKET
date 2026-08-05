@@ -178,6 +178,7 @@ export async function createApp(options = {}) {
   app.use('/api/value-intelligence', createValueIntelligenceRouter(valueIntelligenceService));
   app.use('/api/edx/connections', createEdxConnectionRouter(edxConnectionService));
   app.use('/api/edx/permissions', createEdxPermissionRouter(edxPermissionService));
+  app.use('/api/edx/extractions', createEdxExtractionRouter(edxExtractionService));
   app.use('/api/edx/extraction', createEdxExtractionRouter(edxExtractionService));
   app.use('/api/edx/normalization', createEdxNormalizationRouter(edxNormalizationService));
   app.use('/api/edx/snapshots', createEdxSnapshotRouter(edxSnapshotService));
