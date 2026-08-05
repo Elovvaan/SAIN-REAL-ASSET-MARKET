@@ -51,6 +51,45 @@ test('incomplete lifecycle is rejected before export', async () => {
   await assert.rejects(() => service.createExportPackage({ observationId: 'OBS-MISSING' }), /Internal lifecycle is incomplete/);
 });
 
+test('records from unrelated chains cannot be packaged together', async () => {
+  const domain = new MemoryDomain();
+  seedCompleteLifecycle(domain);
+  domain.seed(RECORD_TYPES.MARKETPLACE_LISTING, 'LST-BAD', { listingId: 'LST-BAD', instrumentId: 'INS-OTHER', state: 'PUBLISHED' });
+  const service = new InternalLifecycleService(domain);
+  const ownership = await service.recognizeOwnership({
+    settlementRecordId: 'SET-1',
+    allocationPositionId: 'ALL-1',
+    ownerId: 'OWNER-1',
+  });
+
+  const inspection = service.inspect({
+    ...references,
+    listingId: 'LST-BAD',
+    ownershipRecognitionId: ownership.ownershipRecognition.ownershipRecognitionId,
+  });
+
+  assert.equal(inspection.complete, false);
+  assert.equal(inspection.valid, false);
+  assert.ok(inspection.issues.some((issue) => issue.code === 'LIFECYCLE_LINK_MISMATCH'));
+  await assert.rejects(
+    () => service.createExportPackage({ references: { ...references, listingId: 'LST-BAD', ownershipRecognitionId: ownership.ownershipRecognition.ownershipRecognitionId } }),
+    /invalid:/,
+  );
+});
+
+test('ownership recognition rejects mismatched settlement and allocation', async () => {
+  const domain = new MemoryDomain();
+  seedCompleteLifecycle(domain);
+  domain.seed(RECORD_TYPES.SRA_SETTLEMENT_RECORD, 'SET-BAD', {
+    settlementRecordId: 'SET-BAD', participantId: 'OWNER-1', instrumentId: 'INS-OTHER', listingId: 'LST-1', state: 'SETTLED',
+  });
+  const service = new InternalLifecycleService(domain);
+  await assert.rejects(
+    () => service.recognizeOwnership({ settlementRecordId: 'SET-BAD', allocationPositionId: 'ALL-1', ownerId: 'OWNER-1' }),
+    /instrument references do not match/,
+  );
+});
+
 test('complete internal lifecycle recognizes ownership and creates one immutable export package', async () => {
   const domain = new MemoryDomain();
   seedCompleteLifecycle(domain);
@@ -67,7 +106,9 @@ test('complete internal lifecycle recognizes ownership and creates one immutable
   const completeReferences = { ...references, ownershipRecognitionId: ownership.ownershipRecognition.ownershipRecognitionId };
   const inspection = service.inspect(completeReferences);
   assert.equal(inspection.complete, true);
+  assert.equal(inspection.valid, true);
   assert.deepEqual(inspection.missing, []);
+  assert.deepEqual(inspection.issues, []);
 
   const first = await service.createExportPackage({
     references: completeReferences,
@@ -76,9 +117,14 @@ test('complete internal lifecycle recognizes ownership and creates one immutable
   assert.equal(first.created, true);
   assert.equal(first.exportPackage.state, 'READY_FOR_EXPORT');
   assert.equal(first.exportPackage.immutable, true);
+  assert.equal(first.exportPackage.ownershipRecognitionId, ownership.ownershipRecognition.ownershipRecognitionId);
   assert.match(first.exportPackage.packageDigest, /^[a-f0-9]{64}$/);
   assert.equal(first.exportPackage.manifest.sourceSystem, 'SRA');
   assert.equal(first.exportPackage.manifest.boundary, 'EXPORT_BOUNDARY');
+
+  const verification = service.verifyExportPackage(first.exportPackage.exportPackageId);
+  assert.equal(verification.valid, true);
+  assert.equal(verification.storedDigest, verification.calculatedDigest);
 
   const second = await service.createExportPackage({
     references: completeReferences,
@@ -87,5 +133,24 @@ test('complete internal lifecycle recognizes ownership and creates one immutable
   assert.equal(second.created, false);
   assert.equal(second.exportPackage.exportPackageId, first.exportPackage.exportPackageId);
   assert.equal(second.exportPackage.packageDigest, first.exportPackage.packageDigest);
+  assert.equal(service.getExportPackage(first.exportPackage.exportPackageId).exportPackageId, first.exportPackage.exportPackageId);
+  assert.equal(service.listExportPackages({ state: 'READY_FOR_EXPORT' }).length, 1);
+  assert.equal(domain.events.some((event) => event.eventType === 'SRA_OWNERSHIP_RECOGNIZED'), true);
   assert.equal(domain.events.some((event) => event.eventType === 'SRA_ASSET_READY_FOR_EXPORT'), true);
+});
+
+test('export package digest detects post-creation mutation', async () => {
+  const domain = new MemoryDomain();
+  seedCompleteLifecycle(domain);
+  const service = new InternalLifecycleService(domain);
+  const ownership = await service.recognizeOwnership({ settlementRecordId: 'SET-1', allocationPositionId: 'ALL-1', ownerId: 'OWNER-1' });
+  const created = await service.createExportPackage({ references: { ...references, ownershipRecognitionId: ownership.ownershipRecognition.ownershipRecognitionId } });
+
+  const stored = domain.get(RECORD_TYPES.EXPORT_PACKAGE, created.exportPackage.exportPackageId);
+  stored.manifest.records.settlement.state = 'ALTERED';
+  domain.records.set(domain.key(RECORD_TYPES.EXPORT_PACKAGE, created.exportPackage.exportPackageId), stored);
+
+  const verification = service.verifyExportPackage(created.exportPackage.exportPackageId);
+  assert.equal(verification.valid, false);
+  assert.notEqual(verification.storedDigest, verification.calculatedDigest);
 });
