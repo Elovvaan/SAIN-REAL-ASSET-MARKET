@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import express, { Router } from 'express';
 import { AccessService } from '../services/access-service.js';
 import { MarketplaceListingService } from '../services/marketplace-listing-service.js';
+import { AdminIntelligenceAgentService } from '../services/admin-intelligence-agent-service.js';
 import { RECORD_TYPES } from '../services/persistent-domain-service.js';
 
 function readCookie(req, name) {
@@ -35,6 +36,7 @@ function safeEqual(left, right) {
 export async function createPrivateAdminRouter({ database, domain, coinbasePublicMarket = null }) {
   const access = new AccessService({ database });
   const marketplaceListings = new MarketplaceListingService(domain);
+  const intelligenceAgent = new AdminIntelligenceAgentService({ domain, database });
   await access.initialize();
   const router = Router();
   router.use(express.json({ limit: '256kb' }));
@@ -119,6 +121,20 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
     return res.json({ signedOut: true });
   });
 
+  router.get('/api/admin/agent/capabilities', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    return res.json(intelligenceAgent.capabilities());
+  });
+
+  router.post('/api/admin/agent/query', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    try {
+      return res.json(await intelligenceAgent.ask(req.body || {}, session));
+    } catch (error) {
+      return res.status(400).json({ error: error.message, code: 'SRA_ADMIN_AGENT_QUERY_FAILED' });
+    }
+  });
+
   router.get('/api/admin/summary', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
     const coinbase = coinbasePublicMarket?.status?.() || null;
@@ -158,10 +174,12 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
         blockerCounts
       },
       connectors: { coinbasePublicMarket: coinbase },
+      adminIntelligenceAgent: intelligenceAgent.capabilities(),
       approvalBoundary: {
-        agentWriteAccess: 'DISABLED',
+        agentWriteAccess: 'HUMAN_IN_THE_LOOP',
+        autonomousReadAndReason: true,
         stateChangesRequireApproval: true,
-        protectedAreas: ['FINANCIAL_RECORDS','RECOGNITION','COIN_POSITIONS','INSTRUMENTS','MARKETPLACE_LISTINGS','TRANSACTIONS','TREASURY','SETTLEMENT','CONNECTORS','ACCOUNT_AUTHORITY']
+        protectedAreas: ['FINANCIAL_RECORDS','RECOGNITION','COIN_POSITIONS','INSTRUMENTS','MARKETPLACE_LISTINGS','TRANSACTIONS','TREASURY','SETTLEMENT','OWNERSHIP_RECOGNITION','EXPORT_PACKAGING','CONNECTORS','ACCOUNT_AUTHORITY']
       }
     });
   });
