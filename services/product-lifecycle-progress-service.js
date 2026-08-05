@@ -1,4 +1,5 @@
 const TYPES = Object.freeze({
+  PRODUCT_DEFINITION: 'SRA_PRODUCT_DEFINITION',
   INSTRUMENT: 'SRA_INSTRUMENT',
   LISTING: 'MARKETPLACE_LISTING',
   PARTICIPATION: 'PARTICIPATION_POSITION',
@@ -23,6 +24,22 @@ function family(record) {
   return String(record?.instrumentFamily || record?.instrumentType || '').toUpperCase();
 }
 
+function uniqueUpper(values = []) {
+  return [...new Set(values.map((item) => String(item || '').trim().toUpperCase()).filter(Boolean))];
+}
+
+function activeProductDefinition(domain, productCode) {
+  const direct = domain.get?.(TYPES.PRODUCT_DEFINITION, productCode) || null;
+  const definition = direct || domain.list(TYPES.PRODUCT_DEFINITION).find((record) => String(record?.productCode || record?.productDefinitionId || record?.id || '').toUpperCase() === productCode) || null;
+  return definition && String(definition.state || '').toUpperCase() === 'ACTIVE' ? definition : null;
+}
+
+function resolveInstrumentFamilies(domain, productCode) {
+  const definition = activeProductDefinition(domain, productCode);
+  const configured = uniqueUpper(definition?.instrumentFamilies || []);
+  return configured.length ? { definition, instrumentFamilies: configured } : { definition: null, instrumentFamilies: [productCode] };
+}
+
 function recordSummary(record, idFields) {
   if (!record) return null;
   return {
@@ -35,7 +52,9 @@ export function scanProductLifecycleProgress(domain, productCode) {
   const code = String(productCode || '').trim().toUpperCase();
   if (!code) throw new Error('productCode is required.');
 
-  const instruments = domain.list(TYPES.INSTRUMENT).filter((record) => family(record) === code);
+  const { definition, instrumentFamilies } = resolveInstrumentFamilies(domain, code);
+  const acceptedFamilies = new Set(instrumentFamilies);
+  const instruments = domain.list(TYPES.INSTRUMENT).filter((record) => acceptedFamilies.has(family(record)));
   const listings = domain.list(TYPES.LISTING);
   const participations = domain.list(TYPES.PARTICIPATION);
   const commitments = domain.list(TYPES.COMMITMENT);
@@ -46,6 +65,7 @@ export function scanProductLifecycleProgress(domain, productCode) {
 
   const chains = instruments.map((instrument) => {
     const instrumentId = value(instrument, ['instrumentId', 'id']);
+    const instrumentFamily = family(instrument);
     const listing = listings.find((record) => matches(record, ['instrumentId'], [instrumentId])) || null;
     const listingId = value(listing, ['listingId', 'id']);
     const participation = participations.find((record) => matches(record, ['instrumentId', 'listingId'], [instrumentId, listingId])) || null;
@@ -74,7 +94,7 @@ export function scanProductLifecycleProgress(domain, productCode) {
     const ordered = Object.entries(stages);
     const firstMissing = ordered.find(([, stage]) => !stage)?.[0] || null;
     const completedStages = ordered.filter(([, stage]) => Boolean(stage)).map(([name]) => name);
-    return { instrumentId, instrumentFamily: code, completedStages, firstMissing, readyForExport: Boolean(exportPackage), stages };
+    return { instrumentId, instrumentFamily, completedStages, firstMissing, readyForExport: Boolean(exportPackage), stages };
   });
 
   const stageCounts = {};
@@ -84,6 +104,8 @@ export function scanProductLifecycleProgress(domain, productCode) {
 
   return {
     productCode: code,
+    productDefinitionId: definition ? value(definition, ['productDefinitionId', 'id', 'productCode']) : null,
+    instrumentFamilies,
     instrumentCount: instruments.length,
     stageCounts,
     furthestStage: [...Object.keys(stageCounts)].reverse().find((stage) => stageCounts[stage] > 0) || null,
