@@ -1,11 +1,14 @@
 import crypto from 'node:crypto';
 
 const RECORD_TYPE = 'FUNDING_OPPORTUNITY';
+const EVIDENCE_RECORD_TYPE = 'FUNDING_OPPORTUNITY_EVIDENCE';
+const VERIFICATION_REQUEST_TYPE = 'FUNDING_OPPORTUNITY_VERIFICATION_REQUEST';
 const STATES = Object.freeze([
   'DRAFT',
   'INTAKE_IN_PROGRESS',
   'INTAKE_COMPLETE',
   'PENDING_VERIFICATION',
+  'VERIFICATION_IN_PROGRESS',
   'WITHDRAWN',
 ]);
 
@@ -13,8 +16,8 @@ function now() {
   return new Date().toISOString();
 }
 
-function id() {
-  return `FOR-${crypto.randomUUID().split('-')[0].toUpperCase()}`;
+function id(prefix = 'FOR') {
+  return `${prefix}-${crypto.randomUUID().split('-')[0].toUpperCase()}`;
 }
 
 function requireFields(payload, fields) {
@@ -32,7 +35,7 @@ export class FundingOpportunityIntakeService {
   }
 
   async initialize() {
-    await this.domain.hydrate([RECORD_TYPE]);
+    await this.domain.hydrate([RECORD_TYPE, EVIDENCE_RECORD_TYPE, VERIFICATION_REQUEST_TYPE]);
     return this.status();
   }
 
@@ -42,6 +45,8 @@ export class FundingOpportunityIntakeService {
       recordType: RECORD_TYPE,
       purpose: 'STANDARDIZED_FUNDING_OPPORTUNITY_INTAKE',
       count: this.domain.list(RECORD_TYPE).length,
+      evidenceCount: this.domain.list(EVIDENCE_RECORD_TYPE).length,
+      verificationRequestCount: this.domain.list(VERIFICATION_REQUEST_TYPE).length,
     };
   }
 
@@ -58,6 +63,14 @@ export class FundingOpportunityIntakeService {
     return this.domain.get(RECORD_TYPE, opportunityId);
   }
 
+  listEvidence(opportunityId) {
+    return this.domain.list(EVIDENCE_RECORD_TYPE).filter((record) => record.opportunityId === opportunityId);
+  }
+
+  listVerificationRequests(opportunityId) {
+    return this.domain.list(VERIFICATION_REQUEST_TYPE).filter((record) => record.opportunityId === opportunityId);
+  }
+
   async create(input, actorId = null) {
     requireFields(input, ['applicantParticipantId', 'title', 'opportunityType', 'purpose', 'requestedAmount', 'currency']);
     const participant = this.domain.get('PARTICIPANT', input.applicantParticipantId);
@@ -69,7 +82,7 @@ export class FundingOpportunityIntakeService {
     }
 
     const record = {
-      opportunityId: input.opportunityId || id(),
+      opportunityId: input.opportunityId || id('FOR'),
       applicantParticipantId: input.applicantParticipantId,
       applicantType: input.applicantType || participant.type || 'PARTICIPANT',
       title: input.title,
@@ -82,11 +95,13 @@ export class FundingOpportunityIntakeService {
       expectedCompletionDate: input.expectedCompletionDate || null,
       fundingStages: input.fundingStages || [],
       supportingDocumentIds: unique(input.supportingDocumentIds || []),
+      evidenceRecordIds: [],
       relatedParticipantIds: unique([input.applicantParticipantId, ...(input.relatedParticipantIds || [])]),
       relatedAgreementIds: unique(input.relatedAgreementIds || []),
       relatedAssetIds: unique(input.relatedAssetIds || []),
       relatedProjectIds: unique(input.relatedProjectIds || []),
       sourceTransactionIds: unique(input.sourceTransactionIds || []),
+      verificationRequestIds: [],
       intakeNotes: input.intakeNotes || null,
       status: 'INTAKE_IN_PROGRESS',
       fundingPhase: 'OPPORTUNITY_INTAKE',
@@ -155,6 +170,55 @@ export class FundingOpportunityIntakeService {
     return updated;
   }
 
+  async registerEvidence(opportunityId, input, actorId = null) {
+    const opportunity = this.get(opportunityId);
+    if (!opportunity) throw new Error('Funding opportunity was not found.');
+    if (opportunity.status === 'WITHDRAWN') throw new Error('Evidence cannot be added to a withdrawn opportunity.');
+    requireFields(input, ['evidenceType', 'sourceReference']);
+
+    const evidence = {
+      evidenceId: input.evidenceId || id('FOE'),
+      opportunityId,
+      evidenceType: input.evidenceType,
+      title: input.title || null,
+      sourceReference: input.sourceReference,
+      documentId: input.documentId || null,
+      agreementId: input.agreementId || null,
+      transactionId: input.transactionId || null,
+      participantIds: unique(input.participantIds || []),
+      assetIds: unique(input.assetIds || []),
+      projectIds: unique(input.projectIds || []),
+      provenance: input.provenance || {},
+      status: input.status || 'REGISTERED',
+      verificationStatus: 'NOT_STARTED',
+      submittedBy: actorId,
+      submittedAt: now(),
+      updatedAt: now(),
+    };
+
+    await this.domain.put(EVIDENCE_RECORD_TYPE, evidence.evidenceId, evidence, {
+      actorId,
+      eventType: 'FUNDING_OPPORTUNITY_EVIDENCE_REGISTERED',
+    });
+
+    const updated = {
+      ...opportunity,
+      evidenceRecordIds: unique([...(opportunity.evidenceRecordIds || []), evidence.evidenceId]),
+      supportingDocumentIds: unique([...(opportunity.supportingDocumentIds || []), evidence.documentId]),
+      relatedAgreementIds: unique([...(opportunity.relatedAgreementIds || []), evidence.agreementId]),
+      sourceTransactionIds: unique([...(opportunity.sourceTransactionIds || []), evidence.transactionId]),
+      relatedParticipantIds: unique([...(opportunity.relatedParticipantIds || []), ...evidence.participantIds]),
+      relatedAssetIds: unique([...(opportunity.relatedAssetIds || []), ...evidence.assetIds]),
+      relatedProjectIds: unique([...(opportunity.relatedProjectIds || []), ...evidence.projectIds]),
+      updatedAt: now(),
+    };
+    await this.domain.put(RECORD_TYPE, opportunityId, updated, {
+      actorId,
+      eventType: 'FUNDING_OPPORTUNITY_EVIDENCE_LINKED',
+    });
+    return evidence;
+  }
+
   assessCompleteness(opportunityId) {
     const record = this.get(opportunityId);
     if (!record) throw new Error('Funding opportunity was not found.');
@@ -176,6 +240,7 @@ export class FundingOpportunityIntakeService {
       supportingDocumentsRegistered: Array.isArray(record.supportingDocumentIds) && record.supportingDocumentIds.length > 0,
       agreementsRegistered: Array.isArray(record.relatedAgreementIds) && record.relatedAgreementIds.length > 0,
       sourceTransactionsRegistered: Array.isArray(record.sourceTransactionIds) && record.sourceTransactionIds.length > 0,
+      evidenceRecordsRegistered: Array.isArray(record.evidenceRecordIds) && record.evidenceRecordIds.length > 0,
     };
 
     const missingRequired = Object.entries(required).filter(([, present]) => !present).map(([field]) => field);
@@ -229,11 +294,78 @@ export class FundingOpportunityIntakeService {
       payload: {
         nextPhase: 'PENDING_VERIFICATION',
         supportingDocumentCount: updated.supportingDocumentIds.length,
+        evidenceRecordCount: updated.evidenceRecordIds.length,
         relatedAgreementCount: updated.relatedAgreementIds.length,
         sourceTransactionCount: updated.sourceTransactionIds.length,
       },
     });
     return updated;
+  }
+
+  async createVerificationRequest(opportunityId, input = {}, actorId = null) {
+    const opportunity = this.get(opportunityId);
+    if (!opportunity) throw new Error('Funding opportunity was not found.');
+    if (!['INTAKE_COMPLETE', 'PENDING_VERIFICATION'].includes(opportunity.status)) {
+      throw new Error(`Verification cannot begin from ${opportunity.status}.`);
+    }
+
+    const evidenceIds = unique(input.evidenceIds?.length ? input.evidenceIds : opportunity.evidenceRecordIds || []);
+    const request = {
+      verificationRequestId: input.verificationRequestId || id('FVR'),
+      opportunityId,
+      applicantParticipantId: opportunity.applicantParticipantId,
+      evidenceIds,
+      supportingDocumentIds: unique(opportunity.supportingDocumentIds || []),
+      relatedAgreementIds: unique(opportunity.relatedAgreementIds || []),
+      sourceTransactionIds: unique(opportunity.sourceTransactionIds || []),
+      verificationScope: input.verificationScope || 'FUNDING_OPPORTUNITY_FACTS_AND_RELATIONSHIPS',
+      requestedChecks: input.requestedChecks || [
+        'PARTICIPANT_IDENTITY',
+        'DOCUMENT_PROVENANCE',
+        'AGREEMENT_EXISTENCE',
+        'TRANSACTION_EXISTENCE',
+        'AMOUNT_CONSISTENCY',
+        'RELATIONSHIP_CONSISTENCY',
+      ],
+      status: 'PENDING',
+      requestedBy: actorId,
+      requestedAt: now(),
+      completedAt: null,
+      resultReference: null,
+    };
+
+    await this.domain.put(VERIFICATION_REQUEST_TYPE, request.verificationRequestId, request, {
+      actorId,
+      eventType: 'FUNDING_OPPORTUNITY_VERIFICATION_REQUESTED',
+    });
+
+    const updated = {
+      ...opportunity,
+      status: 'VERIFICATION_IN_PROGRESS',
+      fundingPhase: 'VERIFIED_TRANSACTION_REVIEW',
+      verificationRequestIds: unique([...(opportunity.verificationRequestIds || []), request.verificationRequestId]),
+      updatedAt: now(),
+      history: [
+        ...(opportunity.history || []),
+        { from: opportunity.status, to: 'VERIFICATION_IN_PROGRESS', at: now(), actorId, note: 'Verification request created.' },
+      ],
+    };
+    await this.domain.put(RECORD_TYPE, opportunityId, updated, {
+      actorId,
+      eventType: 'FUNDING_OPPORTUNITY_VERIFICATION_STARTED',
+    });
+    await this.domain.lifecycle({
+      objectType: RECORD_TYPE,
+      objectId: opportunityId,
+      eventType: 'FUNDING_OPPORTUNITY_HANDED_TO_VERIFICATION',
+      actorId,
+      payload: {
+        verificationRequestId: request.verificationRequestId,
+        evidenceCount: request.evidenceIds.length,
+        requestedChecks: request.requestedChecks,
+      },
+    });
+    return request;
   }
 
   async withdraw(opportunityId, reason, actorId = null) {
@@ -260,4 +392,9 @@ export class FundingOpportunityIntakeService {
   }
 }
 
-export { RECORD_TYPE as FUNDING_OPPORTUNITY_RECORD_TYPE, STATES as FUNDING_OPPORTUNITY_STATES };
+export {
+  RECORD_TYPE as FUNDING_OPPORTUNITY_RECORD_TYPE,
+  EVIDENCE_RECORD_TYPE as FUNDING_OPPORTUNITY_EVIDENCE_RECORD_TYPE,
+  VERIFICATION_REQUEST_TYPE as FUNDING_OPPORTUNITY_VERIFICATION_REQUEST_TYPE,
+  STATES as FUNDING_OPPORTUNITY_STATES,
+};
