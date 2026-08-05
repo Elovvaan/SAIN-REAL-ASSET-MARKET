@@ -13,6 +13,7 @@ import { createFundingInstrumentReviewRouter } from './routes/funding-instrument
 import { createFundingInstrumentIssuanceRouter } from './routes/funding-instrument-issuance-router.js';
 import { createFundingMarketplacePreparationRouter } from './routes/funding-marketplace-preparation-router.js';
 import { createFundingMarketplacePublicationRouter } from './routes/funding-marketplace-publication-router.js';
+import { createFundingMarketplaceCommitmentRouter } from './routes/funding-marketplace-commitment-router.js';
 import { CoinbasePublicMarketService } from './services/coinbase-public-market-service.js';
 import { CoinbaseTransactionAssetPipelineService } from './services/coinbase-transaction-asset-pipeline-service.js';
 import { MarketplaceListingService } from './services/marketplace-listing-service.js';
@@ -26,6 +27,7 @@ import { FundingInstrumentReviewService } from './services/funding-instrument-re
 import { FundingInstrumentIssuanceService } from './services/funding-instrument-issuance-service.js';
 import { FundingMarketplacePreparationService } from './services/funding-marketplace-preparation-service.js';
 import { FundingMarketplacePublicationService } from './services/funding-marketplace-publication-service.js';
+import { FundingMarketplaceCommitmentService } from './services/funding-marketplace-commitment-service.js';
 
 const port = Number(process.env.PORT) || 3000;
 const bootstrap = express();
@@ -45,6 +47,7 @@ let fundingInstrumentReviewExtension = null;
 let fundingInstrumentIssuanceExtension = null;
 let fundingMarketplacePreparationExtension = null;
 let fundingMarketplacePublicationExtension = null;
+let fundingMarketplaceCommitmentExtension = null;
 let onChainProjectionService = null;
 let fundingOpportunityService = null;
 let fundingVerificationService = null;
@@ -55,6 +58,7 @@ let fundingInstrumentReviewService = null;
 let fundingInstrumentIssuanceService = null;
 let fundingMarketplacePreparationService = null;
 let fundingMarketplacePublicationService = null;
+let fundingMarketplaceCommitmentService = null;
 let coinbasePublicMarket = null;
 let coinbaseTransactionAssetPipeline = null;
 let marketplaceListingService = null;
@@ -86,6 +90,7 @@ bootstrap.get('/api/startup', (_req, res) => {
     fundingInstrumentIssuance: fundingInstrumentIssuanceService?.status?.() || null,
     fundingMarketplacePreparation: fundingMarketplacePreparationService?.status?.() || null,
     fundingMarketplacePublication: fundingMarketplacePublicationService?.status?.() || null,
+    fundingMarketplaceCommitment: fundingMarketplaceCommitmentService?.status?.() || null,
     startedAt,
     timestamp: new Date().toISOString()
   });
@@ -108,6 +113,7 @@ bootstrap.use(async (req, res, next) => {
   if (privateAdminExtension && (req.path === '/admin' || req.path.startsWith('/admin/') || req.path.startsWith('/api/admin/'))) return privateAdminExtension(req, res, next);
   if (database && req.method === 'POST' && req.path === '/api/access/signin') return rejectPlatformAdminPublicSignin(req, res, next, database);
   if (database && req.method === 'POST' && ['/api/access/capacity', '/api/access/role'].includes(req.path) && String(req.body?.capacity || req.body?.role || '').toUpperCase() === 'PLATFORM_ADMIN') return res.status(403).json({ error: 'Platform Administration is available only through the private administration portal.' });
+  if (fundingMarketplaceCommitmentExtension && req.path.startsWith('/api/funding-marketplace-commitment')) return fundingMarketplaceCommitmentExtension(req, res, next);
   if (fundingMarketplacePublicationExtension && req.path.startsWith('/api/funding-marketplace-publication')) return fundingMarketplacePublicationExtension(req, res, next);
   if (fundingMarketplacePreparationExtension && req.path.startsWith('/api/funding-marketplace')) return fundingMarketplacePreparationExtension(req, res, next);
   if (fundingInstrumentIssuanceExtension && req.path.startsWith('/api/funding-instrument-issuance')) return fundingInstrumentIssuanceExtension(req, res, next);
@@ -164,6 +170,9 @@ try {
   fundingMarketplacePublicationService = new FundingMarketplacePublicationService(created.persistentDomain);
   await fundingMarketplacePublicationService.initialize();
   fundingMarketplacePublicationExtension = createFundingMarketplacePublicationRouter(fundingMarketplacePublicationService);
+  fundingMarketplaceCommitmentService = new FundingMarketplaceCommitmentService(created.persistentDomain);
+  await fundingMarketplaceCommitmentService.initialize();
+  fundingMarketplaceCommitmentExtension = createFundingMarketplaceCommitmentRouter(fundingMarketplaceCommitmentService);
   onChainProjectionService = new OnChainProjectionService(created.persistentDomain);
   await onChainProjectionService.initialize();
   onChainProjectionExtension = createOnChainProjectionRouter(onChainProjectionService);
