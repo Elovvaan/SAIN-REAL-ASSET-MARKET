@@ -1,4 +1,5 @@
 import express from 'express';
+import { scanProductLifecycleProgress } from '../services/product-lifecycle-progress-service.js';
 
 function staff(req) {
   const roles = String(req.get('x-sra-roles') || req.get('x-sra-role') || '').split(',').map((role) => role.trim().toUpperCase()).filter(Boolean);
@@ -31,6 +32,14 @@ export function createProductionReadinessRouter({ readinessService, database }) 
   router.post('/products/qualifications', async (req, res) => { try { const result = await readinessService.qualifyProduct(req.body || {}, actorId(req)); return res.status(result.created ? 201 : 200).json(result); } catch (error) { return res.status(422).json({ error: error.message, code: 'SRA_PRODUCT_QUALIFICATION_FAILED' }); } });
   router.get('/products/qualifications/records', async (req, res) => res.json({ qualifications: await readinessService.listProductQualifications({ productCode: req.query.productCode || null, state: req.query.state || null }) }));
   router.get('/products/qualifications/records/:qualificationId', async (req, res) => { const record = await readinessService.getProductQualification(req.params.qualificationId); if (!record) return res.status(404).json({ error: 'Product qualification not found.', code: 'SRA_PRODUCT_QUALIFICATION_NOT_FOUND' }); return res.json(record); });
+  router.get('/products/:productCode/lifecycle-progress', async (req, res) => {
+    try {
+      await readinessService.productQualificationStatus();
+      return res.json(scanProductLifecycleProgress(readinessService.domain, req.params.productCode));
+    } catch (error) {
+      return res.status(400).json({ error: error.message, code: 'SRA_PRODUCT_LIFECYCLE_PROGRESS_FAILED' });
+    }
+  });
   router.get('/products/:productCode/qualification-candidates', async (req, res) => {
     try { return res.json({ productCode: String(req.params.productCode).toUpperCase(), candidates: await readinessService.findProductQualificationCandidates(req.params.productCode, { evidenceIds: req.query.evidenceId ? [req.query.evidenceId] : [], evidenceClasses: req.query.evidenceClass ? String(req.query.evidenceClass).split(',') : [] }) }); }
     catch (error) { return res.status(400).json({ error: error.message, code: 'SRA_PRODUCT_CANDIDATE_SCAN_FAILED' }); }
