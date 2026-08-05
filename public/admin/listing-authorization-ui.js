@@ -121,18 +121,19 @@
     }
   }
 
-  function loadHybridAdmin() {
-    if (document.querySelector('script[data-hybrid-liquidity-admin]')) return;
+  function loadAdminScript(source, marker) {
+    if (document.querySelector(`script[${marker}]`)) return;
     const script = document.createElement('script');
-    script.src = '/admin/hybrid-liquidity-admin.js';
+    script.src = source;
     script.defer = true;
-    script.dataset.hybridLiquidityAdmin = 'true';
+    script.setAttribute(marker, 'true');
     document.head.append(script);
   }
 
-  const observer = new MutationObserver(() => { if (document.querySelector('#admin-view:not(.hidden)')) { ensurePanel(); } });
+  const observer = new MutationObserver(() => { if (document.querySelector('#admin-view:not(.hidden)')) ensurePanel(); });
   window.addEventListener('DOMContentLoaded', () => {
-    loadHybridAdmin();
+    loadAdminScript('/admin/hybrid-liquidity-admin.js', 'data-hybrid-liquidity-admin');
+    loadAdminScript('/admin/core-services-dashboard.js', 'data-sra-core-services-dashboard');
     observer.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] });
     setTimeout(() => { ensurePanel(); void load(); }, 350);
     timer = setInterval(() => { if (document.querySelector('#admin-view:not(.hidden)')) void load(); }, 15000);
