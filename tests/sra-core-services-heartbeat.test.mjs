@@ -10,14 +10,16 @@ class MemoryDomain {
     this.records = new Map();
     this.cache = new Map();
     this.persisted = persisted;
-    this.database = {
-      listRecords: async (type) => this.persisted[type] || [],
-    };
+    this.database = { listRecords: async (type) => this.persisted[type] || [] };
   }
   key(type, id) { return `${type}:${id}`; }
   list(type) {
+    const prefix = `${type}:`;
     const source = new Map([...this.records, ...this.cache]);
-    return [...source.values()].filter((item) => item.__type === type || item.__recordType === type).map(({ __type, __recordType, ...item }) => item);
+    return [...source.entries()].filter(([key]) => key.startsWith(prefix)).map(([, value]) => {
+      const { __type, ...record } = value;
+      return record;
+    });
   }
   async put(type, id, record) { this.records.set(this.key(type, id), { __type: type, ...record }); return record; }
 }
@@ -35,7 +37,6 @@ test('core heartbeat runs engines, persists cycle, and emits events', async () =
       { name: 'TWO', async run() { return { moved: 4 }; } },
     ],
   });
-
   const result = await heartbeat.runCycle('TEST');
   assert.equal(result.state, 'COMPLETED');
   assert.equal(result.completedEngines, 2);
