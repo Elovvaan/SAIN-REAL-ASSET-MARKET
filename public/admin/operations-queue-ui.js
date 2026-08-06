@@ -72,7 +72,7 @@
     const root = document.querySelector('#coin-agent-result');
     root.innerHTML = '<div class="ops-empty">Inspecting Coin Position and lifecycle lineage…</div>';
     try {
-      const result = await request(`/api/financial-records/coin-positions/${encodeURIComponent(value)}/agent`);
+      const result = await request(`/api/sane/coin-agents/${encodeURIComponent(value)}`);
       renderCoinAgent(result.agent, result.actionImpact);
     } catch (error) {
       root.innerHTML = `<div class="ops-empty">${esc(error.message)}</div>`;
