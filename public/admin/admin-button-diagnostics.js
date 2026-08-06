@@ -7,15 +7,33 @@
   let sessionRecoveryStarted = false;
   let enhancing = false;
 
+  const adminView = () => document.querySelector('#admin-view');
+
+  function lockAdminWorkspace() {
+    const view = adminView();
+    if (!view) return;
+    view.inert = true;
+    view.setAttribute('aria-hidden', 'true');
+    view.style.pointerEvents = 'none';
+    view.style.opacity = '0.22';
+  }
+
+  function unlockAdminWorkspace() {
+    const view = adminView();
+    if (!view) return;
+    view.inert = false;
+    view.removeAttribute('aria-hidden');
+    view.style.pointerEvents = '';
+    view.style.opacity = '';
+  }
+
   function showSignedOutState() {
-    const setupView = document.querySelector('#setup-view');
-    const loginView = document.querySelector('#login-view');
-    const adminView = document.querySelector('#admin-view');
-    setupView?.classList.add('hidden');
-    adminView?.classList.add('hidden');
-    loginView?.classList.remove('hidden');
+    document.querySelector('#setup-view')?.classList.add('hidden');
+    document.querySelector('#admin-view')?.classList.add('hidden');
+    document.querySelector('#login-view')?.classList.remove('hidden');
     const loginError = document.querySelector('#login-error');
     if (loginError) loginError.textContent = 'Your Platform Administration session expired. Sign in again to continue.';
+    lockAdminWorkspace();
   }
 
   function startSessionRecovery() {
@@ -33,14 +51,25 @@
       document.body.append(notice);
     }
     notice.innerHTML = 'Your Platform Administration session expired. <button id="sra-admin-sign-in-again" type="button" style="margin-left:10px">Sign in again</button>';
-    document.querySelector('#sra-admin-sign-in-again')?.addEventListener('click', () => {
-      notice.remove();
-      document.querySelector('#email')?.focus();
-    }, { once: true });
+    document.querySelector('#sra-admin-sign-in-again')?.addEventListener('click', () => document.querySelector('#email')?.focus(), { once: true });
+  }
+
+  function completeSessionRecovery() {
+    if (!sessionRecoveryStarted) return;
+    sessionRecoveryStarted = false;
+    window.__sraAdminSessionExpired = false;
+    document.querySelector('#sra-admin-session-expired')?.remove();
+    unlockAdminWorkspace();
+    window.dispatchEvent(new CustomEvent('sra-admin-session-restored'));
+    window.setTimeout(() => {
+      inspectButtons();
+      void enhanceFundingInstrumentControl();
+    }, 0);
   }
 
   window.fetch = async (input, options = {}) => {
     const url = typeof input === 'string' ? input : String(input?.url || '');
+    const method = String(options.method || input?.method || 'GET').toUpperCase();
     const isAdminRequest = url.startsWith('/api/admin') || url.includes('/api/admin/');
     const isSessionProbe = url.includes('/api/admin/session') || url.includes('/api/admin/bootstrap-status');
     const controller = new AbortController();
@@ -58,6 +87,7 @@
         signal: controller.signal
       });
       if (isAdminRequest && !isSessionProbe && response.status === 401) startSessionRecovery();
+      if (isAdminRequest && response.ok && sessionRecoveryStarted && !['GET', 'HEAD', 'OPTIONS'].includes(method)) completeSessionRecovery();
       if (response.ok) return response;
       const contentType = response.headers.get('content-type') || '';
       if (contentType.includes('application/json')) return response;
@@ -131,6 +161,7 @@
     void enhanceFundingInstrumentControl();
   }
 
+  window.addEventListener('sra-admin-authenticated', completeSessionRecovery);
   const observer = new MutationObserver(inspectButtons);
   observer.observe(document.documentElement, { subtree: true, childList: true });
   if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', inspectButtons, { once: true });
