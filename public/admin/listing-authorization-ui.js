@@ -156,6 +156,7 @@
     loadAdminScript('/admin/hybrid-liquidity-admin.js', 'data-hybrid-liquidity-admin');
     loadAdminScript('/admin/core-services-dashboard.js', 'data-sra-core-services-dashboard');
     loadAdminScript('/admin/operations-queue-ui.js', 'data-sra-operations-queue');
+    loadAdminScript('/admin/treasury-ledger-ui.js', 'data-sra-treasury-ledger');
     const observer = new MutationObserver(() => { if (document.querySelector('#admin-view:not(.hidden)')) { ensurePanel(); void load(); } });
     observer.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] });
     setTimeout(() => { ensurePanel(); void load(); }, 0);
