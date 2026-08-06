@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { ensurePlatformAdministrator } from './admin-bootstrap-service.js';
 
 const CAPACITY_DEFINITIONS = {
   UNIVERSAL: { label: 'Universal Account', tier: 'FREE', feeBasis: 'No account fee. Participation-specific terms may still apply.', activation: 'AUTOMATIC', selfService: false },
@@ -40,6 +41,7 @@ export class AccessService {
     const persistedSessions = this.database ? await this.database.listSessions() : [];
     persistedUsers.forEach((user) => this.users.set(user.email, user));
     persistedSessions.forEach((session) => this.sessions.set(session.tokenHash, session));
+    await ensurePlatformAdministrator(this, { database: this.database });
     if (!this.users.size && process.env.NODE_ENV !== 'production') await this.seedDemoUsers();
   }
 
