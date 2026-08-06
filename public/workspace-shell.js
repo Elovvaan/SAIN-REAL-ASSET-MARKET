@@ -8,5 +8,5 @@
     document.head.append(script);
   };
   load('/workspace-shell-core.js', 'data-sra-workspace-shell-core');
-  load('/participant-workspace-suite.js', 'data-sra-participant-workspace-suite');
+  load('/participant-workspace-bootstrap.js', 'data-sra-participant-workspace-bootstrap');
 })();
