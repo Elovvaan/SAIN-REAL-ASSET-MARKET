@@ -1,6 +1,8 @@
 import express from 'express';
 import { InstrumentEngineService } from '../services/instrument-engine-service.js';
 import { TransactionEngineService } from '../services/transaction-engine-service.js';
+import { SraCoinAgentService } from '../services/sra-coin-agent-service.js';
+import { SraCoinAgentInspectionService } from '../services/sra-coin-agent-inspection-service.js';
 
 function fail(res, error) {
   return res.status(400).json({ error: error?.message || 'Financial record request failed.' });
@@ -10,6 +12,7 @@ export function createFinancialRecordRouter(service) {
   const router = express.Router();
   const instrumentEngine = new InstrumentEngineService(service.persistentDomain);
   const transactionEngine = new TransactionEngineService(service.persistentDomain);
+  const coinAgentInspection = new SraCoinAgentInspectionService(new SraCoinAgentService(service.persistentDomain));
 
   router.get('/', (req, res) => {
     const financialRecords = service.list({ state: req.query.state, accountId: req.query.accountId, classification: req.query.classification });
@@ -20,6 +23,7 @@ export function createFinancialRecordRouter(service) {
     ...service.summary(),
     instrumentEngine: instrumentEngine.summary(),
     transactionEngine: transactionEngine.summary(),
+    coinAgents: coinAgentInspection.list({ limit: 500 }).status,
     phase: 6,
     layer: 'TRANSACTION_ENGINE'
   }));
@@ -39,6 +43,15 @@ export function createFinancialRecordRouter(service) {
   router.get('/coin-positions', (req, res) => {
     const coinPositions = service.listCoinPositions({ state: req.query.state, coinAccountId: req.query.coinAccountId, financialRecordId: req.query.financialRecordId });
     return res.json({ coinPositions, count: coinPositions.length });
+  });
+  router.get('/coin-agents', (req, res) => {
+    try {
+      return res.json(coinAgentInspection.list({ participantId: req.query.participantId || null, limit: req.query.limit || 100 }));
+    } catch (error) { return fail(res, error); }
+  });
+  router.get('/coin-positions/:coinPositionId/agent', (req, res) => {
+    try { return res.json(coinAgentInspection.inspect(req.params.coinPositionId)); }
+    catch (error) { return res.status(404).json({ error: error.message, code: 'SRA_COIN_AGENT_NOT_FOUND' }); }
   });
   router.get('/coin-positions/:coinPositionId', (req, res) => {
     const coinPosition = service.getCoinPosition(req.params.coinPositionId);
