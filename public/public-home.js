@@ -1,5 +1,6 @@
 (() => {
-  const PUBLIC_HOME_VERSION = 'V20';
+  const PUBLIC_HOME_VERSION = 'V21';
+  const PUBLIC_WELCOME = 'Welcome to the Living Marketplace. SRA connects authorized transaction and asset data to recognized financial assets. Source activity moves through Observation, Recognition, Financial Record, Verified Value, SRA Coin representation, instrument formation, and marketplace participation. What would you like to understand or accomplish?';
   const originalFetch = window.fetch.bind(window);
   let syncQueued = false;
 
@@ -32,8 +33,9 @@
   }
 
   function ensurePublicHomeAttributes() {
-    document.body.dataset.publicHome = isSignedOut() ? 'active' : 'inactive';
-    document.body.dataset.publicHomeVersion = PUBLIC_HOME_VERSION;
+    const state = isSignedOut() ? 'active' : 'inactive';
+    if (document.body.dataset.publicHome !== state) document.body.dataset.publicHome = state;
+    if (document.body.dataset.publicHomeVersion !== PUBLIC_HOME_VERSION) document.body.dataset.publicHomeVersion = PUBLIC_HOME_VERSION;
   }
 
   function openAccess(mode) {
@@ -63,15 +65,14 @@
   function removePublicHome() {
     document.querySelectorAll('.public-feature-rail,.public-home-actions').forEach(node => node.remove());
     document.querySelector('#access-actions')?.classList.remove('public-top-access-hidden');
-    document.body.dataset.publicHome = 'inactive';
+    if (document.body.dataset.publicHome !== 'inactive') document.body.dataset.publicHome = 'inactive';
   }
 
   function ownSignedOutCanvas() {
     const root = document.querySelector('#view-root');
     if (!root) return;
     const alreadyOwned = root.children.length === 1 && root.firstElementChild?.id === 'public-decision-canvas';
-    if (alreadyOwned) return;
-    root.innerHTML = '<section id="public-decision-canvas" class="public-decision-canvas" hidden></section>';
+    if (!alreadyOwned) root.innerHTML = '<section id="public-decision-canvas" class="public-decision-canvas" hidden></section>';
   }
 
   function buildPublicHome() {
@@ -83,7 +84,7 @@
     ownSignedOutCanvas();
     document.querySelector('#access-actions')?.classList.add('public-top-access-hidden');
     const title = document.querySelector('#page-title');
-    if (title) title.textContent = 'Living Marketplace';
+    if (title && title.textContent !== 'Living Marketplace') title.textContent = 'Living Marketplace';
 
     if (!document.querySelector('.public-feature-rail-left')) {
       sane.insertAdjacentHTML('beforebegin', cardMarkup(leftCards,'left'));
@@ -95,9 +96,7 @@
     }
 
     const firstMessage = document.querySelector('#chat-log .sane-message');
-    if (firstMessage) {
-      firstMessage.textContent = 'Welcome to the Living Marketplace. SRA connects authorized transaction and asset data to recognized financial assets. Source activity moves through Observation, Recognition, Financial Record, Verified Value, SRA Coin representation, instrument formation, and marketplace participation. What would you like to understand or accomplish?';
-    }
+    if (firstMessage && firstMessage.textContent !== PUBLIC_WELCOME) firstMessage.textContent = PUBLIC_WELCOME;
 
     document.querySelectorAll('[data-public-prompt]:not([data-public-bound])').forEach(button => {
       button.dataset.publicBound = 'true';
@@ -154,24 +153,30 @@
     requestAnimationFrame(syncPublicHome);
   }
 
+  function scheduleAccessSync() {
+    queueSync();
+    setTimeout(queueSync, 50);
+    setTimeout(queueSync, 250);
+  }
+
   window.fetch = async (...args) => {
     const response = await originalFetch(...args);
     const target = typeof args[0] === 'string' ? args[0] : args[0]?.url || '';
     if (target.includes('/api/sane/message') && isSignedOut()) {
       response.clone().json().then(payload=>renderDecisionCanvas(payload,args[1]?.body)).catch(()=>{});
     }
-    if (target.includes('/api/access/')) setTimeout(queueSync, 0);
+    if (target.includes('/api/access/')) scheduleAccessSync();
     return response;
   };
 
   ensureBootStyle();
   document.body?.classList.add('sra-access-resolving');
   window.SRAPublicHome = { version: PUBLIC_HOME_VERSION, refresh: queueSync };
-  window.addEventListener('sra:access-state-changed', queueSync);
-  const observer = new MutationObserver(queueSync);
+  window.addEventListener('sra:access-state-changed', scheduleAccessSync);
   function initialize() {
-    observer.observe(document.body, { childList: true, subtree: true });
     queueSync();
+    setTimeout(queueSync, 100);
+    setTimeout(queueSync, 300);
   }
   if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', initialize, { once: true });
   else initialize();
