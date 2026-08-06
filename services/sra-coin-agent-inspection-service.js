@@ -1,3 +1,5 @@
+import { SraCoinPassportMemoryService } from './sra-coin-passport-memory-service.js';
+
 const IMPACTS = Object.freeze({
   RESOLVE_BLOCKERS: {
     effect: 'Review the position, instrument, ownership, or restriction records that prevent the Coin Position from advancing.',
@@ -54,13 +56,19 @@ const IMPACTS = Object.freeze({
 });
 
 export class SraCoinAgentInspectionService {
-  constructor(coinAgentService) { this.coinAgentService = coinAgentService; }
+  constructor(coinAgentService) {
+    this.coinAgentService = coinAgentService;
+    this.passportMemory = new SraCoinPassportMemoryService(coinAgentService.domain, coinAgentService);
+  }
 
   inspect(positionId) {
     const agent = this.coinAgentService.explain(positionId);
     const impact = IMPACTS[agent.nextEligibleAction] || IMPACTS.INSPECT_POSITION;
+    const intelligence = this.passportMemory.inspect(positionId);
     return {
       agent,
+      passport: intelligence.passport,
+      memory: intelligence.memory,
       actionImpact: {
         action: agent.nextEligibleAction,
         readOnly: true,
@@ -74,6 +82,7 @@ export class SraCoinAgentInspectionService {
 
   list(input = {}) {
     return {
+      assetName: 'SRA Coin',
       agents: this.coinAgentService.list(input),
       status: this.coinAgentService.status(),
     };
