@@ -3,6 +3,7 @@
   let loading = false;
   let sessionKey = '';
   let stateHooked = false;
+  let syncAfterLoad = false;
 
   function currentSessionKey() {
     const session = window.accessState?.session;
@@ -42,6 +43,7 @@
   function loadParticipantSuite() {
     if (suiteLoaded || loading || !window.accessState?.session) return;
     loading = true;
+    syncAfterLoad = false;
 
     const NativeMutationObserver = window.MutationObserver;
     class OneShotMutationObserver {
@@ -60,11 +62,22 @@
       window.MutationObserver = NativeMutationObserver;
       suiteLoaded = true;
       loading = false;
-      sessionKey = currentSessionKey();
+      const loadedSessionKey = currentSessionKey();
+      sessionKey = loadedSessionKey;
+
+      if (!loadedSessionKey) {
+        window.location.reload();
+        return;
+      }
+
+      if (syncAfterLoad) syncAfterLoad = false;
+      queueMicrotask(syncParticipantSuite);
     }, { once: true });
     script.addEventListener('error', () => {
       window.MutationObserver = NativeMutationObserver;
       loading = false;
+      syncAfterLoad = false;
+      queueMicrotask(syncParticipantSuite);
     }, { once: true });
     document.head.append(script);
   }
@@ -72,6 +85,12 @@
   function syncParticipantSuite() {
     hookAccessState();
     const nextKey = currentSessionKey();
+
+    if (loading) {
+      syncAfterLoad = true;
+      return;
+    }
+
     if (!nextKey) {
       if (suiteLoaded) window.location.reload();
       return;
