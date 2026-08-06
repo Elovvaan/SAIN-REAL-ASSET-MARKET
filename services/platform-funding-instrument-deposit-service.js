@@ -8,7 +8,18 @@ const CREDIT_ACCOUNT = 'TRSY-2200-PLATFORM-INSTRUMENT-FUNDING';
 function now() { return new Date().toISOString(); }
 function text(value, field) { const result = String(value || '').trim(); if (!result) throw new Error(`${field} is required.`); return result; }
 function amount(value) { const result = Number(value); if (!Number.isFinite(result) || result <= 0) throw new Error('faceValueUsd must be greater than zero.'); return Number(result.toFixed(8)); }
-function deterministicId(reference) { return `PFID-${crypto.createHash('sha256').update(String(reference)).digest('hex').slice(0, 16).toUpperCase()}`; }
+function digestId(prefix, value) { return `${prefix}-${crypto.createHash('sha256').update(String(value)).digest('hex').slice(0, 16).toUpperCase()}`; }
+function updateAccount(account, side, value, entryId, timestamp) {
+  const increase = side === account.normalSide;
+  return {
+    ...account,
+    balance: Number((Number(account.balance || 0) + (increase ? value : -value)).toFixed(8)),
+    totalDebits: Number((Number(account.totalDebits || 0) + (side === 'DEBIT' ? value : 0)).toFixed(8)),
+    totalCredits: Number((Number(account.totalCredits || 0) + (side === 'CREDIT' ? value : 0)).toFixed(8)),
+    latestEntryId: entryId,
+    updatedAt: timestamp
+  };
+}
 
 export class PlatformFundingInstrumentDepositService {
   constructor(domain, treasury) { this.domain = domain; this.treasury = treasury; }
@@ -28,11 +39,16 @@ export class PlatformFundingInstrumentDepositService {
     if (['CANCELLED', 'MATURED', 'CLOSED'].includes(instrument.state)) throw new Error('The platform commercial instrument is not open for deposit.');
     const faceValueUsd = amount(input.faceValueUsd ?? instrument.faceValueUsd ?? instrument.principalQuantity);
     const depositReference = text(input.depositReference, 'depositReference');
-    const depositId = deterministicId(depositReference);
+    const depositId = digestId('PFID', depositReference);
     const existing = this.get(depositId);
     if (existing && existing.instrumentId !== instrumentId) throw new Error('The deposit reference is already assigned to another instrument.');
+    const alreadyDeposited = this.deposits().find((item) => item.instrumentId === instrumentId && item.state === 'DEPOSITED_RECOGNIZED_USD');
+    if (alreadyDeposited && alreadyDeposited.transactionId !== depositId) throw new Error('This platform commercial instrument is already deposited in Treasury.');
     const termMonths = Number(input.termMonths ?? instrument.termMonths ?? 36);
     if (!Number.isInteger(termMonths) || termMonths <= 0) throw new Error('termMonths must be a positive integer.');
+    const debitAccount = this.domain.get(RECORD_TYPES.LEDGER_ACCOUNT, DEBIT_ACCOUNT);
+    const creditAccount = this.domain.get(RECORD_TYPES.LEDGER_ACCOUNT, CREDIT_ACCOUNT);
+    if (!debitAccount || !creditAccount) throw new Error('Platform commercial instrument Treasury accounts are unavailable.');
     return {
       action: 'DEPOSIT_PLATFORM_COMMERCIAL_INSTRUMENT',
       readOnly: true,
@@ -60,20 +76,36 @@ export class PlatformFundingInstrumentDepositService {
     const existing = this.get(preview.depositId);
     if (existing) return { deposit: existing, created: false, treasury: this.treasury.summary() };
     const instrument = this.domain.get(RECORD_TYPES.SRA_INSTRUMENT, preview.instrumentId);
+    const debitAccount = this.domain.get(RECORD_TYPES.LEDGER_ACCOUNT, DEBIT_ACCOUNT);
+    const creditAccount = this.domain.get(RECORD_TYPES.LEDGER_ACCOUNT, CREDIT_ACCOUNT);
     const timestamp = now();
-    const journalPreview = this.treasury.preview({
+    const entryId = digestId('TJE', `PLATFORM_INSTRUMENT_DEPOSIT:${preview.depositReference}`);
+    const updatedDebitAccount = updateAccount(debitAccount, 'DEBIT', preview.faceValueUsd, entryId, timestamp);
+    const updatedCreditAccount = updateAccount(creditAccount, 'CREDIT', preview.faceValueUsd, entryId, timestamp);
+    const journal = {
+      entryId,
+      treasuryProfileId: 'SRA_PLATFORM_TREASURY',
+      journalType: DEPOSIT_TYPE,
       memo: `Deposit platform commercial instrument ${preview.instrumentId} into SRA Treasury`,
       reference: preview.depositReference,
-      journalType: DEPOSIT_TYPE,
+      currency: 'USD',
+      totalDebits: preview.faceValueUsd,
+      totalCredits: preview.faceValueUsd,
       lines: [
-        { accountId: DEBIT_ACCOUNT, side: 'DEBIT', amount: preview.faceValueUsd, currency: 'USD' },
-        { accountId: CREDIT_ACCOUNT, side: 'CREDIT', amount: preview.faceValueUsd, currency: 'USD' }
-      ]
-    });
+        { accountId: DEBIT_ACCOUNT, accountName: debitAccount.name, side: 'DEBIT', amount: preview.faceValueUsd, currency: 'USD' },
+        { accountId: CREDIT_ACCOUNT, accountName: creditAccount.name, side: 'CREDIT', amount: preview.faceValueUsd, currency: 'USD' }
+      ],
+      state: 'POSTED',
+      approval: { approvedBy: actorId, approvedAt: timestamp },
+      postedAt: timestamp,
+      createdAt: timestamp,
+      updatedAt: timestamp
+    };
     const deposit = {
       transactionId: preview.depositId,
       transactionType: DEPOSIT_TYPE,
       instrumentId: preview.instrumentId,
+      ledgerEntryId: entryId,
       faceValueUsd: preview.faceValueUsd,
       representedSraQuantity: preview.faceValueUsd,
       nativeMarketPair: 'SRA/USD',
@@ -96,21 +128,14 @@ export class PlatformFundingInstrumentDepositService {
       depositedAt: timestamp,
       updatedAt: timestamp
     };
-    const journalResult = await this.treasury.approve({
-      ...journalPreview,
-      approval: 'APPROVE',
-      idempotencyKey: `PLATFORM_INSTRUMENT_DEPOSIT:${preview.depositReference}`,
-      journalType: DEPOSIT_TYPE,
-      memo: journalPreview.memo,
-      reference: preview.depositReference,
-      lines: journalPreview.lines
-    }, actorId);
-    deposit.ledgerEntryId = journalResult.journal.entryId;
     await this.domain.atomicPut([
+      { type: RECORD_TYPES.LEDGER_ACCOUNT, id: DEBIT_ACCOUNT, payload: updatedDebitAccount, actorId, eventType: 'TREASURY_LEDGER_ACCOUNT_BALANCE_UPDATED' },
+      { type: RECORD_TYPES.LEDGER_ACCOUNT, id: CREDIT_ACCOUNT, payload: updatedCreditAccount, actorId, eventType: 'TREASURY_LEDGER_ACCOUNT_BALANCE_UPDATED' },
+      { type: RECORD_TYPES.LEDGER_ENTRY, id: entryId, payload: journal, actorId, eventType: 'PLATFORM_FUNDING_INSTRUMENT_JOURNAL_POSTED' },
       { type: RECORD_TYPES.SRA_TRANSACTION, id: preview.depositId, payload: deposit, actorId, eventType: 'PLATFORM_FUNDING_INSTRUMENT_DEPOSITED' },
       { type: RECORD_TYPES.SRA_INSTRUMENT, id: preview.instrumentId, payload: updatedInstrument, actorId, eventType: 'PLATFORM_FUNDING_INSTRUMENT_TREASURY_RECOGNIZED' }
     ]);
-    return { deposit, instrument: updatedInstrument, journal: journalResult.journal, created: true, treasury: this.treasury.summary() };
+    return { deposit, instrument: updatedInstrument, journal, created: true, treasury: this.treasury.summary() };
   }
 
   summary() {
