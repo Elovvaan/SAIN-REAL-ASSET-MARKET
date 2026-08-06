@@ -15,15 +15,23 @@ const metrics = {
 function now() { return Date.now(); }
 function requestId(req) { return String(req.get('x-request-id') || req.get('x-correlation-id') || crypto.randomUUID()).slice(0, 128); }
 function clientKey(req) { return req.sraIdentity?.actorId || req.ip || req.socket?.remoteAddress || 'unknown'; }
-function routeClass(path) {
+function routeClass(path, method = 'GET') {
+  if (path.startsWith('/api/admin')) return String(method).toUpperCase() === 'GET' ? 'ADMIN_READ' : 'ADMIN_WRITE';
   if (path.startsWith('/api/access/signin') || path.startsWith('/api/access/signup')) return 'AUTH';
   if (path.startsWith('/api/funding') || path.startsWith('/api/sain/intelligence')) return 'OPERATIONS';
   if (path.startsWith('/api/production')) return 'PRODUCTION';
   return 'GENERAL';
 }
 function limits(kind) {
-  const defaults = { AUTH: [20, 60_000], OPERATIONS: [120, 60_000], PRODUCTION: [60, 60_000], GENERAL: [300, 60_000] };
-  const [count, windowMs] = defaults[kind];
+  const defaults = {
+    AUTH: [20, 60_000],
+    OPERATIONS: [120, 60_000],
+    PRODUCTION: [60, 60_000],
+    ADMIN_READ: [2400, 60_000],
+    ADMIN_WRITE: [120, 60_000],
+    GENERAL: [300, 60_000]
+  };
+  const [count, windowMs] = defaults[kind] || defaults.GENERAL;
   return [Number(process.env[`SRA_RATE_LIMIT_${kind}`]) || count, Number(process.env.SRA_RATE_LIMIT_WINDOW_MS) || windowMs];
 }
 function writeLog(level, payload) {
@@ -46,7 +54,7 @@ export function productionRuntime(req, res, next) {
   req.sraRequestId = id;
   res.set('x-request-id', id);
 
-  const kind = routeClass(req.path);
+  const kind = routeClass(req.path, req.method);
   const [max, windowMs] = limits(kind);
   const key = `${kind}:${clientKey(req)}`;
   const current = buckets.get(key);
