@@ -1,11 +1,15 @@
 import { TreasuryLedgerService } from '../services/treasury-ledger-service.js';
 import { RecordedValueRepresentationService } from '../services/recorded-value-representation-service.js';
-import { PlatformFundingInstrumentDepositService } from '../services/platform-funding-instrument-deposit-service.js';
+import {
+  PlatformFundingInstrumentDepositService,
+  CANONICAL_PLATFORM_FUNDING_INSTRUMENT_ID,
+  CANONICAL_PLATFORM_FUNDING_FACE_VALUE_USD
+} from '../services/platform-funding-instrument-deposit-service.js';
 import { RECORD_TYPES } from '../services/persistent-domain-service.js';
 
 const INSTRUMENT_TREASURY_ACCOUNTS = [
   { accountId: 'TRSY-1050-INSTRUMENT-USD', code: '1050', name: 'Platform Commercial Instrument — USD', category: 'ASSET', normalSide: 'DEBIT', currency: 'USD' },
-  { accountId: 'TRSY-2200-PLATFORM-INSTRUMENT-FUNDING', code: '2200', name: 'Platform Commercial Instrument Funding', category: 'LIABILITY', normalSide: 'CREDIT', currency: 'USD' }
+  { accountId: 'TRSY-2200-PLATFORM-INSTRUMENT-FUNDING', code: '2200', name: 'Legacy Platform Instrument Funding', category: 'LIABILITY', normalSide: 'CREDIT', currency: 'USD' }
 ];
 
 async function ensureInstrumentTreasuryAccounts(domain) {
@@ -22,22 +26,60 @@ async function ensureInstrumentTreasuryAccounts(domain) {
   if (changes.length) await domain.atomicPut(changes);
 }
 
+async function ensureCanonicalPlatformFundingInstrument(domain) {
+  const existing = domain.get(RECORD_TYPES.SRA_INSTRUMENT, CANONICAL_PLATFORM_FUNDING_INSTRUMENT_ID);
+  if (existing) return existing;
+  const createdAt = new Date().toISOString();
+  const instrument = {
+    id: CANONICAL_PLATFORM_FUNDING_INSTRUMENT_ID,
+    instrumentId: CANONICAL_PLATFORM_FUNDING_INSTRUMENT_ID,
+    instrumentCode: 'SRA-PFI-18000000-36M',
+    name: 'SRA Platform Commercial Funding Instrument',
+    instrumentName: 'SRA Platform Commercial Funding Instrument',
+    instrumentType: 'COMMERCIAL_INSTRUMENT',
+    instrumentPurpose: 'PLATFORM_SELF_FINANCING',
+    issuer: 'SRA_PLATFORM',
+    ownerId: 'SRA_PLATFORM',
+    currency: 'USD',
+    denomination: { currency: 'USD', principalQuantity: CANONICAL_PLATFORM_FUNDING_FACE_VALUE_USD },
+    principalQuantity: CANONICAL_PLATFORM_FUNDING_FACE_VALUE_USD,
+    faceValueUsd: CANONICAL_PLATFORM_FUNDING_FACE_VALUE_USD,
+    representedSraQuantity: CANONICAL_PLATFORM_FUNDING_FACE_VALUE_USD,
+    nativeMarketPair: 'SRA/USD',
+    parReference: '1 SRA = 1 USD',
+    termMonths: 36,
+    state: 'ISSUED',
+    status: 'AVAILABLE_FOR_TREASURY_DEPOSIT',
+    treasuryState: 'AWAITING_DEPOSIT',
+    financingState: 'AWAITING_TREASURY_RECOGNITION',
+    source: 'SRA_PLATFORM_THREE_YEAR_FINANCING_PLAN',
+    createdAt,
+    updatedAt: createdAt
+  };
+  await domain.put(RECORD_TYPES.SRA_INSTRUMENT, CANONICAL_PLATFORM_FUNDING_INSTRUMENT_ID, instrument, {
+    actorId: 'SRA_TREASURY_SYSTEM',
+    eventType: 'CANONICAL_PLATFORM_FUNDING_INSTRUMENT_REGISTERED'
+  });
+  return instrument;
+}
+
 function eligibleFundingInstruments(domain) {
   return domain.list(RECORD_TYPES.SRA_INSTRUMENT)
-    .filter((instrument) => !['CANCELLED', 'MATURED', 'CLOSED'].includes(String(instrument.state || '').toUpperCase()))
+    .filter((instrument) => instrument.instrumentId === CANONICAL_PLATFORM_FUNDING_INSTRUMENT_ID && instrument.instrumentPurpose === 'PLATFORM_SELF_FINANCING')
     .map((instrument) => ({
       instrumentId: instrument.instrumentId || instrument.id,
       name: instrument.name || instrument.instrumentName || instrument.instrumentId || instrument.id,
       state: instrument.state || 'UNKNOWN',
+      status: instrument.status || null,
       faceValueUsd: Number(instrument.faceValueUsd ?? instrument.principalQuantity ?? instrument.denomination?.principalQuantity ?? 0),
       termMonths: Number(instrument.termMonths || 36),
       coinPositionId: instrument.coinPositionId || null,
       treasuryState: instrument.treasuryState || null,
+      financingState: instrument.financingState || null,
       deposited: Boolean(instrument.platformTreasuryDepositId),
-      platformTreasuryDepositId: instrument.platformTreasuryDepositId || null
-    }))
-    .filter((instrument) => instrument.instrumentId)
-    .sort((left, right) => Number(right.faceValueUsd || 0) - Number(left.faceValueUsd || 0));
+      platformTreasuryDepositId: instrument.platformTreasuryDepositId || null,
+      instrumentPurpose: instrument.instrumentPurpose
+    }));
 }
 
 export async function installTreasuryAdminRoutes({ router, domain, requireAdmin, database = null }) {
@@ -45,11 +87,19 @@ export async function installTreasuryAdminRoutes({ router, domain, requireAdmin,
   const recordedValue = new RecordedValueRepresentationService(domain);
   await treasury.initialize();
   await ensureInstrumentTreasuryAccounts(domain);
+  await ensureCanonicalPlatformFundingInstrument(domain);
   const fundingInstrumentDeposits = new PlatformFundingInstrumentDepositService(domain, treasury);
 
   router.get('/api/admin/treasury', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
-    return res.json({ ...treasury.summary(), fundingInstrumentDeposits: fundingInstrumentDeposits.summary() });
+    const fundingSummary = fundingInstrumentDeposits.summary();
+    return res.json({
+      ...treasury.summary(),
+      commercialInstrumentUsd: fundingSummary.depositedInstrumentValueUsd,
+      availableFinancingCapacityUsd: fundingSummary.availableFinancingCapacityUsd,
+      sraRepresentedAtParUsd: fundingSummary.representedSraQuantity,
+      fundingInstrumentDeposits: fundingSummary
+    });
   });
   router.post('/api/admin/treasury/journals/preview', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
@@ -71,11 +121,14 @@ export async function installTreasuryAdminRoutes({ router, domain, requireAdmin,
   });
   router.get('/api/admin/treasury/funding-instrument-deposits/eligible-instruments', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
+    await ensureCanonicalPlatformFundingInstrument(domain);
     const instruments = eligibleFundingInstruments(domain);
     return res.json({
       instruments,
       eligibleCount: instruments.filter((instrument) => !instrument.deposited).length,
-      depositedCount: instruments.filter((instrument) => instrument.deposited).length
+      depositedCount: instruments.filter((instrument) => instrument.deposited).length,
+      canonicalInstrumentId: CANONICAL_PLATFORM_FUNDING_INSTRUMENT_ID,
+      canonicalFaceValueUsd: CANONICAL_PLATFORM_FUNDING_FACE_VALUE_USD
     });
   });
   router.post('/api/admin/treasury/funding-instrument-deposits/preview', async (req, res) => {
@@ -87,7 +140,7 @@ export async function installTreasuryAdminRoutes({ router, domain, requireAdmin,
     const session = await requireAdmin(req, res); if (!session) return;
     try {
       const result = await fundingInstrumentDeposits.approve(req.body || {}, session.id);
-      if (database?.audit) await database.audit({ actorId: session.id, eventType: 'SRA_PLATFORM_FUNDING_INSTRUMENT_DEPOSIT_APPROVED', objectType: 'SRA_INSTRUMENT', objectId: result.deposit.instrumentId, payload: { depositId: result.deposit.transactionId, faceValueUsd: result.deposit.faceValueUsd, ledgerEntryId: result.deposit.ledgerEntryId } });
+      if (database?.audit) await database.audit({ actorId: session.id, eventType: 'SRA_PLATFORM_FUNDING_INSTRUMENT_DEPOSIT_APPROVED', objectType: 'SRA_INSTRUMENT', objectId: result.deposit.instrumentId, payload: { depositId: result.deposit.transactionId, faceValueUsd: result.deposit.faceValueUsd, ledgerEntryId: result.deposit.ledgerEntryId, sourceLedgerEntryId: result.deposit.sourceLedgerEntryId || null, supersededLegacyDepositCount: result.deposit.supersededLegacyDepositCount || 0 } });
       return res.status(result.created ? 201 : 200).json(result);
     } catch (error) { return res.status(422).json({ error: error.message, code: 'SRA_PLATFORM_FUNDING_INSTRUMENT_DEPOSIT_FAILED' }); }
   });
