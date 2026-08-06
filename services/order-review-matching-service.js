@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { PreAllocationReservationService } from './pre-allocation-reservation-service.js';
+import { AllocationApprovalService } from './allocation-approval-service.js';
 
 const TRANSACTION_TYPE = 'SRA_TRANSACTION';
 function now() { return new Date().toISOString(); }
@@ -11,7 +12,11 @@ function compatiblePrice(buy, sell) { return buy.orderType === 'MARKET' || sell.
 function proposedPrice(buy, sell) { return buy.orderType === 'LIMIT' && sell.orderType === 'LIMIT' ? Number(((Number(buy.unitPrice) + Number(sell.unitPrice)) / 2).toFixed(8)) : Number(sell.unitPrice || buy.unitPrice || 0); }
 
 export class OrderReviewMatchingService {
-  constructor(domain) { this.domain = domain; this.reservations = new PreAllocationReservationService(domain); }
+  constructor(domain) {
+    this.domain = domain;
+    this.reservations = new PreAllocationReservationService(domain);
+    this.allocations = new AllocationApprovalService(domain);
+  }
   intents() { return this.domain.list(TRANSACTION_TYPE).filter(openIntent); }
   queue() {
     const intents = this.intents();
@@ -34,7 +39,9 @@ export class OrderReviewMatchingService {
       protectedBoundary: ['NO_BALANCE_MOVEMENT', 'NO_POSITION_ALLOCATION', 'NO_SETTLEMENT', 'NO_OWNERSHIP_TRANSFER'] };
   }
   preview(input = {}) {
-    if (String(input.action || '').toUpperCase() === 'RESERVE') return this.reservations.preview(input);
+    const action = String(input.action || '').toUpperCase();
+    if (action === 'RESERVE') return this.reservations.preview(input);
+    if (action === 'ALLOCATE') return this.allocations.preview(input);
     const listingId = String(input.listingId || '').trim();
     if (!listingId) throw new Error('listingId is required.');
     const listing = this.domain.get('MARKETPLACE_LISTING', listingId);
@@ -53,7 +60,9 @@ export class OrderReviewMatchingService {
       doesNot: ['ALLOCATE_POSITION', 'MOVE_BALANCE', 'SETTLE_VALUE', 'TRANSFER_OWNERSHIP', 'CREATE_EXPORT_PACKAGE'], approvalRequired: true };
   }
   async approve(input = {}, actorId = 'SRA_PLATFORM_ADMIN') {
-    if (String(input.action || '').toUpperCase() === 'RESERVE') return this.reservations.approve(input, actorId);
+    const action = String(input.action || '').toUpperCase();
+    if (action === 'RESERVE') return this.reservations.approve(input, actorId);
+    if (action === 'ALLOCATE') return this.allocations.approve(input, actorId);
     if (String(input.approval || '').toUpperCase() !== 'APPROVE') throw new Error('Explicit order-match approval is required.');
     const preview = this.preview(input); if (!preview.matchPossible) throw new Error(preview.reason || 'No compatible order match is available.');
     const approvedAt = now(); const matchReviewId = id();
@@ -79,6 +88,6 @@ export class OrderReviewMatchingService {
     const queue = this.queue(); const reviews = this.reviews();
     return { ...queue, approvedMatchCount: reviews.length,
       pendingAllocationCount: reviews.filter((item) => item.state === 'MATCH_APPROVED_PENDING_ALLOCATION').length,
-      latestApprovedMatch: reviews[0] || null, reservations: this.reservations.status() };
+      latestApprovedMatch: reviews[0] || null, reservations: this.reservations.status(), allocations: this.allocations.status() };
   }
 }
