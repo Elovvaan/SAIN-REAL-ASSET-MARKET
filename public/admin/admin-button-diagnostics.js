@@ -2,7 +2,10 @@
   if (window.__sraAdminDiagnosticsInstalled) return;
   window.__sraAdminDiagnosticsInstalled = true;
 
-  const ADMIN_REQUEST_TIMEOUT_MS = 20_000;
+  const ADMIN_SESSION_TIMEOUT_MS = 15_000;
+  const ADMIN_READ_TIMEOUT_MS = 60_000;
+  const ADMIN_WRITE_TIMEOUT_MS = 180_000;
+  const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
   const nativeFetch = window.fetch.bind(window);
   let sessionRecoveryStarted = false;
   let enhancing = false;
@@ -67,27 +70,38 @@
     }, 0);
   }
 
+  function administrationTimeout({ isAdminRequest, isSessionProbe, method }) {
+    if (!isAdminRequest) return 0;
+    if (isSessionProbe) return ADMIN_SESSION_TIMEOUT_MS;
+    return SAFE_METHODS.has(method) ? ADMIN_READ_TIMEOUT_MS : ADMIN_WRITE_TIMEOUT_MS;
+  }
+
   window.fetch = async (input, options = {}) => {
     const url = typeof input === 'string' ? input : String(input?.url || '');
     const method = String(options.method || input?.method || 'GET').toUpperCase();
     const isAdminRequest = url.startsWith('/api/admin') || url.includes('/api/admin/');
     const isSessionProbe = url.includes('/api/admin/session') || url.includes('/api/admin/bootstrap-status');
-    const controller = new AbortController();
+    const timeoutMs = administrationTimeout({ isAdminRequest, isSessionProbe, method });
     const externalSignal = options.signal;
-    const timeout = window.setTimeout(() => controller.abort(new DOMException('Administration request timed out.', 'TimeoutError')), ADMIN_REQUEST_TIMEOUT_MS);
-    if (externalSignal) {
+    const controller = timeoutMs ? new AbortController() : null;
+    const timeout = timeoutMs
+      ? window.setTimeout(() => controller.abort(new DOMException('Administration request timed out.', 'TimeoutError')), timeoutMs)
+      : null;
+
+    if (controller && externalSignal) {
       if (externalSignal.aborted) controller.abort(externalSignal.reason);
       else externalSignal.addEventListener('abort', () => controller.abort(externalSignal.reason), { once: true });
     }
+
     try {
       const response = await nativeFetch(input, {
+        ...options,
         credentials: isAdminRequest ? 'include' : (options.credentials || 'same-origin'),
         cache: isAdminRequest ? 'no-store' : (options.cache || 'default'),
-        ...options,
-        signal: controller.signal
+        signal: controller?.signal || externalSignal
       });
       if (isAdminRequest && !isSessionProbe && response.status === 401) startSessionRecovery();
-      if (isAdminRequest && response.ok && sessionRecoveryStarted && !['GET', 'HEAD', 'OPTIONS'].includes(method)) completeSessionRecovery();
+      if (isAdminRequest && response.ok && sessionRecoveryStarted && !SAFE_METHODS.has(method)) completeSessionRecovery();
       if (response.ok) return response;
       const contentType = response.headers.get('content-type') || '';
       if (contentType.includes('application/json')) return response;
@@ -103,10 +117,14 @@
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
-      if (controller.signal.aborted && !externalSignal?.aborted) throw new Error(`Administration request timed out after ${ADMIN_REQUEST_TIMEOUT_MS / 1000} seconds.`);
+      if (controller?.signal.aborted && !externalSignal?.aborted) {
+        const seconds = Math.round(timeoutMs / 1000);
+        const operation = SAFE_METHODS.has(method) ? 'read' : 'governed action';
+        throw new Error(`Administration ${operation} timed out after ${seconds} seconds. The server did not confirm completion.`);
+      }
       throw error;
     } finally {
-      window.clearTimeout(timeout);
+      if (timeout !== null) window.clearTimeout(timeout);
     }
   };
 
