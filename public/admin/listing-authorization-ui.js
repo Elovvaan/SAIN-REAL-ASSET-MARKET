@@ -134,6 +134,7 @@
   window.addEventListener('DOMContentLoaded', () => {
     loadAdminScript('/admin/hybrid-liquidity-admin.js', 'data-hybrid-liquidity-admin');
     loadAdminScript('/admin/core-services-dashboard.js', 'data-sra-core-services-dashboard');
+    loadAdminScript('/admin/operations-queue-ui.js', 'data-sra-operations-queue');
     observer.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] });
     setTimeout(() => { ensurePanel(); void load(); }, 350);
     timer = setInterval(() => { if (document.querySelector('#admin-view:not(.hidden)')) void load(); }, 15000);
