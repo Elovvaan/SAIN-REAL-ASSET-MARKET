@@ -20,15 +20,46 @@ function deterministicListingId(instrumentId) {
   return `ML-${digest}`;
 }
 
+function lifecycleRank(listing) {
+  if (listing?.status === 'LIVE' || ['PUBLISHED', 'ACTIVE'].includes(listing?.state)) return 3;
+  if (listing?.status === 'READY_FOR_PUBLICATION_APPROVAL') return 2;
+  if (listing?.state === 'PREPARED') return 1;
+  return 0;
+}
+
+function recordTime(listing) {
+  return String(listing?.updatedAt || listing?.publishedAt || listing?.createdAt || '');
+}
+
+function preferredListing(current, candidate) {
+  if (!current) return candidate;
+  const rankDifference = lifecycleRank(candidate) - lifecycleRank(current);
+  if (rankDifference > 0) return candidate;
+  if (rankDifference < 0) return current;
+  return recordTime(candidate).localeCompare(recordTime(current)) > 0 ? candidate : current;
+}
+
 function canonicalByInstrument(records) {
   const canonical = new Map();
-  const duplicates = [];
-  for (const listing of [...records].sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))) {
+  const grouped = new Map();
+  for (const listing of records) {
     const key = listing.instrumentId || listing.listingId;
-    if (!canonical.has(key)) canonical.set(key, listing);
-    else duplicates.push(listing);
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(listing);
+    canonical.set(key, preferredListing(canonical.get(key), listing));
   }
-  return { listings: [...canonical.values()].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))), duplicates };
+  const selected = new Set([...canonical.values()]);
+  const duplicates = [...grouped.values()].flat().filter((listing) => !selected.has(listing));
+  return {
+    listings: [...canonical.values()].sort((a, b) => recordTime(b).localeCompare(recordTime(a))),
+    duplicates,
+  };
+}
+
+function stateBucket(listing) {
+  if (listing?.status === 'LIVE' || ['PUBLISHED', 'ACTIVE'].includes(listing?.state)) return 'LIVE';
+  if (listing?.status === 'READY_FOR_PUBLICATION_APPROVAL') return 'READY';
+  return 'PREPARED';
 }
 
 export class MarketplaceListingService {
@@ -62,7 +93,7 @@ export class MarketplaceListingService {
   list(filters = {}) {
     const { listings } = canonicalByInstrument(this.rawList());
     return listings
-      .filter((listing) => !filters.state || listing.state === filters.state)
+      .filter((listing) => !filters.state || listing.state === filters.state || stateBucket(listing) === filters.state)
       .filter((listing) => !filters.instrumentId || listing.instrumentId === filters.instrumentId);
   }
 
@@ -73,7 +104,12 @@ export class MarketplaceListingService {
     const total = listings.length;
     const totalPages = Math.max(1, Math.ceil(total / limit));
     const start = (page - 1) * limit;
-    return { listings: listings.slice(start, start + limit), total, page, limit, totalPages };
+    const counts = listings.reduce((result, listing) => {
+      const bucket = stateBucket(listing);
+      result[bucket] += 1;
+      return result;
+    }, { LIVE: 0, READY: 0, PREPARED: 0 });
+    return { listings: listings.slice(start, start + limit), total, counts, page, limit, totalPages };
   }
 
   get(listingId) {
@@ -197,7 +233,11 @@ export class MarketplaceListingService {
     const raw = this.rawList();
     const { listings, duplicates } = canonicalByInstrument(raw);
     const byState = {};
-    for (const listing of listings) byState[listing.state] = (byState[listing.state] || 0) + 1;
+    const counts = { LIVE: 0, READY: 0, PREPARED: 0 };
+    for (const listing of listings) {
+      byState[listing.state] = (byState[listing.state] || 0) + 1;
+      counts[stateBucket(listing)] += 1;
+    }
     return {
       layer: 'MARKETPLACE_LISTING_LAYER',
       phase: 6,
@@ -205,9 +245,10 @@ export class MarketplaceListingService {
       storedRecordCount: raw.length,
       supersededDuplicateCount: duplicates.length,
       byState,
+      counts,
       latestCreatedAt: listings[0]?.createdAt || null
     };
   }
 }
 
-export { LISTING_RECORD_TYPE, deterministicListingId };
+export { LISTING_RECORD_TYPE, deterministicListingId, canonicalByInstrument };
