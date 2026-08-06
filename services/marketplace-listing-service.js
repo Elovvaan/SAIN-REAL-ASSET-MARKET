@@ -2,6 +2,8 @@ import crypto from 'node:crypto';
 import { RECORD_TYPES } from './persistent-domain-service.js';
 
 const LISTING_RECORD_TYPE = 'MARKETPLACE_LISTING';
+const SRA_PAR_UNIT_PRICE_USD = 1;
+const SRA_PAR_PRICING_METHOD = 'VERIFIED_RECORDED_USD_VALUE_AT_SRA_PAR';
 
 function requireText(value, field) {
   const text = String(value || '').trim();
@@ -39,10 +41,56 @@ function preferredListing(current, candidate) {
   return recordTime(candidate).localeCompare(recordTime(current)) > 0 ? candidate : current;
 }
 
+function verifiedRecordedValueUsd(listing) {
+  const value = Number(
+    listing?.verifiedRecordedValueUsd
+    ?? listing?.recordedValueUsd
+    ?? listing?.faceValueUsd
+    ?? listing?.quantity
+    ?? listing?.offeredQuantity
+    ?? 0
+  );
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function withCanonicalSraPricing(listing) {
+  if (!listing) return listing;
+  const unit = String(listing.unit || listing.marketIdentity?.base || '').toUpperCase();
+  const recordedValueUsd = verifiedRecordedValueUsd(listing);
+  if (unit !== 'SRA' || recordedValueUsd <= 0) return listing;
+  const blockers = Array.isArray(listing.blockers)
+    ? listing.blockers.filter((blocker) => blocker !== 'LISTING_PRICE_REQUIRED')
+    : [];
+  return {
+    ...listing,
+    quantity: recordedValueUsd,
+    verifiedRecordedValueUsd: recordedValueUsd,
+    recordedValueUsd,
+    faceValueUsd: recordedValueUsd,
+    pricing: {
+      ...(listing.pricing || {}),
+      state: 'CONFIGURED',
+      method: SRA_PAR_PRICING_METHOD,
+      askingPrice: SRA_PAR_UNIT_PRICE_USD,
+      unitPrice: SRA_PAR_UNIT_PRICE_USD,
+      currency: 'USD',
+      faceValueUsd: recordedValueUsd,
+      recordedValueUsd,
+      parReference: '1 SRA = 1 USD'
+    },
+    readiness: {
+      ...(listing.readiness || {}),
+      pricingApproved: true
+    },
+    blockers
+  };
+}
+
 function canonicalByInstrument(records) {
   const canonical = new Map();
   const grouped = new Map();
-  for (const listing of records) {
+  for (const rawListing of records) {
+    const listing = withCanonicalSraPricing(rawListing);
     const key = listing.instrumentId || listing.listingId;
     if (!grouped.has(key)) grouped.set(key, []);
     grouped.get(key).push(listing);
@@ -79,16 +127,10 @@ export class MarketplaceListingService {
     this.lastError = null;
     this.timer = null;
 
-    if (this.autoStart && this.enabled) {
-      queueMicrotask(() => {
-        void this.startPreparationCycle();
-      });
-    }
+    if (this.autoStart && this.enabled) queueMicrotask(() => { void this.startPreparationCycle(); });
   }
 
-  rawList() {
-    return this.persistentDomain.list(LISTING_RECORD_TYPE);
-  }
+  rawList() { return this.persistentDomain.list(LISTING_RECORD_TYPE); }
 
   list(filters = {}) {
     const { listings } = canonicalByInstrument(this.rawList());
@@ -105,8 +147,7 @@ export class MarketplaceListingService {
     const totalPages = Math.max(1, Math.ceil(total / limit));
     const start = (page - 1) * limit;
     const counts = listings.reduce((result, listing) => {
-      const bucket = stateBucket(listing);
-      result[bucket] += 1;
+      result[stateBucket(listing)] += 1;
       return result;
     }, { LIVE: 0, READY: 0, PREPARED: 0 });
     return { listings: listings.slice(start, start + limit), total, counts, page, limit, totalPages };
@@ -114,7 +155,7 @@ export class MarketplaceListingService {
 
   get(listingId) {
     const direct = this.persistentDomain.get(LISTING_RECORD_TYPE, listingId);
-    if (direct) return direct;
+    if (direct) return withCanonicalSraPricing(direct);
     return this.list().find((listing) => listing.listingId === listingId) || null;
   }
 
@@ -126,12 +167,11 @@ export class MarketplaceListingService {
 
     const listingId = deterministicListingId(instrumentId);
     const deterministic = this.persistentDomain.get(LISTING_RECORD_TYPE, listingId);
-    if (deterministic && !['CANCELLED', 'CLOSED'].includes(deterministic.state)) return { listing: deterministic, created: false };
-
+    if (deterministic && !['CANCELLED', 'CLOSED'].includes(deterministic.state)) return { listing: withCanonicalSraPricing(deterministic), created: false };
     const existing = this.list({ instrumentId }).find((listing) => !['CANCELLED', 'CLOSED'].includes(listing.state));
     if (existing) return { listing: existing, created: false };
 
-    const principalQuantity = finitePositive(instrument.denomination?.principalQuantity, 'instrument principal quantity');
+    const recordedValueUsd = finitePositive(instrument.denomination?.principalQuantity, 'instrument principal quantity');
     const now = new Date().toISOString();
     const listing = {
       listingId,
@@ -143,24 +183,37 @@ export class MarketplaceListingService {
       listingType: requireText(input.listingType || 'SRA_INSTRUMENT_OFFERING', 'listingType').toUpperCase(),
       title: input.title || instrument.name,
       seller: input.seller || instrument.issuer,
-      quantity: principalQuantity,
+      quantity: recordedValueUsd,
+      verifiedRecordedValueUsd: recordedValueUsd,
+      recordedValueUsd,
+      faceValueUsd: recordedValueUsd,
       unit: instrument.denomination?.symbol || 'SRA',
-      pricing: { state: 'NOT_SET', method: null, askingPrice: null, currency: 'USD', verifiedValueReference: instrument.financialRecordId },
+      pricing: {
+        state: 'CONFIGURED',
+        method: SRA_PAR_PRICING_METHOD,
+        askingPrice: SRA_PAR_UNIT_PRICE_USD,
+        unitPrice: SRA_PAR_UNIT_PRICE_USD,
+        currency: 'USD',
+        faceValueUsd: recordedValueUsd,
+        recordedValueUsd,
+        parReference: '1 SRA = 1 USD',
+        verifiedValueReference: instrument.financialRecordId
+      },
       access: { state: 'NOT_CONFIGURED', eligibilityRule: null, minimumOrder: null, maximumOrder: null },
-      readiness: { instrumentReviewed: false, pricingApproved: false, accessRulesApproved: false, transactionRouteConnected: false, settlementRouteConnected: false },
-      blockers: ['ADMINISTRATIVE_INSTRUMENT_REVIEW_REQUIRED', 'LISTING_PRICE_REQUIRED', 'MARKET_ACCESS_RULES_REQUIRED', 'TRANSACTION_ROUTE_REQUIRED', 'SETTLEMENT_ROUTE_REQUIRED'],
+      readiness: { instrumentReviewed: false, pricingApproved: true, accessRulesApproved: false, transactionRouteConnected: false, settlementRouteConnected: false },
+      blockers: ['ADMINISTRATIVE_INSTRUMENT_REVIEW_REQUIRED', 'MARKET_ACCESS_RULES_REQUIRED', 'TRANSACTION_ROUTE_REQUIRED', 'SETTLEMENT_ROUTE_REQUIRED'],
       sourceLineage: instrument.sourceLineage,
       state: 'PREPARED',
-      statusHistory: [{ state: 'PREPARED', actorId, occurredAt: now, reason: 'Marketplace listing prepared from SRA Instrument.' }],
+      statusHistory: [{ state: 'PREPARED', actorId, occurredAt: now, reason: 'Marketplace listing prepared from verified recorded USD value at the fixed SRA/USD par reference.' }],
       phase: 6,
-      version: 2,
+      version: 3,
       createdBy: actorId,
       createdAt: now,
       updatedAt: now
     };
 
     await this.persistentDomain.put(LISTING_RECORD_TYPE, listingId, listing, { actorId, eventType: 'MARKETPLACE_LISTING_PREPARED' });
-    await this.persistentDomain.lifecycle({ objectType: LISTING_RECORD_TYPE, objectId: listingId, eventType: 'INSTRUMENT_MARKETPLACE_LISTING_PREPARED', actorId, payload: { instrumentId, quantity: principalQuantity, unit: listing.unit } });
+    await this.persistentDomain.lifecycle({ objectType: LISTING_RECORD_TYPE, objectId: listingId, eventType: 'INSTRUMENT_MARKETPLACE_LISTING_PREPARED', actorId, payload: { instrumentId, quantity: recordedValueUsd, unit: listing.unit, unitPriceUsd: 1, faceValueUsd: recordedValueUsd } });
     this.prepared += 1;
     this.lastPreparedAt = now;
     return { listing, created: true };
@@ -177,8 +230,7 @@ export class MarketplaceListingService {
     if (!this.enabled || this.backfillState === 'RUNNING') return this.status();
     this.backfillState = 'RUNNING';
     this.lastCycleAt = new Date().toISOString();
-    const instruments = this.pendingInstruments()
-      .slice(0, Number.isFinite(this.backfillLimit) && this.backfillLimit > 0 ? this.backfillLimit : 5000);
+    const instruments = this.pendingInstruments().slice(0, Number.isFinite(this.backfillLimit) && this.backfillLimit > 0 ? this.backfillLimit : 5000);
     for (const instrument of instruments) {
       try { await this.prepareFromInstrument(instrument.instrumentId); }
       catch (error) {
@@ -191,16 +243,11 @@ export class MarketplaceListingService {
   }
 
   async startPreparationCycle() {
-    if (!this.enabled) {
-      this.cycleState = 'DISABLED';
-      return this.status();
-    }
+    if (!this.enabled) { this.cycleState = 'DISABLED'; return this.status(); }
     if (this.timer) return this.status();
     this.cycleState = 'RUNNING';
     await this.backfill();
-    this.timer = setInterval(() => {
-      void this.backfill();
-    }, this.cycleIntervalMs);
+    this.timer = setInterval(() => { void this.backfill(); }, this.cycleIntervalMs);
     this.timer.unref?.();
     return this.status();
   }
@@ -238,17 +285,15 @@ export class MarketplaceListingService {
       byState[listing.state] = (byState[listing.state] || 0) + 1;
       counts[stateBucket(listing)] += 1;
     }
-    return {
-      layer: 'MARKETPLACE_LISTING_LAYER',
-      phase: 6,
-      listingCount: listings.length,
-      storedRecordCount: raw.length,
-      supersededDuplicateCount: duplicates.length,
-      byState,
-      counts,
-      latestCreatedAt: listings[0]?.createdAt || null
-    };
+    return { layer: 'MARKETPLACE_LISTING_LAYER', phase: 6, listingCount: listings.length, storedRecordCount: raw.length, supersededDuplicateCount: duplicates.length, byState, counts, latestCreatedAt: listings[0]?.createdAt || null };
   }
 }
 
-export { LISTING_RECORD_TYPE, deterministicListingId, canonicalByInstrument };
+export {
+  LISTING_RECORD_TYPE,
+  SRA_PAR_UNIT_PRICE_USD,
+  SRA_PAR_PRICING_METHOD,
+  deterministicListingId,
+  canonicalByInstrument,
+  withCanonicalSraPricing
+};
