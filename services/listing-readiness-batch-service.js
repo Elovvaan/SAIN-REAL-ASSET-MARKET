@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 
 const LISTING_TYPE = 'MARKETPLACE_LISTING';
 const BATCH_TYPE = 'SRA_LISTING_READINESS_BATCH';
+const SRA_PAR_PRICING_METHOD = 'VERIFIED_RECORDED_USD_VALUE_AT_SRA_PAR';
 const ELIGIBLE_BLOCKERS = new Set([
   'ADMINISTRATIVE_INSTRUMENT_REVIEW_REQUIRED',
   'LISTING_PRICE_REQUIRED',
@@ -16,6 +17,15 @@ function finitePositive(value, field) {
   const number = Number(value);
   if (!Number.isFinite(number) || number <= 0) throw new Error(`${field} must be greater than zero.`);
   return number;
+}
+function recordedValue(listing) {
+  return finitePositive(
+    listing.verifiedRecordedValueUsd
+      ?? listing.recordedValueUsd
+      ?? listing.faceValueUsd
+      ?? listing.quantity,
+    'verified recorded USD value'
+  );
 }
 
 export class ListingReadinessBatchService {
@@ -32,8 +42,8 @@ export class ListingReadinessBatchService {
 
   preview(input = {}) {
     const listings = this.eligibleListings();
-    const askingPriceMethod = String(input.askingPriceMethod || 'ADMIN_APPROVED_SRA_USD_UNIT_PRICE').toUpperCase();
-    const unitPrice = finitePositive(input.unitPrice || 1, 'unitPrice');
+    const askingPriceMethod = SRA_PAR_PRICING_METHOD;
+    const unitPrice = 1;
     const eligibilityRule = String(input.eligibilityRule || 'SRA_REGISTERED_PARTICIPANTS').toUpperCase();
     const transactionRouteId = String(input.transactionRouteId || 'SRA_INTERNAL_MARKETPLACE').toUpperCase();
     const settlementRouteId = String(input.settlementRouteId || 'SRA_INTERNAL_SETTLEMENT').toUpperCase();
@@ -49,8 +59,8 @@ export class ListingReadinessBatchService {
         excludesNativePlatformAsset: true,
       },
       policy: { askingPriceMethod, unitPrice, currency: 'USD', eligibilityRule, minimumOrder, transactionRouteId, settlementRouteId },
-      effect: 'Apply the approved SRA / USD unit price, clear the five standard readiness blockers, and mark covered listings READY_FOR_PUBLICATION_APPROVAL.',
-      doesNot: ['PUBLISH_LISTINGS', 'CREATE_TRANSACTIONS', 'ALLOCATE_POSITIONS', 'SETTLE_VALUE', 'RECOGNIZE_OWNERSHIP', 'CREATE_EXPORT_PACKAGES'],
+      effect: 'Preserve the verified recorded USD value as SRA quantity at the fixed $1.00 SRA/USD par reference, clear the remaining readiness blockers, and mark covered listings READY_FOR_PUBLICATION_APPROVAL.',
+      doesNot: ['REPRICE_SOURCE_ASSETS', 'USE_SOURCE_TOKEN_QUANTITY_AS_SRA_QUANTITY', 'PUBLISH_LISTINGS', 'CREATE_TRANSACTIONS', 'ALLOCATE_POSITIONS', 'SETTLE_VALUE', 'RECOGNIZE_OWNERSHIP', 'CREATE_EXPORT_PACKAGES'],
       approvalRequired: true,
     };
   }
@@ -65,14 +75,23 @@ export class ListingReadinessBatchService {
     for (const listingId of preview.scope.listingIds) {
       const listing = this.domain.get(LISTING_TYPE, listingId);
       if (!listing || listing.state !== 'PREPARED') continue;
+      const recordedValueUsd = recordedValue(listing);
       const next = {
         ...listing,
+        quantity: recordedValueUsd,
+        verifiedRecordedValueUsd: recordedValueUsd,
+        recordedValueUsd,
+        faceValueUsd: recordedValueUsd,
         pricing: {
           ...(listing.pricing || {}),
           state: 'CONFIGURED',
           method: preview.policy.askingPriceMethod,
-          askingPrice: preview.policy.unitPrice,
+          askingPrice: 1,
+          unitPrice: 1,
           currency: 'USD',
+          faceValueUsd: recordedValueUsd,
+          recordedValueUsd,
+          parReference: '1 SRA = 1 USD',
         },
         access: { ...(listing.access || {}), state: 'CONFIGURED', eligibilityRule: preview.policy.eligibilityRule, minimumOrder: preview.policy.minimumOrder },
         transactionRouteId: preview.policy.transactionRouteId,
