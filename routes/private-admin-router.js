@@ -7,6 +7,7 @@ import { ListingPublicationBatchService } from '../services/listing-publication-
 import { AdminIntelligenceAgentService } from '../services/admin-intelligence-agent-service.js';
 import { RECORD_TYPES } from '../services/persistent-domain-service.js';
 import { installTreasuryAdminRoutes } from './treasury-admin-routes.js';
+import { installTreasuryTransferReadinessRoutes } from './treasury-transfer-readiness-routes.js';
 
 function readCookie(req, name) {
   const cookie = req.headers.cookie || '';
@@ -146,6 +147,7 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
   });
 
   const treasuryAdministration = await installTreasuryAdminRoutes({ router, domain, requireAdmin, database });
+  const treasuryTransferReadiness = await installTreasuryTransferReadinessRoutes({ router, domain, requireAdmin, database });
 
   router.get('/api/admin/summary', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
@@ -168,6 +170,7 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
       listingPublicationBatch: listingPublicationBatch.status(),
       nativePlatformAsset: nativePlatformAsset?.status?.() || { state: 'UNAVAILABLE' },
       treasury,
+      treasuryTransferReadiness: treasuryTransferReadiness.status(),
       recordedValueRepresentation: treasuryAdministration.recordedValue.preview(),
       connectors: { coinbasePublicMarket: coinbase },
       adminIntelligenceAgent: intelligenceAgent.capabilities(),
