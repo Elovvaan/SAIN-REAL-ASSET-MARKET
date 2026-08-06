@@ -13,6 +13,7 @@ import { UnifiedMarketOperationsQueueService } from '../services/unified-market-
 import { SraCoinAgentService } from '../services/sra-coin-agent-service.js';
 import { SraCoinAgentInspectionService } from '../services/sra-coin-agent-inspection-service.js';
 import { SraAgentOperatingSystemService } from '../services/sra-agent-operating-system-service.js';
+import { SraCoinPositionSegmentationService } from '../services/sra-coin-position-segmentation-service.js';
 
 function actorId(req) {
   return req.sraIdentity?.actorId || req.headers['x-sra-actor-id'] || req.body?.actorId || null;
@@ -27,6 +28,7 @@ export function createSaneRouter(service = new SaneSkillService(), edxOperations
   const participantOrderIntents = domain ? new ParticipantOrderIntentService(domain) : null;
   const orderReviewMatching = domain ? new OrderReviewMatchingService(domain) : null;
   const coinAgentInspection = domain ? new SraCoinAgentInspectionService(new SraCoinAgentService(domain)) : null;
+  const coinSegmentation = domain ? new SraCoinPositionSegmentationService(domain) : null;
   const coreHeartbeat = domain ? new SraCoreServicesHeartbeat({
     domain,
     eventBus: new SraCoreEventBus({ onDeliveryError: ({ eventType, error }) => console.error(JSON.stringify({ level: 'error', event: 'SRA_CORE_EVENT_SUBSCRIBER_FAILED', eventType, error: error?.message || String(error) })) }),
@@ -55,6 +57,18 @@ export function createSaneRouter(service = new SaneSkillService(), edxOperations
     if (!coinAgentInspection) return res.status(503).json({ error: 'SRA Coin Agent inspection is unavailable.' });
     try { return res.json(coinAgentInspection.inspect(req.params.coinPositionId)); }
     catch (error) { const notFound = /not found/i.test(error.message); return res.status(notFound ? 404 : 422).json({ error: error.message, code: 'SRA_COIN_AGENT_INSPECTION_FAILED' }); }
+  });
+  router.post('/coin-agents/:coinPositionId/segment/preview', (req, res) => {
+    if (!coinSegmentation) return res.status(503).json({ error: 'SRA Coin segmentation is unavailable.' });
+    try { return res.json(coinSegmentation.preview({ ...(req.body || {}), positionId: req.params.coinPositionId })); }
+    catch (error) { return res.status(422).json({ error: error.message, code: 'SRA_COIN_SEGMENTATION_PREVIEW_FAILED' }); }
+  });
+  router.post('/coin-agents/:coinPositionId/segment/approve', async (req, res) => {
+    if (!coinSegmentation) return res.status(503).json({ error: 'SRA Coin segmentation is unavailable.' });
+    const administrator = actorId(req);
+    if (!administrator) return res.status(401).json({ error: 'An authenticated administrator identity is required.' });
+    try { return res.status(201).json(await coinSegmentation.approve({ ...(req.body || {}), positionId: req.params.coinPositionId }, administrator)); }
+    catch (error) { return res.status(422).json({ error: error.message, code: 'SRA_COIN_SEGMENTATION_APPROVAL_FAILED' }); }
   });
 
   router.post('/order-intents/preview', (req, res) => {
