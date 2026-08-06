@@ -5,25 +5,44 @@
   const ADMIN_REQUEST_TIMEOUT_MS = 20_000;
   const nativeFetch = window.fetch.bind(window);
   let sessionRecoveryStarted = false;
+  let enhancing = false;
+
+  function showSignedOutState() {
+    const setupView = document.querySelector('#setup-view');
+    const loginView = document.querySelector('#login-view');
+    const adminView = document.querySelector('#admin-view');
+    setupView?.classList.add('hidden');
+    adminView?.classList.add('hidden');
+    loginView?.classList.remove('hidden');
+    const loginError = document.querySelector('#login-error');
+    if (loginError) loginError.textContent = 'Your Platform Administration session expired. Sign in again to continue.';
+  }
 
   function startSessionRecovery() {
     if (sessionRecoveryStarted) return;
     sessionRecoveryStarted = true;
+    window.__sraAdminSessionExpired = true;
     window.dispatchEvent(new CustomEvent('sra-admin-session-expired'));
-    const existing = document.querySelector('#sra-admin-session-expired');
-    if (!existing) {
-      const notice = document.createElement('div');
+    showSignedOutState();
+
+    let notice = document.querySelector('#sra-admin-session-expired');
+    if (!notice) {
+      notice = document.createElement('div');
       notice.id = 'sra-admin-session-expired';
-      notice.textContent = 'Your Platform Administration session expired. Returning to administrator sign in…';
       notice.style.cssText = 'position:fixed;inset:16px 16px auto 16px;z-index:99999;padding:14px 16px;border:1px solid #6b5318;border-radius:12px;background:#171207;color:#f1d777;font-weight:700;text-align:center';
       document.body.append(notice);
     }
-    window.setTimeout(() => window.location.reload(), 900);
+    notice.innerHTML = 'Your Platform Administration session expired. <button id="sra-admin-sign-in-again" type="button" style="margin-left:10px">Sign in again</button>';
+    document.querySelector('#sra-admin-sign-in-again')?.addEventListener('click', () => {
+      notice.remove();
+      document.querySelector('#email')?.focus();
+    }, { once: true });
   }
 
   window.fetch = async (input, options = {}) => {
     const url = typeof input === 'string' ? input : String(input?.url || '');
     const isAdminRequest = url.startsWith('/api/admin') || url.includes('/api/admin/');
+    const isSessionProbe = url.includes('/api/admin/session') || url.includes('/api/admin/bootstrap-status');
     const controller = new AbortController();
     const externalSignal = options.signal;
     const timeout = window.setTimeout(() => controller.abort(new DOMException('Administration request timed out.', 'TimeoutError')), ADMIN_REQUEST_TIMEOUT_MS);
@@ -38,7 +57,7 @@
         ...options,
         signal: controller.signal
       });
-      if (isAdminRequest && response.status === 401) startSessionRecovery();
+      if (isAdminRequest && !isSessionProbe && response.status === 401) startSessionRecovery();
       if (response.ok) return response;
       const contentType = response.headers.get('content-type') || '';
       if (contentType.includes('application/json')) return response;
@@ -54,9 +73,7 @@
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
-      if (controller.signal.aborted && !externalSignal?.aborted) {
-        throw new Error(`Administration request timed out after ${ADMIN_REQUEST_TIMEOUT_MS / 1000} seconds.`);
-      }
+      if (controller.signal.aborted && !externalSignal?.aborted) throw new Error(`Administration request timed out after ${ADMIN_REQUEST_TIMEOUT_MS / 1000} seconds.`);
       throw error;
     } finally {
       window.clearTimeout(timeout);
@@ -64,10 +81,9 @@
   };
 
   const money = (value) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 8 }).format(Number(value || 0));
-  let enhancing = false;
 
   async function enhanceFundingInstrumentControl() {
-    if (enhancing) return;
+    if (enhancing || sessionRecoveryStarted) return;
     const current = document.querySelector('#funding-instrument-id');
     if (!current || current.dataset.canonicalSelector === 'true') return;
     enhancing = true;
@@ -84,7 +100,6 @@
         ? instruments.map((instrument) => `<option value="${String(instrument.instrumentId).replaceAll('"', '&quot;')}" ${instrument.deposited ? 'disabled' : ''}>${instrument.instrumentId} · ${instrument.name} · ${money(instrument.faceValueUsd)}${instrument.deposited ? ' · DEPOSITED' : ''}</option>`).join('')
         : '<option value="">No eligible canonical instruments found</option>';
       current.replaceWith(select);
-
       const applyInstrument = () => {
         const instrument = instruments.find((item) => item.instrumentId === select.value);
         if (!instrument) return;
@@ -101,7 +116,7 @@
       applyInstrument();
     } catch (error) {
       const message = document.querySelector('#funding-instrument-message');
-      if (message) message.textContent = error.message;
+      if (message && !sessionRecoveryStarted) message.textContent = error.message;
     } finally {
       enhancing = false;
     }
