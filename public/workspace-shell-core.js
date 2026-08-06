@@ -62,88 +62,47 @@
     }
   };
 
-  function signedIn() {
-    return Boolean(window.accessState?.session);
-  }
-
-  function escapeHtml(value) {
-    return String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#039;');
-  }
-
+  let initialized = false;
+  function signedIn() { return Boolean(window.accessState?.session); }
+  function escapeHtml(value) { return String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#039;'); }
   function currentWorkspaceDefinition() {
     const tier = window.accessState?.session?.activeCapacity || 'UNIVERSAL';
     return WORKSPACE_COPY[tier] || WORKSPACE_COPY.UNIVERSAL;
   }
-
   function removePublicOnlyElements() {
     document.querySelectorAll('.public-feature-rail,.public-home-actions').forEach((element) => element.remove());
     document.querySelector('#access-actions')?.classList.remove('public-top-access-hidden');
   }
-
   function openView(view) {
-    if (view === 'capabilities') {
-      document.querySelector('#capabilities-button')?.click();
-      return;
-    }
-    if (view === 'sain') {
-      document.body.classList.remove('workspace-open');
-      document.querySelector('#sane-input')?.focus();
-      return;
-    }
-    const button = document.querySelector(`.nav-item[data-view="${view}"]`);
-    button?.click();
+    if (view === 'capabilities') { document.querySelector('#capabilities-button')?.click(); return; }
+    if (view === 'sain') { document.body.classList.remove('workspace-open'); document.querySelector('#sane-input')?.focus(); return; }
+    document.querySelector(`.nav-item[data-view="${view}"]`)?.click();
   }
-
   function renderCurrentWorkspace() {
+    if (!signedIn()) return;
     const definition = currentWorkspaceDefinition();
     const title = document.querySelector('#context-title');
     const status = document.querySelector('#context-status');
     const root = document.querySelector('#view-root');
     if (!root) return;
-
     if (title) title.textContent = definition.label;
-    if (status) {
-      status.textContent = 'ACTIVE';
-      status.className = 'badge open';
-    }
-
-    root.innerHTML = `<section class="workspace-overview">
-      <div class="workspace-overview-intro">
-        <p class="eyebrow">AVAILABLE IN THIS WORKSPACE</p>
-        <h2>${escapeHtml(definition.label)}</h2>
-        <p>${escapeHtml(definition.intro)}</p>
-      </div>
-      <div class="workspace-feature-grid">
-        ${definition.features.map(([name, description, view]) => `<button class="workspace-feature-card" data-workspace-target="${escapeHtml(view)}"><strong>${escapeHtml(name)}</strong><span>${escapeHtml(description)}</span><small>Open →</small></button>`).join('')}
-      </div>
-      <p class="workspace-position-note">Your existing market commitments and holdings remain under <strong>My Positions</strong> in the left navigation.</p>
-    </section>`;
-
-    root.querySelectorAll('[data-workspace-target]').forEach((button) => {
-      button.addEventListener('click', () => openView(button.dataset.workspaceTarget));
-    });
+    if (status) { status.textContent = 'ACTIVE'; status.className = 'badge open'; }
+    root.innerHTML = `<section class="workspace-overview"><div class="workspace-overview-intro"><p class="eyebrow">AVAILABLE IN THIS WORKSPACE</p><h2>${escapeHtml(definition.label)}</h2><p>${escapeHtml(definition.intro)}</p></div><div class="workspace-feature-grid">${definition.features.map(([name, description, view]) => `<button class="workspace-feature-card" data-workspace-target="${escapeHtml(view)}"><strong>${escapeHtml(name)}</strong><span>${escapeHtml(description)}</span><small>Open →</small></button>`).join('')}</div><p class="workspace-position-note">Your existing market commitments and holdings remain under <strong>My Positions</strong> in the left navigation.</p></section>`;
+    root.querySelectorAll('[data-workspace-target]').forEach((button) => button.addEventListener('click', () => openView(button.dataset.workspaceTarget)));
   }
-
   function syncShell() {
     const workspaceButton = document.querySelector('.nav-item[data-view="workspace"]');
     if (!workspaceButton) return;
-
-    if (signedIn()) {
-      removePublicOnlyElements();
-      workspaceButton.classList.remove('role-hidden');
-      return;
-    }
-
+    if (signedIn()) { removePublicOnlyElements(); workspaceButton.classList.remove('role-hidden'); return; }
     document.body.classList.remove('workspace-open');
     workspaceButton.classList.add('role-hidden');
     workspaceButton.classList.remove('active');
   }
-
-  document.addEventListener('click', (event) => {
+  function onClick(event) {
     const button = event.target.closest('.nav-item');
     if (!button) return;
-
     if (button.dataset.view === 'workspace') {
+      if (!signedIn()) return;
       event.preventDefault();
       event.stopImmediatePropagation();
       const opening = !document.body.classList.contains('workspace-open');
@@ -153,16 +112,19 @@
       if (opening) renderCurrentWorkspace();
       return;
     }
-
     if (signedIn()) {
       document.body.classList.remove('workspace-open');
       document.querySelector('.nav-item[data-view="workspace"]')?.classList.remove('active');
     }
-  }, true);
-
-  const observer = new MutationObserver(syncShell);
-  window.addEventListener('DOMContentLoaded', () => {
+  }
+  function initialize() {
+    if (initialized) return;
+    initialized = true;
+    document.addEventListener('click', onClick, true);
+    const observer = new MutationObserver(syncShell);
     observer.observe(document.body, { childList: true, subtree: true });
     syncShell();
-  });
+  }
+  if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', initialize, { once: true });
+  else initialize();
 })();
