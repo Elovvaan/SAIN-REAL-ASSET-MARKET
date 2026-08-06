@@ -1,51 +1,21 @@
 (() => {
-  const REFRESH_INTERVAL_MS = 15000;
+  const REFRESH_INTERVAL_MS = 60000;
   let refreshInFlight = false;
   let timer = null;
   let orderSide = 'BUY';
 
-  function marketplaceIsOpen() {
-    return Boolean(document.querySelector('.nav-item[data-view="marketplace"].active'));
-  }
+  const marketplaceIsOpen = () => Boolean(document.querySelector('.nav-item[data-view="marketplace"].active'));
+  const userIsEditingMarketControls = () => Boolean(document.activeElement?.closest?.('.live-terminal input, .live-terminal select, .live-terminal textarea'));
 
-  function userIsEditingMarketControls() {
-    const active = document.activeElement;
-    return Boolean(active?.closest?.('.live-terminal input, .live-terminal select, .live-terminal textarea'));
-  }
-
-  async function marketplaceStatus() {
-    const response = await fetch('/api/marketplace-listings/status', { headers: { Accept: 'application/json' } });
-    if (!response.ok) return null;
-    return response.json();
-  }
-
-  function patchTruthfulCounts(status) {
-    if (!status) return;
-    const totals = {
-      Listings: Number(status.listingCount || 0),
-      Live: Number(status.byState?.PUBLISHED || 0) + Number(status.byState?.ACTIVE || 0),
-      Ready: Number(status.readyListings || 0),
-      Prepared: Number(status.byState?.PREPARED || 0)
-    };
-    document.querySelectorAll('.terminal-kpis > div').forEach((card) => {
-      const label = card.querySelector('span')?.textContent?.trim();
-      const value = card.querySelector('strong');
-      if (value && Object.hasOwn(totals, label)) value.textContent = totals[label].toLocaleString();
-    });
-    const shown = document.querySelector('.market-watch .terminal-panel-head span');
-    if (shown) shown.title = 'The table shows up to 100 records. Header totals represent the complete marketplace.';
-  }
-
-  async function refreshPublishedInventory() {
+  async function refreshPublishedInventory({ force = false } = {}) {
     if (refreshInFlight || document.hidden || !marketplaceIsOpen() || userIsEditingMarketControls()) return;
     if (typeof window.renderTransactionMarketSection !== 'function') return;
     refreshInFlight = true;
     try {
-      await window.renderTransactionMarketSection();
-      patchTruthfulCounts(await marketplaceStatus());
+      await window.renderTransactionMarketSection({ force });
       window.dispatchEvent(new CustomEvent('sra:marketplace-refreshed', { detail: { refreshedAt: new Date().toISOString() } }));
     } catch {
-      // Keep the last successful state and retry on the next cycle.
+      // Preserve the last successful LIVE inventory and retry on the next scheduled cycle.
     } finally {
       refreshInFlight = false;
     }
@@ -64,12 +34,6 @@
     if (button.disabled) return;
     const ticket = button.closest('.order-ticket');
     const terminal = button.closest('.live-terminal');
-    const selectedState = terminal?.querySelector('.instrument-chart .terminal-panel-head > span')?.textContent?.trim().toUpperCase() || '';
-    if (selectedState && !['LIVE', 'PUBLISHED', 'ACTIVE'].includes(selectedState)) {
-      button.textContent = 'Awaiting Market Authorization';
-      setTimeout(() => { button.textContent = `Review ${orderSide === 'BUY' ? 'Buy' : 'Sell'} Order with SAIN`; }, 1800);
-      return;
-    }
     const quantity = Number(ticket?.querySelector('#market-order-quantity')?.value || 0);
     const orderType = ticket?.querySelector('select')?.value || 'Market';
     const limitInputs = ticket?.querySelectorAll('input[type="number"]') || [];
@@ -77,7 +41,7 @@
     const listingId = terminal?.querySelector('.instrument-chart .terminal-panel-head small')?.textContent?.trim() || '';
     const market = terminal?.querySelector('.instrument-chart .terminal-panel-head strong')?.textContent?.trim() || 'SRA / USD';
     if (!Number.isFinite(quantity) || quantity <= 0) {
-      ticket.querySelector('#market-order-quantity')?.focus();
+      ticket?.querySelector('#market-order-quantity')?.focus();
       button.textContent = 'Enter a quantity first';
       setTimeout(() => { button.textContent = `Review ${orderSide === 'BUY' ? 'Buy' : 'Sell'} Order with SAIN`; }, 1600);
       return;
@@ -86,7 +50,6 @@
     const input = document.querySelector('#sane-input');
     if (input) input.value = prompt;
     document.querySelector('#send-message')?.click();
-    document.querySelector('.sane-workspace')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
   function loadHybridMarketView() {
@@ -100,14 +63,16 @@
 
   function start() {
     if (timer) clearInterval(timer);
-    timer = setInterval(refreshPublishedInventory, REFRESH_INTERVAL_MS);
+    timer = setInterval(() => void refreshPublishedInventory({ force: true }), REFRESH_INTERVAL_MS);
     timer.unref?.();
   }
 
   document.addEventListener('click', (event) => {
     const marketplace = event.target.closest('.nav-item[data-view="marketplace"]');
-    if (marketplace) setTimeout(refreshPublishedInventory, 300);
-
+    if (marketplace) {
+      loadHybridMarketView();
+      setTimeout(() => void refreshPublishedInventory(), 100);
+    }
     const side = event.target.closest('.order-ticket .side-toggle button');
     if (side) {
       event.preventDefault();
@@ -115,7 +80,6 @@
       selectSide(side);
       return;
     }
-
     const review = event.target.closest('.order-ticket [data-context-action]');
     if (review) {
       event.preventDefault();
@@ -124,15 +88,8 @@
     }
   }, true);
 
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) void refreshPublishedInventory();
-  });
-
-  window.addEventListener('focus', () => void refreshPublishedInventory());
-  window.addEventListener('sra:marketplace-refreshed', async () => patchTruthfulCounts(await marketplaceStatus()));
-  window.addEventListener('DOMContentLoaded', () => {
-    loadHybridMarketView();
-    start();
-    setTimeout(refreshPublishedInventory, 800);
-  });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && marketplaceIsOpen()) void refreshPublishedInventory(); });
+  const initialize = () => start();
+  if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', initialize, { once: true });
+  else initialize();
 })();
