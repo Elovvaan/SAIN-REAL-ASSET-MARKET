@@ -7,6 +7,7 @@ function recordId(record) { return first(record?.coinPositionId, record?.positio
 function participantId(record) { return first(record?.participantId, record?.ownerParticipantId, record?.ownerId, record?.accountHolderId); }
 function instrumentId(record) { return first(record?.instrumentId, record?.sraInstrumentId, record?.linkedInstrumentId); }
 function stateOf(record) { return String(first(record?.state, record?.status, 'UNKNOWN')).toUpperCase(); }
+function idOf(record, ...fields) { return first(...fields.map((field) => record?.[field]), record?.transactionId, record?.id); }
 function restricted(record) {
   return Boolean(record?.frozen || record?.complianceHold || record?.transferRestricted || record?.exportRestricted
     || record?.externalTransferRestricted || record?.disputeState === 'OPEN' || stateOf(record) === 'FROZEN');
@@ -39,33 +40,44 @@ export class SraCoinAgentService {
     return records;
   }
 
-  relatedTransactions(positionId, instrument) {
-    return this.domain.list(TRANSACTION_TYPE).filter((record) => {
-      const ids = [record.positionId, record.buyerPositionId, record.sellerPositionId, record.pendingBuyerPositionId];
-      return ids.includes(positionId) || (instrument && record.instrumentId === instrument);
-    });
-  }
+  transactions() { return this.domain.list(TRANSACTION_TYPE); }
 
   explain(positionId) {
     const { type, record: position } = this.resolvePosition(positionId);
     const id = recordId(position);
     const owner = participantId(position);
     const instrument = instrumentId(position);
+    const tx = this.transactions();
     const linkedInstrument = instrument ? this.domain.get('SRA_INSTRUMENT', instrument) : null;
-    const ownership = this.domain.list('OWNERSHIP_RECOGNITION').find((item) => item.positionId === id || (owner && instrument && participantId(item) === owner && instrumentId(item) === instrument)) || null;
+    const ownership = this.domain.list('OWNERSHIP_RECOGNITION').find((item) => item.positionId === id
+      || (owner && instrument && participantId(item) === owner && instrumentId(item) === instrument)) || null;
     const listings = this.domain.list('MARKETPLACE_LISTING').filter((item) => item.instrumentId === instrument);
-    const transactions = this.relatedTransactions(id, instrument);
-    const activeReservation = transactions.find((item) => item.transactionType === 'PRE_ALLOCATION_RESERVATION'
-      && (item.positionReservation?.positionId === id || item.sellerPositionId === id)
-      && item.positionReservation?.state === 'HELD') || null;
-    const allocation = transactions.find((item) => item.transactionType === 'POSITION_ALLOCATION_APPROVAL'
-      && ['ALLOCATION_APPROVED_PENDING_SETTLEMENT', 'SETTLED'].includes(item.state)) || null;
-    const settlement = transactions.find((item) => item.transactionType === 'ATOMIC_ORDER_SETTLEMENT'
-      && (item.buyerPositionId === id || item.sellerPositionId === id)) || null;
-    const exportPackage = this.domain.list('EXPORT_PACKAGE').find((item) => item.positionId === id) || null;
-    const transferInstruction = transactions.find((item) => item.transactionType === 'EXTERNAL_TRANSFER_INSTRUCTION' && item.positionId === id) || null;
-    const execution = transactions.find((item) => item.transactionType === 'EXTERNAL_TRANSFER_EXECUTION_AUTHORIZATION' && item.positionId === id) || null;
-    const result = transactions.find((item) => item.transactionType === 'EXTERNAL_TRANSFER_RESULT' && item.positionId === id) || null;
+
+    const reservations = tx.filter((item) => item.transactionType === 'PRE_ALLOCATION_RESERVATION'
+      && (item.positionReservation?.positionId === id || item.sellerPositionId === id));
+    const activeReservation = reservations.find((item) => item.positionReservation?.state === 'HELD') || null;
+    const reservationIds = new Set(reservations.map((item) => idOf(item, 'reservationId')).filter(Boolean));
+
+    const allocations = tx.filter((item) => item.transactionType === 'POSITION_ALLOCATION_APPROVAL'
+      && (item.pendingBuyerPositionId === id || item.buyerPositionId === id || reservationIds.has(item.reservationId)));
+    const allocation = allocations.find((item) => ['ALLOCATION_APPROVED_PENDING_SETTLEMENT', 'SETTLED'].includes(item.state)) || null;
+    const allocationIds = new Set(allocations.map((item) => idOf(item, 'allocationId')).filter(Boolean));
+
+    const settlements = tx.filter((item) => item.transactionType === 'ATOMIC_ORDER_SETTLEMENT'
+      && (item.buyerPositionId === id || reservationIds.has(item.reservationId) || allocationIds.has(item.allocationId)));
+    const settlement = settlements.find((item) => item.state === 'SETTLED') || settlements[0] || null;
+
+    const exportPackage = this.domain.list('EXPORT_PACKAGE').find((item) => item.positionId === id
+      || (settlement && item.settlementId === idOf(settlement, 'settlementId'))) || null;
+    const transferInstruction = tx.find((item) => item.transactionType === 'EXTERNAL_TRANSFER_INSTRUCTION'
+      && (item.positionId === id || (exportPackage && item.exportPackageId === exportPackage.exportPackageId))) || null;
+    const execution = tx.find((item) => item.transactionType === 'EXTERNAL_TRANSFER_EXECUTION_AUTHORIZATION'
+      && transferInstruction && item.transferInstructionId === idOf(transferInstruction, 'transferInstructionId')) || null;
+    const result = transferInstruction ? tx.find((item) => item.transactionType === 'EXTERNAL_TRANSFER_RESULT'
+      && (item.transferInstructionId === idOf(transferInstruction, 'transferInstructionId')
+        || item.transferResultId === transferInstruction.transferResultId
+        || item.transactionId === transferInstruction.transferResultId)) || null : null;
+
     const blockers = [];
     if (!instrument) blockers.push('NO_LINKED_INSTRUMENT');
     if (instrument && !linkedInstrument) blockers.push('LINKED_INSTRUMENT_NOT_FOUND');
@@ -74,6 +86,7 @@ export class SraCoinAgentService {
     if (linkedInstrument && restricted(linkedInstrument)) blockers.push('INSTRUMENT_RESTRICTED');
 
     const currentState = result?.result === 'COMPLETED' ? 'EXTERNALLY_HELD'
+      : result?.result === 'FAILED' ? 'EXTERNAL_TRANSFER_FAILED'
       : transferInstruction ? transferInstruction.state
       : exportPackage ? exportPackage.state
       : settlement ? settlement.state
@@ -81,23 +94,28 @@ export class SraCoinAgentService {
       : activeReservation ? 'RESERVED'
       : stateOf(position);
 
+    const readyForPublication = listings.some((item) => item.status === 'READY_FOR_PUBLICATION_APPROVAL'
+      || item.state === 'READY_FOR_PUBLICATION_APPROVAL');
+    const live = listings.some((item) => item.status === 'LIVE' || item.state === 'LIVE' || item.state === 'PUBLISHED');
+
     let nextAction = 'INSPECT_POSITION';
     let approvalRequired = false;
     if (blockers.length) nextAction = 'RESOLVE_BLOCKERS';
     else if (result?.result === 'FAILED') nextAction = 'REVIEW_FAILED_EXTERNAL_TRANSFER';
+    else if (result?.result === 'COMPLETED') nextAction = 'MONITOR_EXTERNAL_HOLDING';
     else if (execution && !result) { nextAction = 'RECONCILE_EXTERNAL_RESULT'; approvalRequired = true; }
     else if (transferInstruction && transferInstruction.executionState === 'NOT_AUTHORIZED') { nextAction = 'AUTHORIZE_EXTERNAL_EXECUTION'; approvalRequired = true; }
     else if (exportPackage && !transferInstruction) { nextAction = 'VERIFY_TRANSFER_DESTINATION'; approvalRequired = true; }
     else if (settlement && !exportPackage) { nextAction = 'REVIEW_EXPORT_ELIGIBILITY'; approvalRequired = true; }
     else if (allocation && !settlement) { nextAction = 'AUTHORIZE_SETTLEMENT'; approvalRequired = true; }
     else if (activeReservation && !allocation) { nextAction = 'APPROVE_ALLOCATION'; approvalRequired = true; }
-    else if (listings.some((item) => item.status === 'LIVE')) nextAction = 'AVAILABLE_FOR_GOVERNED_MARKET_PARTICIPATION';
-    else if (listings.some((item) => item.state === 'READY_FOR_PUBLICATION_APPROVAL')) { nextAction = 'AUTHORIZE_PUBLICATION'; approvalRequired = true; }
+    else if (live) nextAction = 'AVAILABLE_FOR_GOVERNED_MARKET_PARTICIPATION';
+    else if (readyForPublication) { nextAction = 'AUTHORIZE_PUBLICATION'; approvalRequired = true; }
     else if (instrument) nextAction = 'APPLY_OR_REVIEW_MARKET_READINESS_POLICY';
 
     const quantity = number(first(position.availableQuantity, position.quantity, position.balance));
     const reservedQuantity = activeReservation ? number(first(activeReservation.positionReservation?.quantity, activeReservation.quantity)) : 0;
-    const externallyTransferred = number(first(position.externallyTransferredQuantity, position.externalQuantity));
+    const externallyTransferred = number(first(position.externalizedQuantity, position.externallyTransferredQuantity, position.externalQuantity));
 
     return {
       agentType: 'SRA_COIN_POSITION_AGENT',
@@ -114,34 +132,27 @@ export class SraCoinAgentService {
       instrumentId: instrument,
       currentState,
       ownershipState: ownership?.state || null,
-      marketplaceState: listings.some((item) => item.status === 'LIVE') ? 'LIVE'
-        : listings.some((item) => item.state === 'READY_FOR_PUBLICATION_APPROVAL') ? 'READY_FOR_PUBLICATION_APPROVAL'
-        : listings.length ? listings[0].state || listings[0].status : 'NOT_LISTED',
+      marketplaceState: live ? 'LIVE' : readyForPublication ? 'READY_FOR_PUBLICATION_APPROVAL'
+        : listings.length ? first(listings[0].status, listings[0].state) : 'NOT_LISTED',
       lineage: {
         observationId: first(position.observationId, position.sourceObservationId, linkedInstrument?.observationId),
         recognitionId: first(position.recognitionId, position.recognitionRecordId, linkedInstrument?.recognitionId),
         financialRecordId: first(position.financialRecordId, linkedInstrument?.financialRecordId),
         instrumentId: instrument,
         listingIds: listings.map((item) => first(item.listingId, item.id)).filter(Boolean),
-        reservationId: first(activeReservation?.reservationId, activeReservation?.transactionId),
-        allocationId: first(allocation?.allocationId, allocation?.transactionId),
-        settlementId: first(settlement?.settlementId, settlement?.transactionId),
+        reservationId: idOf(activeReservation, 'reservationId'),
+        allocationId: idOf(allocation, 'allocationId'),
+        settlementId: idOf(settlement, 'settlementId'),
         exportPackageId: exportPackage?.exportPackageId || null,
-        transferInstructionId: first(transferInstruction?.transferInstructionId, transferInstruction?.transactionId),
-        executionAuthorizationId: first(execution?.executionAuthorizationId, execution?.transactionId),
-        externalResultId: first(result?.transferResultId, result?.transactionId),
+        transferInstructionId: idOf(transferInstruction, 'transferInstructionId'),
+        executionAuthorizationId: idOf(execution, 'executionAuthorizationId'),
+        externalResultId: idOf(result, 'transferResultId'),
       },
       blockers,
       nextEligibleAction: nextAction,
       humanApprovalRequired: approvalRequired,
-      capabilities: [
-        'EXPLAIN_ORIGIN', 'EXPLAIN_CURRENT_STATE', 'TRACE_LINEAGE', 'REPORT_RESTRICTIONS',
-        'IDENTIFY_NEXT_ACTION', 'PREPARE_GOVERNED_ACTION',
-      ],
-      prohibitedActions: [
-        'SELF_APPROVE', 'MOVE_VALUE_WITHOUT_AUTHORIZATION', 'CHANGE_OWNERSHIP_WITHOUT_SETTLEMENT',
-        'CREATE_UNVERIFIED_VALUE', 'BYPASS_POLICY',
-      ],
+      capabilities: ['EXPLAIN_ORIGIN', 'EXPLAIN_CURRENT_STATE', 'TRACE_LINEAGE', 'REPORT_RESTRICTIONS', 'IDENTIFY_NEXT_ACTION', 'PREPARE_GOVERNED_ACTION'],
+      prohibitedActions: ['SELF_APPROVE', 'MOVE_VALUE_WITHOUT_AUTHORIZATION', 'CHANGE_OWNERSHIP_WITHOUT_SETTLEMENT', 'CREATE_UNVERIFIED_VALUE', 'BYPASS_POLICY'],
       explanation: this.summarize({ id, quantity, currentState, instrument, owner, blockers, nextAction, approvalRequired }),
       generatedAt: new Date().toISOString(),
     };
@@ -156,8 +167,7 @@ export class SraCoinAgentService {
   }
 
   list({ participantId: owner = null, limit = 100 } = {}) {
-    return this.positions()
-      .filter(({ record }) => !owner || participantId(record) === owner)
+    return this.positions().filter(({ record }) => !owner || participantId(record) === owner)
       .slice(0, Math.max(1, Math.min(Number(limit) || 100, 500)))
       .map(({ record }) => this.explain(recordId(record)));
   }
