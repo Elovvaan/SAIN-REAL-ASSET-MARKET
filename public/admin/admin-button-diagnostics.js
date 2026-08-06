@@ -5,10 +5,15 @@
   const ADMIN_SESSION_TIMEOUT_MS = 15_000;
   const ADMIN_READ_TIMEOUT_MS = 60_000;
   const ADMIN_WRITE_TIMEOUT_MS = 180_000;
+  const ADMIN_READ_CACHE_TTL_MS = 5_000;
+  const ADMIN_HIDDEN_CACHE_TTL_MS = 60_000;
   const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
   const nativeFetch = window.fetch.bind(window);
+  const inFlightReads = new Map();
+  const readCache = new Map();
   let sessionRecoveryStarted = false;
   let enhancing = false;
+  let inspectionScheduled = false;
 
   const adminView = () => document.querySelector('#admin-view');
 
@@ -43,6 +48,8 @@
     if (sessionRecoveryStarted) return;
     sessionRecoveryStarted = true;
     window.__sraAdminSessionExpired = true;
+    inFlightReads.clear();
+    readCache.clear();
     window.dispatchEvent(new CustomEvent('sra-admin-session-expired'));
     showSignedOutState();
 
@@ -65,7 +72,7 @@
     unlockAdminWorkspace();
     window.dispatchEvent(new CustomEvent('sra-admin-session-restored'));
     window.setTimeout(() => {
-      inspectButtons();
+      scheduleButtonInspection();
       void enhanceFundingInstrumentControl();
     }, 0);
   }
@@ -76,13 +83,38 @@
     return SAFE_METHODS.has(method) ? ADMIN_READ_TIMEOUT_MS : ADMIN_WRITE_TIMEOUT_MS;
   }
 
-  window.fetch = async (input, options = {}) => {
-    const url = typeof input === 'string' ? input : String(input?.url || '');
-    const method = String(options.method || input?.method || 'GET').toUpperCase();
-    const isAdminRequest = url.startsWith('/api/admin') || url.includes('/api/admin/');
-    const isSessionProbe = url.includes('/api/admin/session') || url.includes('/api/admin/bootstrap-status');
-    const timeoutMs = administrationTimeout({ isAdminRequest, isSessionProbe, method });
-    const externalSignal = options.signal;
+  function cacheKey(url, method) { return `${method}:${url}`; }
+
+  function responseFromSnapshot(snapshot) {
+    return new Response(snapshot.body, {
+      status: snapshot.status,
+      statusText: snapshot.statusText,
+      headers: snapshot.headers
+    });
+  }
+
+  async function snapshotResponse(response) {
+    return {
+      body: await response.clone().text(),
+      status: response.status,
+      statusText: response.statusText,
+      headers: [...response.headers.entries()],
+      storedAt: Date.now()
+    };
+  }
+
+  function cachedResponse(key, maxAgeMs) {
+    const snapshot = readCache.get(key);
+    if (!snapshot) return null;
+    if (Date.now() - snapshot.storedAt > maxAgeMs) {
+      readCache.delete(key);
+      return null;
+    }
+    return responseFromSnapshot(snapshot);
+  }
+
+  async function performFetch(input, options, context) {
+    const { isAdminRequest, isSessionProbe, method, timeoutMs, externalSignal } = context;
     const controller = timeoutMs ? new AbortController() : null;
     const timeout = timeoutMs
       ? window.setTimeout(() => controller.abort(new DOMException('Administration request timed out.', 'TimeoutError')), timeoutMs)
@@ -126,12 +158,48 @@
     } finally {
       if (timeout !== null) window.clearTimeout(timeout);
     }
+  }
+
+  window.fetch = async (input, options = {}) => {
+    const url = typeof input === 'string' ? input : String(input?.url || '');
+    const method = String(options.method || input?.method || 'GET').toUpperCase();
+    const isAdminRequest = url.startsWith('/api/admin') || url.includes('/api/admin/');
+    const isSessionProbe = url.includes('/api/admin/session') || url.includes('/api/admin/bootstrap-status');
+    const timeoutMs = administrationTimeout({ isAdminRequest, isSessionProbe, method });
+    const externalSignal = options.signal;
+    const cacheableRead = isAdminRequest && method === 'GET' && !isSessionProbe && !externalSignal;
+    const key = cacheKey(url, method);
+
+    if (cacheableRead) {
+      const maxAge = document.visibilityState === 'visible' ? ADMIN_READ_CACHE_TTL_MS : ADMIN_HIDDEN_CACHE_TTL_MS;
+      const cached = cachedResponse(key, maxAge);
+      if (cached) return cached;
+      const existing = inFlightReads.get(key);
+      if (existing) return responseFromSnapshot(await existing);
+
+      const pending = performFetch(input, options, { isAdminRequest, isSessionProbe, method, timeoutMs, externalSignal })
+        .then(async (response) => {
+          const snapshot = await snapshotResponse(response);
+          if (response.ok) readCache.set(key, snapshot);
+          return snapshot;
+        })
+        .finally(() => inFlightReads.delete(key));
+      inFlightReads.set(key, pending);
+      return responseFromSnapshot(await pending);
+    }
+
+    const response = await performFetch(input, options, { isAdminRequest, isSessionProbe, method, timeoutMs, externalSignal });
+    if (isAdminRequest && !SAFE_METHODS.has(method) && response.ok) {
+      readCache.clear();
+      window.dispatchEvent(new CustomEvent('sra-admin-data-changed'));
+    }
+    return response;
   };
 
   const money = (value) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 8 }).format(Number(value || 0));
 
   async function enhanceFundingInstrumentControl() {
-    if (enhancing || sessionRecoveryStarted) return;
+    if (enhancing || sessionRecoveryStarted || document.visibilityState !== 'visible') return;
     const current = document.querySelector('#funding-instrument-id');
     if (!current || current.dataset.canonicalSelector === 'true') return;
     enhancing = true;
@@ -179,9 +247,22 @@
     void enhanceFundingInstrumentControl();
   }
 
+  function scheduleButtonInspection() {
+    if (inspectionScheduled) return;
+    inspectionScheduled = true;
+    window.requestAnimationFrame(() => {
+      inspectionScheduled = false;
+      inspectButtons();
+    });
+  }
+
   window.addEventListener('sra-admin-authenticated', completeSessionRecovery);
-  const observer = new MutationObserver(inspectButtons);
+  window.addEventListener('sra-admin-data-changed', scheduleButtonInspection);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') scheduleButtonInspection();
+  });
+  const observer = new MutationObserver(scheduleButtonInspection);
   observer.observe(document.documentElement, { subtree: true, childList: true });
-  if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', inspectButtons, { once: true });
-  else inspectButtons();
+  if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', scheduleButtonInspection, { once: true });
+  else scheduleButtonInspection();
 })();
