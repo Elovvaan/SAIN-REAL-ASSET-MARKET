@@ -98,10 +98,13 @@ export class SraCoinPassportMemoryService {
     return {
       passportType: 'SRA_COIN_AGENT_PASSPORT',
       assetName: 'SRA Coin',
+      assetSymbol: 'SRA',
+      nativeMarketPair: 'SRA/USD',
+      parReference: { baseAsset: 'SRA Coin', baseSymbol: 'SRA', quoteCurrency: 'USD', rate: 1 },
       denomination: agent.denomination,
       agentId: agent.agentId,
       positionId: agent.positionId,
-      generation: parentPositionId ? 2 : 1,
+      generation: Number(agent.generation || (parentPositionId ? 2 : 1)),
       parentPositionId: parentPositionId || null,
       childPositionIds,
       quantity: agent.quantity,
@@ -141,7 +144,7 @@ export class SraCoinPassportMemoryService {
       recordId: agent.positionId,
       state: agent.currentState,
       occurredAt: null,
-      detail: `SRA Coin Position ${agent.positionId} represents ${agent.quantity} ${agent.denomination}.`,
+      detail: `SRA Coin Position ${agent.positionId} represents ${agent.quantity} ${agent.denomination}. Its native market is SRA/USD at the platform par reference of 1 SRA to 1 USD.`,
     });
 
     for (const listing of related.listings) {
@@ -169,6 +172,8 @@ export class SraCoinPassportMemoryService {
     return {
       memoryType: 'SRA_COIN_AGENT_MEMORY',
       assetName: 'SRA Coin',
+      assetSymbol: 'SRA',
+      nativeMarketPair: 'SRA/USD',
       agentId: agent.agentId,
       positionId: agent.positionId,
       authoritativeSource: 'DERIVED_FROM_CANONICAL_PLATFORM_RECORDS',
