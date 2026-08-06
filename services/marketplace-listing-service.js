@@ -4,6 +4,7 @@ import { RECORD_TYPES } from './persistent-domain-service.js';
 const LISTING_RECORD_TYPE = 'MARKETPLACE_LISTING';
 const SRA_PAR_UNIT_PRICE_USD = 1;
 const SRA_PAR_PRICING_METHOD = 'VERIFIED_RECORDED_USD_VALUE_AT_SRA_PAR';
+const INVALID_FINANCIAL_RECORD_BLOCKER = 'INVALID_LINKED_FINANCIAL_RECORD';
 
 function requireText(value, field) {
   const text = String(value || '').trim();
@@ -54,6 +55,13 @@ function listingRecordedValueUsd(listing, linkedFinancialRecordAmount = null) {
     const value = Number(candidate);
     if (Number.isFinite(value) && value > 0) return value;
   }
+
+  // Deliberate compatibility rule for historical LIVE SRA listings created
+  // before Financial Record lineage and explicit recorded-value fields existed.
+  if (!listing?.financialRecordId && (listing?.status === 'LIVE' || ['PUBLISHED', 'ACTIVE'].includes(listing?.state))) {
+    const legacyQuantity = Number(listing?.quantity ?? listing?.offeredQuantity ?? 0);
+    if (Number.isFinite(legacyQuantity) && legacyQuantity > 0) return legacyQuantity;
+  }
   return 0;
 }
 
@@ -82,10 +90,7 @@ function withCanonicalSraPricing(listing, linkedFinancialRecordAmount = null) {
       recordedValueUsd,
       parReference: '1 SRA = 1 USD'
     },
-    readiness: {
-      ...(listing.readiness || {}),
-      pricingApproved: true
-    },
+    readiness: { ...(listing.readiness || {}), pricingApproved: true },
     blockers
   };
 }
@@ -129,22 +134,38 @@ export class MarketplaceListingService {
     this.lastCycleAt = null;
     this.lastError = null;
     this.timer = null;
-
     if (this.autoStart && this.enabled) queueMicrotask(() => { void this.startPreparationCycle(); });
   }
 
-  linkedRecordedValueUsd(listingOrInstrument) {
-    const financialRecordId = listingOrInstrument?.financialRecordId;
-    if (!financialRecordId) return 0;
+  linkedRecordedValueUsd(listingOrInstrument, options = {}) {
+    const financialRecordId = String(listingOrInstrument?.financialRecordId || '').trim();
+    if (!financialRecordId) {
+      if (options.required) throw new Error('Instrument must reference a Financial Record before marketplace preparation.');
+      return 0;
+    }
     const record = this.persistentDomain.get(RECORD_TYPES.FINANCIAL_RECORD, financialRecordId);
-    if (!record) return 0;
+    if (!record) throw new Error(`Linked Financial Record ${financialRecordId} was not found.`);
     const unit = String(record.recognizedPosition?.unit || record.measurement?.unit || '').toUpperCase();
     if (unit !== 'USD') throw new Error(`Financial record ${financialRecordId} is not denominated in USD.`);
     return finitePositive(record.recognizedPosition?.amount ?? record.measurement?.value, `financial record ${financialRecordId} recorded USD amount`);
   }
 
   canonicalize(listing) {
-    return withCanonicalSraPricing(listing, this.linkedRecordedValueUsd(listing));
+    try {
+      return withCanonicalSraPricing(listing, this.linkedRecordedValueUsd(listing));
+    } catch (error) {
+      const blockers = new Set(Array.isArray(listing?.blockers) ? listing.blockers : []);
+      blockers.add(INVALID_FINANCIAL_RECORD_BLOCKER);
+      return {
+        ...listing,
+        blockers: [...blockers],
+        executionBlocked: true,
+        canonicalization: {
+          state: 'INVALID_LINKED_FINANCIAL_RECORD',
+          message: error?.message || String(error)
+        }
+      };
+    }
   }
 
   rawList() {
@@ -190,7 +211,9 @@ export class MarketplaceListingService {
     const existing = this.list({ instrumentId }).find((listing) => !['CANCELLED', 'CLOSED'].includes(listing.state));
     if (existing) return { listing: existing, created: false };
 
-    const recordedValueUsd = this.linkedRecordedValueUsd(instrument);
+    // Required validation occurs before any listing write. Missing, dangling,
+    // non-USD, or non-positive Financial Records leave the instrument pending.
+    const recordedValueUsd = this.linkedRecordedValueUsd(instrument, { required: true });
     const representedSraQuantity = finitePositive(instrument.denomination?.principalQuantity, 'instrument principal quantity');
     const now = new Date().toISOString();
     const listing = {
@@ -210,15 +233,10 @@ export class MarketplaceListingService {
       faceValueUsd: recordedValueUsd,
       unit: instrument.denomination?.symbol || 'SRA',
       pricing: {
-        state: 'CONFIGURED',
-        method: SRA_PAR_PRICING_METHOD,
-        askingPrice: SRA_PAR_UNIT_PRICE_USD,
-        unitPrice: SRA_PAR_UNIT_PRICE_USD,
-        currency: 'USD',
-        faceValueUsd: recordedValueUsd,
-        recordedValueUsd,
-        parReference: '1 SRA = 1 USD',
-        verifiedValueReference: instrument.financialRecordId
+        state: 'CONFIGURED', method: SRA_PAR_PRICING_METHOD,
+        askingPrice: 1, unitPrice: 1, currency: 'USD',
+        faceValueUsd: recordedValueUsd, recordedValueUsd,
+        parReference: '1 SRA = 1 USD', verifiedValueReference: instrument.financialRecordId
       },
       access: { state: 'NOT_CONFIGURED', eligibilityRule: null, minimumOrder: null, maximumOrder: null },
       readiness: { instrumentReviewed: false, pricingApproved: true, accessRulesApproved: false, transactionRouteConnected: false, settlementRouteConnected: false },
@@ -302,11 +320,13 @@ export class MarketplaceListingService {
     const { listings, duplicates } = canonicalByInstrument(raw);
     const byState = {};
     const counts = { LIVE: 0, READY: 0, PREPARED: 0 };
+    let invalidListingCount = 0;
     for (const listing of listings) {
       byState[listing.state] = (byState[listing.state] || 0) + 1;
       counts[stateBucket(listing)] += 1;
+      if (listing.canonicalization?.state === 'INVALID_LINKED_FINANCIAL_RECORD') invalidListingCount += 1;
     }
-    return { layer: 'MARKETPLACE_LISTING_LAYER', phase: 6, listingCount: listings.length, storedRecordCount: raw.length, supersededDuplicateCount: duplicates.length, byState, counts, latestCreatedAt: listings[0]?.createdAt || null };
+    return { layer: 'MARKETPLACE_LISTING_LAYER', phase: 6, listingCount: listings.length, invalidListingCount, storedRecordCount: raw.length, supersededDuplicateCount: duplicates.length, byState, counts, latestCreatedAt: listings[0]?.createdAt || null };
   }
 }
 
@@ -314,6 +334,7 @@ export {
   LISTING_RECORD_TYPE,
   SRA_PAR_UNIT_PRICE_USD,
   SRA_PAR_PRICING_METHOD,
+  INVALID_FINANCIAL_RECORD_BLOCKER,
   deterministicListingId,
   canonicalByInstrument,
   withCanonicalSraPricing
