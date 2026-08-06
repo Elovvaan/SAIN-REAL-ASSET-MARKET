@@ -1,7 +1,8 @@
 import express from 'express';
+import { GovernedLoanFinancingService } from '../services/governed-loan-financing-service.js';
 
 function actorId(req) {
-  return req.get('x-sra-actor-id') || req.body?.actorId || null;
+  return req.sraIdentity?.actorId || req.get('x-sra-actor-id') || req.body?.actorId || null;
 }
 
 function handle(res, error) {
@@ -15,8 +16,10 @@ function handle(res, error) {
 
 export function createFundingInstrumentIssuanceRouter(service) {
   const router = express.Router();
+  const loanFinancing = new GovernedLoanFinancingService(service.domain);
+  void loanFinancing.initialize().catch((error) => console.error(JSON.stringify({ level: 'error', event: 'LOAN_FINANCING_INITIALIZATION_FAILED', error: error?.message || String(error) })));
 
-  router.get('/status', (_req, res) => res.json(service.status()));
+  router.get('/status', (_req, res) => res.json({ issuance: service.status(), loanFinancing: loanFinancing.status() }));
 
   router.get('/requests/:requestId/assessment', (req, res) => {
     try { return res.json(service.assessRequest(req.params.requestId)); }
@@ -50,6 +53,20 @@ export function createFundingInstrumentIssuanceRouter(service) {
   router.post('/authorizations/:authorizationId/issue', async (req, res) => {
     try { return res.status(201).json(await service.issue(req.params.authorizationId, req.body, actorId(req))); }
     catch (error) { return handle(res, error); }
+  });
+
+  router.get('/financing/status', (_req, res) => res.json(loanFinancing.status()));
+
+  router.post('/financing/preview', (req, res) => {
+    try { return res.json(loanFinancing.preview(req.body || {})); }
+    catch (error) { return res.status(/not found/i.test(error.message) ? 404 : 422).json({ error: error.message, code: 'LOAN_FINANCING_PREVIEW_FAILED' }); }
+  });
+
+  router.post('/financing/approve', async (req, res) => {
+    const administrator = actorId(req);
+    if (!administrator) return res.status(401).json({ error: 'An authenticated administrator identity is required.' });
+    try { return res.status(201).json(await loanFinancing.approve(req.body || {}, administrator)); }
+    catch (error) { return res.status(/not found/i.test(error.message) ? 404 : 422).json({ error: error.message, code: 'LOAN_FINANCING_APPROVAL_FAILED' }); }
   });
 
   return router;
