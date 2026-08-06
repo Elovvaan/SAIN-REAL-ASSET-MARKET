@@ -12,6 +12,7 @@ import { OrderReviewMatchingService } from '../services/order-review-matching-se
 import { UnifiedMarketOperationsQueueService } from '../services/unified-market-operations-queue-service.js';
 import { SraCoinAgentService } from '../services/sra-coin-agent-service.js';
 import { SraCoinAgentInspectionService } from '../services/sra-coin-agent-inspection-service.js';
+import { SraAgentOperatingSystemService } from '../services/sra-agent-operating-system-service.js';
 
 function actorId(req) {
   return req.sraIdentity?.actorId || req.headers['x-sra-actor-id'] || req.body?.actorId || null;
@@ -33,6 +34,7 @@ export function createSaneRouter(service = new SaneSkillService(), edxOperations
     engines: createSraCoreEngineRegistry(),
   }) : null;
   const unifiedOperationsQueue = domain ? new UnifiedMarketOperationsQueueService(domain, orderReviewMatching, coreHeartbeat) : null;
+  const agentOperatingSystem = domain ? new SraAgentOperatingSystemService(domain, { operationsQueue: unifiedOperationsQueue, coreHeartbeat }) : null;
 
   if (coreHeartbeat) void coreHeartbeat.start().catch((error) => console.error(JSON.stringify({ level: 'error', event: 'SRA_CORE_START_FAILED', error: error?.message || String(error) })));
 
@@ -41,24 +43,18 @@ export function createSaneRouter(service = new SaneSkillService(), edxOperations
   router.get('/agent/status', (_req, res) => res.json({ agent: 'SANE', available: Boolean(sraAgentService?.available()), model: sraAgentService?.model || null, writeAccess: 'DISABLED', approvalRequiredForStateChanges: true }));
   router.post('/agent/chat', async (req, res) => { if (!sraAgentService) return res.status(503).json({ error: 'SRA agent service is unavailable.' }); try { return res.json(await sraAgentService.chat(req.body || {})); } catch (error) { return res.status(error.statusCode || 400).json({ error: error.message }); } });
 
+  router.get('/agent-os', (_req, res) => agentOperatingSystem ? res.json(agentOperatingSystem.brief()) : res.status(503).json({ error: 'SAIN Agent OS is unavailable.' }));
+  router.get('/agent-os/registry', (_req, res) => agentOperatingSystem ? res.json({ operatingSystem: 'SAIN_AGENT_OS', agents: agentOperatingSystem.registry(), authorityBoundary: agentOperatingSystem.brief().authorityBoundary }) : res.status(503).json({ error: 'SAIN Agent OS is unavailable.' }));
+
   router.get('/coin-agents', (req, res) => {
     if (!coinAgentInspection) return res.status(503).json({ error: 'SRA Coin Agent inspection is unavailable.' });
-    try {
-      return res.json(coinAgentInspection.list({
-        participantId: typeof req.query.participantId === 'string' ? req.query.participantId : null,
-        limit: req.query.limit,
-      }));
-    } catch (error) {
-      return res.status(422).json({ error: error.message, code: 'SRA_COIN_AGENT_LIST_FAILED' });
-    }
+    try { return res.json(coinAgentInspection.list({ participantId: typeof req.query.participantId === 'string' ? req.query.participantId : null, limit: req.query.limit })); }
+    catch (error) { return res.status(422).json({ error: error.message, code: 'SRA_COIN_AGENT_LIST_FAILED' }); }
   });
   router.get('/coin-agents/:coinPositionId', (req, res) => {
     if (!coinAgentInspection) return res.status(503).json({ error: 'SRA Coin Agent inspection is unavailable.' });
     try { return res.json(coinAgentInspection.inspect(req.params.coinPositionId)); }
-    catch (error) {
-      const notFound = /not found/i.test(error.message);
-      return res.status(notFound ? 404 : 422).json({ error: error.message, code: 'SRA_COIN_AGENT_INSPECTION_FAILED' });
-    }
+    catch (error) { const notFound = /not found/i.test(error.message); return res.status(notFound ? 404 : 422).json({ error: error.message, code: 'SRA_COIN_AGENT_INSPECTION_FAILED' }); }
   });
 
   router.post('/order-intents/preview', (req, res) => {
