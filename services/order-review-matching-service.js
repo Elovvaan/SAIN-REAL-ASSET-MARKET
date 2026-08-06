@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { PreAllocationReservationService } from './pre-allocation-reservation-service.js';
 import { AllocationApprovalService } from './allocation-approval-service.js';
 import { SettlementAuthorizationService } from './settlement-authorization-service.js';
+import { PostSettlementExportService } from './post-settlement-export-service.js';
 
 const TRANSACTION_TYPE = 'SRA_TRANSACTION';
 function now() { return new Date().toISOString(); }
@@ -18,6 +19,7 @@ export class OrderReviewMatchingService {
     this.reservations = new PreAllocationReservationService(domain);
     this.allocations = new AllocationApprovalService(domain);
     this.settlements = new SettlementAuthorizationService(domain);
+    this.exports = new PostSettlementExportService(domain);
   }
   intents() { return this.domain.list(TRANSACTION_TYPE).filter(openIntent); }
   queue() {
@@ -45,6 +47,7 @@ export class OrderReviewMatchingService {
     if (action === 'RESERVE') return this.reservations.preview(input);
     if (action === 'ALLOCATE') return this.allocations.preview(input);
     if (action === 'SETTLE') return this.settlements.preview(input);
+    if (action === 'EXPORT') return this.exports.preview(input);
     const listingId = String(input.listingId || '').trim();
     if (!listingId) throw new Error('listingId is required.');
     const listing = this.domain.get('MARKETPLACE_LISTING', listingId);
@@ -67,6 +70,7 @@ export class OrderReviewMatchingService {
     if (action === 'RESERVE') return this.reservations.approve(input, actorId);
     if (action === 'ALLOCATE') return this.allocations.approve(input, actorId);
     if (action === 'SETTLE') return this.settlements.approve(input, actorId);
+    if (action === 'EXPORT') return this.exports.approve(input, actorId);
     if (String(input.approval || '').toUpperCase() !== 'APPROVE') throw new Error('Explicit order-match approval is required.');
     const preview = this.preview(input); if (!preview.matchPossible) throw new Error(preview.reason || 'No compatible order match is available.');
     const approvedAt = now(); const matchReviewId = id();
@@ -93,6 +97,6 @@ export class OrderReviewMatchingService {
     return { ...queue, approvedMatchCount: reviews.length,
       pendingAllocationCount: reviews.filter((item) => item.state === 'MATCH_APPROVED_PENDING_ALLOCATION').length,
       latestApprovedMatch: reviews[0] || null,
-      reservations: this.reservations.status(), allocations: this.allocations.status(), settlements: this.settlements.status() };
+      reservations: this.reservations.status(), allocations: this.allocations.status(), settlements: this.settlements.status(), exports: this.exports.status() };
   }
 }
