@@ -9,6 +9,7 @@ import { ListingReadinessPolicyService } from '../services/listing-readiness-pol
 import { PublicationDecisionQueueService } from '../services/publication-decision-queue-service.js';
 import { ParticipantOrderIntentService } from '../services/participant-order-intent-service.js';
 import { OrderReviewMatchingService } from '../services/order-review-matching-service.js';
+import { UnifiedMarketOperationsQueueService } from '../services/unified-market-operations-queue-service.js';
 
 function actorId(req) {
   return req.sraIdentity?.actorId || req.headers['x-sra-actor-id'] || req.body?.actorId || null;
@@ -28,6 +29,7 @@ export function createSaneRouter(service = new SaneSkillService(), edxOperations
     intervalMs: Number(process.env.SRA_CORE_HEARTBEAT_INTERVAL_MS) || 15000,
     engines: createSraCoreEngineRegistry(),
   }) : null;
+  const unifiedOperationsQueue = domain ? new UnifiedMarketOperationsQueueService(domain, orderReviewMatching, coreHeartbeat) : null;
 
   if (coreHeartbeat) void coreHeartbeat.start().catch((error) => console.error(JSON.stringify({ level: 'error', event: 'SRA_CORE_START_FAILED', error: error?.message || String(error) })));
 
@@ -56,6 +58,7 @@ export function createSaneRouter(service = new SaneSkillService(), edxOperations
   });
 
   router.get('/order-review/queue', (_req, res) => orderReviewMatching ? res.json(orderReviewMatching.status()) : res.status(503).json({ error: 'Order review and matching service is unavailable.' }));
+  router.get('/operations-queue', (_req, res) => unifiedOperationsQueue ? res.json(unifiedOperationsQueue.explain()) : res.status(503).json({ error: 'Unified market operations queue is unavailable.' }));
   router.post('/order-review/preview', (req, res) => {
     if (!orderReviewMatching) return res.status(503).json({ error: 'Order review and matching service is unavailable.' });
     try { return res.json(orderReviewMatching.preview(req.body || {})); }
