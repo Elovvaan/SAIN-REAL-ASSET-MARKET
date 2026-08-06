@@ -1,6 +1,7 @@
 (() => {
-  const PUBLIC_HOME_VERSION = 'V19';
+  const PUBLIC_HOME_VERSION = 'V20';
   const originalFetch = window.fetch.bind(window);
+  let syncQueued = false;
 
   const leftCards = [
     ['Verified Value','Understand how supported value is established and recorded.','Explain Verified Value.'],
@@ -14,8 +15,20 @@
     ['How Value Enters SRA','Follow the path from authorized source data to Financial Record, Verified Value, Coin Position, instrument, and marketplace.','Show me how value enters SRA and becomes a financial asset.']
   ];
 
+  function accessResolved() {
+    return Boolean(window.accessState && window.accessState.publicData !== null);
+  }
+
   function isSignedOut() {
-    return !window.accessState?.session;
+    return accessResolved() && !window.accessState.session;
+  }
+
+  function ensureBootStyle() {
+    if (document.querySelector('style[data-public-home-boot]')) return;
+    const style = document.createElement('style');
+    style.dataset.publicHomeBoot = 'true';
+    style.textContent = 'body.sra-access-resolving .app-shell{visibility:hidden}';
+    document.head.append(style);
   }
 
   function ensurePublicHomeAttributes() {
@@ -47,23 +60,38 @@
     return `<aside class="public-feature-rail public-feature-rail-${side}" aria-label="Platform highlights">${cards.map(([title,description,prompt])=>`<button class="public-feature-card" data-public-prompt="${escape(prompt)}"><strong>${escape(title)}</strong><span>${escape(description)}</span><small>Ask SAIN →</small></button>`).join('')}</aside>`;
   }
 
+  function removePublicHome() {
+    document.querySelectorAll('.public-feature-rail,.public-home-actions').forEach(node => node.remove());
+    document.querySelector('#access-actions')?.classList.remove('public-top-access-hidden');
+    document.body.dataset.publicHome = 'inactive';
+  }
+
+  function ownSignedOutCanvas() {
+    const root = document.querySelector('#view-root');
+    if (!root) return;
+    const alreadyOwned = root.children.length === 1 && root.firstElementChild?.id === 'public-decision-canvas';
+    if (alreadyOwned) return;
+    root.innerHTML = '<section id="public-decision-canvas" class="public-decision-canvas" hidden></section>';
+  }
+
   function buildPublicHome() {
     if (!isSignedOut()) return;
     const workspace = document.querySelector('.operating-workspace');
-    const sain = document.querySelector('.sane-workspace');
-    if (!workspace || !sain) return;
+    const sane = document.querySelector('.sane-workspace');
+    if (!workspace || !sane) return;
 
+    ownSignedOutCanvas();
     document.querySelector('#access-actions')?.classList.add('public-top-access-hidden');
     const title = document.querySelector('#page-title');
     if (title) title.textContent = 'Living Marketplace';
 
     if (!document.querySelector('.public-feature-rail-left')) {
-      sain.insertAdjacentHTML('beforebegin', cardMarkup(leftCards,'left'));
-      sain.insertAdjacentHTML('afterend', cardMarkup(rightCards,'right'));
+      sane.insertAdjacentHTML('beforebegin', cardMarkup(leftCards,'left'));
+      sane.insertAdjacentHTML('afterend', cardMarkup(rightCards,'right'));
     }
 
     if (!document.querySelector('.public-home-actions')) {
-      sain.insertAdjacentHTML('afterend', `<div class="public-home-actions"><button class="secondary-button" data-public-action="signin">Sign in</button><button class="primary-button" data-public-action="signup">Create free account</button></div>`);
+      sane.insertAdjacentHTML('afterend', '<div class="public-home-actions"><button class="secondary-button" data-public-action="signin">Sign in</button><button class="primary-button" data-public-action="signup">Create free account</button></div>');
     }
 
     const firstMessage = document.querySelector('#chat-log .sane-message');
@@ -71,12 +99,20 @@
       firstMessage.textContent = 'Welcome to the Living Marketplace. SRA connects authorized transaction and asset data to recognized financial assets. Source activity moves through Observation, Recognition, Financial Record, Verified Value, SRA Coin representation, instrument formation, and marketplace participation. What would you like to understand or accomplish?';
     }
 
-    document.querySelectorAll('[data-public-prompt]').forEach(button => {
+    document.querySelectorAll('[data-public-prompt]:not([data-public-bound])').forEach(button => {
+      button.dataset.publicBound = 'true';
       button.addEventListener('click', () => openSainWithPrompt(button.dataset.publicPrompt || 'Help me understand this marketplace.'));
     });
-    document.querySelector('[data-public-action="signin"]')?.addEventListener('click', () => openAccess('signin'));
-    document.querySelector('[data-public-action="signup"]')?.addEventListener('click', () => openAccess('signup'));
-    document.querySelector('#sane-input')?.focus();
+    const signin = document.querySelector('[data-public-action="signin"]');
+    if (signin && signin.dataset.publicBound !== 'true') {
+      signin.dataset.publicBound = 'true';
+      signin.addEventListener('click', () => openAccess('signin'));
+    }
+    const signup = document.querySelector('[data-public-action="signup"]');
+    if (signup && signup.dataset.publicBound !== 'true') {
+      signup.dataset.publicBound = 'true';
+      signup.addEventListener('click', () => openAccess('signup'));
+    }
   }
 
   async function renderDecisionCanvas(payload, requestBody) {
@@ -100,10 +136,22 @@
     canvas.querySelectorAll('[data-public-result]').forEach(card=>card.addEventListener('click',()=>openAccess('signup')));
   }
 
-  function bindPermanentPublicFlow() {
+  function syncPublicHome() {
+    syncQueued = false;
     ensurePublicHomeAttributes();
-    if (!isSignedOut()) return;
-    setTimeout(buildPublicHome, 40);
+    if (!accessResolved()) {
+      document.body.classList.add('sra-access-resolving');
+      return;
+    }
+    document.body.classList.remove('sra-access-resolving');
+    if (isSignedOut()) buildPublicHome();
+    else removePublicHome();
+  }
+
+  function queueSync() {
+    if (syncQueued) return;
+    syncQueued = true;
+    requestAnimationFrame(syncPublicHome);
   }
 
   window.fetch = async (...args) => {
@@ -112,10 +160,19 @@
     if (target.includes('/api/sane/message') && isSignedOut()) {
       response.clone().json().then(payload=>renderDecisionCanvas(payload,args[1]?.body)).catch(()=>{});
     }
+    if (target.includes('/api/access/')) setTimeout(queueSync, 0);
     return response;
   };
 
-  window.SRAPublicHome = { version: PUBLIC_HOME_VERSION, refresh: bindPermanentPublicFlow };
-  window.addEventListener('DOMContentLoaded', () => setTimeout(bindPermanentPublicFlow, 220));
-  window.addEventListener('sra:access-state-changed', bindPermanentPublicFlow);
+  ensureBootStyle();
+  document.body?.classList.add('sra-access-resolving');
+  window.SRAPublicHome = { version: PUBLIC_HOME_VERSION, refresh: queueSync };
+  window.addEventListener('sra:access-state-changed', queueSync);
+  const observer = new MutationObserver(queueSync);
+  function initialize() {
+    observer.observe(document.body, { childList: true, subtree: true });
+    queueSync();
+  }
+  if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', initialize, { once: true });
+  else initialize();
 })();
