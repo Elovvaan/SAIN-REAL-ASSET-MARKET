@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { withCanonicalSraPricing } from './marketplace-listing-service.js';
 
 export const ORDER_INTENT_RECORD_TYPE = 'SRA_TRANSACTION';
 
@@ -14,8 +15,9 @@ export class ParticipantOrderIntentService {
   constructor(domain) { this.domain = domain; }
 
   listing(listingId) {
-    const listing = this.domain.get('MARKETPLACE_LISTING', listingId);
-    if (!listing) throw new Error('Marketplace listing was not found.');
+    const stored = this.domain.get('MARKETPLACE_LISTING', listingId);
+    if (!stored) throw new Error('Marketplace listing was not found.');
+    const listing = withCanonicalSraPricing(stored);
     if (!['PUBLISHED', 'ACTIVE'].includes(listing.state) || listing.status !== 'LIVE') throw new Error('Only LIVE marketplace listings can accept order intents.');
     return listing;
   }
@@ -34,6 +36,8 @@ export class ParticipantOrderIntentService {
       listingId: listing.listingId, instrumentId: listing.instrumentId, market: 'SRA / USD', side, orderType,
       quantity, unit: listing.unit || 'SRA', unitPrice, quoteCurrency: 'USD', estimatedNotional: quantity * unitPrice,
       listingState: listing.state,
+      pricingMethod: listing.pricing?.method || null,
+      verifiedRecordedValueUsd: Number(listing.verifiedRecordedValueUsd || listing.recordedValueUsd || listing.faceValueUsd || 0),
       effect: 'Create a queued participant order intent for later matching and authorization review.',
       doesNot: ['MATCH_ORDER', 'ALLOCATE_POSITION', 'MOVE_BALANCE', 'SETTLE_VALUE', 'TRANSFER_OWNERSHIP', 'CREATE_EXPORT_PACKAGE'],
       confirmationRequired: true,
@@ -60,6 +64,8 @@ export class ParticipantOrderIntentService {
       unitPrice: preview.unitPrice,
       quoteCurrency: preview.quoteCurrency,
       estimatedNotional: preview.estimatedNotional,
+      pricingMethod: preview.pricingMethod,
+      verifiedRecordedValueUsd: preview.verifiedRecordedValueUsd,
       state: 'QUEUED_FOR_ORDER_REVIEW',
       matchingState: 'NOT_STARTED',
       allocationState: 'NOT_STARTED',
@@ -70,7 +76,7 @@ export class ParticipantOrderIntentService {
       statusHistory: [{ state: 'QUEUED_FOR_ORDER_REVIEW', actorId: participantId, occurredAt: createdAt }],
     };
     await this.domain.put(ORDER_INTENT_RECORD_TYPE, orderIntentId, record, { actorId: participantId, eventType: 'PARTICIPANT_ORDER_INTENT_CONFIRMED' });
-    await this.domain.lifecycle?.({ objectType: ORDER_INTENT_RECORD_TYPE, objectId: orderIntentId, eventType: 'PARTICIPANT_ORDER_INTENT_QUEUED', actorId: participantId, payload: { listingId: record.listingId, side: record.side, quantity: record.quantity } });
+    await this.domain.lifecycle?.({ objectType: ORDER_INTENT_RECORD_TYPE, objectId: orderIntentId, eventType: 'PARTICIPANT_ORDER_INTENT_QUEUED', actorId: participantId, payload: { listingId: record.listingId, side: record.side, quantity: record.quantity, unitPrice: record.unitPrice } });
     return record;
   }
 
