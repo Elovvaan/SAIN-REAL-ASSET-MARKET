@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { RECORD_TYPES } from './persistent-domain-service.js';
 import { withCanonicalSraPricing } from './marketplace-listing-service.js';
 
 export const ORDER_INTENT_RECORD_TYPE = 'SRA_TRANSACTION';
@@ -17,8 +18,15 @@ export class ParticipantOrderIntentService {
   listing(listingId) {
     const stored = this.domain.get('MARKETPLACE_LISTING', listingId);
     if (!stored) throw new Error('Marketplace listing was not found.');
-    const listing = withCanonicalSraPricing(stored);
+    const financialRecord = stored.financialRecordId
+      ? this.domain.get(RECORD_TYPES.FINANCIAL_RECORD, stored.financialRecordId)
+      : null;
+    const unit = String(financialRecord?.recognizedPosition?.unit || financialRecord?.measurement?.unit || '').toUpperCase();
+    if (financialRecord && unit !== 'USD') throw new Error('The linked Financial Record is not denominated in USD.');
+    const recordedValueUsd = financialRecord?.recognizedPosition?.amount ?? financialRecord?.measurement?.value ?? null;
+    const listing = withCanonicalSraPricing(stored, recordedValueUsd);
     if (!['PUBLISHED', 'ACTIVE'].includes(listing.state) || listing.status !== 'LIVE') throw new Error('Only LIVE marketplace listings can accept order intents.');
+    if (String(listing.unit || '').toUpperCase() === 'SRA' && Number(listing.pricing?.askingPrice) !== 1) throw new Error('The LIVE SRA listing does not have canonical $1.00 par execution terms.');
     return listing;
   }
 
