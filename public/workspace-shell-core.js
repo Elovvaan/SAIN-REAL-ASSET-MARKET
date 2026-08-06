@@ -62,6 +62,7 @@
     }
   };
 
+  const PANEL_BACKED_VIEWS = new Set(['marketplace', 'positions']);
   let initialized = false;
   function signedIn() { return Boolean(window.accessState?.session); }
   function escapeHtml(value) { return String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#039;'); }
@@ -101,7 +102,8 @@
   function onClick(event) {
     const button = event.target.closest('.nav-item');
     if (!button) return;
-    if (button.dataset.view === 'workspace') {
+    const view = button.dataset.view;
+    if (view === 'workspace') {
       if (!signedIn()) return;
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -112,10 +114,10 @@
       if (opening) renderCurrentWorkspace();
       return;
     }
-    if (signedIn()) {
-      document.body.classList.remove('workspace-open');
-      document.querySelector('.nav-item[data-view="workspace"]')?.classList.remove('active');
-    }
+    if (!signedIn()) return;
+    if (PANEL_BACKED_VIEWS.has(view)) document.body.classList.add('workspace-open');
+    else document.body.classList.remove('workspace-open');
+    document.querySelector('.nav-item[data-view="workspace"]')?.classList.remove('active');
   }
   function initialize() {
     if (initialized) return;
