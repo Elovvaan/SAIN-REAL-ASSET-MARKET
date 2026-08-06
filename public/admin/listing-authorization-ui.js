@@ -8,7 +8,7 @@
   async function request(url, options) {
     const response = await fetch(url, options);
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.error || 'Request failed.');
+    if (!response.ok) throw new Error(payload.error || `Request failed with HTTP ${response.status}.`);
     return payload;
   }
 
@@ -40,7 +40,7 @@
       <div id="authorization-impact" class="market-pipeline"></div>
       <div class="market-next" id="market-next-action">Reading the next valid governed action.</div>
       <div style="margin-top:14px;padding-top:14px;border-top:1px solid #3f3519"><h4>Native market terms</h4><div class="market-terms"><label>USD per SRA<input id="batch-unit-price" type="number" min="0.00000001" step="any" value="1"></label><label>Minimum order<input id="batch-minimum-order" type="number" min="0.00000001" step="any" value="1"></label></div></div>
-      <div class="market-actions"><button id="approve-listing-batch">Authorize readiness</button><button id="approve-publication-batch">Publish ready listings</button><button id="authorize-current-market-cycle" class="primary">Advance Current Eligible Set</button></div>
+      <div class="market-actions"><button id="approve-listing-batch" type="button">Authorize readiness</button><button id="approve-publication-batch" type="button">Publish ready listings</button><button id="authorize-current-market-cycle" type="button" class="primary">Advance Current Eligible Set</button></div>
       <p id="authorization-message" style="color:#aaa">Loading current market state.</p>
       <div class="market-note">This control uses the same canonical listing transition that produces <strong>state: PUBLISHED</strong> and <strong>status: LIVE</strong>. The user marketplace reads that live state. Publication does not create orders, settlement, ownership recognition, or export packages.</div>
     </section>`);
@@ -153,6 +153,7 @@
   function initialize() {
     if (initialized) return;
     initialized = true;
+    loadAdminScript('/admin/admin-button-diagnostics.js', 'data-sra-admin-button-diagnostics');
     loadAdminScript('/admin/hybrid-liquidity-admin.js', 'data-hybrid-liquidity-admin');
     loadAdminScript('/admin/core-services-dashboard.js', 'data-sra-core-services-dashboard');
     loadAdminScript('/admin/operations-queue-ui.js', 'data-sra-operations-queue');

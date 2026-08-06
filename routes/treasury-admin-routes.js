@@ -22,6 +22,24 @@ async function ensureInstrumentTreasuryAccounts(domain) {
   if (changes.length) await domain.atomicPut(changes);
 }
 
+function eligibleFundingInstruments(domain) {
+  return domain.list(RECORD_TYPES.SRA_INSTRUMENT)
+    .filter((instrument) => !['CANCELLED', 'MATURED', 'CLOSED'].includes(String(instrument.state || '').toUpperCase()))
+    .map((instrument) => ({
+      instrumentId: instrument.instrumentId || instrument.id,
+      name: instrument.name || instrument.instrumentName || instrument.instrumentId || instrument.id,
+      state: instrument.state || 'UNKNOWN',
+      faceValueUsd: Number(instrument.faceValueUsd ?? instrument.principalQuantity ?? instrument.denomination?.principalQuantity ?? 0),
+      termMonths: Number(instrument.termMonths || 36),
+      coinPositionId: instrument.coinPositionId || null,
+      treasuryState: instrument.treasuryState || null,
+      deposited: Boolean(instrument.platformTreasuryDepositId),
+      platformTreasuryDepositId: instrument.platformTreasuryDepositId || null
+    }))
+    .filter((instrument) => instrument.instrumentId)
+    .sort((left, right) => Number(right.faceValueUsd || 0) - Number(left.faceValueUsd || 0));
+}
+
 export async function installTreasuryAdminRoutes({ router, domain, requireAdmin, database = null }) {
   const treasury = new TreasuryLedgerService(domain);
   const recordedValue = new RecordedValueRepresentationService(domain);
@@ -50,6 +68,15 @@ export async function installTreasuryAdminRoutes({ router, domain, requireAdmin,
   router.get('/api/admin/treasury/funding-instrument-deposits', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
     return res.json(fundingInstrumentDeposits.summary());
+  });
+  router.get('/api/admin/treasury/funding-instrument-deposits/eligible-instruments', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    const instruments = eligibleFundingInstruments(domain);
+    return res.json({
+      instruments,
+      eligibleCount: instruments.filter((instrument) => !instrument.deposited).length,
+      depositedCount: instruments.filter((instrument) => instrument.deposited).length
+    });
   });
   router.post('/api/admin/treasury/funding-instrument-deposits/preview', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
