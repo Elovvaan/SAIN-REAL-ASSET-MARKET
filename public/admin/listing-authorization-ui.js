@@ -14,8 +14,8 @@
 
   function policy() {
     return {
-      unitPrice: Number(document.querySelector('#batch-unit-price')?.value || 1),
-      askingPriceMethod: 'ADMIN_APPROVED_SRA_USD_UNIT_PRICE',
+      unitPrice: 1,
+      askingPriceMethod: 'VERIFIED_RECORDED_USD_VALUE_AT_SRA_PAR',
       eligibilityRule: 'SRA_REGISTERED_PARTICIPANTS',
       minimumOrder: Number(document.querySelector('#batch-minimum-order')?.value || 1),
       transactionRouteId: 'SRA_INTERNAL_MARKETPLACE',
@@ -39,10 +39,10 @@
       <div class="market-cycle-head"><div><h3>SRA/USD Market Lifecycle</h3><p>One canonical flow moves eligible SRA Coin instruments from preparation to participant activity.</p></div><strong id="market-cycle-state" class="status">CHECKING</strong></div>
       <div id="authorization-impact" class="market-pipeline"></div>
       <div class="market-next" id="market-next-action">Reading the next valid governed action.</div>
-      <div style="margin-top:14px;padding-top:14px;border-top:1px solid #3f3519"><h4>Native market terms</h4><div class="market-terms"><label>USD per SRA<input id="batch-unit-price" type="number" min="0.00000001" step="any" value="1"></label><label>Minimum order<input id="batch-minimum-order" type="number" min="0.00000001" step="any" value="1"></label></div></div>
+      <div style="margin-top:14px;padding-top:14px;border-top:1px solid #3f3519"><h4>Native market terms</h4><div class="market-terms"><label>USD per SRA<input id="batch-unit-price" type="number" value="1" readonly aria-readonly="true"></label><label>Minimum order<input id="batch-minimum-order" type="number" min="0.00000001" step="any" value="1"></label></div><p style="margin:8px 0 0;color:#d6a92f">Fixed par reference: 1 SRA = $1.00. The administrator authorizes readiness, not a different SRA price.</p></div>
       <div class="market-actions"><button id="approve-listing-batch" type="button">Authorize readiness</button><button id="approve-publication-batch" type="button">Publish ready listings</button><button id="authorize-current-market-cycle" type="button" class="primary">Advance Current Eligible Set</button></div>
       <p id="authorization-message" style="color:#aaa">Loading current market state.</p>
-      <div class="market-note">This control uses the same canonical listing transition that produces <strong>state: PUBLISHED</strong> and <strong>status: LIVE</strong>. The user marketplace reads that live state. Publication does not create orders, settlement, ownership recognition, or export packages.</div>
+      <div class="market-note">This control uses the same canonical listing transition that produces <strong>state: PUBLISHED</strong> and <strong>status: LIVE</strong>. The user marketplace and order execution both use the fixed $1.00 SRA/USD terms. Publication does not create orders, settlement, ownership recognition, or export packages.</div>
     </section>`);
     document.querySelector('#approve-listing-batch').addEventListener('click', approveReadiness);
     document.querySelector('#approve-publication-batch').addEventListener('click', approvePublication);
@@ -51,6 +51,7 @@
 
   function render() {
     const prepared = Number(readiness?.preview?.eligibleListingCount || readiness?.status?.eligibleForBatch || 0);
+    const invalid = Number(readiness?.preview?.invalidListingCount || 0);
     const ready = Number(publication?.preview?.eligibleListingCount || readiness?.status?.readyForPublicationApproval || 0);
     const live = Number(publication?.status?.liveListingCount || 0);
     const operations = window.__sraOperationsSnapshot || {};
@@ -68,19 +69,21 @@
     const readinessButton = document.querySelector('#approve-listing-batch');
     const publicationButton = document.querySelector('#approve-publication-batch');
     const cycleButton = document.querySelector('#authorize-current-market-cycle');
-    readinessButton.disabled = prepared === 0;
+    readinessButton.disabled = prepared === 0 || invalid > 0;
     publicationButton.disabled = ready === 0;
-    cycleButton.disabled = prepared === 0 && ready === 0;
+    cycleButton.disabled = (prepared === 0 && ready === 0) || invalid > 0;
     readinessButton.hidden = prepared === 0;
     publicationButton.hidden = ready === 0;
     cycleButton.hidden = prepared === 0 && ready === 0;
-    document.querySelector('#market-cycle-state').textContent = prepared ? 'READINESS REQUIRED' : ready ? 'PUBLICATION REQUIRED' : 'MARKET CURRENT';
-    document.querySelector('#market-next-action').innerHTML = prepared
-      ? `<strong>Next:</strong> authorize readiness for ${number(prepared)} prepared listings. The same control can then publish the resulting ready set.`
+    document.querySelector('#market-cycle-state').textContent = invalid ? 'VALUE REVIEW REQUIRED' : prepared ? 'READINESS REQUIRED' : ready ? 'PUBLICATION REQUIRED' : 'MARKET CURRENT';
+    document.querySelector('#market-next-action').innerHTML = invalid
+      ? `<strong>Next:</strong> correct ${number(invalid)} listing(s) that do not have a positive linked verified recorded USD value before authorizing the batch.`
+      : prepared ? `<strong>Next:</strong> authorize readiness for ${number(prepared)} prepared listings at the fixed $1.00 SRA/USD par reference.`
       : ready ? `<strong>Next:</strong> publish ${number(ready)} authorized listings into the live SRA/USD market.`
       : `<strong>Next:</strong> participant order activity. ${number(live)} listings are currently LIVE.`;
-    document.querySelector('#authorization-message').textContent = prepared
-      ? `${number(prepared)} prepared listings have not yet received market terms and readiness authorization.`
+    document.querySelector('#authorization-message').textContent = invalid
+      ? `${number(invalid)} scoped listing(s) failed recorded-value validation. No readiness writes will be performed until the scope is valid.`
+      : prepared ? `${number(prepared)} prepared listings are eligible for fixed-par readiness authorization.`
       : ready ? `${number(ready)} listings have approved terms and are waiting for publication.`
       : `${number(live)} listings are verified LIVE. New prepared records will appear here automatically.`;
   }
@@ -95,9 +98,9 @@
 
   async function approveReadiness() {
     const count = Number(readiness?.preview?.eligibleListingCount || 0);
-    if (!count || !confirm(`Authorize readiness for ${number(count)} SRA/USD listings at $${policy().unitPrice} per SRA?`)) return;
+    if (!count || !confirm(`Authorize readiness for ${number(count)} SRA/USD listings at the fixed par rate of $1.00 per SRA?`)) return;
     const result = await request('/api/admin/listing-readiness-batch/approve', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...policy(), approval: 'APPROVE' }) });
-    window.append?.(`Readiness batch ${result.batchId}: ${number(result.updatedListingCount)} listings are ready for publication.`, 'agent');
+    window.append?.(`Readiness batch ${result.batchId}: ${number(result.updatedListingCount)} listings are ready for publication at fixed SRA/USD par.`, 'agent');
     await Promise.all([window.loadSummary?.(), load()]);
   }
 
@@ -116,7 +119,7 @@
     const prepared = Number(readiness?.preview?.eligibleListingCount || 0);
     const alreadyReady = Number(publication?.preview?.eligibleListingCount || 0);
     const total = prepared + alreadyReady;
-    if (!total || !confirm(`Advance the complete eligible set of ${number(total)} listings through readiness and publication?`)) return;
+    if (!total || !confirm(`Advance the complete eligible set of ${number(total)} listings through fixed-par readiness and publication?`)) return;
     const button = document.querySelector('#authorize-current-market-cycle');
     button.disabled = true; button.textContent = 'Advancing market cycle...';
     try {
@@ -134,7 +137,7 @@
       }
       await Promise.all([load(), window.loadSummary?.()]);
       const live = Number(publication?.status?.liveListingCount || 0);
-      const message = `${number(madeReady)} listings passed readiness; ${number(published)} changed to PUBLISHED / LIVE; ${number(live)} listings are now visible in SRA/USD.`;
+      const message = `${number(madeReady)} listings passed fixed-par readiness; ${number(published)} changed to PUBLISHED / LIVE; ${number(live)} listings are now visible in SRA/USD.`;
       document.querySelector('#authorization-message').textContent = message;
       window.append?.(message, 'agent');
     } catch (error) { document.querySelector('#authorization-message').textContent = error.message; }
