@@ -1,3 +1,5 @@
+import { SraCoinAgentService } from './sra-coin-agent-service.js';
+
 const TRANSACTION_TYPE = 'SRA_TRANSACTION';
 
 function now() { return new Date().toISOString(); }
@@ -8,6 +10,7 @@ function item(id, stage, state, participantId, action, explanation, record = {})
     stage,
     state,
     participantId: participantId || null,
+    positionId: record.positionId || record.buyerPositionId || record.sellerPositionId || null,
     listingId: record.listingId || null,
     instrumentId: record.instrumentId || null,
     quantity: Number(record.quantity || record.matchedQuantity || 0) || null,
@@ -23,9 +26,31 @@ export class UnifiedMarketOperationsQueueService {
     this.domain = domain;
     this.orderReviewService = orderReviewService;
     this.coreHeartbeat = coreHeartbeat;
+    this.coinAgents = new SraCoinAgentService(domain);
   }
 
   transactions() { return this.domain.list(TRANSACTION_TYPE); }
+
+  attachCoinAgent(entry) {
+    if (!entry.positionId) return entry;
+    try {
+      const agent = this.coinAgents.explain(entry.positionId);
+      return {
+        ...entry,
+        coinAgent: {
+          agentId: agent.agentId,
+          positionId: agent.positionId,
+          currentState: agent.currentState,
+          blockers: agent.blockers,
+          nextEligibleAction: agent.nextEligibleAction,
+          humanApprovalRequired: agent.humanApprovalRequired,
+          explanation: agent.explanation,
+        },
+      };
+    } catch {
+      return entry;
+    }
+  }
 
   build() {
     const tx = this.transactions();
@@ -40,7 +65,9 @@ export class UnifiedMarketOperationsQueueService {
         queue.push(item(record.matchReviewId || record.transactionId, 'MATCH_REVIEW', record.state, null, 'RESERVE', 'Approved match is waiting for buyer-value and seller-position holds.', record));
       }
       if (record.transactionType === 'PRE_ALLOCATION_RESERVATION' && record.state === 'RESERVED_PENDING_ALLOCATION_APPROVAL') {
-        queue.push(item(record.reservationId || record.transactionId, 'RESERVATION', record.state, null, 'ALLOCATE', 'Both protected holds are active. Allocation approval is the next governed action.', record));
+        const entry = item(record.reservationId || record.transactionId, 'RESERVATION', record.state, null, 'ALLOCATE', 'Both protected holds are active. Allocation approval is the next governed action.', record);
+        entry.positionId = record.positionReservation?.positionId || record.sellerPositionId || entry.positionId;
+        queue.push(entry);
       }
       if (record.transactionType === 'POSITION_ALLOCATION_APPROVAL' && record.state === 'ALLOCATION_APPROVED_PENDING_SETTLEMENT') {
         queue.push(item(record.allocationId || record.transactionId, 'ALLOCATION', record.state, record.buyerParticipantId, 'SETTLE', 'Buyer position is allocated pending settlement. Funding and position holds remain active.', record));
@@ -71,13 +98,14 @@ export class UnifiedMarketOperationsQueueService {
       }
     }
 
-    const orderedQueue = sortByTime(queue);
-    const orderedExceptions = sortByTime(exceptions);
+    const orderedQueue = sortByTime(queue).map((entry) => this.attachCoinAgent(entry));
+    const orderedExceptions = sortByTime(exceptions).map((entry) => this.attachCoinAgent(entry));
     const counts = orderedQueue.reduce((map, entry) => {
       map[entry.stage] = (map[entry.stage] || 0) + 1;
       return map;
     }, {});
     const heartbeat = this.coreHeartbeat?.status?.() || null;
+    const coinAgentStatus = this.coinAgents.status();
 
     return {
       generatedAt: now(),
@@ -87,13 +115,17 @@ export class UnifiedMarketOperationsQueueService {
       counts,
       queue: orderedQueue,
       exceptions: orderedExceptions,
+      coinAgents: coinAgentStatus,
       platformPulse: heartbeat ? {
         schedulerState: heartbeat.schedulerState || heartbeat.state || null,
         latestCycle: heartbeat.latestCycle || null,
         completedCycles: heartbeat.cycleCount || heartbeat.completedCycleCount || 0,
         failedEngines: heartbeat.latestCycle?.failedEngineCount || 0,
       } : null,
-      protectedBoundary: ['NO_AUTOMATIC_APPROVAL', 'NO_BATCH_STATE_CHANGE', 'NO_SILENT_SETTLEMENT', 'NO_SILENT_EXTERNAL_EXECUTION'],
+      protectedBoundary: [
+        'NO_AUTOMATIC_APPROVAL', 'NO_BATCH_STATE_CHANGE', 'NO_SILENT_SETTLEMENT',
+        'NO_SILENT_EXTERNAL_EXECUTION', 'COIN_AGENTS_EXPLAIN_AND_PREPARE_ONLY',
+      ],
     };
   }
 
@@ -107,7 +139,12 @@ export class UnifiedMarketOperationsQueueService {
         : result.totalAwaitingAction
           ? `${result.totalAwaitingAction} governed action${result.totalAwaitingAction === 1 ? '' : 's'} are waiting.`
           : 'No governed market operations are waiting.',
-      nextRecommendedAction: next ? { id: next.id, stage: next.stage, action: next.nextAction, explanation: next.explanation } : null,
+      nextRecommendedAction: next ? {
+        id: next.id,
+        stage: next.stage,
+        action: next.nextAction,
+        explanation: next.coinAgent?.explanation || next.explanation,
+      } : null,
     };
   }
 }
