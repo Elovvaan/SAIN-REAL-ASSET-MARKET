@@ -12,11 +12,13 @@ const metrics = {
   recentErrors: [],
 };
 
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
 function now() { return Date.now(); }
 function requestId(req) { return String(req.get('x-request-id') || req.get('x-correlation-id') || crypto.randomUUID()).slice(0, 128); }
 function clientKey(req) { return req.sraIdentity?.actorId || req.ip || req.socket?.remoteAddress || 'unknown'; }
 function routeClass(path, method = 'GET') {
-  if (path.startsWith('/api/admin')) return String(method).toUpperCase() === 'GET' ? 'ADMIN_READ' : 'ADMIN_WRITE';
+  if (path.startsWith('/api/admin')) return SAFE_METHODS.has(String(method).toUpperCase()) ? 'ADMIN_READ' : 'ADMIN_WRITE';
   if (path.startsWith('/api/access/signin') || path.startsWith('/api/access/signup')) return 'AUTH';
   if (path.startsWith('/api/funding') || path.startsWith('/api/sain/intelligence')) return 'OPERATIONS';
   if (path.startsWith('/api/production')) return 'PRODUCTION';
