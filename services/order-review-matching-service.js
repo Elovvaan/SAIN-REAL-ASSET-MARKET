@@ -34,6 +34,7 @@ export class OrderReviewMatchingService {
       protectedBoundary: ['NO_BALANCE_MOVEMENT', 'NO_POSITION_ALLOCATION', 'NO_SETTLEMENT', 'NO_OWNERSHIP_TRANSFER'] };
   }
   preview(input = {}) {
+    if (String(input.action || '').toUpperCase() === 'RESERVE') return this.reservations.preview(input);
     const listingId = String(input.listingId || '').trim();
     if (!listingId) throw new Error('listingId is required.');
     const listing = this.domain.get('MARKETPLACE_LISTING', listingId);
@@ -73,8 +74,6 @@ export class OrderReviewMatchingService {
     }
     return review;
   }
-  reservationPreview(input = {}) { return this.reservations.preview(input); }
-  reservationStatus() { return this.reservations.status(); }
   reviews() { return this.domain.list(TRANSACTION_TYPE).filter(isReview).sort((a, b) => String(b.approvedAt).localeCompare(String(a.approvedAt))); }
   status() {
     const queue = this.queue(); const reviews = this.reviews();
