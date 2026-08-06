@@ -1,14 +1,37 @@
 import { TreasuryLedgerService } from '../services/treasury-ledger-service.js';
 import { RecordedValueRepresentationService } from '../services/recorded-value-representation-service.js';
+import { PlatformFundingInstrumentDepositService } from '../services/platform-funding-instrument-deposit-service.js';
+import { RECORD_TYPES } from '../services/persistent-domain-service.js';
+
+const INSTRUMENT_TREASURY_ACCOUNTS = [
+  { accountId: 'TRSY-1050-INSTRUMENT-USD', code: '1050', name: 'Platform Commercial Instrument — USD', category: 'ASSET', normalSide: 'DEBIT', currency: 'USD' },
+  { accountId: 'TRSY-2200-PLATFORM-INSTRUMENT-FUNDING', code: '2200', name: 'Platform Commercial Instrument Funding', category: 'LIABILITY', normalSide: 'CREDIT', currency: 'USD' }
+];
+
+async function ensureInstrumentTreasuryAccounts(domain) {
+  const createdAt = new Date().toISOString();
+  const changes = INSTRUMENT_TREASURY_ACCOUNTS
+    .filter((definition) => !domain.get(RECORD_TYPES.LEDGER_ACCOUNT, definition.accountId))
+    .map((definition) => ({
+      type: RECORD_TYPES.LEDGER_ACCOUNT,
+      id: definition.accountId,
+      actorId: 'SRA_TREASURY_SYSTEM',
+      eventType: 'TREASURY_LEDGER_ACCOUNT_OPENED',
+      payload: { ...definition, treasuryProfileId: 'SRA_PLATFORM_TREASURY', state: 'ACTIVE', balance: 0, totalDebits: 0, totalCredits: 0, createdAt, updatedAt: createdAt }
+    }));
+  if (changes.length) await domain.atomicPut(changes);
+}
 
 export async function installTreasuryAdminRoutes({ router, domain, requireAdmin, database = null }) {
   const treasury = new TreasuryLedgerService(domain);
   const recordedValue = new RecordedValueRepresentationService(domain);
   await treasury.initialize();
+  await ensureInstrumentTreasuryAccounts(domain);
+  const fundingInstrumentDeposits = new PlatformFundingInstrumentDepositService(domain, treasury);
 
   router.get('/api/admin/treasury', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
-    return res.json(treasury.summary());
+    return res.json({ ...treasury.summary(), fundingInstrumentDeposits: fundingInstrumentDeposits.summary() });
   });
   router.post('/api/admin/treasury/journals/preview', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
@@ -24,6 +47,24 @@ export async function installTreasuryAdminRoutes({ router, domain, requireAdmin,
     } catch (error) { return res.status(422).json({ error: error.message, code: 'SRA_TREASURY_JOURNAL_APPROVAL_FAILED' }); }
   });
 
+  router.get('/api/admin/treasury/funding-instrument-deposits', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    return res.json(fundingInstrumentDeposits.summary());
+  });
+  router.post('/api/admin/treasury/funding-instrument-deposits/preview', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    try { return res.json(fundingInstrumentDeposits.preview(req.body || {})); }
+    catch (error) { return res.status(422).json({ error: error.message, code: 'SRA_PLATFORM_FUNDING_INSTRUMENT_DEPOSIT_PREVIEW_FAILED' }); }
+  });
+  router.post('/api/admin/treasury/funding-instrument-deposits/approve', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    try {
+      const result = await fundingInstrumentDeposits.approve(req.body || {}, session.id);
+      if (database?.audit) await database.audit({ actorId: session.id, eventType: 'SRA_PLATFORM_FUNDING_INSTRUMENT_DEPOSIT_APPROVED', objectType: 'SRA_INSTRUMENT', objectId: result.deposit.instrumentId, payload: { depositId: result.deposit.transactionId, faceValueUsd: result.deposit.faceValueUsd, ledgerEntryId: result.deposit.ledgerEntryId } });
+      return res.status(result.created ? 201 : 200).json(result);
+    } catch (error) { return res.status(422).json({ error: error.message, code: 'SRA_PLATFORM_FUNDING_INSTRUMENT_DEPOSIT_FAILED' }); }
+  });
+
   router.get('/api/admin/recorded-value-representation', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
     return res.json(recordedValue.preview());
@@ -37,5 +78,5 @@ export async function installTreasuryAdminRoutes({ router, domain, requireAdmin,
     } catch (error) { return res.status(422).json({ error: error.message, code: 'SRA_RECORDED_VALUE_REPRESENTATION_CORRECTION_FAILED' }); }
   });
 
-  return { treasury, recordedValue };
+  return { treasury, recordedValue, fundingInstrumentDeposits };
 }
