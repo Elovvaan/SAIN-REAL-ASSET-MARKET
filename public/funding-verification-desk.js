@@ -36,6 +36,7 @@
   async function loadOpportunity(root) {
     const opportunityId = selectedId(root);
     const detailRoot = root.querySelector('#verification-detail');
+    if (!detailRoot) return;
     if (!opportunityId) {
       detailRoot.innerHTML = '<div class="funding-ops-empty">Select a funding opportunity.</div>';
       return;
@@ -93,23 +94,26 @@
     }
   }
 
-  async function mount() {
-    const fundingRoot = document.querySelector('#view-root .funding-ops');
+  async function mount(fundingRoot) {
     if (!fundingRoot || fundingRoot.querySelector('#funding-verification-desk')) return;
+    addStyle();
     try {
       const dashboard = await request('/api/funding-operations/dashboard');
+      if (!fundingRoot.isConnected || fundingRoot.querySelector('#funding-verification-desk')) return;
       const section = document.createElement('section');
       section.className = 'verification-desk';
       section.id = 'funding-verification-desk';
       section.innerHTML = `<div class="funding-panel-head"><div><p class="eyebrow">PHASE 1–2 WORK DESK</p><h3>Evidence and verification</h3><p>Register supporting evidence, begin review, record findings, and make the verification decision.</p></div></div><select id="verification-opportunity" style="margin-top:12px"><option value="">Select opportunity</option>${(dashboard.queue || []).map((item) => `<option value="${esc(item.opportunityId)}">${esc(item.title || item.opportunityId)} · ${esc(item.status)}</option>`).join('')}</select><div id="verification-detail" style="margin-top:12px"><div class="funding-ops-empty">Select a funding opportunity.</div></div>`;
       fundingRoot.append(section);
-      section.querySelector('#verification-opportunity').addEventListener('change', () => loadOpportunity(section));
-    } catch {
-      // Funding Operations owns its own error state.
+      section.querySelector('#verification-opportunity')?.addEventListener('change', () => loadOpportunity(section));
+    } catch (error) {
+      const section = document.createElement('section');
+      section.className = 'verification-desk';
+      section.id = 'funding-verification-desk';
+      section.innerHTML = `<strong>Verification desk could not load.</strong><p>${esc(error.message)}</p>`;
+      fundingRoot.append(section);
     }
   }
 
-  addStyle();
-  new MutationObserver(mount).observe(document.documentElement, { childList: true, subtree: true });
-  window.addEventListener('DOMContentLoaded', mount);
+  window.mountFundingVerificationDesk = mount;
 })();
