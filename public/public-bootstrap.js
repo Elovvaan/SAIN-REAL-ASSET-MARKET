@@ -21,7 +21,6 @@
     '/transaction-market-ui.js',
     '/order-intent-ui.js',
     '/live-market-publication-sync.js',
-    '/live-asset-vault.js',
     '/funding-intake-ui.js',
     '/funding-operations-ui.js',
     '/funding-verification-desk.js',
