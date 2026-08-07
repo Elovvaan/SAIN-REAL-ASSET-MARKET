@@ -7,37 +7,25 @@ const read = (path) => fs.readFileSync(new URL(path, import.meta.url), 'utf8');
 const adminIndex = read('../public/admin/index.html');
 const bootstrap = read('../public/admin/admin-bootstrap.js');
 const dataClient = read('../public/admin/admin-data-client.js');
-const listingUi = read('../public/admin/listing-authorization-ui.js');
-const instrumentApprovals = read('../public/admin/admin-instrument-approvals.js');
-const treasuryUi = read('../public/admin/treasury-ledger-ui.js');
-const operationsUi = read('../public/admin/operations-queue-ui.js');
-const coreUi = read('../public/admin/core-services-dashboard.js');
-const hybridUi = read('../public/admin/hybrid-liquidity-admin.js');
+const workstationControls = read('../public/admin/admin-workstation-controls.js');
 const diagnosticsCore = read('../public/admin/admin-button-diagnostics-core.js');
 const privateRouter = read('../routes/private-admin-router.js');
 const treasuryRoutes = read('../routes/treasury-admin-routes.js');
 const saneRouter = read('../routes/sane-router.js');
 
-function expectButtonHandler(source, id) {
-  assert.match(source, new RegExp(`#${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['\"]?\\)\\.addEventListener\\(['\"]click`), `${id} must have a click handler`);
-}
+test('consolidated workstation controls own the primary administration actions', () => {
+  for (const selector of [
+    'data-market-ready','data-market-publish','data-market-policy','data-hybrid-preview','data-hybrid-approve',
+    'data-coin-explain','data-deposit-preview','data-deposit-approve','data-journal-preview','data-journal-post','data-correct',
+    'data-core-run','data-core-publish','data-approve-instruments'
+  ]) assert.match(workstationControls, new RegExp(`\\[${selector}\\]`));
 
-test('every primary private-administration button has a wired click handler', () => {
-  expectButtonHandler(adminIndex, 'signout');
-  expectButtonHandler(adminIndex, 'send');
-  expectButtonHandler(listingUi, 'approve-listing-batch');
-  expectButtonHandler(listingUi, 'approve-publication-batch');
-  expectButtonHandler(listingUi, 'authorize-current-market-cycle');
-  expectButtonHandler(treasuryUi, 'funding-instrument-preview');
-  expectButtonHandler(treasuryUi, 'funding-instrument-approve');
-  expectButtonHandler(treasuryUi, 'treasury-preview');
-  expectButtonHandler(treasuryUi, 'treasury-post');
-  expectButtonHandler(treasuryUi, 'treasury-refresh');
-  expectButtonHandler(treasuryUi, 'correct-recorded-value');
-  assert.match(operationsUi, /addEventListener\(['"]click/);
-  assert.match(coreUi, /addEventListener\(['"]click/);
-  assert.match(hybridUi, /addEventListener\(['"]click/);
-  assert.match(instrumentApprovals, /addEventListener\(['"]click/);
+  assert.match(workstationControls, /addEventListener\(['"]click/);
+  assert.match(workstationControls, /data-workspace=\\"marketplace\\"/);
+  assert.match(workstationControls, /data-workspace=\\"operations\\"/);
+  assert.match(workstationControls, /data-workspace=\\"treasury\\"/);
+  assert.match(workstationControls, /data-workspace=\\"system\\"/);
+  assert.match(workstationControls, /data-workspace=\\"instruments\\"/);
 });
 
 test('administration action endpoints exist in the mounted production routers', () => {
@@ -59,34 +47,38 @@ test('administration action endpoints exist in the mounted production routers', 
   }
 });
 
-test('administration has one bootstrap authority and one request owner', () => {
+test('administration bootstrap loads one shell and one workstation-control owner', () => {
   assert.match(adminIndex, /admin-data-client\.js/);
   assert.match(adminIndex, /admin-bootstrap\.js/);
-  assert.doesNotMatch(adminIndex, /listing-authorization-ui\.js/);
-  assert.doesNotMatch(adminIndex, /admin-settlement-destination\.js/);
-  assert.doesNotMatch(adminIndex, /admin-button-diagnostics\.js/);
+  assert.match(bootstrap, /admin-suite-shell\.js/);
+  assert.match(bootstrap, /admin-workstation-controls\.js/);
+  assert.match(bootstrap, /admin-button-diagnostics-core\.js/);
 
-  for (const feature of [
+  for (const retired of [
     'listing-authorization-ui.js',
     'hybrid-liquidity-admin.js',
     'core-services-dashboard.js',
     'operations-queue-ui.js',
     'treasury-ledger-ui.js',
-    'admin-button-diagnostics-core.js',
-    'admin-suite-shell.js',
     'admin-instrument-approvals.js',
-  ]) assert.match(bootstrap, new RegExp(feature.replaceAll('.', '\\.')));
+    'listing-readiness-policy-ui.js',
+  ]) assert.doesNotMatch(bootstrap, new RegExp(retired.replaceAll('.', '\\.')));
 
   assert.doesNotMatch(bootstrap, /admin-workspace-data-bridge\.js/);
   assert.doesNotMatch(bootstrap, /admin-workspace-sync\.js/);
   assert.doesNotMatch(bootstrap, /admin-action-reconciliation\.js/);
   assert.doesNotMatch(bootstrap, /admin-settlement-destination\.js/);
+});
 
-  assert.doesNotMatch(listingUi, /loadAdminScript/);
-  assert.doesNotMatch(listingUi, /setInterval/);
-  assert.doesNotMatch(listingUi, /MutationObserver/);
-  assert.doesNotMatch(instrumentApprovals, /MutationObserver/);
+test('consolidated workstation owner has no DOM observer or polling loop', () => {
+  assert.doesNotMatch(workstationControls, /MutationObserver/);
+  assert.doesNotMatch(workstationControls, /setInterval/);
+  assert.match(workstationControls, /SRAAdminDataClient/);
+  assert.match(workstationControls, /sra:admin-refresh/);
+  assert.match(workstationControls, /sra:admin-mutated/);
+});
 
+test('administration still has one request runtime owner', () => {
   assert.match(dataClient, /window\.fetch = request/);
   assert.match(dataClient, /ADMIN_SESSION_TIMEOUT_MS/);
   assert.match(dataClient, /ADMIN_READ_CACHE_TTL_MS/);

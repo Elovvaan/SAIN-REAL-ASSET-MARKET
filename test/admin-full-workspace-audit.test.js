@@ -61,13 +61,22 @@ test('only one administration shell is visible', () => {
   assert.match(css, /\.admin-workspace-controls>\.card/);
 });
 
-test('administration conceals legacy first paint and loads the suite shell before feature scripts', () => {
+test('administration conceals legacy first paint and loads consolidated controls after the suite shell', () => {
   const shellIndex = bootstrap.indexOf("['/admin/admin-suite-shell.js'");
-  const listingIndex = bootstrap.indexOf("['/admin/listing-authorization-ui.js'");
-  const treasuryIndex = bootstrap.indexOf("['/admin/treasury-ledger-ui.js'");
+  const controlsIndex = bootstrap.indexOf("['/admin/admin-workstation-controls.js'");
+  const diagnosticsIndex = bootstrap.indexOf("['/admin/admin-button-diagnostics-core.js'");
   assert.ok(shellIndex >= 0, 'suite shell must be declared');
-  assert.ok(listingIndex > shellIndex, 'listing authorization must load after the suite shell');
-  assert.ok(treasuryIndex > shellIndex, 'treasury feature must load after the suite shell');
+  assert.ok(controlsIndex > shellIndex, 'consolidated workstation controls must load after the suite shell');
+  assert.ok(diagnosticsIndex > controlsIndex, 'diagnostics must load after workstation controls');
+  for (const retired of [
+    'listing-authorization-ui.js',
+    'hybrid-liquidity-admin.js',
+    'core-services-dashboard.js',
+    'operations-queue-ui.js',
+    'treasury-ledger-ui.js',
+    'admin-instrument-approvals.js',
+    'listing-readiness-policy-ui.js',
+  ]) assert.doesNotMatch(bootstrap, new RegExp(retired.replaceAll('.', '\\.')));
   assert.match(bootstrap, /concealLegacyFirstPaint\(admin\)/);
   assert.match(bootstrap, /admin\.style\.visibility = 'hidden'/);
   assert.match(bootstrap, /await loadScript\(shellSource, shellMarker\)/);
@@ -95,6 +104,7 @@ test('successful admin mutations synchronize through the consolidated data clien
 test('active bootstrap has one feature ownership path', () => {
   assert.match(bootstrap, /const FEATURES = \[/);
   assert.match(bootstrap, /admin-suite-shell\.js/);
+  assert.match(bootstrap, /admin-workstation-controls\.js/);
   assert.doesNotMatch(bootstrap, /admin-button-diagnostics\.js/);
   assert.doesNotMatch(bootstrap, /admin-action-reconciliation\.js/);
   assert.doesNotMatch(bootstrap, /admin-workspace-data-bridge\.js/);

@@ -4,13 +4,8 @@
 
   const FEATURES = [
     ['/admin/admin-suite-shell.js', 'data-sra-admin-suite-shell'],
-    ['/admin/listing-authorization-ui.js', 'data-sra-listing-authorization'],
-    ['/admin/hybrid-liquidity-admin.js', 'data-sra-hybrid-liquidity'],
-    ['/admin/core-services-dashboard.js', 'data-sra-core-services'],
-    ['/admin/operations-queue-ui.js', 'data-sra-operations-queue'],
-    ['/admin/treasury-ledger-ui.js', 'data-sra-treasury-ledger'],
+    ['/admin/admin-workstation-controls.js', 'data-sra-admin-workstation-controls'],
     ['/admin/admin-button-diagnostics-core.js', 'data-sra-admin-diagnostics-core'],
-    ['/admin/admin-instrument-approvals.js', 'data-sra-admin-instrument-approvals'],
   ];
 
   let booted = false;
