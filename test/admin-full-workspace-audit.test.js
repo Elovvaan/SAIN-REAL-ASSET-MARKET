@@ -61,6 +61,21 @@ test('only one administration shell is visible', () => {
   assert.match(css, /\.admin-workspace-controls>\.card/);
 });
 
+test('administration conceals legacy first paint and loads the suite shell before feature scripts', () => {
+  const shellIndex = bootstrap.indexOf("['/admin/admin-suite-shell.js'");
+  const listingIndex = bootstrap.indexOf("['/admin/listing-authorization-ui.js'");
+  const treasuryIndex = bootstrap.indexOf("['/admin/treasury-ledger-ui.js'");
+  assert.ok(shellIndex >= 0, 'suite shell must be declared');
+  assert.ok(listingIndex > shellIndex, 'listing authorization must load after the suite shell');
+  assert.ok(treasuryIndex > shellIndex, 'treasury feature must load after the suite shell');
+  assert.match(bootstrap, /concealLegacyFirstPaint\(admin\)/);
+  assert.match(bootstrap, /admin\.style\.visibility = 'hidden'/);
+  assert.match(bootstrap, /await loadScript\(shellSource, shellMarker\)/);
+  assert.match(bootstrap, /admin\.querySelector\('\.admin-suite'\)/);
+  assert.match(bootstrap, /revealAdminSuite\(admin\)/);
+  assert.match(bootstrap, /FEATURES\.slice\(1\)/);
+});
+
 test('workspace opened during the shared initial request is rendered when that request settles', () => {
   assert.match(shell, /const pending = loadWorkspaceData\(false\)/);
   assert.match(shell, /activeWorkspaceId\(\)/);
