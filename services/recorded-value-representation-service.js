@@ -22,16 +22,12 @@ export class RecordedValueRepresentationService {
   chains() {
     const observations = new Map(this.domain.list(RECORD_TYPES.MARKET_OBSERVATION).map((item) => [item.observationId, item]));
     const positions = this.domain.list(RECORD_TYPES.COIN_POSITION).filter((item) => item.symbol === 'SRA' && item.state !== 'RETIRED');
-    const instruments = this.domain.list(RECORD_TYPES.SRA_INSTRUMENT);
-    const listings = this.domain.list(RECORD_TYPES.MARKETPLACE_LISTING);
     return positions.map((position) => {
       const record = this.domain.get(RECORD_TYPES.FINANCIAL_RECORD, position.financialRecordId);
       const observation = observations.get(position.observationId || record?.observationId) || null;
       const targetQuantity = recordedUsd(record, observation);
-      const instrument = instruments.find((item) => item.coinPositionId === position.coinPositionId && !['CANCELLED', 'MATURED', 'CLOSED'].includes(item.state)) || null;
-      const linkedListings = listings.filter((item) => item.coinPositionId === position.coinPositionId || item.instrumentId === instrument?.instrumentId);
       const currentQuantity = Number(position.quantity || 0);
-      return { position, record, observation, instrument, listings: linkedListings, currentQuantity, targetQuantity, requiresCorrection: targetQuantity > 0 && difference(currentQuantity, targetQuantity) };
+      return { position, record, observation, currentQuantity, targetQuantity, requiresCorrection: targetQuantity > 0 && difference(currentQuantity, targetQuantity) };
     });
   }
 
@@ -45,11 +41,11 @@ export class RecordedValueRepresentationService {
       correctablePositionCount: correctable.length,
       currentRepresentedQuantity: Number(chains.reduce((sum, item) => sum + item.currentQuantity, 0).toFixed(8)),
       targetRepresentedQuantity: Number(chains.reduce((sum, item) => sum + (item.targetQuantity || item.currentQuantity), 0).toFixed(8)),
-      sample: correctable.slice(0, 25).map((item) => ({ coinPositionId: item.position.coinPositionId, financialRecordId: item.record?.financialRecordId || null, currentQuantity: item.currentQuantity, targetQuantity: item.targetQuantity, instrumentId: item.instrument?.instrumentId || null, listingCount: item.listings.length })),
+      sample: correctable.slice(0, 25).map((item) => ({ coinPositionId: item.position.coinPositionId, financialRecordId: item.record?.financialRecordId || null, currentQuantity: item.currentQuantity, targetQuantity: item.targetQuantity })),
       parReference: { asset: 'SRA Coin', market: 'SRA/USD', rate: 1, rule: 'SRA_QUANTITY_EQUALS_RECOGNIZED_RECORDED_USD_VALUE' },
       approvalRequired: true,
-      effect: 'Restates legacy SRA Coin Positions, instrument principal quantities, and marketplace quantities to the recognized recorded USD value at par.',
-      doesNot: ['CREATE_VALUE_WITHOUT_A_RECOGNIZED_FINANCIAL_RECORD', 'CHANGE_OWNERSHIP', 'CREATE_TRANSACTIONS', 'SETTLE', 'EXPORT']
+      effect: 'Restates SRA Coin Positions to the recognized recorded USD value at par while preserving the source quantity separately.',
+      doesNot: ['CREATE_VALUE_WITHOUT_A_RECOGNIZED_FINANCIAL_RECORD', 'CREATE_OR_MODIFY_INSTRUMENTS', 'CREATE_OR_MODIFY_MARKETPLACE_LISTINGS', 'CHANGE_OWNERSHIP', 'CREATE_TRANSACTIONS', 'SETTLE', 'EXPORT']
     };
   }
 
@@ -88,15 +84,6 @@ export class RecordedValueRepresentationService {
           conversionRule: { ...(chain.position.conversionRule || {}), method: 'RECORDED_USD_VALUE_AT_PAR', rate: 1, sourceUnit: 'USD', coinUnit: 'SRA', methodologyReference: 'ONE_SRA_PER_RECOGNIZED_RECORDED_USD' },
           statusHistory: [...(chain.position.statusHistory || []), { state: chain.position.state, actorId, occurredAt: timestamp, reason: `Quantity restated from ${priorQuantity} to ${target} SRA using recognized recorded USD value at par.` }],
           updatedAt: timestamp
-        } });
-        if (chain.instrument) changes.push({ type: RECORD_TYPES.SRA_INSTRUMENT, id: chain.instrument.instrumentId, actorId, eventType: 'SRA_INSTRUMENT_PRINCIPAL_RESTATED_TO_RECORDED_VALUE', payload: {
-          ...chain.instrument,
-          denomination: { ...(chain.instrument.denomination || {}), principalQuantity: target, symbol: 'SRA' },
-          recordedValue: { amount: target, currency: 'USD' },
-          updatedAt: timestamp
-        } });
-        for (const listing of chain.listings) changes.push({ type: RECORD_TYPES.MARKETPLACE_LISTING, id: listing.listingId, actorId, eventType: 'MARKETPLACE_LISTING_QUANTITY_RESTATED_TO_RECORDED_VALUE', payload: {
-          ...listing, quantity: target, offeredQuantity: target, recordedValue: { amount: target, currency: 'USD' }, updatedAt: timestamp
         } });
         await this.domain.atomicPut(changes);
         corrected += 1;
