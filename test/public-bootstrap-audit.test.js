@@ -57,6 +57,15 @@ test('current signed-in participant shell contract is explicit and stable', () =
   assert.match(participantSuite, /#quick-prompts/);
 });
 
+test('participant lifecycle is driven by explicit access-state events, not DOM observers', () => {
+  assert.match(participantBootstrap, /sra:access-state-changed/);
+  assert.match(participantSuite, /window\.addEventListener\('sra:access-state-changed', sync\)/);
+  assert.doesNotMatch(participantBootstrap, /MutationObserver/);
+  assert.doesNotMatch(participantBootstrap, /window\.MutationObserver/);
+  assert.doesNotMatch(participantSuite, /new MutationObserver/);
+  assert.doesNotMatch(participantSuite, /observer\.observe/);
+});
+
 test('participant bootstrap is the sole signed-in shell loader', () => {
   assert.match(participantBootstrap, /participant-workspace-suite\.js/);
   assert.match(participantBootstrap, /sra:access-state-changed/);
@@ -72,7 +81,7 @@ test('signed-in marketplace is owned by the participant suite', () => {
   assert.doesNotMatch(participantSuite, /ORDER\.filter\(\(view\) => view !== 'marketplace'\)/);
 });
 
-test('legacy app remains loaded only as a public compatibility surface for this checkpoint', () => {
+test('legacy app remains isolated as a signed-out public compatibility surface for this checkpoint', () => {
   assert.match(bootstrap, /'\/app\.js'/);
   assert.match(app, /function renderMarketplace\(\)/);
   assert.match(app, /fetch\('\/api\/marketplace'\)/);

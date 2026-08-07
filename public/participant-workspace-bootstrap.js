@@ -45,21 +45,11 @@
     loading = true;
     syncAfterLoad = false;
 
-    const NativeMutationObserver = window.MutationObserver;
-    class OneShotMutationObserver {
-      constructor(callback) { this.callback = callback; }
-      observe() { queueMicrotask(() => this.callback([], this)); }
-      disconnect() {}
-      takeRecords() { return []; }
-    }
-
-    window.MutationObserver = OneShotMutationObserver;
     const script = document.createElement('script');
     script.src = '/participant-workspace-suite.js';
     script.async = false;
     script.dataset.sraParticipantWorkspaceSuite = 'true';
     script.addEventListener('load', () => {
-      window.MutationObserver = NativeMutationObserver;
       suiteLoaded = true;
       loading = false;
       const loadedSessionKey = currentSessionKey();
@@ -74,7 +64,6 @@
       queueMicrotask(syncParticipantSuite);
     }, { once: true });
     script.addEventListener('error', () => {
-      window.MutationObserver = NativeMutationObserver;
       loading = false;
       syncAfterLoad = false;
       queueMicrotask(syncParticipantSuite);
