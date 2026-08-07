@@ -42,6 +42,12 @@ function sortNewest(records = []) {
   });
 }
 function expose(records = [], limit = 250) { return sortNewest(records).slice(0, Math.max(1, Math.min(Number(limit) || 250, 1000))); }
+function list(domain, type, limit) { return expose(domain.list(type), limit); }
+function workspaceStatus(records, requiredKeys) {
+  const missingSources = requiredKeys.filter((key) => !Array.isArray(records[key]));
+  const recordCount = requiredKeys.reduce((sum, key) => sum + (records[key]?.length || 0), 0);
+  return { state: missingSources.length ? 'MISCONFIGURED' : 'AVAILABLE', recordCount, missingSources };
+}
 
 export async function createPrivateAdminRouter({ database, domain, coinbasePublicMarket = null, nativePlatformAsset = null }) {
   const access = new AccessService({ database });
@@ -164,26 +170,56 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
     const limit = req.query.limit;
     const users = (await persistedUsers()).map((user) => ({ id: user.id, displayName: user.displayName, email: user.email, capacities: user.capacities || [], state: user.state || 'ACTIVE', createdAt: user.createdAt || null }));
     const records = {
-      instruments: expose(domain.list(RECORD_TYPES.SRA_INSTRUMENT), limit),
-      marketplaceListings: expose(domain.list(RECORD_TYPES.MARKETPLACE_LISTING), limit),
-      recognitions: expose(domain.list(RECORD_TYPES.RECOGNITION_ASSESSMENT), limit),
-      ownershipRecognitions: expose(domain.list(RECORD_TYPES.OWNERSHIP_RECOGNITION), limit),
-      observations: expose(domain.list(RECORD_TYPES.MARKET_OBSERVATION), limit),
-      financialRecords: expose(domain.list(RECORD_TYPES.FINANCIAL_RECORD), limit),
-      financialHistory: expose(domain.list(RECORD_TYPES.FINANCIAL_HISTORY_RECORD), limit),
-      evidencePackages: expose(domain.list(RECORD_TYPES.EVIDENCE_PACKAGE), limit),
-      coinPositions: expose(domain.list(RECORD_TYPES.COIN_POSITION), limit),
-      coinAccounts: expose(domain.list(RECORD_TYPES.COIN_ACCOUNT), limit),
-      transactions: expose(domain.list(RECORD_TYPES.SRA_TRANSACTION), limit),
-      exportPackages: expose(domain.list(RECORD_TYPES.EXPORT_PACKAGE), limit),
-      settlementInstructions: expose(domain.list(RECORD_TYPES.SETTLEMENT_RAIL_INSTRUCTION), limit),
-      settlementAdapters: expose(domain.list(RECORD_TYPES.SETTLEMENT_RAIL_ADAPTER), limit),
-      settlements: expose(domain.list(RECORD_TYPES.SRA_SETTLEMENT), limit),
-      settlementRecords: expose(domain.list(RECORD_TYPES.SRA_SETTLEMENT_RECORD), limit),
-      paymentReceipts: expose(domain.list(RECORD_TYPES.PAYMENT_RECEIPT), limit),
-      treasuryBankConnections: expose(domain.list(RECORD_TYPES.TREASURY_BANK_CONNECTION), limit),
-      treasuryWallets: expose(domain.list(RECORD_TYPES.TREASURY_CRYPTO_WALLET), limit),
-      lifecycleEvents: expose(domain.list(RECORD_TYPES.LIFECYCLE_EVENT), limit),
+      participants: list(domain, RECORD_TYPES.PARTICIPANT, limit),
+      assetAccounts: list(domain, RECORD_TYPES.ASSET_ACCOUNT, limit),
+      projectAccounts: list(domain, RECORD_TYPES.PROJECT_ACCOUNT, limit),
+      instruments: list(domain, RECORD_TYPES.SRA_INSTRUMENT, limit),
+      protectionInstruments: list(domain, RECORD_TYPES.PROTECTION_INSTRUMENT, limit),
+      marketplaceListings: list(domain, RECORD_TYPES.MARKETPLACE_LISTING, limit),
+      marketplaceCommitmentWindows: list(domain, RECORD_TYPES.FUNDING_MARKETPLACE_COMMITMENT_WINDOW, limit),
+      marketplaceCommitments: list(domain, RECORD_TYPES.FUNDING_MARKETPLACE_COMMITMENT, limit),
+      marketplacePositions: list(domain, RECORD_TYPES.FUNDING_MARKETPLACE_POSITION, limit),
+      marketplaceAllocations: list(domain, RECORD_TYPES.FUNDING_MARKETPLACE_ALLOCATION_REVIEW, limit),
+      marketplaceSettlementPreparations: list(domain, RECORD_TYPES.FUNDING_MARKETPLACE_SETTLEMENT_PREPARATION, limit),
+      marketplaceSettlementReviews: list(domain, RECORD_TYPES.FUNDING_MARKETPLACE_SETTLEMENT_REVIEW, limit),
+      marketplaceSettlementAuthorizations: list(domain, RECORD_TYPES.FUNDING_MARKETPLACE_SETTLEMENT_AUTHORIZATION, limit),
+      recognitions: list(domain, RECORD_TYPES.RECOGNITION_ASSESSMENT, limit),
+      ownershipRecognitions: list(domain, RECORD_TYPES.OWNERSHIP_RECOGNITION, limit),
+      observations: list(domain, RECORD_TYPES.MARKET_OBSERVATION, limit),
+      verifiedValueRecords: list(domain, RECORD_TYPES.VERIFIED_VALUE_RECORD, limit),
+      financialRecords: list(domain, RECORD_TYPES.FINANCIAL_RECORD, limit),
+      financialRecordAccounts: list(domain, RECORD_TYPES.FINANCIAL_RECORD_ACCOUNT, limit),
+      financialHistory: list(domain, RECORD_TYPES.FINANCIAL_HISTORY_RECORD, limit),
+      evidencePackages: list(domain, RECORD_TYPES.EVIDENCE_PACKAGE, limit),
+      assetRelationships: list(domain, RECORD_TYPES.ASSET_RELATIONSHIP, limit),
+      coinPositions: list(domain, RECORD_TYPES.COIN_POSITION, limit),
+      coinAccounts: list(domain, RECORD_TYPES.COIN_ACCOUNT, limit),
+      transactions: list(domain, RECORD_TYPES.SRA_TRANSACTION, limit),
+      fundingInstructions: list(domain, RECORD_TYPES.FUNDING_INSTRUCTION, limit),
+      paymentReceipts: list(domain, RECORD_TYPES.PAYMENT_RECEIPT, limit),
+      exportPackages: list(domain, RECORD_TYPES.EXPORT_PACKAGE, limit),
+      settlementInstructions: list(domain, RECORD_TYPES.SETTLEMENT_RAIL_INSTRUCTION, limit),
+      settlementAdapters: list(domain, RECORD_TYPES.SETTLEMENT_RAIL_ADAPTER, limit),
+      settlements: list(domain, RECORD_TYPES.SRA_SETTLEMENT, limit),
+      settlementRecords: list(domain, RECORD_TYPES.SRA_SETTLEMENT_RECORD, limit),
+      treasuryProfiles: list(domain, RECORD_TYPES.PLATFORM_TREASURY_PROFILE, limit),
+      treasuryForecasts: list(domain, RECORD_TYPES.PLATFORM_TREASURY_FORECAST, limit),
+      treasuryExceptions: list(domain, RECORD_TYPES.PLATFORM_TREASURY_EXCEPTION, limit),
+      treasuryBankConnections: list(domain, RECORD_TYPES.TREASURY_BANK_CONNECTION, limit),
+      treasuryPaymentOrders: list(domain, RECORD_TYPES.TREASURY_PAYMENT_ORDER, limit),
+      treasuryStatements: list(domain, RECORD_TYPES.TREASURY_STATEMENT, limit),
+      treasuryWallets: list(domain, RECORD_TYPES.TREASURY_CRYPTO_WALLET, limit),
+      treasuryCryptoActivity: list(domain, RECORD_TYPES.TREASURY_CRYPTO_ACTIVITY, limit),
+      ledgerAccounts: list(domain, RECORD_TYPES.LEDGER_ACCOUNT, limit),
+      ledgerEntries: list(domain, RECORD_TYPES.LEDGER_ENTRY, limit),
+      accountingPeriods: list(domain, RECORD_TYPES.ACCOUNTING_PERIOD, limit),
+      financialStatementSnapshots: list(domain, RECORD_TYPES.FINANCIAL_STATEMENT_SNAPSHOT, limit),
+      connectorDefinitions: list(domain, RECORD_TYPES.EDX_CONNECTOR_DEFINITION, limit),
+      enterpriseConnections: list(domain, RECORD_TYPES.EDX_ENTERPRISE_CONNECTION, limit),
+      extractionRequests: list(domain, RECORD_TYPES.EDX_EXTRACTION_REQUEST, limit),
+      extractionResults: list(domain, RECORD_TYPES.EDX_EXTRACTION_RESULT, limit),
+      outboundEvents: list(domain, RECORD_TYPES.EDX_OUTBOUND_EVENT, limit),
+      lifecycleEvents: list(domain, RECORD_TYPES.LIFECYCLE_EVENT, limit),
       users
     };
     const counts = Object.fromEntries(Object.entries(records).map(([key, value]) => [key, value.length]));
@@ -192,7 +228,24 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
       for (const record of value) byState[stateOf(record)] = (byState[stateOf(record)] || 0) + 1;
       return [key, byState];
     }));
-    return res.json({ generatedAt: new Date().toISOString(), administrator: { id: session.id, displayName: session.displayName }, counts, states, records });
+    const workspaceSources = {
+      dashboard: ['instruments','marketplaceListings','transactions','exportPackages','settlementInstructions','treasuryExceptions','lifecycleEvents'],
+      operations: ['transactions','fundingInstructions','exportPackages','settlementInstructions','treasuryPaymentOrders','lifecycleEvents'],
+      treasury: ['treasuryProfiles','ledgerAccounts','ledgerEntries','treasuryBankConnections','treasuryPaymentOrders','treasuryStatements','treasuryWallets','treasuryCryptoActivity','treasuryForecasts','treasuryExceptions','financialStatementSnapshots'],
+      nativeAsset: ['instruments','marketplaceListings','ownershipRecognitions','exportPackages','lifecycleEvents'],
+      marketplace: ['marketplaceListings','marketplaceCommitmentWindows','marketplaceCommitments','marketplacePositions','marketplaceAllocations','marketplaceSettlementPreparations','marketplaceSettlementReviews','marketplaceSettlementAuthorizations'],
+      instruments: ['instruments','protectionInstruments','lifecycleEvents'],
+      records: ['recognitions','ownershipRecognitions','observations','verifiedValueRecords','financialRecords','financialRecordAccounts','financialHistory','evidencePackages','assetRelationships','lifecycleEvents'],
+      coinPositions: ['coinAccounts','coinPositions','recognitions','observations','lifecycleEvents'],
+      transactions: ['transactions','fundingInstructions','paymentReceipts','lifecycleEvents'],
+      settlement: ['exportPackages','settlementInstructions','settlementAdapters','settlements','settlementRecords','paymentReceipts','lifecycleEvents'],
+      agent: ['lifecycleEvents'],
+      connections: ['settlementAdapters','treasuryBankConnections','treasuryWallets','connectorDefinitions','enterpriseConnections','extractionRequests','extractionResults','outboundEvents','lifecycleEvents'],
+      users: ['users','participants'],
+      system: ['treasuryExceptions','outboundEvents','lifecycleEvents']
+    };
+    const workspaces = Object.fromEntries(Object.entries(workspaceSources).map(([key, required]) => [key, workspaceStatus(records, required)]));
+    return res.json({ generatedAt: new Date().toISOString(), administrator: { id: session.id, displayName: session.displayName }, counts, states, workspaces, records });
   });
 
   router.get('/api/admin/summary', async (req, res) => {
@@ -224,7 +277,13 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
     });
   });
 
-  router.use('/admin', express.static(new URL('../public/admin', import.meta.url).pathname, { index: 'index.html' }));
+  router.use('/admin', (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.setHeader('Surrogate-Control', 'no-store');
+    next();
+  }, express.static(new URL('../public/admin', import.meta.url).pathname, { index: 'index.html', etag: false, lastModified: false, maxAge: 0 }));
   return router;
 }
 
