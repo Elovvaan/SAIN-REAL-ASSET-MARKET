@@ -1,11 +1,16 @@
 (() => {
+  if (window.__sraListingAuthorizationInstalled) return;
+  window.__sraListingAuthorizationInstalled = true;
+
   let readiness = null;
   let publication = null;
-  let timer = null;
-  let initialized = false;
+  let loading = false;
 
   const number = (value) => Number(value || 0).toLocaleString();
-  async function request(url, options) {
+  const client = () => window.SRAAdminDataClient;
+
+  async function request(url, options = {}) {
+    if (client()) return client().json(url, options);
     const response = await fetch(url, options);
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || `Request failed with HTTP ${response.status}.`);
@@ -19,7 +24,7 @@
       eligibilityRule: 'SRA_REGISTERED_PARTICIPANTS',
       minimumOrder: Number(document.querySelector('#batch-minimum-order')?.value || 1),
       transactionRouteId: 'SRA_INTERNAL_MARKETPLACE',
-      settlementRouteId: 'SRA_INTERNAL_SETTLEMENT'
+      settlementRouteId: 'SRA_INTERNAL_SETTLEMENT',
     };
   }
 
@@ -50,6 +55,7 @@
   }
 
   function render() {
+    if (!document.querySelector('#listing-authorization')) return;
     const prepared = Number(readiness?.preview?.eligibleListingCount || readiness?.status?.eligibleForBatch || 0);
     const invalid = Number(readiness?.preview?.invalidListingCount || 0);
     const ready = Number(publication?.preview?.eligibleListingCount || readiness?.status?.readyForPublicationApproval || 0);
@@ -63,7 +69,7 @@
       ['Orders', counts.ORDER_INTENT || 0, ''],
       ['Reservations', counts.RESERVATION || 0, ''],
       ['Allocation', counts.ALLOCATION || 0, ''],
-      ['Settlement+', (counts.SETTLEMENT || 0) + (counts.EXPORT_PACKAGE || 0) + (counts.TRANSFER_INSTRUCTION || 0), '']
+      ['Settlement+', (counts.SETTLEMENT || 0) + (counts.EXPORT_PACKAGE || 0) + (counts.TRANSFER_INSTRUCTION || 0), ''],
     ];
     document.querySelector('#authorization-impact').innerHTML = stages.map(([label, value, state]) => `<div class="market-stage ${state}"><span>${label}</span><strong>${number(value)}</strong></div>`).join('');
     const readinessButton = document.querySelector('#approve-listing-batch');
@@ -85,15 +91,27 @@
       ? `${number(invalid)} scoped listing(s) failed recorded-value validation. No readiness writes will be performed until the scope is valid.`
       : prepared ? `${number(prepared)} prepared listings are eligible for fixed-par readiness authorization.`
       : ready ? `${number(ready)} listings have approved terms and are waiting for publication.`
-      : `${number(live)} listings are verified LIVE. New prepared records will appear here automatically.`;
+      : `${number(live)} listings are verified LIVE. New prepared records will appear after the next administration refresh.`;
   }
 
   async function load() {
+    if (loading) return;
     ensurePanel();
     if (!document.querySelector('#listing-authorization')) return;
-    const query = new URLSearchParams(policy()).toString();
-    [readiness, publication] = await Promise.all([request(`/api/admin/listing-readiness-batch?${query}`), request('/api/admin/listing-publication-batch')]);
-    render();
+    loading = true;
+    try {
+      const query = new URLSearchParams(policy()).toString();
+      [readiness, publication] = await Promise.all([
+        request(`/api/admin/listing-readiness-batch?${query}`),
+        request('/api/admin/listing-publication-batch'),
+      ]);
+      render();
+    } catch (error) {
+      const message = document.querySelector('#authorization-message');
+      if (message) message.textContent = error.message;
+    } finally {
+      loading = false;
+    }
   }
 
   async function approveReadiness() {
@@ -121,7 +139,8 @@
     const total = prepared + alreadyReady;
     if (!total || !confirm(`Advance the complete eligible set of ${number(total)} listings through fixed-par readiness and publication?`)) return;
     const button = document.querySelector('#authorize-current-market-cycle');
-    button.disabled = true; button.textContent = 'Advancing market cycle...';
+    button.disabled = true;
+    button.textContent = 'Advancing market cycle...';
     try {
       let madeReady = 0;
       if (prepared) {
@@ -140,35 +159,16 @@
       const message = `${number(madeReady)} listings passed fixed-par readiness; ${number(published)} changed to PUBLISHED / LIVE; ${number(live)} listings are now visible in SRA/USD.`;
       document.querySelector('#authorization-message').textContent = message;
       window.append?.(message, 'agent');
-    } catch (error) { document.querySelector('#authorization-message').textContent = error.message; }
-    finally { button.disabled = false; button.textContent = 'Advance Current Eligible Set'; }
+    } catch (error) {
+      document.querySelector('#authorization-message').textContent = error.message;
+    } finally {
+      button.disabled = false;
+      button.textContent = 'Advance Current Eligible Set';
+    }
   }
 
-  function loadAdminScript(source, marker) {
-    if (document.querySelector(`script[${marker}]`)) return;
-    const script = document.createElement('script');
-    script.src = source;
-    script.async = false;
-    script.setAttribute(marker, 'true');
-    document.head.append(script);
-  }
-
-  function initialize() {
-    if (initialized) return;
-    initialized = true;
-    loadAdminScript('/admin/admin-button-diagnostics.js?v=178', 'data-sra-admin-button-diagnostics');
-    loadAdminScript('/admin/admin-instrument-approvals.js?v=178', 'data-sra-admin-instrument-approvals-direct');
-    loadAdminScript('/admin/hybrid-liquidity-admin.js', 'data-hybrid-liquidity-admin');
-    loadAdminScript('/admin/core-services-dashboard.js', 'data-sra-core-services-dashboard');
-    loadAdminScript('/admin/operations-queue-ui.js', 'data-sra-operations-queue');
-    loadAdminScript('/admin/treasury-ledger-ui.js', 'data-sra-treasury-ledger');
-    const observer = new MutationObserver(() => { if (document.querySelector('#admin-view:not(.hidden)')) { ensurePanel(); void load(); } });
-    observer.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] });
-    setTimeout(() => { ensurePanel(); void load(); }, 0);
-    timer = setInterval(() => { if (document.querySelector('#admin-view:not(.hidden)')) void load(); }, 15000);
-    timer.unref?.();
-  }
-
-  if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', initialize, { once: true });
-  else initialize();
+  window.addEventListener('sra:admin-refresh', () => void load());
+  window.addEventListener('sra:admin-mutated', () => void load());
+  ensurePanel();
+  void load();
 })();
