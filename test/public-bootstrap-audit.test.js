@@ -7,7 +7,7 @@ const index = read('../public/index.html');
 const bootstrap = read('../public/public-bootstrap.js');
 const participantBootstrap = read('../public/participant-workspace-bootstrap.js');
 const participantSuite = read('../public/participant-workspace-suite.js');
-const app = read('../public/app.js');
+const chatRuntime = read('../public/public-chat-runtime.js');
 
 test('public index delegates JavaScript ownership to one bootstrap', () => {
   assert.match(index, /<script src="\/public-bootstrap\.js" defer><\/script>/);
@@ -26,9 +26,10 @@ test('public index delegates JavaScript ownership to one bootstrap', () => {
 
 test('public bootstrap keeps one participant bootstrap and retires redundant signed-in routers', () => {
   assert.match(bootstrap, /'\/participant-workspace-bootstrap\.js'/);
-  for (const retired of ['/workspace-shell.js','/workspace-panel-routing.js','/current-workspace-market.js']) {
+  for (const retired of ['/app.js','/workspace-shell.js','/workspace-panel-routing.js','/current-workspace-market.js']) {
     assert.doesNotMatch(bootstrap, new RegExp(retired.replaceAll('/', '\\/').replaceAll('.', '\\.')));
   }
+  assert.match(bootstrap, /'\/public-chat-runtime\.js'/);
   assert.match(bootstrap, /for \(const source of FEATURES\) await loadScript\(source\)/);
   assert.match(bootstrap, /sra:public-booted/);
 });
@@ -81,9 +82,13 @@ test('signed-in marketplace is owned by the participant suite', () => {
   assert.doesNotMatch(participantSuite, /ORDER\.filter\(\(view\) => view !== 'marketplace'\)/);
 });
 
-test('legacy app remains isolated as a signed-out public compatibility surface for this checkpoint', () => {
-  assert.match(bootstrap, /'\/app\.js'/);
-  assert.match(app, /function renderMarketplace\(\)/);
-  assert.match(app, /fetch\('\/api\/marketplace'\)/);
-  assert.match(participantSuite, /event\.stopImmediatePropagation\(\)/);
+test('shared public chat runtime owns chat without owning participant views', () => {
+  assert.match(chatRuntime, /fetch\('\/api\/sane\/agent\/chat'/);
+  assert.match(chatRuntime, /document\.querySelector\('\.nav-item\.active'\)\?\.dataset\.view/);
+  assert.match(chatRuntime, /includeTrialBalance: view === 'activity'/);
+  assert.match(chatRuntime, /#send-message/);
+  assert.match(chatRuntime, /#sane-input/);
+  assert.doesNotMatch(chatRuntime, /#view-root/);
+  assert.doesNotMatch(chatRuntime, /renderMarketplace/);
+  assert.doesNotMatch(chatRuntime, /querySelectorAll\('\.nav-item'\).*addEventListener/);
 });
