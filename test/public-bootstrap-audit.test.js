@@ -8,6 +8,7 @@ const bootstrap = read('../public/public-bootstrap.js');
 const participantBootstrap = read('../public/participant-workspace-bootstrap.js');
 const participantSuite = read('../public/participant-workspace-suite.js');
 const chatRuntime = read('../public/public-chat-runtime.js');
+const access = read('../public/access.js');
 
 test('public index delegates JavaScript ownership to one bootstrap', () => {
   assert.match(index, /<script src="\/public-bootstrap\.js" defer><\/script>/);
@@ -30,8 +31,20 @@ test('public bootstrap keeps one participant bootstrap and retires redundant sig
     assert.doesNotMatch(bootstrap, new RegExp(retired.replaceAll('/', '\\/').replaceAll('.', '\\.')));
   }
   assert.match(bootstrap, /'\/public-chat-runtime\.js'/);
-  assert.match(bootstrap, /for \(const source of FEATURES\) await loadScript\(source\)/);
+  assert.match(bootstrap, /for \(const source of FEATURES\) \{\s*await loadScript\(source\);/);
   assert.match(bootstrap, /sra:public-booted/);
+});
+
+test('access.js is the sole access and capability shell owner', () => {
+  assert.match(bootstrap, /'\/access\.js'/);
+  assert.doesNotMatch(bootstrap, /'\/account-capacities\.js'/);
+  assert.match(access, /function renderAccessControls\(\)/);
+  assert.match(access, /function renderCapabilities\(\)/);
+  assert.match(access, /async function applyCapacity\(capacity\)/);
+  assert.match(access, /async function activateCapacity\(capacity\)/);
+  assert.match(access, /function configureNavigation\(\)/);
+  assert.match(access, /function applyAccessShell\(\)/);
+  assert.match(access, /async function initializeAccess\(\)/);
 });
 
 test('current signed-in participant shell contract is explicit and stable', () => {
