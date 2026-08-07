@@ -188,6 +188,7 @@
     const originalUrl = typeof input === 'string' ? input : input?.url;
     const url = normalizeWorkspaceUrl(new URL(originalUrl, location.origin));
     const method = String(init.method || (typeof input !== 'string' ? input?.method : '') || 'GET').toUpperCase();
+    const isMutation = !['GET', 'HEAD', 'OPTIONS'].includes(method);
     const sameOrigin = url.origin === location.origin;
     const isAdminRequest = sameOrigin && url.pathname.startsWith('/api/admin/');
     const isSessionProbe = isAdminRequest && (url.pathname === '/api/admin/session' || url.pathname === '/api/admin/bootstrap-status');
@@ -239,7 +240,7 @@
 
     if (isWorkspaceRead) response = await enrichWorkspaceResponse(response);
 
-    if (isAdminRequest && !SAFE_METHODS.has(method) && response.ok) {
+    if (isAdminRequest && isMutation && response.ok) {
       readCache.clear();
       window.dispatchEvent(new CustomEvent('sra-admin-data-changed'));
       window.dispatchEvent(new CustomEvent('sra:admin-mutated', {
