@@ -65,6 +65,61 @@
     } finally { clearTimeout(timer); }
   }
 
+  function achDestinationControlMarkup(){
+    return `<section class="admin-record-card" data-ach-destination-control data-native-ach-destination-control>
+      <header><strong>Manual ACH Destination</strong><em>PREPARE</em></header>
+      <form data-native-ach-destination-form autocomplete="off">
+        <div class="admin-record-grid">
+          <label><span>Bank / destination label</span><input name="bankName" type="text" placeholder="Receiving bank" required></label>
+          <label><span>Account type</span><select name="accountType" required style="width:100%;background:#050505;border:1px solid #292929;border-radius:10px;color:#f5f5f5;padding:12px"><option value="CHECKING">Checking</option><option value="SAVINGS">Savings</option></select></label>
+          <label><span>Routing number</span><input name="routingNumber" type="text" inputmode="numeric" pattern="[0-9]{9}" maxlength="9" placeholder="9 digits" required></label>
+          <label><span>Account number</span><input name="accountNumber" type="password" inputmode="numeric" pattern="[0-9]{4,17}" maxlength="17" placeholder="4–17 digits" required></label>
+          <label><span>Amount USD</span><input name="amountUsd" type="number" min="0.01" step="0.01" value="1.00" required></label>
+        </div>
+        <p style="color:#9a9a9a;font-size:12px;line-height:1.45;margin:12px 0">Routing and account numbers are used only for this preparation request. SRA stores an opaque destination reference and masked display label, not the full bank details.</p>
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><button type="submit">Verify & Prepare Instruction</button><span data-native-ach-result style="color:#d6a92f;font-size:12px"></span></div>
+      </form>
+    </section>`;
+  }
+
+  function renderSettlementControls(tab){
+    const controls = controlsBody('settlement');
+    if(!controls) return;
+    const existing = controls.querySelector('[data-native-ach-destination-control]');
+    if(tab !== 'Destination Verification') { existing?.remove(); return; }
+    if(!existing) controls.insertAdjacentHTML('afterbegin',achDestinationControlMarkup());
+  }
+
+  async function prepareAchDestination(form){
+    const button = form.querySelector('button[type="submit"]');
+    const result = form.querySelector('[data-native-ach-result]');
+    const values = Object.fromEntries(new FormData(form).entries());
+    button.disabled = true;
+    result.textContent = 'Preparing…';
+    try {
+      const prepared = await requestJson('/api/admin/treasury-transfer-readiness/ach/prepare',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          bankName:values.bankName,
+          accountType:values.accountType,
+          routingNumber:values.routingNumber,
+          accountNumber:values.accountNumber,
+          amountUsd:Number(values.amountUsd),
+        }),
+      });
+      form.elements.routingNumber.value = '';
+      form.elements.accountNumber.value = '';
+      result.textContent = `Ready: ${prepared.transferInstruction?.transferInstructionId || 'ACH instruction'} · $${Number(prepared.transferInstruction?.amountUsd || values.amountUsd).toFixed(2)}`;
+      try { await loadWorkspaceData(true); } catch {}
+      renderWorkspace('settlement');
+    } catch(error) {
+      result.textContent = error.message;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   function makeWorkspace([id,label,description]){
     const section = document.createElement('section');
     section.className = 'admin-workspace';
@@ -81,6 +136,12 @@
       button.setAttribute('aria-selected','true');
       section.dataset.activeTab = button.dataset.adminTab;
       renderWorkspace(id);
+    });
+    section.addEventListener('submit',event => {
+      const form = event.target.closest('[data-native-ach-destination-form]');
+      if(!form) return;
+      event.preventDefault();
+      void prepareAchDestination(form);
     });
     return section;
   }
@@ -266,10 +327,11 @@
     const node = recordsBody(id);
     if(!node) return;
     if(id==='dashboard'){ node.innerHTML = dashboardMarkup(); syncDashboard(); return; }
-    if(state.loading){ node.innerHTML = loadingState(); return; }
-    if(state.lastError){ node.innerHTML = errorState(state.lastError); return; }
     const section = document.querySelector(`[data-workspace="${id}"]`);
     const tab = section?.dataset.activeTab || TABS[id]?.[0] || '';
+    if(id==='settlement') renderSettlementControls(tab);
+    if(state.loading){ node.innerHTML = loadingState(); return; }
+    if(state.lastError){ node.innerHTML = errorState(state.lastError); return; }
     node.innerHTML = recordsMarkup(workspaceRecords(id,tab),labelFor(id,tab));
   }
   async function loadWorkspaceData(force=false){
