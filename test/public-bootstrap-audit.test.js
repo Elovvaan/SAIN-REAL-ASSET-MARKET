@@ -5,7 +5,9 @@ import fs from 'node:fs';
 const read = (path) => fs.readFileSync(new URL(path, import.meta.url), 'utf8');
 const index = read('../public/index.html');
 const bootstrap = read('../public/public-bootstrap.js');
+const participantBootstrap = read('../public/participant-workspace-bootstrap.js');
 const participantSuite = read('../public/participant-workspace-suite.js');
+const app = read('../public/app.js');
 
 test('public index delegates JavaScript ownership to one bootstrap', () => {
   assert.match(index, /<script src="\/public-bootstrap\.js" defer><\/script>/);
@@ -22,15 +24,10 @@ test('public index delegates JavaScript ownership to one bootstrap', () => {
   }
 });
 
-test('public bootstrap preserves the established feature order for the baseline checkpoint', () => {
-  const order = [
-    '/sane-skills.js','/app.js','/sane-chat-format.js','/interoperability.js','/onboarding.js','/custody.js','/access.js','/sra-authenticated-fetch.js','/participation.js','/marketplace-tier-one.js','/current-workspace-market.js','/platform-admin-workspace.js','/account-capacities.js','/public-home.js','/workspace-shell.js','/workspace-panel-routing.js','/home-project-workspace.js','/institution-workspace-loader.js','/transaction-market-ui.js','/order-intent-ui.js','/live-market-publication-sync.js','/live-asset-vault.js','/funding-intake-ui.js','/funding-operations-ui.js','/funding-verification-desk.js','/funding-value-model-desk.js','/funding-instrument-desk.js','/sain-operations-intelligence.js','/funding-market-activation-desk.js','/verified-settlement-desk.js'
-  ];
-  let previous = -1;
-  for (const source of order) {
-    const current = bootstrap.indexOf(`'${source}'`);
-    assert.ok(current > previous, `${source} must preserve its current relative load order`);
-    previous = current;
+test('public bootstrap keeps one participant bootstrap and retires redundant signed-in routers', () => {
+  assert.match(bootstrap, /'\/participant-workspace-bootstrap\.js'/);
+  for (const retired of ['/workspace-shell.js','/workspace-panel-routing.js','/current-workspace-market.js']) {
+    assert.doesNotMatch(bootstrap, new RegExp(retired.replaceAll('/', '\\/').replaceAll('.', '\\.')));
   }
   assert.match(bootstrap, /for \(const source of FEATURES\) await loadScript\(source\)/);
   assert.match(bootstrap, /sra:public-booted/);
@@ -54,13 +51,21 @@ test('current signed-in participant shell contract is explicit and stable', () =
   }
   assert.match(participantSuite, /const OWNED_VIEWS = new Set/);
   assert.match(participantSuite, /function renderOwnedView\(view\)/);
+  assert.match(participantSuite, /event\.stopImmediatePropagation\(\)/);
   assert.match(participantSuite, /#view-root/);
   assert.match(participantSuite, /#sane-workspace-title/);
   assert.match(participantSuite, /#quick-prompts/);
 });
 
-test('baseline keeps compatibility routers visible for later retirement rather than silently deleting them', () => {
-  for (const source of ['/app.js','/workspace-shell.js','/workspace-panel-routing.js','/current-workspace-market.js']) {
-    assert.match(bootstrap, new RegExp(source.replaceAll('/', '\\/').replaceAll('.', '\\.')));
-  }
+test('participant bootstrap is now the sole signed-in shell loader', () => {
+  assert.match(participantBootstrap, /participant-workspace-suite\.js/);
+  assert.match(participantBootstrap, /sra:access-state-changed/);
+  assert.doesNotMatch(bootstrap, /workspace-shell-core\.js/);
+});
+
+test('marketplace remains the explicit legacy renderer for this checkpoint', () => {
+  assert.match(participantSuite, /ORDER\.filter\(\(view\) => view !== 'marketplace'\)/);
+  assert.match(participantSuite, /if \(view === 'marketplace'\)/);
+  assert.match(app, /function renderMarketplace\(\)/);
+  assert.match(app, /fetch\('\/api\/marketplace'\)/);
 });
