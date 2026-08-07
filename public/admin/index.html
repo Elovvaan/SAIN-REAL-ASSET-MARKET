@@ -47,5 +47,6 @@ document.querySelector('#login-form').addEventListener('submit',async event=>{ev
 document.querySelector('#signout').addEventListener('click',async()=>{await json('/api/admin/signout',{method:'POST'});location.reload()});assetButton.addEventListener('click',approvePlatformAsset);document.querySelector('#send').addEventListener('click',()=>sendPrompt(document.querySelector('#prompt').value));document.querySelectorAll('[data-prompt]').forEach(button=>button.addEventListener('click',()=>sendPrompt(button.dataset.prompt)));checkSession().catch(error=>{hideAll();loginView.classList.remove('hidden');loginError.textContent=error.message});
 </script>
 <script src="/admin/listing-authorization-ui.js" defer></script>
+<script src="/admin/admin-settlement-destination.js?v=182" defer></script>
 </body>
 </html>
