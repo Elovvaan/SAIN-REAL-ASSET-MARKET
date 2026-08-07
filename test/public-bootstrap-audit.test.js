@@ -95,6 +95,16 @@ test('signed-in marketplace is owned by the participant suite', () => {
   assert.doesNotMatch(participantSuite, /ORDER\.filter\(\(view\) => view !== 'marketplace'\)/);
 });
 
+test('signed-in Asset Vault is owned by the participant suite', () => {
+  assert.doesNotMatch(bootstrap, /'\/live-asset-vault\.js'/);
+  assert.match(participantSuite, /async function renderAssetVault\(root\)/);
+  assert.match(participantSuite, /fetch\('\/api\/access\/vault'/);
+  assert.match(participantSuite, /if \(view === 'custody'\) void renderAssetVault\(root\)/);
+  assert.match(participantSuite, /Participant-linked activity/);
+  assert.match(participantSuite, /Recorded account balance/);
+  assert.match(participantSuite, /OWNER CONTROLLED/);
+});
+
 test('shared public chat runtime owns chat without owning participant views', () => {
   assert.match(chatRuntime, /fetch\('\/api\/sane\/agent\/chat'/);
   assert.match(chatRuntime, /document\.querySelector\('\.nav-item\.active'\)\?\.dataset\.view/);
