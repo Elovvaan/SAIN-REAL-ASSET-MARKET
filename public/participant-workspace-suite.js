@@ -253,8 +253,8 @@
   }
 
   function sync() { signedIn() ? mount() : unmount(); }
-  const observer = new MutationObserver(sync);
-  function initialize() { observer.observe(document.body, { subtree: true, childList: true }); sync(); }
+  function initialize() { sync(); }
+  window.addEventListener('sra:access-state-changed', sync);
   if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', initialize, { once: true });
   else initialize();
 })();
