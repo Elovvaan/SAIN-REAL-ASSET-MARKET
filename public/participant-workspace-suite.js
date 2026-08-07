@@ -12,14 +12,18 @@
     ['participants', ['◌', 'Account']]
   ]);
   const ORDER = [...LABELS.keys()];
-  const OWNED_VIEWS = new Set(ORDER.filter((view) => view !== 'marketplace'));
+  const OWNED_VIEWS = new Set(ORDER);
   const signedIn = () => Boolean(window.accessState?.session);
   const esc = (value) => String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#039;');
+  const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
   let mounted = false;
   let activeView = 'home-projects';
+  let marketplaceState = null;
+  let marketplaceRequest = null;
 
   const VIEW_COPY = {
     'home-projects': ['Home', 'ACTIVE'],
+    marketplace: ['Marketplace', 'LIVE'],
     instruments: ['Create Instrument', 'AVAILABLE'],
     'funding-operations': ['Financing', 'AVAILABLE'],
     positions: ['My Positions', 'ACTIVE'],
@@ -137,10 +141,55 @@
     return homeMarkup();
   }
 
+  async function getMarketplace() {
+    if (marketplaceState) return marketplaceState;
+    if (!marketplaceRequest) {
+      marketplaceRequest = fetch('/api/marketplace', { cache: 'no-store' })
+        .then(async (response) => {
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload.error || 'Marketplace request failed.');
+          marketplaceState = payload;
+          return payload;
+        })
+        .finally(() => { marketplaceRequest = null; });
+    }
+    return marketplaceRequest;
+  }
+
+  function marketplaceProjectRows(projects = []) {
+    return projects.map((project) => `<article class="project-row context-card"><div class="project-main"><div class="project-title"><div class="project-symbol">◇</div><div><h3>${esc(project.title)}</h3><p>${esc(project.assetName)} · ${esc(project.region)}</p></div></div><div class="project-signal"><strong>+${esc(project.projectedGainRate)}%</strong><span>market signal</span></div></div><div class="project-gain-row"><div><span>Verified Value</span><strong>${money.format(Number(project.verifiedValue || 0))}</strong></div><div><span>Projected window</span><strong>${esc(project.participationWindow)}</strong></div></div><div class="project-meta"><span class="badge open">${esc(project.stage)}</span><span class="badge ${project.completionState === 'ELIGIBLE' ? 'watch' : ''}">${esc(project.completionState)}</span></div><div class="context-actions"><button data-participant-prompt="Open ${esc(project.title)}">Open</button><button data-participant-prompt="Compare ${esc(project.title)}">Compare</button><button data-participant-prompt="Participate in ${esc(project.title)}">Participate</button></div></article>`).join('');
+  }
+
+  async function renderMarketplace(root) {
+    root.innerHTML = '<div class="loading-state">Loading Marketplace…</div>';
+    try {
+      const data = await getMarketplace();
+      if (activeView !== 'marketplace') return;
+      const projects = Array.isArray(data.projects) ? data.projects : [];
+      const represented = projects.reduce((sum, project) => sum + Number(project.verifiedValue || 0), 0);
+      root.innerHTML = `<section class="metric-grid compact"><article class="metric-card"><span>Verified opportunities</span><strong>${projects.length}</strong><small>Live productive opportunities</small></article><article class="metric-card"><span>Verified Value represented</span><strong>${money.format(represented)}</strong><small>Current value represented</small></article><article class="metric-card"><span>Marketplace</span><strong>${esc(data.marketStatus || 'LIVE')}</strong><small>Current operating state</small></article></section><section class="panel contextual-panel"><div class="panel-header"><div><h2>Opportunities</h2><p>Results and actions remain in the Marketplace workspace.</p></div><span class="badge open">LIVE MARKET</span></div><div class="project-list">${marketplaceProjectRows(projects)}</div></section>`;
+      bindParticipantPrompts(root);
+    } catch (error) {
+      root.innerHTML = `<div class="empty-view"><h2>Marketplace unavailable</h2><p>${esc(error.message || 'Marketplace could not load.')}</p></div>`;
+    }
+  }
+
   function actionMarkup(view) {
+    if (view === 'marketplace') return ['Marketplace', `<div class="participant-action-ticket"><div class="ticket-stat"><span>Market</span><strong>LIVE SRA/USD</strong></div><button type="button" data-participant-prompt="Show me opportunities I can participate in.">Find opportunities</button><button type="button" data-participant-prompt="Compare the current projects for me.">Compare projects</button><button type="button" data-participant-prompt="Show me the smallest eligible opportunity.">Start small</button></div>`];
     if (view === 'instruments') return ['Create Instrument', `<div class="participant-action-ticket"><div class="ticket-stat"><span>Tier</span><strong>Tier 1 — Available</strong></div><div class="ticket-stat"><span>Recognized value</span><strong>Linked from account</strong></div><div class="ticket-stat"><span>SRA available</span><strong>At par</strong></div><label>Instrument amount<input type="number" min="0" step="any" placeholder="0.00 SRA"></label><label>Purpose<select><option>Recorded-value instrument</option><option>Commercial project</option><option>Financing instrument</option></select></label><label>Term<select><option>Open term</option><option>12 months</option><option>36 months</option></select></label><button type="button" data-participant-prompt="Review my proposed instrument with SAIN.">Review with SAIN</button></div>`];
     if (view === 'funding-operations') return ['Request Financing', `<div class="participant-action-ticket"><div class="ticket-stat"><span>Available capacity</span><strong>Based on approved tier</strong></div><label>Approved instrument<select><option>Select instrument</option></select></label><label>Amount<input type="number" min="0" step="any" placeholder="0.00 USD"></label><label>Term<select><option>Select term</option><option>12 months</option><option>36 months</option></select></label><button type="button" data-participant-prompt="Review my financing request with SAIN.">Review Financing</button></div>`];
     return ['What are you trying to accomplish?', ''];
+  }
+
+  function bindParticipantPrompts(scope = document) {
+    scope.querySelectorAll('[data-participant-prompt]').forEach((button) => {
+      if (button.dataset.participantPromptBound === 'true') return;
+      button.dataset.participantPromptBound = 'true';
+      button.addEventListener('click', () => {
+        const input = document.querySelector('#sane-input');
+        if (input) { input.value = button.dataset.participantPrompt; input.focus(); }
+      });
+    });
   }
 
   function renderAction(view) {
@@ -151,10 +200,7 @@
     if (title) title.textContent = titleText;
     if (context) context.textContent = view === 'home-projects' ? 'Ask SAIN to guide your next participant action.' : 'Current participant action';
     if (prompts) prompts.innerHTML = html;
-    document.querySelectorAll('[data-participant-prompt]').forEach((button) => button.addEventListener('click', () => {
-      const input = document.querySelector('#sane-input');
-      if (input) { input.value = button.dataset.participantPrompt; input.focus(); }
-    }));
+    bindParticipantPrompts();
   }
 
   function renderOwnedView(view) {
@@ -164,18 +210,15 @@
     if (!root) return;
     document.body.classList.add('workspace-open');
     setFrame(view);
-    root.innerHTML = viewMarkup(view);
-    root.querySelectorAll('[data-suite-view]').forEach((button) => button.addEventListener('click', () => openView(button.dataset.suiteView)));
+    if (view === 'marketplace') void renderMarketplace(root);
+    else {
+      root.innerHTML = viewMarkup(view);
+      root.querySelectorAll('[data-suite-view]').forEach((button) => button.addEventListener('click', () => openView(button.dataset.suiteView)));
+    }
     renderAction(view);
   }
 
-  function openView(view) {
-    if (view === 'marketplace') {
-      document.querySelector('.nav-item[data-view="marketplace"]')?.click();
-      return;
-    }
-    renderOwnedView(view);
-  }
+  function openView(view) { renderOwnedView(view); }
 
   function bindOwnedButtons() {
     document.querySelectorAll('.nav-item').forEach((button) => {
@@ -204,6 +247,7 @@
 
   function unmount() {
     mounted = false;
+    marketplaceState = null;
     document.body.classList.remove('participant-suite-ready');
     document.querySelector('.nav-list')?.removeAttribute('data-participant-nav');
   }
