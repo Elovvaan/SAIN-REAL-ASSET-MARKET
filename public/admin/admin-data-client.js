@@ -61,6 +61,24 @@
     headers: value.headers,
   });
 
+  async function enrichWorkspaceResponse(response) {
+    if (!response.ok) return response;
+    try {
+      const payload = enrichWorkspacePayload(await response.clone().json());
+      const headers = new Headers(response.headers);
+      headers.delete('content-length');
+      headers.delete('content-encoding');
+      headers.set('content-type', 'application/json; charset=utf-8');
+      return new Response(JSON.stringify(payload), {
+        status: response.status,
+        statusText: response.statusText,
+        headers,
+      });
+    } catch {
+      return response;
+    }
+  }
+
   async function reconcileNativePlatformAsset() {
     await new Promise((resolve) => window.setTimeout(resolve, 1500));
     const response = await nativeFetch('/api/admin/platform-asset', {
@@ -81,6 +99,7 @@
     const url = normalizeWorkspaceUrl(new URL(originalUrl, location.origin));
     const method = String(init.method || (typeof input !== 'string' ? input?.method : '') || 'GET').toUpperCase();
     const sameOrigin = url.origin === location.origin;
+    const isWorkspaceRead = sameOrigin && method === 'GET' && url.pathname === '/api/admin/workspaces';
     const key = sameOrigin ? governedKey(url, method) : null;
     const normalizedInput = typeof input === 'string'
       ? (url.origin === location.origin ? `${url.pathname}${url.search}${url.hash}` : url.toString())
@@ -110,6 +129,8 @@
       response = await execute();
     }
 
+    if (isWorkspaceRead) response = await enrichWorkspaceResponse(response);
+
     if (sameOrigin && url.pathname.startsWith('/api/admin/') && !['GET', 'HEAD', 'OPTIONS'].includes(method) && response.ok) {
       window.dispatchEvent(new CustomEvent('sra:admin-mutated', {
         detail: { method, path: url.pathname, mutatedAt: new Date().toISOString() },
@@ -131,7 +152,7 @@
       error.status = response.status;
       throw error;
     }
-    return new URL(url, location.origin).pathname === '/api/admin/workspaces' ? enrichWorkspacePayload(payload) : payload;
+    return payload;
   }
 
   function refresh(source = 'manual') {
@@ -141,4 +162,5 @@
   }
 
   window.SRAAdminDataClient = Object.freeze({ request, json, refresh, workspaceLimit: WORKSPACE_RECORD_LIMIT });
+  window.fetch = request;
 })();
