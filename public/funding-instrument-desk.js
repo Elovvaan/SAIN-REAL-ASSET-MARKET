@@ -33,6 +33,7 @@
   async function loadOpportunity(root) {
     const opportunityId = root.querySelector('#instrument-opportunity')?.value || '';
     const detailRoot = root.querySelector('#instrument-detail');
+    if (!detailRoot) return;
     if (!opportunityId) {
       detailRoot.innerHTML = '<div class="funding-ops-empty">Select an opportunity in instrument selection, draft review, or issuance.</div>';
       return;
@@ -139,24 +140,31 @@
     }
   }
 
-  async function mount() {
-    const fundingRoot = document.querySelector('#view-root .funding-ops');
+  async function mount(fundingRoot) {
     if (!fundingRoot || fundingRoot.querySelector('#funding-instrument-desk')) return;
+    addStyle();
     try {
       const dashboard = await request('/api/funding-operations/dashboard');
+      if (!fundingRoot.isConnected || fundingRoot.querySelector('#funding-instrument-desk')) return;
       const candidates = (dashboard.queue || []).filter((item) => ['FUNDING_MODEL_SELECTED', 'INSTRUMENT_DRAFTED', 'INSTRUMENT_REVIEWED', 'ISSUANCE_REQUESTED', 'INSTRUMENT_ISSUED'].includes(item.status));
       const section = document.createElement('section');
       section.className = 'instrument-desk';
       section.id = 'funding-instrument-desk';
       section.innerHTML = `<div class="funding-panel-head"><div><p class="eyebrow">PHASE 5–7 WORK DESK</p><h3>Instrument selection, review, and issuance</h3><p>Assess the instrument family, create the draft, complete review, authorize issuance, and record the authoritative issuance transaction.</p></div></div><select id="instrument-opportunity" style="margin-top:12px"><option value="">Select opportunity</option>${candidates.map((item) => `<option value="${esc(item.opportunityId)}">${esc(item.title || item.opportunityId)} · ${esc(item.status)}</option>`).join('')}</select><div id="instrument-detail" style="margin-top:12px"><div class="funding-ops-empty">Select an opportunity in instrument selection, draft review, or issuance.</div></div>`;
       fundingRoot.append(section);
-      section.querySelector('#instrument-opportunity').addEventListener('change', () => loadOpportunity(section));
-    } catch {
-      // Funding Operations owns its own error state.
+      section.querySelector('#instrument-opportunity')?.addEventListener('change', () => loadOpportunity(section));
+    } catch (error) {
+      const section = document.createElement('section');
+      section.className = 'instrument-desk';
+      section.id = 'funding-instrument-desk';
+      section.innerHTML = `<strong>Instrument desk could not load.</strong><p>${esc(error.message)}</p>`;
+      fundingRoot.append(section);
     }
   }
 
-  addStyle();
-  new MutationObserver(mount).observe(document.documentElement, { childList: true, subtree: true });
-  window.addEventListener('DOMContentLoaded', mount);
+  window.mountFundingInstrumentDesk = mount;
+  window.addEventListener('sra:funding-operations-rendered', (event) => {
+    const fundingRoot = event.detail?.root?.querySelector('.funding-ops');
+    if (fundingRoot) void mount(fundingRoot);
+  });
 })();
