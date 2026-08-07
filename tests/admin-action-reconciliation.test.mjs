@@ -2,27 +2,20 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const reconciliation = fs.readFileSync(new URL('../public/admin/admin-action-reconciliation.js', import.meta.url), 'utf8');
-const loader = fs.readFileSync(new URL('../public/admin/admin-button-diagnostics.js', import.meta.url), 'utf8');
+const client = fs.readFileSync(new URL('../public/admin/admin-data-client.js', import.meta.url), 'utf8');
+const index = fs.readFileSync(new URL('../public/admin/index.html', import.meta.url), 'utf8');
 const agent = fs.readFileSync(new URL('../services/admin-intelligence-agent-service.js', import.meta.url), 'utf8');
 
-test('admin loader installs action reconciliation before workspace controls', () => {
-  const reconciliationIndex = loader.indexOf('/admin/admin-action-reconciliation.js');
-  const suiteIndex = loader.indexOf('/admin/admin-suite-shell.js');
-  assert.ok(reconciliationIndex >= 0);
-  assert.ok(suiteIndex > reconciliationIndex);
+test('consolidated data client de-duplicates protected native asset writes', () => {
+  assert.match(client, /activeWrites\.has\(key\)/);
+  assert.match(client, /NATIVE_PLATFORM_ASSET_BOOTSTRAP/);
+  assert.match(client, /reconcileNativePlatformAsset/);
+  assert.match(client, /readyForExport/);
 });
 
-test('reconciliation de-duplicates protected native asset writes', () => {
-  assert.match(reconciliation, /activeWrites\.get\(key\)/);
-  assert.match(reconciliation, /NATIVE_PLATFORM_ASSET_BOOTSTRAP/);
-  assert.match(reconciliation, /reconcileNativePlatformAsset/);
-  assert.match(reconciliation, /readyForExport/);
-});
-
-test('reconciliation normalizes the incomplete product workflows prompt', () => {
-  assert.match(reconciliation, /incomplete\\s\+product\\s\+workflows/i);
-  assert.match(reconciliation, /Generate an operational brief showing all incomplete workflows and the next action for each\./);
+test('administrative prompt is canonical in the owning page instead of normalized by a DOM observer', () => {
+  assert.match(index, /Generate an operational brief showing all incomplete workflows and the next action for each\./);
+  assert.doesNotMatch(client, /MutationObserver/);
 });
 
 test('server agent exposes operational brief support', () => {

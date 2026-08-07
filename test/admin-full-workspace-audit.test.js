@@ -5,8 +5,8 @@ import test from 'node:test';
 const router = fs.readFileSync(new URL('../routes/private-admin-router.js', import.meta.url), 'utf8');
 const shell = fs.readFileSync(new URL('../public/admin/admin-suite-shell.js', import.meta.url), 'utf8');
 const css = fs.readFileSync(new URL('../public/admin/admin-suite-shell.css', import.meta.url), 'utf8');
-const loader = fs.readFileSync(new URL('../public/admin/admin-button-diagnostics.js', import.meta.url), 'utf8');
-const sync = fs.readFileSync(new URL('../public/admin/admin-workspace-sync.js', import.meta.url), 'utf8');
+const bootstrap = fs.readFileSync(new URL('../public/admin/admin-bootstrap.js', import.meta.url), 'utf8');
+const client = fs.readFileSync(new URL('../public/admin/admin-data-client.js', import.meta.url), 'utf8');
 
 const workspaceIds = [
   'dashboard','operations','treasury','native-asset','marketplace','instruments','records',
@@ -34,7 +34,7 @@ test('administration assets cannot remain stale after deployment', () => {
   assert.match(router, /etag: false/);
   assert.match(router, /lastModified: false/);
   assert.match(router, /maxAge: 0/);
-  assert.match(shell, /cache:'no-store'/);
+  assert.match(client, /cache: 'no-store'/);
   assert.match(shell, /_\=\$\{Date\.now\(\)\}/);
 });
 
@@ -44,11 +44,10 @@ test('all workspace groups have dedicated record mappings', () => {
   }
 });
 
-test('legacy action panels are moved into visible workspace control containers before the source layout is hidden', () => {
+test('legacy action panels are routed once into visible workspace control containers', () => {
   assert.match(shell, /admin-workspace-controls/);
   assert.match(shell, /admin-legacy-source-root/);
   assert.match(shell, /routeKnownSections\(oldLayout \|\| admin\)/);
-  assert.match(shell, /observeSource\(admin\)/);
   assert.match(shell, /#asset-details/);
   assert.match(shell, /#listing-details/);
   assert.match(shell, /#chat-log/);
@@ -68,16 +67,23 @@ test('workspace opened during the shared initial request is rendered when that r
   assert.match(shell, /pending\.catch\(\(\)=>\{\}\)\.finally/);
 });
 
-test('successful admin mutations synchronize the active workspace and dashboard', () => {
-  assert.match(loader, /admin-workspace-sync\.js/);
-  assert.match(sync, /window\.fetch = async function synchronizedAdminFetch/);
-  assert.match(sync, /url\.pathname\.startsWith\('\/api\/admin\/'\)/);
-  assert.match(sync, /!\['GET', 'HEAD', 'OPTIONS'\]\.includes\(method\)/);
-  assert.match(sync, /isAdminMutation && response\.ok/);
-  assert.match(sync, /data-refresh-workspace/);
-  assert.match(sync, /window\.loadSummary/);
-  assert.match(sync, /sra:admin-mutated/);
-  assert.match(sync, /refreshAgain/);
+test('successful admin mutations synchronize through the consolidated data client and bootstrap', () => {
+  assert.match(client, /url\.pathname\.startsWith\('\/api\/admin\/'\)/);
+  assert.match(client, /!\['GET', 'HEAD', 'OPTIONS'\]\.includes\(method\)/);
+  assert.match(client, /sra:admin-mutated/);
+  assert.match(bootstrap, /sra:admin-mutated/);
+  assert.match(bootstrap, /data-refresh-workspace/);
+  assert.match(bootstrap, /window\.loadSummary/);
+  assert.doesNotMatch(bootstrap, /admin-workspace-sync\.js/);
+});
+
+test('active bootstrap has one feature ownership path', () => {
+  assert.match(bootstrap, /const FEATURES = \[/);
+  assert.match(bootstrap, /admin-suite-shell\.js/);
+  assert.doesNotMatch(bootstrap, /admin-button-diagnostics\.js/);
+  assert.doesNotMatch(bootstrap, /admin-action-reconciliation\.js/);
+  assert.doesNotMatch(bootstrap, /admin-workspace-data-bridge\.js/);
+  assert.doesNotMatch(bootstrap, /admin-settlement-destination\.js/);
 });
 
 test('marketplace status counts every source displayed by its tabs', () => {
