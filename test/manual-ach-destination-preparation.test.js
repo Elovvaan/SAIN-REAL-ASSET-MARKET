@@ -30,7 +30,10 @@ test('rejects unsupported account types and malformed account values', () => {
   assert.throws(() => prepareManualAchDestination({ routingNumber: '021000021', accountNumber: '12345678', accountType: 'BROKERAGE' }), /CHECKING or SAVINGS/);
 });
 
-test('admin loader installs the Destination Verification control after the workspace shell', () => {
+test('admin page loads the Destination Verification control directly and the fallback loader keeps shell ordering', () => {
+  const page = fs.readFileSync(new URL('../public/admin/index.html', import.meta.url), 'utf8');
+  assert.match(page, /admin-settlement-destination\.js\?v=182/);
+
   const loader = fs.readFileSync(new URL('../public/admin/admin-button-diagnostics.js', import.meta.url), 'utf8');
   const shellIndex = loader.indexOf('/admin/admin-suite-shell.js');
   const destinationIndex = loader.indexOf('/admin/admin-settlement-destination.js');
