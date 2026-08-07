@@ -50,15 +50,20 @@ test('verified market events emit an immutable canonical VVR chain while preserv
   assert.equal(result.verifiedValueRecord.canonicalValueArchitecture, 'REFERENCE_TO_IMMUTABLE_VVR');
   assert.equal(result.verifiedValueRecord.canonicalVerifiedValueRecordId, result.canonicalVerifiedValueRecord.verifiedValueRecordId);
   assert.equal(result.event.canonicalVerifiedValueRecordId, result.canonicalVerifiedValueRecord.verifiedValueRecordId);
+  assert.equal(result.event.determinationSubjectId, 'MARKET-EVENT-ASSET-A-1');
   assert.equal(result.canonicalVerifiedValueRecord.value, 112.5);
   assert.equal(result.canonicalVerifiedValueRecord.state, 'CANONICAL');
   assert.equal(result.canonicalVerifiedValueRecord.immutable, true);
+  assert.equal(result.canonicalVerifiedValueRecord.confidence.level, 'DIRECT_VERIFIED_EVENT');
   assert.equal(result.canonicalVerifiedValueRecord.contractFormationBoundary.referenceOnly, true);
   assert.equal(result.canonicalVerifiedValueRecord.contractFormationBoundary.createsInstrument, false);
 
+  const subjects = domain.list(DETERMINATION_RECORD_TYPES.SUBJECT);
   const snapshots = domain.list(DETERMINATION_RECORD_TYPES.SNAPSHOT);
   const determinations = domain.list(DETERMINATION_RECORD_TYPES.DETERMINATION);
   const canonicalRecords = domain.list(DETERMINATION_RECORD_TYPES.VERIFIED_VALUE);
+  assert.equal(subjects.length, 1);
+  assert.equal(subjects[0].subjectId, 'MARKET-EVENT-ASSET-A-1');
   assert.equal(snapshots.length, 1);
   assert.equal(determinations.length, 1);
   assert.equal(canonicalRecords.length, 1);
