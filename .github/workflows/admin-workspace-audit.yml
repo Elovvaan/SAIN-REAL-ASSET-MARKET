@@ -1,0 +1,29 @@
+name: Administration Workspace Audit
+
+on:
+  pull_request:
+    paths:
+      - 'routes/private-admin-router.js'
+      - 'public/admin/**'
+      - 'test/admin-full-workspace-audit.test.js'
+      - '.github/workflows/admin-workspace-audit.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'routes/private-admin-router.js'
+      - 'public/admin/**'
+      - 'test/admin-full-workspace-audit.test.js'
+
+jobs:
+  admin-workspace-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Run administration workspace audit
+        run: node --test --test-concurrency=1 test/admin-full-workspace-audit.test.js
