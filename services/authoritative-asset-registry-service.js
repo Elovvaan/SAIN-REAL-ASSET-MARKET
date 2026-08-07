@@ -43,9 +43,31 @@ function asPosition(record) {
   };
 }
 
+class KeyedExclusiveRunner {
+  constructor() {
+    this.tails = new Map();
+  }
+
+  async run(key, operation) {
+    const previous = this.tails.get(key) || Promise.resolve();
+    let release;
+    const current = new Promise((resolve) => { release = resolve; });
+    this.tails.set(key, current);
+    await previous.catch(() => {});
+    try {
+      return await operation();
+    } finally {
+      release();
+      if (this.tails.get(key) === current) this.tails.delete(key);
+    }
+  }
+}
+
 export class AuthoritativeAssetRegistryService {
   constructor(domain) {
     this.domain = domain;
+    const relationshipWrites = new KeyedExclusiveRunner();
+    const reservationWrites = new KeyedExclusiveRunner();
     const assetRepository = {
       getById: async (assetId) => asAsset(
         domain.get(RECORD_TYPES.ASSET_ACCOUNT, assetId) ||
@@ -53,6 +75,7 @@ export class AuthoritativeAssetRegistryService {
       ),
     };
     const relationshipRepository = {
+      runExclusive: async (assetId, operation) => relationshipWrites.run(assetId, operation),
       save: async (relationship) => domain.put(
         RECORD_TYPES.AUTHORITATIVE_ASSET_RELATIONSHIP,
         relationship.id,
@@ -64,6 +87,7 @@ export class AuthoritativeAssetRegistryService {
         .filter((record) => record.assetId === assetId),
     };
     const reservationRepository = {
+      runExclusive: async (positionId, operation) => reservationWrites.run(positionId, operation),
       save: async (reservation) => domain.put(
         RECORD_TYPES.POSITION_RESERVATION,
         reservation.id,
@@ -104,10 +128,14 @@ export class AuthoritativeAssetRegistryService {
 
   listReservations({ assetId = null, positionId = null, activeOnly = false } = {}) {
     const active = new Set(['HELD', 'CONSUMING']);
+    const now = new Date();
     return this.domain.list(RECORD_TYPES.POSITION_RESERVATION)
       .filter((record) => !assetId || record.assetId === assetId)
       .filter((record) => !positionId || record.positionId === positionId)
-      .filter((record) => !activeOnly || active.has(record.status))
+      .filter((record) => !activeOnly || (
+        active.has(record.status) &&
+        (!record.expiresAt || new Date(record.expiresAt) > now)
+      ))
       .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
   }
 
@@ -232,7 +260,7 @@ export class AuthoritativeAssetRegistryService {
     if (!(error instanceof RegistryConflictError)) return null;
     const explanations = {
       EXCLUSIVE_OWNER_CONFLICT: 'A different active owner is already recognized for this asset. Close or supersede that relationship before registering another exclusive owner.',
-      EXCLUSIVE_CUSTODY_CONFLICT: 'A different exclusive custodian is already active. Mark custody non-exclusive only when the governing authority permits shared custody.',
+      EXCLUSIVE_CUSTODY_CONFLICT: 'A different active custodian conflicts with an exclusive custody claim. Every coexisting custodian must be expressly non-exclusive.',
       RESERVATION_POSITION_MISMATCH: 'The requested reservation does not point to the supplied asset and position.',
       INSUFFICIENT_TRANSFERABLE_CAPACITY: 'The requested amount exceeds the position capacity that remains unreserved and transferable.',
       STALE_ASSET_VERSION: 'The asset changed after the request was prepared. Reload the asset state before submitting again.',
