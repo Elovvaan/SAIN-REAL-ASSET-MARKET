@@ -27,13 +27,14 @@ test('direct instrument approval moves DRAFT to APPROVED and clears only the ins
   assert.deepEqual(listing.blockers,['MARKET_ACCESS_RULES_REQUIRED']);
 });
 
-test('admin loader includes the instrument approval control after the suite shell', () => {
-  const loader=fs.readFileSync(new URL('../public/admin/admin-button-diagnostics.js',import.meta.url),'utf8');
-  const shell=loader.indexOf('/admin/admin-suite-shell.js');
-  const approval=loader.indexOf('/admin/admin-instrument-approvals.js');
+test('admin bootstrap includes the instrument approval control after the suite shell', () => {
+  const bootstrap=fs.readFileSync(new URL('../public/admin/admin-bootstrap.js',import.meta.url),'utf8');
+  const shell=bootstrap.indexOf('/admin/admin-suite-shell.js');
+  const approval=bootstrap.indexOf('/admin/admin-instrument-approvals.js');
   assert.ok(shell>=0 && approval>shell);
   const ui=fs.readFileSync(new URL('../public/admin/admin-instrument-approvals.js',import.meta.url),'utf8');
   assert.match(ui,/data-instrument-approve/);
   assert.match(ui,/instrumentId/);
   assert.match(ui,/approval:\s*'APPROVE'/);
+  assert.match(ui,/SRAAdminDataClient/);
 });

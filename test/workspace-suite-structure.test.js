@@ -31,15 +31,17 @@ test('Participant suite exposes fixed navigation, journey, and action rail', () 
 });
 
 test('suite loaders preserve the original core modules', () => {
-  const adminLoader = read('public/admin/admin-button-diagnostics.js');
+  const adminBootstrap = read('public/admin/admin-bootstrap.js');
   const participantLoader = read('public/workspace-shell.js');
   const participantBootstrap = read('public/participant-workspace-bootstrap.js');
-  assert.match(adminLoader, /admin-button-diagnostics-core\.js/);
-  assert.match(adminLoader, /admin-suite-shell\.js/);
+  assert.match(adminBootstrap, /admin-button-diagnostics-core\.js/);
+  assert.match(adminBootstrap, /admin-suite-shell\.js/);
+  assert.doesNotMatch(adminBootstrap, /admin-button-diagnostics\.js/);
   assert.match(participantLoader, /workspace-shell-core\.js/);
   assert.match(participantLoader, /participant-workspace-bootstrap\.js/);
   assert.match(participantBootstrap, /participant-workspace-suite\.js/);
   assert.ok(fs.existsSync(new URL('../public/admin/admin-button-diagnostics-core.js', import.meta.url)));
+  assert.ok(fs.existsSync(new URL('../public/admin/admin-data-client.js', import.meta.url)));
   assert.ok(fs.existsSync(new URL('../public/workspace-shell-core.js', import.meta.url)));
   assert.ok(fs.existsSync(new URL('../public/participant-workspace-bootstrap.js', import.meta.url)));
 });

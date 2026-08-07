@@ -59,7 +59,7 @@ test('administration action endpoints exist in the mounted production routers', 
   }
 });
 
-test('administration has one bootstrap authority and one request normalization layer', () => {
+test('administration has one bootstrap authority and one request owner', () => {
   assert.match(adminIndex, /admin-data-client\.js/);
   assert.match(adminIndex, /admin-bootstrap\.js/);
   assert.doesNotMatch(adminIndex, /listing-authorization-ui\.js/);
@@ -87,11 +87,19 @@ test('administration has one bootstrap authority and one request normalization l
   assert.doesNotMatch(listingUi, /MutationObserver/);
   assert.doesNotMatch(instrumentApprovals, /MutationObserver/);
 
-  assert.match(dataClient, /WORKSPACE_RECORD_LIMIT = 100/);
+  assert.match(dataClient, /window\.fetch = request/);
+  assert.match(dataClient, /ADMIN_SESSION_TIMEOUT_MS/);
+  assert.match(dataClient, /ADMIN_READ_CACHE_TTL_MS/);
   assert.match(dataClient, /activeWrites/);
+  assert.match(dataClient, /inFlightReads/);
   assert.match(dataClient, /EXTERNAL_TRANSFER_INSTRUCTION/);
   assert.match(dataClient, /sra:admin-mutated/);
-  assert.match(diagnosticsCore, /credentials: 'same-origin'/);
-  assert.match(diagnosticsCore, /HTTP \$\{response\.status\}/);
+  assert.match(dataClient, /sra-admin-session-expired/);
+  assert.match(dataClient, /HTTP \$\{response\.status\}/);
+
+  assert.doesNotMatch(diagnosticsCore, /window\.fetch\s*=/);
+  assert.doesNotMatch(diagnosticsCore, /nativeFetch/);
+  assert.match(diagnosticsCore, /SRAAdminDataClient/);
   assert.match(diagnosticsCore, /eligible-instruments/);
+  assert.match(diagnosticsCore, /replaceWith\(select\)/);
 });

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
 
-const source = fs.readFileSync(new URL('../public/admin/admin-button-diagnostics.js', import.meta.url), 'utf8');
+const source = fs.readFileSync(new URL('../public/admin/admin-data-client.js', import.meta.url), 'utf8');
 
 test('Administration requests use operation-aware timeout boundaries', () => {
   assert.match(source, /ADMIN_SESSION_TIMEOUT_MS = 15_000/);
