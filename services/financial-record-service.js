@@ -13,6 +13,8 @@ function finitePositive(value, field) {
   return number;
 }
 
+function normalizedUnit(value) { return String(value || '').trim().toUpperCase(); }
+
 export class FinancialRecordService {
   constructor(persistentDomain) {
     this.persistentDomain = persistentDomain;
@@ -144,9 +146,24 @@ export class FinancialRecordService {
     if (existing) return { coinPosition: existing, coinAccount: this.getCoinAccount(existing.coinAccountId), created: false };
 
     const sourceAmount = finitePositive(record.recognizedPosition?.amount, 'recognizedPosition.amount');
-    const conversionRate = finitePositive(input.conversionRate ?? 1, 'conversionRate');
-    const coinQuantity = Number((sourceAmount * conversionRate).toFixed(8));
+    const sourceUnit = normalizedUnit(record.recognizedPosition?.unit);
     const symbol = requireText(input.symbol || 'SRA', 'symbol').toUpperCase();
+    const requestedRate = finitePositive(input.conversionRate ?? 1, 'conversionRate');
+
+    let representedValueUsd = null;
+    if (sourceUnit === 'USD') representedValueUsd = sourceAmount;
+    else {
+      const explicitUsd = input.recognizedValueUsd ?? input.representedValueUsd ?? record.recognizedRecordedValue?.amount ?? record.recordedValue?.amount;
+      if (explicitUsd !== undefined && explicitUsd !== null && explicitUsd !== '') representedValueUsd = finitePositive(explicitUsd, 'recognizedValueUsd');
+    }
+
+    if (symbol === 'SRA') {
+      if (!representedValueUsd) throw new Error(`SRA representation requires recognized USD value. Source quantity ${sourceAmount} ${sourceUnit || 'UNKNOWN'} cannot be represented 1:1 as SRA.`);
+      if (requestedRate !== 1) throw new Error('SRA representation is fixed at 1 SRA per 1 recognized USD and requires conversionRate 1.');
+    }
+
+    const representationBase = symbol === 'SRA' ? representedValueUsd : sourceAmount;
+    const coinQuantity = Number((representationBase * requestedRate).toFixed(8));
     const coinAccountId = input.coinAccountId || `CA-${crypto.randomUUID().split('-')[0].toUpperCase()}`;
     const now = new Date().toISOString();
 
@@ -187,12 +204,14 @@ export class FinancialRecordService {
         asOf: record.recognizedPosition.asOf,
         basis: record.recognizedPosition.basis
       },
+      recordedValue: representedValueUsd ? { amount: representedValueUsd, currency: 'USD' } : null,
       conversionRule: {
-        method: requireText(input.conversionMethod || 'DIRECT_RATIO', 'conversionMethod').toUpperCase(),
-        rate: conversionRate,
-        sourceUnit: record.recognizedPosition.unit,
+        method: symbol === 'SRA' ? 'RECORDED_USD_VALUE_AT_PAR' : requireText(input.conversionMethod || 'DIRECT_RATIO', 'conversionMethod').toUpperCase(),
+        rate: requestedRate,
+        sourceUnit: symbol === 'SRA' ? 'USD' : record.recognizedPosition.unit,
+        originalSourceUnit: record.recognizedPosition.unit,
         coinUnit: symbol,
-        methodologyReference: input.methodologyReference || null
+        methodologyReference: symbol === 'SRA' ? (input.methodologyReference || 'ONE_SRA_PER_RECOGNIZED_RECORDED_USD') : (input.methodologyReference || null)
       },
       quantity: coinQuantity,
       rights: record.rights || [],
@@ -208,7 +227,7 @@ export class FinancialRecordService {
       state: 'REPRESENTED',
       statusHistory: [{ state: 'REPRESENTED', actorId, occurredAt: now, reason: input.reason || 'Financial Record represented in SRA Coin units.' }],
       phase: 4,
-      version: 3,
+      version: 4,
       representedBy: actorId,
       representedAt: now,
       updatedAt: now
@@ -228,7 +247,7 @@ export class FinancialRecordService {
       objectId: coinPositionId,
       eventType: 'FINANCIAL_RECORD_COIN_REPRESENTATION_CREATED',
       actorId,
-      payload: { financialRecordId, coinAccountId, symbol, quantity: coinQuantity, conversionRate }
+      payload: { financialRecordId, coinAccountId, symbol, quantity: coinQuantity, conversionRate: requestedRate, representedValueUsd }
     });
 
     return { coinPosition, coinAccount, created: true };
@@ -285,7 +304,7 @@ export class FinancialRecordService {
       coinBySymbol[position.symbol] = Number(((coinBySymbol[position.symbol] || 0) + Number(position.quantity || 0)).toFixed(8));
     }
     return {
-      version: 3,
+      version: 4,
       phase: 4,
       layer: 'COIN_REPRESENTATION_LAYER',
       financialRecordCount: records.length,
