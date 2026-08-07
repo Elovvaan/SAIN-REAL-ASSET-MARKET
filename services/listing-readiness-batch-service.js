@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { RECORD_TYPES } from './persistent-domain-service.js';
 
 const LISTING_TYPE = 'MARKETPLACE_LISTING';
 const BATCH_TYPE = 'SRA_LISTING_READINESS_BATCH';
@@ -10,6 +11,7 @@ const ELIGIBLE_BLOCKERS = new Set([
   'TRANSACTION_ROUTE_REQUIRED',
   'SETTLEMENT_ROUTE_REQUIRED',
 ]);
+const APPROVABLE_INSTRUMENT_STATES = new Set(['DRAFT','PENDING','PENDING_REVIEW','IN_REVIEW','REVIEW_REQUIRED','AWAITING_APPROVAL']);
 
 function now() { return new Date().toISOString(); }
 function id() { return `LRB-${crypto.randomUUID().split('-')[0].toUpperCase()}`; }
@@ -60,26 +62,55 @@ export class ListingReadinessBatchService {
     const settlementRouteId = String(input.settlementRouteId || 'SRA_INTERNAL_SETTLEMENT').toUpperCase();
     const minimumOrder = finitePositive(input.minimumOrder || 1, 'minimumOrder');
     return {
-      action: 'LISTING_READINESS_BATCH_PREVIEW',
-      readOnly: true,
-      eligibleListingCount: valid.length,
-      invalidListingCount: invalid.length,
-      invalidListings: invalid,
+      action: 'LISTING_READINESS_BATCH_PREVIEW', readOnly: true,
+      eligibleListingCount: valid.length, invalidListingCount: invalid.length, invalidListings: invalid,
       market: 'SRA / USD',
-      scope: {
-        listingIds: valid.map(({ listing }) => listing.listingId),
-        listingState: 'PREPARED',
-        excludesNativePlatformAsset: true,
-      },
+      scope: { listingIds: valid.map(({ listing }) => listing.listingId), listingState: 'PREPARED', excludesNativePlatformAsset: true },
       policy: { askingPriceMethod: SRA_PAR_PRICING_METHOD, unitPrice: 1, currency: 'USD', eligibilityRule, minimumOrder, transactionRouteId, settlementRouteId },
       effect: 'Preserve the verified recorded USD value as SRA quantity at the fixed $1.00 SRA/USD par reference, clear the remaining readiness blockers, and mark covered listings READY_FOR_PUBLICATION_APPROVAL.',
-      doesNot: ['REPRICE_SOURCE_ASSETS', 'USE_SOURCE_TOKEN_QUANTITY_AS_SRA_QUANTITY', 'PUBLISH_LISTINGS', 'CREATE_TRANSACTIONS', 'ALLOCATE_POSITIONS', 'SETTLE_VALUE', 'RECOGNIZE_OWNERSHIP', 'CREATE_EXPORT_PACKAGES'],
+      doesNot: ['REPRICE_SOURCE_ASSETS','USE_SOURCE_TOKEN_QUANTITY_AS_SRA_QUANTITY','PUBLISH_LISTINGS','CREATE_TRANSACTIONS','ALLOCATE_POSITIONS','SETTLE_VALUE','RECOGNIZE_OWNERSHIP','CREATE_EXPORT_PACKAGES'],
       approvalRequired: true,
     };
   }
 
+  async approveInstrument(instrumentId, actorId = 'SRA_PLATFORM_ADMIN') {
+    const instrument = this.domain.get(RECORD_TYPES.SRA_INSTRUMENT, instrumentId);
+    if (!instrument) throw new Error(`Instrument ${instrumentId} was not found.`);
+    if (instrument.state === 'APPROVED') return { action: 'INSTRUMENT_APPROVAL', batchId: instrumentId, instrument, changed: false, updatedListingCount: 0, policy: { unitPrice: 1 } };
+    if (!APPROVABLE_INSTRUMENT_STATES.has(String(instrument.state || '').toUpperCase())) throw new Error(`Instrument ${instrumentId} is not pending approval.`);
+
+    const approvedAt = now();
+    const approved = {
+      ...instrument,
+      state: 'APPROVED', status: 'APPROVED', approvedBy: actorId, approvedAt, updatedAt: approvedAt,
+      statusHistory: [...(Array.isArray(instrument.statusHistory) ? instrument.statusHistory : []), { state: 'APPROVED', actorId, occurredAt: approvedAt, reason: 'Approved by Platform Administration.' }],
+    };
+    const changes = [{ type: RECORD_TYPES.SRA_INSTRUMENT, id: instrumentId, payload: approved, actorId, eventType: 'SRA_INSTRUMENT_APPROVED' }];
+    const linkedListings = this.domain.list(LISTING_TYPE).filter((listing) => listing.instrumentId === instrumentId && !['CANCELLED','CLOSED'].includes(String(listing.state || '').toUpperCase()));
+    for (const listing of linkedListings) {
+      changes.push({
+        type: LISTING_TYPE,
+        id: listing.listingId,
+        actorId,
+        eventType: 'MARKETPLACE_LISTING_INSTRUMENT_APPROVED',
+        payload: {
+          ...listing,
+          readiness: { ...(listing.readiness || {}), instrumentReviewed: true },
+          blockers: Array.isArray(listing.blockers) ? listing.blockers.filter((blocker) => blocker !== 'ADMINISTRATIVE_INSTRUMENT_REVIEW_REQUIRED') : [],
+          instrumentApprovedBy: actorId,
+          instrumentApprovedAt: approvedAt,
+          updatedAt: approvedAt,
+        },
+      });
+    }
+    await this.domain.atomicPut(changes);
+    await this.domain.lifecycle({ objectType: RECORD_TYPES.SRA_INSTRUMENT, objectId: instrumentId, eventType: 'SRA_INSTRUMENT_APPROVED', actorId, payload: { linkedListingIds: linkedListings.map((listing) => listing.listingId) } });
+    return { action: 'INSTRUMENT_APPROVAL', batchId: instrumentId, instrument: approved, changed: true, updatedListingCount: linkedListings.length, linkedListingIds: linkedListings.map((listing) => listing.listingId), policy: { unitPrice: 1 } };
+  }
+
   async approve(input = {}, actorId = 'SRA_PLATFORM_ADMIN') {
     if (String(input.approval || '').toUpperCase() !== 'APPROVE') throw new Error('Explicit administrator approval is required.');
+    if (input.instrumentId) return this.approveInstrument(String(input.instrumentId), actorId);
     const preview = this.preview(input);
     if (preview.invalidListingCount > 0) {
       const ids = preview.invalidListings.map((item) => item.listingId).join(', ');
@@ -89,62 +120,23 @@ export class ListingReadinessBatchService {
     const batchId = id();
     const changes = [];
     const updated = [];
-
     for (const listingId of preview.scope.listingIds) {
       const listing = this.domain.get(LISTING_TYPE, listingId);
       if (!listing || listing.state !== 'PREPARED') throw new Error(`Listing ${listingId} changed before approval. Refresh the preview and try again.`);
       const recordedValueUsd = recordedValue(listing);
       const next = {
         ...listing,
-        quantity: recordedValueUsd,
-        verifiedRecordedValueUsd: recordedValueUsd,
-        recordedValueUsd,
-        faceValueUsd: recordedValueUsd,
-        pricing: {
-          ...(listing.pricing || {}),
-          state: 'CONFIGURED',
-          method: SRA_PAR_PRICING_METHOD,
-          askingPrice: 1,
-          unitPrice: 1,
-          currency: 'USD',
-          faceValueUsd: recordedValueUsd,
-          recordedValueUsd,
-          parReference: '1 SRA = 1 USD',
-        },
+        quantity: recordedValueUsd, verifiedRecordedValueUsd: recordedValueUsd, recordedValueUsd, faceValueUsd: recordedValueUsd,
+        pricing: { ...(listing.pricing || {}), state: 'CONFIGURED', method: SRA_PAR_PRICING_METHOD, askingPrice: 1, unitPrice: 1, currency: 'USD', faceValueUsd: recordedValueUsd, recordedValueUsd, parReference: '1 SRA = 1 USD' },
         access: { ...(listing.access || {}), state: 'CONFIGURED', eligibilityRule: preview.policy.eligibilityRule, minimumOrder: preview.policy.minimumOrder },
-        transactionRouteId: preview.policy.transactionRouteId,
-        settlementRouteId: preview.policy.settlementRouteId,
-        readiness: {
-          instrumentReviewed: true,
-          pricingApproved: true,
-          accessRulesApproved: true,
-          transactionRouteConnected: true,
-          settlementRouteConnected: true,
-        },
-        blockers: [],
-        status: 'READY_FOR_PUBLICATION_APPROVAL',
-        readinessBatchId: batchId,
-        readinessApprovedBy: actorId,
-        readinessApprovedAt: approvedAt,
-        updatedAt: approvedAt,
+        transactionRouteId: preview.policy.transactionRouteId, settlementRouteId: preview.policy.settlementRouteId,
+        readiness: { instrumentReviewed: true, pricingApproved: true, accessRulesApproved: true, transactionRouteConnected: true, settlementRouteConnected: true },
+        blockers: [], status: 'READY_FOR_PUBLICATION_APPROVAL', readinessBatchId: batchId, readinessApprovedBy: actorId, readinessApprovedAt: approvedAt, updatedAt: approvedAt,
       };
       changes.push({ type: LISTING_TYPE, id: listingId, payload: next, actorId, eventType: 'MARKETPLACE_LISTING_READINESS_BATCH_APPROVED' });
       updated.push(listingId);
     }
-
-    const batch = {
-      batchId,
-      state: 'APPROVED',
-      approvedBy: actorId,
-      approvedAt,
-      policy: preview.policy,
-      eligibleListingCount: preview.eligibleListingCount,
-      updatedListingCount: updated.length,
-      invalidListingCount: 0,
-      listingIds: updated,
-      publicationExecuted: false,
-      protectedNextAction: 'SEPARATE_PUBLICATION_APPROVAL_REQUIRED',
-    };
+    const batch = { batchId, state: 'APPROVED', approvedBy: actorId, approvedAt, policy: preview.policy, eligibleListingCount: preview.eligibleListingCount, updatedListingCount: updated.length, invalidListingCount: 0, listingIds: updated, publicationExecuted: false, protectedNextAction: 'SEPARATE_PUBLICATION_APPROVAL_REQUIRED' };
     changes.push({ type: BATCH_TYPE, id: batchId, payload: batch, actorId, eventType: 'LISTING_READINESS_BATCH_RECORDED' });
     await this.domain.atomicPut(changes);
     return batch;
