@@ -39,15 +39,17 @@ test('treasury posts only balanced administrator-approved journals', async () =>
   assert.equal(service.summary().journalCount, 1);
 });
 
-test('recorded-value correction carries USD value only through the Financial Record and SRA Coin Position', async () => {
+test('recorded-value correction preserves native source quantity while restating SRA to recognized USD value', async () => {
   const observation = { observationId: 'OBS-1', rawValues: { price: 50000, size: 0.002, notional: 100 } };
-  const financialRecord = { financialRecordId: 'FR-1', observationId: 'OBS-1', recognizedPosition: { amount: 100, unit: 'USD', basis: 'SOURCE_TRANSACTION_NOTIONAL' }, state: 'RECORDED' };
-  const position = { coinPositionId: 'CP-1', financialRecordId: 'FR-1', observationId: 'OBS-1', symbol: 'SRA', quantity: 0.002, state: 'REPRESENTED', restrictions: [] };
+  const financialRecord = { financialRecordId: 'FR-1', observationId: 'OBS-1', recognizedPosition: { amount: 0.002, unit: 'BTC', basis: 'SOURCE_EXECUTED_QUANTITY' }, measurement: { value: 0.002, unit: 'BTC', method: 'SOURCE_EXECUTED_QUANTITY' }, state: 'RECORDED' };
+  const coinAccount = { coinAccountId: 'CA-1', financialAccountId: 'FRA-1', symbol: 'SRA', representedQuantity: 0.002, positionCount: 1, state: 'ACTIVE' };
+  const position = { coinPositionId: 'CP-1', coinAccountId: 'CA-1', financialRecordId: 'FR-1', observationId: 'OBS-1', symbol: 'SRA', sourcePosition: { amount: 0.002, unit: 'BTC', basis: 'SOURCE_EXECUTED_QUANTITY' }, quantity: 0.002, availableQuantity: 0.002, state: 'REPRESENTED', restrictions: [] };
   const instrument = { instrumentId: 'INS-1', coinPositionId: 'CP-1', state: 'ACTIVE', denomination: { symbol: 'SRA', principalQuantity: 0.002 } };
   const listing = { listingId: 'LIST-1', instrumentId: 'INS-1', coinPositionId: 'CP-1', state: 'PUBLISHED', status: 'LIVE', quantity: 0.002 };
   const domain = new Domain({
     [RECORD_TYPES.MARKET_OBSERVATION]: { 'OBS-1': observation },
     [RECORD_TYPES.FINANCIAL_RECORD]: { 'FR-1': financialRecord },
+    [RECORD_TYPES.COIN_ACCOUNT]: { 'CA-1': coinAccount },
     [RECORD_TYPES.COIN_POSITION]: { 'CP-1': position },
     [RECORD_TYPES.SRA_INSTRUMENT]: { 'INS-1': instrument },
     [RECORD_TYPES.MARKETPLACE_LISTING]: { 'LIST-1': listing }
@@ -55,26 +57,41 @@ test('recorded-value correction carries USD value only through the Financial Rec
   const service = new RecordedValueRepresentationService(domain);
   const preview = service.preview();
   assert.equal(preview.correctablePositionCount, 1);
+  assert.deepEqual(preview.sample[0], {
+    coinPositionId: 'CP-1', financialRecordId: 'FR-1', sourceAmount: 0.002, sourceUnit: 'BTC', currentQuantity: 0.002, targetQuantity: 100
+  });
   assert.ok(preview.doesNot.includes('CREATE_OR_MODIFY_INSTRUMENTS'));
   assert.ok(preview.doesNot.includes('CREATE_OR_MODIFY_MARKETPLACE_LISTINGS'));
 
   const result = await service.approve({ approval: 'APPROVE' }, 'ADMIN-1');
   assert.equal(result.correctedPositionCount, 1);
-  assert.equal(domain.get(RECORD_TYPES.COIN_POSITION, 'CP-1').quantity, 100);
+  const corrected = domain.get(RECORD_TYPES.COIN_POSITION, 'CP-1');
+  assert.equal(corrected.quantity, 100);
+  assert.equal(corrected.availableQuantity, 100);
+  assert.deepEqual(corrected.sourcePosition, { amount: 0.002, unit: 'BTC', basis: 'SOURCE_EXECUTED_QUANTITY' });
+  assert.equal(corrected.representationBasis.amount, 100);
+  assert.equal(corrected.representationBasis.unit, 'USD');
+  assert.equal(corrected.conversionRule.method, 'RECORDED_USD_VALUE_AT_PAR');
+  assert.equal(domain.get(RECORD_TYPES.COIN_ACCOUNT, 'CA-1').representedQuantity, 100);
   assert.equal(domain.get(RECORD_TYPES.SRA_INSTRUMENT, 'INS-1').denomination.principalQuantity, 0.002);
   assert.equal(domain.get(RECORD_TYPES.MARKETPLACE_LISTING, 'LIST-1').quantity, 0.002);
   assert.deepEqual(domain.get(RECORD_TYPES.FINANCIAL_RECORD, 'FR-1').representation, { representedAmount: 100, unrepresentedAmount: 0, coinUnit: 'SRA', parRate: 1 });
 });
 
-test('production private admin wiring exposes treasury and recorded-value UI', () => {
+test('production private admin wiring exposes treasury and recorded-value correction through Coin Positions', () => {
   const router = fs.readFileSync(new URL('../routes/private-admin-router.js', import.meta.url), 'utf8');
   const routes = fs.readFileSync(new URL('../routes/treasury-admin-routes.js', import.meta.url), 'utf8');
-  const loader = fs.readFileSync(new URL('../public/admin/listing-authorization-ui.js', import.meta.url), 'utf8');
-  const ui = fs.readFileSync(new URL('../public/admin/treasury-ledger-ui.js', import.meta.url), 'utf8');
+  const bootstrap = fs.readFileSync(new URL('../public/admin/admin-bootstrap.js', import.meta.url), 'utf8');
+  const controls = fs.readFileSync(new URL('../public/admin/admin-coin-representation-integrity.js', import.meta.url), 'utf8');
   assert.match(router, /installTreasuryAdminRoutes/);
   assert.match(routes, /\/api\/admin\/treasury\/journals\/approve/);
   assert.match(routes, /\/api\/admin\/recorded-value-representation\/approve/);
-  assert.match(loader, /treasury-ledger-ui\.js/);
-  assert.match(ui, /Post Balanced Entry/);
-  assert.match(ui, /1 SRA = 1 USD/);
+  assert.match(bootstrap, /admin-coin-representation-integrity\.js/);
+  assert.match(bootstrap, /mountAdminCoinRepresentationIntegrityControls/);
+  assert.match(controls, /Legacy Corrections/);
+  assert.match(controls, /\/api\/admin\/recorded-value-representation/);
+  assert.match(controls, /\/api\/admin\/recorded-value-representation\/approve/);
+  assert.match(controls, /Approve USD-at-par correction/);
+  assert.doesNotMatch(controls, /MutationObserver/);
+  assert.doesNotMatch(controls, /DOMContentLoaded/);
 });
