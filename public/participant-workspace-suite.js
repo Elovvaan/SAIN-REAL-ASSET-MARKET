@@ -95,27 +95,47 @@
     return Boolean(record?.parentPositionId || record?.segmentationState === 'ACTIVE_CHILD' || (record?.sourcePositionId && record.sourcePositionId !== id));
   }
 
+  function coinUnit(position) {
+    return String(position?.symbol || position?.unit || position?.denomination?.symbol || '').toUpperCase();
+  }
+
+  function participantSpendableSra(position) {
+    return Math.max(0, number(position?.availableQuantity ?? position?.quantity));
+  }
+
   function coinBasisUsd(record) {
     return number(record?.recordedValue?.amount ?? record?.representedValueUsd ?? (String(record?.sourcePosition?.unit || '').toUpperCase() === 'USD' ? record?.sourcePosition?.amount : 0));
+  }
+
+  function settledValue(result, fallback) {
+    return result?.status === 'fulfilled' ? result.value : fallback;
+  }
+
+  function settledError(result) {
+    return result?.status === 'rejected' ? (result.reason?.message || String(result.reason || 'Request failed.')) : null;
   }
 
   async function getParticipantMirror(force = false) {
     if (force) participantMirror = null;
     if (participantMirror) return participantMirror;
     if (!participantMirrorRequest) {
-      participantMirrorRequest = Promise.all([
+      participantMirrorRequest = Promise.allSettled([
         requestJson('/api/participation/positions'),
         requestJson('/api/access/vault'),
         requestJson('/api/marketplace-listings?state=LIVE&limit=100'),
         requestJson('/api/financial-records/coin-positions'),
-      ]).then(([positionsPayload, vaultPayload, listingsPayload, coinPayload]) => {
+      ]).then(([positionsResult, vaultResult, listingsResult, coinResult]) => {
+        const positionsPayload = settledValue(positionsResult, { positions: [] });
+        const vaultPayload = settledValue(vaultResult, { vault: {} });
+        const listingsPayload = settledValue(listingsResult, { listings: [] });
+        const coinPayload = settledValue(coinResult, { coinPositions: [] });
         const positions = Array.isArray(positionsPayload.positions) ? positionsPayload.positions : [];
         const vault = vaultPayload.vault || {};
         const listings = Array.isArray(listingsPayload.listings) ? listingsPayload.listings.filter((listing) => {
           const live = listing.status === 'LIVE' || ['PUBLISHED', 'ACTIVE'].includes(listing.state);
           return live && !listing.executionBlocked && !(listing.blockers || []).length;
         }) : [];
-        const allCoinPositions = Array.isArray(coinPayload.coinPositions) ? coinPayload.coinPositions.filter((item) => String(item.symbol || '').toUpperCase() === 'SRA') : [];
+        const allCoinPositions = Array.isArray(coinPayload.coinPositions) ? coinPayload.coinPositions.filter((position) => coinUnit(position) === 'SRA') : [];
         const roots = allCoinPositions.filter((item) => !isDerivativeCoinPosition(item));
         const activeRoots = roots.filter((item) => String(item.state || '').toUpperCase() !== 'RETIRED');
         const participantCoins = allCoinPositions.filter((item) => belongsToParticipant(item));
@@ -132,6 +152,12 @@
           positions,
           vault,
           listings,
+          errors: {
+            positions: settledError(positionsResult),
+            vault: settledError(vaultResult),
+            listings: settledError(listingsResult),
+            coin: settledError(coinResult),
+          },
           coin: {
             all: allCoinPositions,
             roots,
@@ -194,21 +220,21 @@
     try {
       const data = await getParticipantMirror();
       if (activeView !== 'home-projects') return;
-      const participantSra = data.coin.participant.reduce((sum, item) => sum + number(item.quantity), 0);
+      const participantSra = data.coin.participant.reduce((sum, item) => sum + participantSpendableSra(item), 0);
       const pendingTransactions = number(data.vault.pendingTransactionCount);
       const pendingPositions = data.positions.filter((item) => /PENDING|AWAITING|AUTHORIZED|REVIEW|READY/.test(String(item.state || '').toUpperCase())).length;
       root.innerHTML = `<section class="participant-journey">
         <div class="participant-home-summary">
-          <article><span>Recorded vault balance</span><strong>${moneyCents.format(number(data.vault.recordedBalance))}</strong></article>
-          <article><span>Your SRA</span><strong>${qty(participantSra)} SRA</strong></article>
-          <article><span>Your positions</span><strong>${data.positions.length}</strong></article>
-          <article><span>LIVE marketplace products</span><strong>${data.listings.length}</strong></article>
+          <article><span>Recorded vault balance</span><strong>${data.errors.vault ? 'Unavailable' : moneyCents.format(number(data.vault.recordedBalance))}</strong></article>
+          <article><span>Your available SRA</span><strong>${data.errors.coin ? 'Unavailable' : `${qty(participantSra)} SRA`}</strong></article>
+          <article><span>Your positions</span><strong>${data.errors.positions ? 'Unavailable' : data.positions.length}</strong></article>
+          <article><span>LIVE marketplace products</span><strong>${data.errors.listings ? 'Initializing' : data.listings.length}</strong></article>
           <article><span>Pending actions</span><strong>${pendingTransactions + pendingPositions}</strong></article>
         </div>
         <section class="participant-journey-section"><h3>Continue where you left off</h3><div class="journey-list">
-          <button class="journey-row" data-suite-view="positions"><strong>${data.positions.length ? 'Review your positions' : 'No positions yet'}</strong><span>${data.positions.length ? 'See holdings and their current recorded state.' : 'Positions appear only after a participant action creates one.'}</span></button>
-          <button class="journey-row" data-suite-view="marketplace"><strong>${data.listings.length ? `${data.listings.length} LIVE marketplace product${data.listings.length === 1 ? '' : 's'}` : 'No LIVE marketplace products'}</strong><span>Marketplace only shows products that have completed publication.</span></button>
-          <button class="journey-row" data-suite-view="activity"><strong>${data.vault.transactionCount || 0} linked transaction record${Number(data.vault.transactionCount || 0) === 1 ? '' : 's'}</strong><span>Open your participant-linked activity and settlement history.</span></button>
+          <button class="journey-row" data-suite-view="positions"><strong>${data.errors.positions ? 'Positions temporarily unavailable' : data.positions.length ? 'Review your positions' : 'No positions yet'}</strong><span>${data.errors.positions ? 'Other participant workspaces remain available.' : data.positions.length ? 'See holdings and their current recorded state.' : 'Positions appear only after a participant action creates one.'}</span></button>
+          <button class="journey-row" data-suite-view="marketplace"><strong>${data.errors.listings ? 'Marketplace listing layer is initializing' : data.listings.length ? `${data.listings.length} LIVE marketplace product${data.listings.length === 1 ? '' : 's'}` : 'No LIVE marketplace products'}</strong><span>Marketplace only shows products that have completed publication.</span></button>
+          <button class="journey-row" data-suite-view="activity"><strong>${data.errors.vault ? 'Transaction activity temporarily unavailable' : `${data.vault.transactionCount || 0} linked transaction record${Number(data.vault.transactionCount || 0) === 1 ? '' : 's'}`}</strong><span>Open your participant-linked activity and settlement history.</span></button>
         </div></section>
         <section class="participant-journey-section"><h3>Available platform services</h3><div class="product-grid">
           ${card('Create an Instrument', 'Create within the tier and capacity approved for your account.', 'instruments')}
@@ -219,7 +245,10 @@
         </div></section>
       </section>`;
       bindSuiteLinks(root);
-    } catch (error) { root.innerHTML = `<div class="empty-view"><h2>Home state unavailable</h2><p>${esc(error.message)}</p></div>`; }
+    } catch (error) {
+      if (activeView !== 'home-projects') return;
+      root.innerHTML = `<div class="empty-view"><h2>Home state unavailable</h2><p>${esc(error.message)}</p></div>`;
+    }
   }
 
   async function renderPositions(root) {
@@ -227,8 +256,12 @@
     try {
       const data = await getParticipantMirror();
       if (activeView !== 'positions') return;
+      if (data.errors.positions) throw new Error(data.errors.positions);
       root.innerHTML = `<section class="asset-vault-view"><section class="asset-vault-ledger"><div class="transaction-section-title"><div><p class="eyebrow">PARTICIPANT STATE</p><h2>My Positions</h2><p>Only positions linked to the signed-in participant are shown here.</p></div><span class="badge">${data.positions.length} RECORDED</span></div><div class="transaction-list">${positionRows(data.positions)}</div></section></section>`;
-    } catch (error) { root.innerHTML = `<div class="empty-view"><h2>Positions unavailable</h2><p>${esc(error.message)}</p></div>`; }
+    } catch (error) {
+      if (activeView !== 'positions') return;
+      root.innerHTML = `<div class="empty-view"><h2>Positions unavailable</h2><p>${esc(error.message)}</p></div>`;
+    }
   }
 
   async function renderTransactions(root) {
@@ -236,8 +269,12 @@
     try {
       const data = await getParticipantMirror();
       if (activeView !== 'activity') return;
+      if (data.errors.vault) throw new Error(data.errors.vault);
       root.innerHTML = `<section class="asset-vault-view"><section class="asset-vault-balance-grid"><article class="asset-vault-balance"><span>Linked transactions</span><strong>${data.vault.transactionCount || 0}</strong></article><article class="asset-vault-balance"><span>Completed</span><strong>${data.vault.completedTransactionCount || 0}</strong></article><article class="asset-vault-balance"><span>Pending</span><strong>${data.vault.pendingTransactionCount || 0}</strong></article></section><section class="asset-vault-ledger"><div class="transaction-section-title"><div><p class="eyebrow">TRANSACTION HISTORY</p><h2>Your recorded activity</h2><p>Global platform activity is not mixed into this account view.</p></div><span class="badge">LIVE READ MODEL</span></div><div class="transaction-list">${vaultActivityRows(data.vault.transactions || [])}</div></section></section>`;
-    } catch (error) { root.innerHTML = `<div class="empty-view"><h2>Transactions unavailable</h2><p>${esc(error.message)}</p></div>`; }
+    } catch (error) {
+      if (activeView !== 'activity') return;
+      root.innerHTML = `<div class="empty-view"><h2>Transactions unavailable</h2><p>${esc(error.message)}</p></div>`;
+    }
   }
 
   async function renderSraCoin(root) {
@@ -245,12 +282,15 @@
     try {
       const data = await getParticipantMirror();
       if (activeView !== 'assets') return;
+      if (data.errors.coin) throw new Error(data.errors.coin);
       const network = data.coin.network;
-      const participantSra = data.coin.participant.reduce((sum, item) => sum + number(item.quantity), 0);
-      const participantAvailable = data.coin.participant.reduce((sum, item) => sum + number(item.availableQuantity ?? item.quantity), 0);
+      const participantSra = data.coin.participant.reduce((sum, item) => sum + participantSpendableSra(item), 0);
       const sources = Object.entries(network.sourceMix).sort((a, b) => b[1] - a[1]).map(([unit, count]) => `${unit}: ${count}`).join(' · ') || 'No represented sources';
-      root.innerHTML = `<section class="participant-journey"><section class="participant-journey-section"><div class="transaction-section-title"><div><p class="eyebrow">SRA / USD REPRESENTATION</p><h2>SRA Coin</h2><p>Network representation and your account ownership are separate facts.</p></div><span class="badge open">1 SRA = 1 USD</span></div><div class="participant-home-summary"><article><span>Network represented SRA</span><strong>${qty(network.representedSra)} SRA</strong></article><article><span>Network recognized USD basis</span><strong>${moneyCents.format(network.recognizedUsd)}</strong></article><article><span>Network Coin Positions</span><strong>${network.totalPositionCount}</strong></article><article><span>Your linked SRA</span><strong>${qty(participantSra)} SRA</strong></article><article><span>Your available SRA</span><strong>${qty(participantAvailable)} SRA</strong></article></div><div class="journey-list"><div class="journey-row"><strong>Representation coverage ${network.coveragePct.toFixed(1)}%</strong><span>${network.missingBasis} root positions are missing a visible USD basis in this read model; ${network.mismatches} are off par.</span></div><div class="journey-row"><strong>Position lineage</strong><span>${network.rootPositionCount} independent root positions · ${network.derivativePositionCount} derivative/segmented slices. Derivatives do not create new supply.</span></div><div class="journey-row"><strong>Source mix</strong><span>${esc(sources)}</span></div></div></section></section>`;
-    } catch (error) { root.innerHTML = `<div class="empty-view"><h2>SRA Coin state unavailable</h2><p>${esc(error.message)}</p></div>`; }
+      root.innerHTML = `<section class="participant-journey"><section class="participant-journey-section"><div class="transaction-section-title"><div><p class="eyebrow">SRA / USD REPRESENTATION</p><h2>SRA Coin</h2><p>Network representation and your account ownership are separate facts.</p></div><span class="badge open">1 SRA = 1 USD</span></div><div class="participant-home-summary"><article><span>Network represented SRA</span><strong>${qty(network.representedSra)} SRA</strong></article><article><span>Network recognized USD basis</span><strong>${moneyCents.format(network.recognizedUsd)}</strong></article><article><span>Network Coin Positions</span><strong>${network.totalPositionCount}</strong></article><article><span>Your linked position slices</span><strong>${data.coin.participant.length}</strong></article><article><span>Your available SRA</span><strong>${qty(participantSra)} SRA</strong></article></div><div class="journey-list"><div class="journey-row"><strong>Representation coverage ${network.coveragePct.toFixed(1)}%</strong><span>${network.missingBasis} root positions are missing a visible USD basis in this read model; ${network.mismatches} are off par.</span></div><div class="journey-row"><strong>Position lineage</strong><span>${network.rootPositionCount} independent root positions · ${network.derivativePositionCount} derivative/segmented slices. Derivatives do not create new supply.</span></div><div class="journey-row"><strong>Participant holding math</strong><span>Your available SRA is summed from spendable position quantities, so segmented children do not create a duplicate holding.</span></div><div class="journey-row"><strong>Source mix</strong><span>${esc(sources)}</span></div></div></section></section>`;
+    } catch (error) {
+      if (activeView !== 'assets') return;
+      root.innerHTML = `<div class="empty-view"><h2>SRA Coin state unavailable</h2><p>${esc(error.message)}</p></div>`;
+    }
   }
 
   async function renderAssetVault(root) {
@@ -258,6 +298,7 @@
     try {
       const data = await getParticipantMirror();
       if (activeView !== 'custody') return;
+      if (data.errors.vault) throw new Error(data.errors.vault);
       const vault = data.vault || {};
       const contextStatus = document.querySelector('#context-status');
       if (contextStatus) contextStatus.textContent = 'OWNER CONTROLLED';
@@ -279,10 +320,14 @@
     try {
       const data = await getParticipantMirror();
       if (activeView !== 'marketplace') return;
+      if (data.errors.listings) throw new Error(data.errors.listings);
       const represented = data.listings.reduce((sum, listing) => sum + number(listing.recordedValueUsd || listing.verifiedRecordedValueUsd || listing.faceValueUsd), 0);
       root.innerHTML = `<section class="metric-grid compact"><article class="metric-card"><span>LIVE products</span><strong>${data.listings.length}</strong><small>Published participant-facing listings only</small></article><article class="metric-card"><span>Recorded value represented</span><strong>${money.format(represented)}</strong><small>USD basis of LIVE products</small></article><article class="metric-card"><span>Marketplace</span><strong>LIVE</strong><small>Feature state does not imply products exist</small></article></section><section class="panel contextual-panel"><div class="panel-header"><div><h2>Marketplace</h2><p>Internal projects, Financial Records, Coin Positions, and prepared listings remain out of this view until they become a published product.</p></div><span class="badge open">LIVE MARKET</span></div><div class="project-list">${marketplaceRows(data.listings)}</div></section>`;
       bindParticipantPrompts(root);
-    } catch (error) { root.innerHTML = `<div class="empty-view"><h2>Marketplace unavailable</h2><p>${esc(error.message || 'Marketplace could not load.')}</p></div>`; }
+    } catch (error) {
+      if (activeView !== 'marketplace') return;
+      root.innerHTML = `<div class="empty-view"><h2>Marketplace unavailable</h2><p>${esc(error.message || 'Marketplace could not load.')}</p></div>`;
+    }
   }
 
   function actionMarkup(view) {
