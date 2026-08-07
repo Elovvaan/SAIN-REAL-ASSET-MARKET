@@ -156,7 +156,8 @@
   function initialize() {
     if (initialized) return;
     initialized = true;
-    loadAdminScript('/admin/admin-button-diagnostics.js', 'data-sra-admin-button-diagnostics');
+    loadAdminScript('/admin/admin-button-diagnostics.js?v=178', 'data-sra-admin-button-diagnostics');
+    loadAdminScript('/admin/admin-instrument-approvals.js?v=178', 'data-sra-admin-instrument-approvals-direct');
     loadAdminScript('/admin/hybrid-liquidity-admin.js', 'data-hybrid-liquidity-admin');
     loadAdminScript('/admin/core-services-dashboard.js', 'data-sra-core-services-dashboard');
     loadAdminScript('/admin/operations-queue-ui.js', 'data-sra-operations-queue');
