@@ -5,7 +5,9 @@ import { MarketplaceListingService } from '../services/marketplace-listing-servi
 import { ListingReadinessBatchService } from '../services/listing-readiness-batch-service.js';
 import { ListingPublicationBatchService } from '../services/listing-publication-batch-service.js';
 import { AdminIntelligenceAgentService } from '../services/admin-intelligence-agent-service.js';
+import { DeterminationEngineService } from '../services/determination-engine-service.js';
 import { RECORD_TYPES } from '../services/persistent-domain-service.js';
+import { installDeterminationAdminRoutes } from './determination-admin-routes.js';
 import { installTreasuryAdminRoutes } from './treasury-admin-routes.js';
 import { installTreasuryTransferReadinessRoutes } from './treasury-transfer-readiness-routes.js';
 
@@ -55,7 +57,9 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
   const listingReadinessBatch = new ListingReadinessBatchService(domain);
   const listingPublicationBatch = new ListingPublicationBatchService(domain);
   const intelligenceAgent = new AdminIntelligenceAgentService({ domain, database });
+  const determinationEngine = new DeterminationEngineService(domain);
   await access.initialize();
+  await determinationEngine.initialize();
   const router = Router();
   router.use(express.json({ limit: '256kb' }));
 
@@ -162,6 +166,7 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
     } catch (error) { return res.status(422).json({ error: error.message, code: 'SRA_LISTING_PUBLICATION_BATCH_FAILED' }); }
   });
 
+  const determinationAdministration = await installDeterminationAdminRoutes({ router, service: determinationEngine, requireAdmin });
   const treasuryAdministration = await installTreasuryAdminRoutes({ router, domain, requireAdmin, database });
   const treasuryTransferReadiness = await installTreasuryTransferReadinessRoutes({ router, domain, requireAdmin, database });
 
@@ -268,12 +273,13 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
       listingReadinessBatch: listingReadinessBatch.status(),
       listingPublicationBatch: listingPublicationBatch.status(),
       nativePlatformAsset: nativePlatformAsset?.status?.() || { state: 'UNAVAILABLE' },
+      determinationEngine: determinationAdministration.status(),
       treasury,
       treasuryTransferReadiness: treasuryTransferReadiness.status(),
       recordedValueRepresentation: treasuryAdministration.recordedValue.preview(),
       connectors: { coinbasePublicMarket: coinbase },
       adminIntelligenceAgent: intelligenceAgent.capabilities(),
-      approvalBoundary: { agentWriteAccess: 'HUMAN_IN_THE_LOOP', autonomousReadAndReason: true, stateChangesRequireApproval: true, protectedAreas: ['FINANCIAL_RECORDS','RECOGNITION','COIN_POSITIONS','INSTRUMENTS','MARKETPLACE_LISTINGS','TRANSACTIONS','TREASURY','SETTLEMENT','OWNERSHIP_RECOGNITION','EXPORT_PACKAGING','CONNECTORS','ACCOUNT_AUTHORITY'] }
+      approvalBoundary: { agentWriteAccess: 'HUMAN_IN_THE_LOOP', autonomousReadAndReason: true, stateChangesRequireApproval: true, protectedAreas: ['FINANCIAL_RECORDS','RECOGNITION','COIN_POSITIONS','INSTRUMENTS','MARKETPLACE_LISTINGS','TRANSACTIONS','TREASURY','SETTLEMENT','OWNERSHIP_RECOGNITION','EXPORT_PACKAGING','CONNECTORS','ACCOUNT_AUTHORITY','DETERMINATIONS'] }
     });
   });
 
