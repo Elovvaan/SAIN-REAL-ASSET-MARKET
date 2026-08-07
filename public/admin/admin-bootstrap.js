@@ -8,6 +8,7 @@
     ['/admin/admin-button-diagnostics-core.js', 'data-sra-admin-diagnostics-core'],
     ['/admin/admin-settlement-execution-controls.js', 'data-sra-admin-settlement-execution-controls'],
     ['/admin/admin-coin-representation-integrity.js', 'data-sra-admin-coin-representation-integrity'],
+    ['/admin/admin-coin-lifecycle-workstation.js', 'data-sra-admin-coin-lifecycle-workstation'],
   ];
 
   let booted = false;
@@ -87,7 +88,9 @@
       revealAdminSuite(admin);
       for (const [source, marker] of FEATURES.slice(1)) await loadScript(source, marker);
       window.mountAdminSettlementExecutionControls?.(admin.querySelector('[data-workspace="settlement"]'));
-      window.mountAdminCoinRepresentationIntegrityControls?.(admin.querySelector('[data-workspace="coin-positions"]'));
+      const coinWorkspace = admin.querySelector('[data-workspace="coin-positions"]');
+      window.mountAdminCoinRepresentationIntegrityControls?.(coinWorkspace);
+      window.mountAdminCoinLifecycleWorkstation?.(coinWorkspace);
       window.dispatchEvent(new CustomEvent('sra:admin-booted', {
         detail: { featureCount: FEATURES.length, bootedAt: new Date().toISOString() },
       }));
