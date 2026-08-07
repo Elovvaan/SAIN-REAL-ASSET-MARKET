@@ -16,6 +16,7 @@
   const signedIn = () => Boolean(window.accessState?.session);
   const esc = (value) => String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#039;');
   const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+  const moneyCents = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
   let mounted = false;
   let activeView = 'home-projects';
   let marketplaceState = null;
@@ -120,10 +121,6 @@
     return `<section class="participant-journey"><section class="participant-journey-section"><h3>My Positions</h3><p>Your active, held, transferable, settled, and completed participant positions appear here.</p><div class="journey-list"><div class="journey-row"><strong>No participant positions loaded</strong><span>Positions will appear after an instrument, financing, or marketplace action creates one for this account.</span></div></div></section></section>`;
   }
 
-  function vaultMarkup() {
-    return `<section class="participant-journey"><section class="participant-journey-section"><h3>Asset Vault</h3><p>This view shows only your participant-facing asset custody state. Restricted institutional records, internal collateral schedules, and administrative files remain in Administration.</p><div class="participant-home-summary"><article><span>Assets held</span><strong>Account linked</strong></article><article><span>Settlement status</span><strong>Review when available</strong></article><article><span>Release status</span><strong>Controlled</strong></article></div></section></section>`;
-  }
-
   function simpleMarkup(title, description, rows) {
     return `<section class="participant-journey"><section class="participant-journey-section"><h3>${esc(title)}</h3><p>${esc(description)}</p><div class="journey-list">${rows.map(([name, copy]) => `<div class="journey-row"><strong>${esc(name)}</strong><span>${esc(copy)}</span></div>`).join('')}</div></section></section>`;
   }
@@ -133,12 +130,43 @@
     if (view === 'instruments') return instrumentMarkup();
     if (view === 'funding-operations') return financingMarkup();
     if (view === 'positions') return positionsMarkup();
-    if (view === 'custody') return vaultMarkup();
     if (view === 'activity') return simpleMarkup('Transactions', 'Your participant transaction history and settlement events appear here.', [['Recent activity', 'No participant transactions are loaded for this account.'], ['Search', 'Transaction search becomes available when records exist.']]);
     if (view === 'assets') return simpleMarkup('SRA Coin', 'SRA representation follows verified recorded USD value at the fixed SRA/USD par reference.', [['Unit reference', '1 SRA = 1 USD'], ['Represented value', 'Linked from your recognized account records'], ['Coin intelligence', 'SAIN can explain any canonical Coin Position ID']]);
     if (view === 'pools') return simpleMarkup('Predictions / Liquidity', 'Reference markets and liquidity information are shown only when approved products exist.', [['Reference markets', 'No approved participant reference markets are currently available.'], ['Execution boundary', 'Reference information is separate from executed market activity.']]);
     if (view === 'participants') return simpleMarkup('Account', 'Manage your participant identity, tier, capabilities, and account access.', [['Current workspace', window.accessState?.session?.activeCapacity || 'Universal'], ['Capabilities', 'Use the Capabilities control to review available tiers.'], ['Security', 'Session and sign-in controls remain at the top of the page.']]);
     return homeMarkup();
+  }
+
+  function vaultActivityRows(transactions = []) {
+    if (!transactions.length) {
+      return '<div class="transaction-empty"><strong>No participant-linked activity recorded yet.</strong><span>Your balance remains zero until completed incoming or outgoing account activity is recorded.</span></div>';
+    }
+    return transactions.map((item) => `<article class="transaction-row"><div class="transaction-row-main"><span class="transaction-kind">${esc(String(item.kind || 'TRANSACTION').replaceAll('_', ' '))}</span><strong>${esc(item.transactionId || item.referenceId || 'Recorded transaction')}</strong><small>${esc(item.occurredAt ? new Date(item.occurredAt).toLocaleString() : 'Time not recorded')}</small></div><div class="transaction-row-state"><strong>${moneyCents.format(Number(item.amount || 0))}</strong><span class="badge ${item.verified ? 'open' : ''}">${esc(item.direction || item.state || 'RECORDED')}</span></div></article>`).join('');
+  }
+
+  async function renderAssetVault(root) {
+    root.innerHTML = '<section class="asset-vault-view"><div class="loading-state">Loading your recorded Asset Vault activity…</div></section>';
+    try {
+      const response = await fetch('/api/access/vault', { headers: { Accept: 'application/json' }, cache: 'no-store' });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || 'Asset Vault lookup failed.');
+      if (activeView !== 'custody') return;
+      const vault = payload.vault || {};
+      const contextStatus = document.querySelector('#context-status');
+      if (contextStatus) contextStatus.textContent = 'OWNER CONTROLLED';
+      root.innerHTML = `<section class="asset-vault-view">
+        <section class="asset-vault-hero"><div><p class="eyebrow">PARTICIPANT-OWNED DIGITAL ACCOUNT</p><h2>${esc(vault.displayName || 'Participant')} Asset Vault</h2><p>This view is derived from participant-linked transaction records. SRA connects, verifies, records, and routes authorized activity without representing the participant's assets as platform-owned property.</p></div><div class="asset-vault-identity"><span>Universal Account</span><strong>${esc(vault.accountId || window.accessState?.session?.universalAccountId || 'Account linked')}</strong><small>Current operating tier: ${esc(vault.activeCapacity || window.accessState?.session?.activeCapacity || 'UNIVERSAL')}</small></div></section>
+        <section class="asset-vault-balance-grid"><article class="asset-vault-balance primary"><span>Recorded account balance</span><strong>${moneyCents.format(Number(vault.recordedBalance || 0))}</strong><small>Completed incoming activity minus completed outgoing activity.</small></article><article class="asset-vault-balance"><span>Incoming recorded</span><strong>${moneyCents.format(Number(vault.incomingTotal || 0))}</strong><small>Completed value recorded into this account.</small></article><article class="asset-vault-balance"><span>Outgoing recorded</span><strong>${moneyCents.format(Number(vault.outgoingTotal || 0))}</strong><small>Completed value recorded out of this account.</small></article></section>
+        <section class="asset-vault-control-grid"><article><span>Ownership</span><strong>${esc(vault.ownership || 'PARTICIPANT')}</strong><p>The account belongs to the identified participant.</p></article><article><span>Platform role</span><strong>${esc(vault.platformRole || 'INFRASTRUCTURE')}</strong><p>SRA provides access, verification, recording, routing, and settlement coordination.</p></article><article><span>Custody state</span><strong>${esc(String(vault.custodyState || 'NOT_INFERRED').replaceAll('_', ' '))}</strong><p>Custody is shown only when an actual custody arrangement is recorded.</p></article></section>
+        <section class="asset-vault-balance-grid"><article class="asset-vault-balance"><span>Linked transactions</span><strong>${esc(vault.transactionCount || 0)}</strong><small>Records linked to this participant or Universal Account.</small></article><article class="asset-vault-balance"><span>Completed</span><strong>${esc(vault.completedTransactionCount || 0)}</strong><small>Completed directional and recorded activity.</small></article><article class="asset-vault-balance"><span>Pending</span><strong>${esc(vault.pendingTransactionCount || 0)}</strong><small>Not included in the recorded balance.</small></article></section>
+        <section class="asset-vault-ledger"><div class="transaction-section-title"><div><p class="eyebrow">ACCOUNT LEDGER</p><h2>Participant-linked activity</h2></div><span class="badge">LIVE READ MODEL</span></div><div class="transaction-list">${vaultActivityRows(vault.transactions)}</div></section>
+      </section>`;
+    } catch (error) {
+      if (activeView !== 'custody') return;
+      const contextStatus = document.querySelector('#context-status');
+      if (contextStatus) contextStatus.textContent = 'UNAVAILABLE';
+      root.innerHTML = `<section class="asset-vault-view"><div class="transaction-empty"><strong>Asset Vault could not load.</strong><span>${esc(error.message)}</span></div></section>`;
+    }
   }
 
   async function getMarketplace() {
@@ -211,6 +239,7 @@
     document.body.classList.add('workspace-open');
     setFrame(view);
     if (view === 'marketplace') void renderMarketplace(root);
+    else if (view === 'custody') void renderAssetVault(root);
     else {
       root.innerHTML = viewMarkup(view);
       root.querySelectorAll('[data-suite-view]').forEach((button) => button.addEventListener('click', () => openView(button.dataset.suiteView)));
