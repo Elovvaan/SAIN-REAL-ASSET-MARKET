@@ -49,7 +49,7 @@ test('current signed-in participant shell contract is explicit and stable', () =
   for (const [view, label] of expected) {
     assert.match(participantSuite, new RegExp(`\\['${view}', \\['[^']*', '${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}'\\]\\]`));
   }
-  assert.match(participantSuite, /const OWNED_VIEWS = new Set/);
+  assert.match(participantSuite, /const OWNED_VIEWS = new Set\(ORDER\)/);
   assert.match(participantSuite, /function renderOwnedView\(view\)/);
   assert.match(participantSuite, /event\.stopImmediatePropagation\(\)/);
   assert.match(participantSuite, /#view-root/);
@@ -57,15 +57,24 @@ test('current signed-in participant shell contract is explicit and stable', () =
   assert.match(participantSuite, /#quick-prompts/);
 });
 
-test('participant bootstrap is now the sole signed-in shell loader', () => {
+test('participant bootstrap is the sole signed-in shell loader', () => {
   assert.match(participantBootstrap, /participant-workspace-suite\.js/);
   assert.match(participantBootstrap, /sra:access-state-changed/);
   assert.doesNotMatch(bootstrap, /workspace-shell-core\.js/);
 });
 
-test('marketplace remains the explicit legacy renderer for this checkpoint', () => {
-  assert.match(participantSuite, /ORDER\.filter\(\(view\) => view !== 'marketplace'\)/);
-  assert.match(participantSuite, /if \(view === 'marketplace'\)/);
+test('signed-in marketplace is owned by the participant suite', () => {
+  assert.match(participantSuite, /marketplace: \['Marketplace', 'LIVE'\]/);
+  assert.match(participantSuite, /fetch\('\/api\/marketplace', \{ cache: 'no-store' \}\)/);
+  assert.match(participantSuite, /async function renderMarketplace\(root\)/);
+  assert.match(participantSuite, /if \(view === 'marketplace'\) void renderMarketplace\(root\)/);
+  assert.match(participantSuite, /data-participant-prompt/);
+  assert.doesNotMatch(participantSuite, /ORDER\.filter\(\(view\) => view !== 'marketplace'\)/);
+});
+
+test('legacy app remains loaded only as a public compatibility surface for this checkpoint', () => {
+  assert.match(bootstrap, /'\/app\.js'/);
   assert.match(app, /function renderMarketplace\(\)/);
   assert.match(app, /fetch\('\/api\/marketplace'\)/);
+  assert.match(participantSuite, /event\.stopImmediatePropagation\(\)/);
 });
