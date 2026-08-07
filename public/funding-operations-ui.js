@@ -106,6 +106,10 @@
           setTimeout(() => render(root), 900);
         } catch (error) { if (result) result.textContent = error.message; }
       });
+      const fundingRoot = root.querySelector('.funding-ops');
+      if (fundingRoot && typeof window.mountFundingVerificationDesk === 'function') {
+        await window.mountFundingVerificationDesk(fundingRoot);
+      }
       window.dispatchEvent(new CustomEvent('sra:funding-operations-rendered', { detail: { root } }));
     } catch (error) {
       root.innerHTML = `<div class="funding-ops-panel"><strong>Funding Operations could not load.</strong><p>${esc(error.message)}</p></div>`;
