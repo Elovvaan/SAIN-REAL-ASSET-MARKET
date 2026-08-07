@@ -22,13 +22,13 @@
     '/order-intent-ui.js',
     '/live-market-publication-sync.js',
     '/funding-intake-ui.js',
-    '/funding-operations-ui.js',
     '/funding-verification-desk.js',
     '/funding-value-model-desk.js',
     '/funding-instrument-desk.js',
-    '/sain-operations-intelligence.js',
     '/funding-market-activation-desk.js',
     '/verified-settlement-desk.js',
+    '/funding-operations-ui.js',
+    '/sain-operations-intelligence.js',
   ];
 
   function markerFor(source) {
