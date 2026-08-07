@@ -88,7 +88,7 @@ export class FundingInstrumentSelectionService {
     if (!request || !opportunity) throw new Error('Required funding records were not found.');
     const existing = this.domain.list(TYPES.SRA_INSTRUMENT).find((r) => r.instrumentSelectionId === selectionId && r.state === 'DRAFT'); if (existing) return existing;
 
-    const canonicalVerifiedValueRecordId = input.canonicalVerifiedValueRecordId || opportunity.canonicalVerifiedValueRecordId || request.canonicalVerifiedValueRecordId || null;
+    const canonicalVerifiedValueRecordId = opportunity.canonicalVerifiedValueRecordId || request.canonicalVerifiedValueRecordId || input.canonicalVerifiedValueRecordId || null;
     const vvr = canonicalVvr(this.domain, canonicalVerifiedValueRecordId);
     const instrument = {
       instrumentId: input.instrumentId || id('SRAI'), instrumentFamily: selection.selectedInstrumentFamily, instrumentType: selection.selectedInstrumentFamily,
