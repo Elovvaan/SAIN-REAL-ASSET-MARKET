@@ -6,14 +6,11 @@
   let busy = false;
 
   async function requestJson(url, options = {}) {
+    if (window.SRAAdminDataClient) return window.SRAAdminDataClient.json(url, options);
     const response = await fetch(url, {
       ...options,
       cache: 'no-store',
-      headers: {
-        Accept: 'application/json',
-        'Cache-Control': 'no-cache',
-        ...(options.headers || {}),
-      },
+      headers: { Accept: 'application/json', 'Cache-Control': 'no-cache', ...(options.headers || {}) },
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || `Request failed with ${response.status}.`);
@@ -26,7 +23,7 @@
     button.disabled = true;
     button.textContent = 'Approving...';
     try {
-      const workspace = await requestJson(`/api/admin/workspaces?limit=1000&_=${Date.now()}`);
+      const workspace = await requestJson(`/api/admin/workspaces?limit=100&_=${Date.now()}`);
       const pending = Array.isArray(workspace?.records?.instruments)
         ? workspace.records.instruments.filter((instrument) => pendingStates.has(String(instrument?.state || instrument?.status || '').toUpperCase()))
         : [];
@@ -35,7 +32,6 @@
         window.alert('There are no pending instruments to approve.');
         return;
       }
-
       if (!window.confirm(`Approve ${pending.length} pending instrument${pending.length === 1 ? '' : 's'}?`)) return;
 
       for (const instrument of pending) {
@@ -48,12 +44,8 @@
         });
       }
 
-      window.dispatchEvent(new CustomEvent('sra:admin-mutated', {
-        detail: { source: 'instrument-approval', count: pending.length },
-      }));
-      if (typeof window.sraRefreshAdministration === 'function') await window.sraRefreshAdministration();
-      const refresh = document.querySelector('[data-workspace="instruments"] [data-refresh-workspace="instruments"]');
-      if (refresh) refresh.click();
+      window.SRAAdminDataClient?.refresh('instrument-approval');
+      document.querySelector('[data-workspace="instruments"] [data-refresh-workspace="instruments"]')?.click();
     } catch (error) {
       window.alert(error.message || 'Instrument approval failed.');
     } finally {
@@ -65,11 +57,11 @@
 
   function installButton() {
     const workspace = document.querySelector('[data-workspace="instruments"]');
-    if (!workspace) return;
+    if (!workspace) return false;
     const tabs = workspace.querySelector('.admin-workspace-tabs');
-    if (!tabs || tabs.querySelector('[data-instrument-approve-top]')) return;
+    if (!tabs || tabs.querySelector('[data-instrument-approve-top]')) return Boolean(tabs);
     const history = [...tabs.querySelectorAll('[data-admin-tab]')].find((button) => button.dataset.adminTab === 'History');
-    if (!history) return;
+    if (!history) return false;
 
     const approve = document.createElement('button');
     approve.type = 'button';
@@ -82,13 +74,12 @@
       void approvePending(approve);
     });
     history.insertAdjacentElement('afterend', approve);
+    return true;
   }
 
   const style = document.createElement('style');
   style.textContent = '.admin-instrument-approve-top{background:#d6a92f!important;color:#090909!important;border-color:#d6a92f!important;font-weight:800!important}';
   document.head.append(style);
 
-  const observer = new MutationObserver(installButton);
-  observer.observe(document.documentElement, { childList: true, subtree: true });
-  installButton();
+  if (!installButton()) window.addEventListener('sra:admin-booted', installButton, { once: true });
 })();
