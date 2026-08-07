@@ -24,7 +24,7 @@
     records:['Recognitions','Observations','Financial Records','Evidence','Origin Records','Trace','Audit'],
     'coin-positions':['Current Supply','Represented Value','Legacy Corrections','Coin Intelligence','Mint History','Retirements','Adjustments'],
     transactions:['All','Pending','Completed','Failed','Exported','Imported','Settlement','Search'],
-    settlement:['Export Packages','Settlement Instructions','External Confirmation','Destination Verification','Export History','Settlement Logs'],
+    settlement:['Export Packages','Settlement Instructions','External Confirmation','Destination Verification','Export History','Settlement Logs','Workflow'],
     agent:['Conversation','Suggested Actions','Workflow Approvals','Incomplete Workflows','Explain Record','Trace Instrument','Platform Questions','Diagnostics'],
     connections:['Coinbase','FedWire','ACH','Ethereum','Solana','Bitcoin','Export Adapters','Connector Logs','Synchronization'],
     users:['Overview','Administrators','Roles','Permissions','Sessions','Access History'],
@@ -157,6 +157,20 @@
     return `<article class="admin-record-card"><header><strong>${esc(firstId(record))}</strong><em>${esc(recordState(record))}</em></header><div class="admin-record-grid">${field('Type',record.instrumentType||record.transactionType||record.recordType||record.rail||record.classification||record.type||record.eventType||record.journalType)}${field('Amount',amount?`${amount} ${record.currency||'USD'}`:null)}${field('Participant',record.participantId||record.ownerId||record.holderId||record.accountId)}${field('Instrument',record.instrumentId)}${field('Listing',record.listingId)}${field('Export package',record.exportPackageId)}${field('Settlement',record.settlementId||record.settlementAuthorizationId)}${field('Connection',record.connectionId||record.adapterId)}${field('Updated',dateValue(record))}</div><details><summary>Record details</summary><pre>${esc(JSON.stringify(record,null,2))}</pre></details></article>`;
   }
   function recordsMarkup(records,label){ return list(records).length ? `<div class="admin-record-list">${records.map(recordCard).join('')}</div>` : emptyState(label); }
+  function settlementWorkflowMarkup(){
+    const r = state.workspaceData?.records || {};
+    const destinations = list(r.settlementInstructions).filter(item=>item.destinationReference||item.receivingAccountReference||item.receivingInstitutionReference);
+    const confirmations = combined(r.paymentReceipts,r.settlementRecords,r.settlements);
+    const logs = combined(r.settlements,r.settlementRecords,r.settlementInstructions,contains(r.lifecycleEvents,/SETTLE|RAIL/i));
+    const stages = [
+      ['Export Packages',list(r.exportPackages).length],
+      ['Destinations',destinations.length],
+      ['Settlement Instructions',list(r.settlementInstructions).length],
+      ['External Confirmations',confirmations.length],
+      ['Settlement Logs',logs.length]
+    ];
+    return `<section class="admin-record-card"><header><strong>Export & Settlement Workflow</strong><em>LIVE</em></header><div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-top:12px">${stages.map(([label,count],index)=>`<div style="border:1px solid #292929;border-radius:12px;padding:14px;background:#090909;min-width:0"><span style="display:block;color:#9a9a9a;font-size:10px;text-transform:uppercase">Stage ${index+1}</span><strong style="display:block;margin-top:5px">${esc(label)}</strong><b style="display:block;font-size:22px;margin-top:8px">${Number(count).toLocaleString()}</b></div>`).join('')}</div><p style="color:#9a9a9a;margin:14px 0 0">Export Package → Destination → Settlement Instruction → External Confirmation → Settlement Log</p></section>`;
+  }
 
   function nearestCard(node){ return node?.closest?.('section.card,article.card,.card'); }
   function moveCard(node,id){
@@ -279,6 +293,7 @@
       if(tab==='Destination Verification') return list(r.settlementInstructions).filter(item=>item.destinationReference||item.receivingAccountReference||item.receivingInstitutionReference);
       if(tab==='Export History') return combined(r.exportPackages,contains(r.lifecycleEvents,/EXPORT/i));
       if(tab==='Settlement Logs') return combined(r.settlements,r.settlementRecords,r.settlementInstructions,contains(r.lifecycleEvents,/SETTLE|RAIL/i));
+      if(tab==='Workflow') return [];
     }
     if(id==='connections'){
       if(tab==='Coinbase') return combined(contains(r.settlementAdapters,/COINBASE/i),list(r.treasuryWallets).filter(item=>/COINBASE/i.test(JSON.stringify(item))),list(r.enterpriseConnections).filter(item=>/COINBASE/i.test(JSON.stringify(item))));
@@ -332,6 +347,7 @@
     if(id==='settlement') renderSettlementControls(tab);
     if(state.loading){ node.innerHTML = loadingState(); return; }
     if(state.lastError){ node.innerHTML = errorState(state.lastError); return; }
+    if(id==='settlement' && tab==='Workflow'){ node.innerHTML = settlementWorkflowMarkup(); return; }
     node.innerHTML = recordsMarkup(workspaceRecords(id,tab),labelFor(id,tab));
   }
   async function loadWorkspaceData(force=false){
