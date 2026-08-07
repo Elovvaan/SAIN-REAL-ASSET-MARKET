@@ -46,7 +46,8 @@ export class TreasuryLiveExecutionService {
     const prior = executionLocks.get(transferInstructionId) || Promise.resolve();
     let release;
     const current = new Promise((resolve) => { release = resolve; });
-    executionLocks.set(transferInstructionId, prior.then(() => current));
+    const queued = prior.then(() => current);
+    executionLocks.set(transferInstructionId, queued);
     await prior;
 
     try {
@@ -150,7 +151,7 @@ export class TreasuryLiveExecutionService {
       };
     } finally {
       release();
-      if (executionLocks.get(transferInstructionId) === current) executionLocks.delete(transferInstructionId);
+      if (executionLocks.get(transferInstructionId) === queued) executionLocks.delete(transferInstructionId);
     }
   }
 }
