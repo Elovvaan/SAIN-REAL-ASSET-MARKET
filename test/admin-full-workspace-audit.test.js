@@ -4,6 +4,7 @@ import test from 'node:test';
 
 const router = fs.readFileSync(new URL('../routes/private-admin-router.js', import.meta.url), 'utf8');
 const shell = fs.readFileSync(new URL('../public/admin/admin-suite-shell.js', import.meta.url), 'utf8');
+const css = fs.readFileSync(new URL('../public/admin/admin-suite-shell.css', import.meta.url), 'utf8');
 
 const workspaceIds = [
   'dashboard','operations','treasury','native-asset','marketplace','instruments','records',
@@ -43,13 +44,20 @@ test('all workspace groups have dedicated record mappings', () => {
 
 test('legacy action panels are moved into visible workspace control containers before the source layout is hidden', () => {
   assert.match(shell, /admin-workspace-controls/);
-  assert.match(shell, /routeKnownSections\(admin\)/);
+  assert.match(shell, /admin-legacy-source-root/);
+  assert.match(shell, /routeKnownSections\(oldLayout \|\| admin\)/);
   assert.match(shell, /observeSource\(admin\)/);
-  assert.match(shell, /routeKnownSections\(admin\)[\s\S]*admin-source-layout/);
   assert.match(shell, /#asset-details/);
   assert.match(shell, /#listing-details/);
   assert.match(shell, /#chat-log/);
   assert.match(shell, /#protected-areas/);
+});
+
+test('only one administration shell is visible', () => {
+  assert.match(css, /\.admin-source-layout,\.admin-source-metrics,\.admin-legacy-source-root\{display:none!important/);
+  assert.doesNotMatch(css, /\.admin-suite \.layout\{display:contents\}/);
+  assert.doesNotMatch(css, /\.admin-suite \.layout>div\{display:contents\}/);
+  assert.match(css, /\.admin-workspace-controls>\.card/);
 });
 
 test('workspace opened during the shared initial request is rendered when that request settles', () => {
