@@ -5,6 +5,8 @@ import test from 'node:test';
 const router = fs.readFileSync(new URL('../routes/private-admin-router.js', import.meta.url), 'utf8');
 const shell = fs.readFileSync(new URL('../public/admin/admin-suite-shell.js', import.meta.url), 'utf8');
 const css = fs.readFileSync(new URL('../public/admin/admin-suite-shell.css', import.meta.url), 'utf8');
+const loader = fs.readFileSync(new URL('../public/admin/admin-button-diagnostics.js', import.meta.url), 'utf8');
+const sync = fs.readFileSync(new URL('../public/admin/admin-workspace-sync.js', import.meta.url), 'utf8');
 
 const workspaceIds = [
   'dashboard','operations','treasury','native-asset','marketplace','instruments','records',
@@ -64,6 +66,18 @@ test('workspace opened during the shared initial request is rendered when that r
   assert.match(shell, /const pending = loadWorkspaceData\(false\)/);
   assert.match(shell, /activeWorkspaceId\(\)/);
   assert.match(shell, /pending\.catch\(\(\)=>\{\}\)\.finally/);
+});
+
+test('successful admin mutations synchronize the active workspace and dashboard', () => {
+  assert.match(loader, /admin-workspace-sync\.js/);
+  assert.match(sync, /window\.fetch = async function synchronizedAdminFetch/);
+  assert.match(sync, /url\.pathname\.startsWith\('\/api\/admin\/'\)/);
+  assert.match(sync, /!\['GET', 'HEAD', 'OPTIONS'\]\.includes\(method\)/);
+  assert.match(sync, /isAdminMutation && response\.ok/);
+  assert.match(sync, /data-refresh-workspace/);
+  assert.match(sync, /window\.loadSummary/);
+  assert.match(sync, /sra:admin-mutated/);
+  assert.match(sync, /refreshAgain/);
 });
 
 test('marketplace status counts every source displayed by its tabs', () => {
