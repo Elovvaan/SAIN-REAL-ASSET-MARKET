@@ -9,6 +9,7 @@ const participantBootstrap = read('../public/participant-workspace-bootstrap.js'
 const participantSuite = read('../public/participant-workspace-suite.js');
 const chatRuntime = read('../public/public-chat-runtime.js');
 const access = read('../public/access.js');
+const fundingOperations = read('../public/funding-operations-ui.js');
 
 test('public index delegates JavaScript ownership to one bootstrap', () => {
   assert.match(index, /<script src="\/public-bootstrap\.js" defer><\/script>/);
@@ -103,6 +104,19 @@ test('signed-in Asset Vault is owned by the participant suite', () => {
   assert.match(participantSuite, /Participant-linked activity/);
   assert.match(participantSuite, /Recorded account balance/);
   assert.match(participantSuite, /OWNER CONTROLLED/);
+});
+
+test('Financing is participant-owned and the funding module is a capability renderer only', () => {
+  assert.match(bootstrap, /'\/funding-operations-ui\.js'/);
+  assert.match(participantSuite, /view === 'funding-operations'/);
+  assert.match(participantSuite, /window\.renderParticipantFundingOperations\(root\)/);
+  assert.match(fundingOperations, /window\.renderParticipantFundingOperations = render/);
+  assert.match(fundingOperations, /\/api\/funding-operations\/dashboard/);
+  assert.match(fundingOperations, /\/api\/funding\/opportunities/);
+  assert.doesNotMatch(fundingOperations, /MutationObserver/);
+  assert.doesNotMatch(fundingOperations, /data-view="funding-operations"/);
+  assert.doesNotMatch(fundingOperations, /querySelectorAll\('\.nav-item'\)/);
+  assert.doesNotMatch(fundingOperations, /DOMContentLoaded/);
 });
 
 test('shared public chat runtime owns chat without owning participant views', () => {
