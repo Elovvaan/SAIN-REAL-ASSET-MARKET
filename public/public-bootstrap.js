@@ -14,7 +14,6 @@
     '/participation.js',
     '/marketplace-tier-one.js',
     '/platform-admin-workspace.js',
-    '/account-capacities.js',
     '/public-home.js',
     '/participant-workspace-bootstrap.js',
     '/home-project-workspace.js',
