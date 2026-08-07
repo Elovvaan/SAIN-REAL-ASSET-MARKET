@@ -26,7 +26,6 @@ function prepareManualAchDestination(input = {}) {
   const bankName = String(input.bankName || 'ACH destination').trim() || 'ACH destination';
   const ownerId = String(input.ownerId || 'SRA_PLATFORM_TREASURY').trim() || 'SRA_PLATFORM_TREASURY';
   const last4 = accountNumber.slice(-4);
-  const fingerprint = crypto.createHash('sha256').update(`${routingNumber}:${accountNumber}`).digest('hex').toUpperCase();
   return {
     ownerId,
     label: `${bankName} ••••${last4}`,
@@ -34,9 +33,8 @@ function prepareManualAchDestination(input = {}) {
     accountType,
     accountLast4: last4,
     routingLast4: routingNumber.slice(-4),
-    destinationId: `DST-ACH-${fingerprint.slice(0, 20)}`,
-    destinationReference: `ACH-DEST-${fingerprint.slice(0, 24)}`,
-    fingerprint,
+    destinationId: `DST-ACH-${crypto.randomUUID().toUpperCase()}`,
+    destinationReference: `ACH-DEST-${crypto.randomUUID().toUpperCase()}`,
   };
 }
 
@@ -92,7 +90,7 @@ export async function installTreasuryTransferReadinessRoutes({ router, domain, r
         approval: 'APPROVE',
         destinationId: destinationResult.destination.destinationId,
         amountUsd,
-        idempotencyKey: req.body?.idempotencyKey || `MANUAL-ACH-${prepared.fingerprint.slice(0, 24)}-${amountUsd.toFixed(8)}`,
+        idempotencyKey: req.body?.idempotencyKey || `MANUAL-ACH-${crypto.randomUUID().toUpperCase()}`,
       }, session.id);
       if (database?.audit) await database.audit({
         actorId: session.id,
