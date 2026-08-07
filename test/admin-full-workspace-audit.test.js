@@ -41,6 +41,30 @@ test('all workspace groups have dedicated record mappings', () => {
   }
 });
 
+test('legacy action panels are moved into visible workspace control containers before the source layout is hidden', () => {
+  assert.match(shell, /admin-workspace-controls/);
+  assert.match(shell, /routeKnownSections\(admin\)/);
+  assert.match(shell, /observeSource\(admin\)/);
+  assert.match(shell, /routeKnownSections\(admin\)[\s\S]*admin-source-layout/);
+  assert.match(shell, /#asset-details/);
+  assert.match(shell, /#listing-details/);
+  assert.match(shell, /#chat-log/);
+  assert.match(shell, /#protected-areas/);
+});
+
+test('workspace opened during the shared initial request is rendered when that request settles', () => {
+  assert.match(shell, /const pending = loadWorkspaceData\(false\)/);
+  assert.match(shell, /activeWorkspaceId\(\)/);
+  assert.match(shell, /pending\.catch\(\(\)=>\{\}\)\.finally/);
+});
+
+test('marketplace status counts every source displayed by its tabs', () => {
+  for (const source of ['marketplaceListings','marketplaceCommitmentWindows','marketplaceCommitments','marketplacePositions','marketplaceAllocations','marketplaceSettlementPreparations','marketplaceSettlementReviews','marketplaceSettlementAuthorizations','transactions','settlements','lifecycleEvents']) {
+    assert.match(shell, new RegExp(`marketplaceDisplayedCount[\\s\\S]*${source}`));
+  }
+  assert.match(shell, /effectiveWorkspaceStatuses/);
+});
+
 test('deleted placeholder-only text cannot return', () => {
   const deleted = [
     'Instrument registry, approvals, terms, and lifecycle history will appear here.',
