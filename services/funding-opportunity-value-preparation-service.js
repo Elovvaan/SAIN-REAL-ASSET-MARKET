@@ -62,14 +62,11 @@ export class FundingOpportunityValuePreparationService {
   async createPreparation(opportunityId, input = {}, actorId = null) {
     const opportunity = this.domain.get(TYPES.OPPORTUNITY, opportunityId);
     if (!opportunity) throw new Error('Funding opportunity was not found.');
-    if (opportunity.status !== 'VERIFIED' || !opportunity.verifiedRecordId) {
-      throw new Error('Funding opportunity must be verified before value preparation begins.');
-    }
+    if (opportunity.status !== 'VERIFIED' || !opportunity.verifiedRecordId) throw new Error('Funding opportunity must be verified before value preparation begins.');
     const verifiedRecord = this.domain.get(TYPES.VERIFIED_RECORD, opportunity.verifiedRecordId);
     if (!verifiedRecord) throw new Error('Verified funding opportunity record was not found.');
 
-    const existing = this.domain.list(TYPES.VALUE_PREPARATION)
-      .find((record) => record.opportunityId === opportunityId && !['CLOSED', 'CANCELLED'].includes(record.status));
+    const existing = this.domain.list(TYPES.VALUE_PREPARATION).find((record) => record.opportunityId === opportunityId && !['CLOSED', 'CANCELLED'].includes(record.status));
     if (existing) return existing;
 
     const valueDimensions = input.valueDimensions || {
@@ -77,58 +74,31 @@ export class FundingOpportunityValuePreparationService {
       collateralOrAssetSupport: null, agreementSupport: null, transactionSupport: null,
     };
     const recognizedValue = positiveAmount(input.recognizedValue ?? valueDimensions.existingVerifiedValue);
-
     const preparation = {
-      preparationId: input.preparationId || id('FVP'),
-      opportunityId,
-      verifiedRecordId: verifiedRecord.verifiedRecordId,
-      applicantParticipantId: opportunity.applicantParticipantId,
-      opportunityType: opportunity.opportunityType,
-      purpose: opportunity.purpose,
-      requestedAmount: opportunity.requestedAmount,
-      currency: opportunity.currency,
-      evidenceIds: unique(verifiedRecord.evidenceIds || []),
-      agreementIds: unique(verifiedRecord.agreementIds || []),
-      transactionIds: unique(verifiedRecord.transactionIds || []),
-      relatedAssetIds: unique(opportunity.relatedAssetIds || []),
-      relatedProjectIds: unique(opportunity.relatedProjectIds || []),
-      valueDimensions,
-      recognizedValue,
-      recognizedCurrency: input.recognizedCurrency || opportunity.currency,
-      assumptions: input.assumptions || [],
-      exclusions: input.exclusions || [],
-      determinationSubjectId: null,
-      observationId: null,
-      snapshotId: null,
-      determinationId: null,
-      canonicalVerifiedValueRecordId: null,
+      preparationId: input.preparationId || id('FVP'), opportunityId, verifiedRecordId: verifiedRecord.verifiedRecordId,
+      applicantParticipantId: opportunity.applicantParticipantId, opportunityType: opportunity.opportunityType, purpose: opportunity.purpose,
+      requestedAmount: opportunity.requestedAmount, currency: opportunity.currency,
+      evidenceIds: unique(verifiedRecord.evidenceIds || []), agreementIds: unique(verifiedRecord.agreementIds || []), transactionIds: unique(verifiedRecord.transactionIds || []),
+      relatedAssetIds: unique(opportunity.relatedAssetIds || []), relatedProjectIds: unique(opportunity.relatedProjectIds || []),
+      valueDimensions, recognizedValue, recognizedCurrency: input.recognizedCurrency || opportunity.currency,
+      assumptions: input.assumptions || [], exclusions: input.exclusions || [],
+      determinationSubjectId: null, observationId: null, snapshotId: null, determinationId: null, canonicalVerifiedValueRecordId: null,
       valueReferenceArchitecture: recognizedValue ? 'CANONICAL_VVR_PENDING' : 'LEGACY_COMPATIBILITY',
-      status: 'PREPARATION_IN_PROGRESS',
-      fundingPhase: 'VERIFIED_VALUE_PREPARATION',
-      createdBy: actorId,
-      createdAt: now(),
-      updatedAt: now(),
-      completedAt: null,
+      status: 'PREPARATION_IN_PROGRESS', fundingPhase: 'VERIFIED_VALUE_PREPARATION', createdBy: actorId, createdAt: now(), updatedAt: now(), completedAt: null,
     };
-
     await this.domain.put(TYPES.VALUE_PREPARATION, preparation.preparationId, preparation, { actorId, eventType: 'FUNDING_VALUE_PREPARATION_CREATED' });
-    await this.domain.put(TYPES.OPPORTUNITY, opportunityId, {
-      ...opportunity,
-      fundingPhase: 'VERIFIED_VALUE_PREPARATION',
-      valuePreparationId: preparation.preparationId,
-      updatedAt: now(),
-    }, { actorId, eventType: 'FUNDING_OPPORTUNITY_VALUE_PREPARATION_STARTED' });
+    await this.domain.put(TYPES.OPPORTUNITY, opportunityId, { ...opportunity, fundingPhase: 'VERIFIED_VALUE_PREPARATION', valuePreparationId: preparation.preparationId, updatedAt: now() }, { actorId, eventType: 'FUNDING_OPPORTUNITY_VALUE_PREPARATION_STARTED' });
     return preparation;
   }
 
   async updatePreparation(preparationId, input = {}, actorId = null) {
     const current = this.getPreparation(preparationId);
     if (!current) throw new Error('Value preparation record was not found.');
-    if (['COMPLETED', 'CLOSED', 'CANCELLED'].includes(current.status)) {
-      throw new Error(`Value preparation cannot be updated from ${current.status}.`);
-    }
+    if (['COMPLETED', 'CLOSED', 'CANCELLED'].includes(current.status)) throw new Error(`Value preparation cannot be updated from ${current.status}.`);
     const valueDimensions = { ...current.valueDimensions, ...(input.valueDimensions || {}) };
-    const candidateValue = input.recognizedValue ?? valueDimensions.existingVerifiedValue ?? current.recognizedValue;
+    const candidateValue = input.recognizedValue !== undefined
+      ? input.recognizedValue
+      : (current.recognizedValue ?? valueDimensions.existingVerifiedValue);
     const recognizedValue = positiveAmount(candidateValue);
     const updated = {
       ...current,
@@ -153,10 +123,8 @@ export class FundingOpportunityValuePreparationService {
     const revenueSupport = Number(preparation.valueDimensions?.revenueCapacity || 0) > 0;
     const agreementSupport = preparation.agreementIds.length > 0;
     const transactionSupport = preparation.transactionIds.length > 0;
-
     const results = MODELS.map((model) => {
-      let score = 0;
-      const reasons = [];
+      let score = 0; const reasons = [];
       if (model === 'PLATFORM_FUNDING' && (opportunityType.includes('PLATFORM') || purpose.includes('PLATFORM'))) { score += 60; reasons.push('Platform purpose or type identified.'); }
       if (model === 'PROJECT_FUNDING' && preparation.relatedProjectIds.length > 0) { score += 50; reasons.push('Existing related project identified.'); }
       if (model === 'CONSTRUCTION_FUNDING' && (opportunityType.includes('CONSTRUCTION') || purpose.includes('BUILD'))) { score += 60; reasons.push('Construction or build purpose identified.'); }
@@ -166,168 +134,60 @@ export class FundingOpportunityValuePreparationService {
       if (model === 'INVOICE_FUNDING' && transactionSupport && opportunityType.includes('INVOICE')) { score += 55; reasons.push('Invoice transaction support identified.'); }
       if (model === 'WORKING_CAPITAL' && purpose.includes('WORKING')) { score += 55; reasons.push('Working-capital purpose identified.'); }
       if (model === 'EQUIPMENT_FUNDING' && (opportunityType.includes('EQUIPMENT') || purpose.includes('EQUIPMENT'))) { score += 55; reasons.push('Equipment purpose identified.'); }
-      if (agreementSupport) score += 10;
-      if (transactionSupport) score += 10;
+      if (agreementSupport) score += 10; if (transactionSupport) score += 10;
       return { model, score: Math.min(score, 100), reasons };
     }).sort((a, b) => b.score - a.score);
-
-    return {
-      preparationId,
-      opportunityId: preparation.opportunityId,
-      assessments: results,
-      recommendedModel: results[0]?.score > 0 ? results[0].model : null,
-      note: 'This assessment identifies candidate funding models. It does not select or issue an instrument.',
-    };
+    return { preparationId, opportunityId: preparation.opportunityId, assessments: results, recommendedModel: results[0]?.score > 0 ? results[0].model : null, note: 'This assessment identifies candidate funding models. It does not select or issue an instrument.' };
   }
 
   async saveModelAssessment(preparationId, actorId = null) {
     const summary = this.assessModels(preparationId);
-    const assessment = {
-      assessmentId: id('FMA'),
-      preparationId,
-      opportunityId: summary.opportunityId,
-      assessments: summary.assessments,
-      recommendedModel: summary.recommendedModel,
-      status: 'ASSESSMENT_COMPLETE',
-      assessedBy: actorId,
-      assessedAt: now(),
-    };
+    const assessment = { assessmentId: id('FMA'), preparationId, opportunityId: summary.opportunityId, assessments: summary.assessments, recommendedModel: summary.recommendedModel, status: 'ASSESSMENT_COMPLETE', assessedBy: actorId, assessedAt: now() };
     await this.domain.put(TYPES.MODEL_ASSESSMENT, assessment.assessmentId, assessment, { actorId, eventType: 'FUNDING_MODEL_ASSESSMENT_COMPLETED' });
     return assessment;
   }
 
   async createCanonicalDetermination(preparation, actorId = null) {
+    if (preparation.canonicalVerifiedValueRecordId) {
+      const verifiedValueRecord = this.domain.get(DETERMINATION_RECORD_TYPES.VERIFIED_VALUE, preparation.canonicalVerifiedValueRecordId);
+      const determination = preparation.determinationId ? this.domain.get(DETERMINATION_RECORD_TYPES.DETERMINATION, preparation.determinationId) : null;
+      const snapshot = preparation.snapshotId ? this.domain.get(DETERMINATION_RECORD_TYPES.SNAPSHOT, preparation.snapshotId) : null;
+      const observation = preparation.observationId ? this.domain.get(DETERMINATION_RECORD_TYPES.OBSERVATION, preparation.observationId) : null;
+      const subject = preparation.determinationSubjectId ? this.domain.get(DETERMINATION_RECORD_TYPES.SUBJECT, preparation.determinationSubjectId) : null;
+      if (verifiedValueRecord) return { subject, observation, snapshot, determination, verifiedValueRecord };
+    }
+
     const recognizedValue = positiveAmount(preparation.recognizedValue);
     if (!recognizedValue) return null;
     const verifiedRecord = this.domain.get(TYPES.VERIFIED_RECORD, preparation.verifiedRecordId);
     if (!verifiedRecord) throw new Error('Verified funding opportunity record was not found.');
     const subjectId = `FUNDING-OPPORTUNITY-${preparation.opportunityId}`;
     let subject = this.domain.get(DETERMINATION_RECORD_TYPES.SUBJECT, subjectId);
-    if (!subject) {
-      subject = await this.determinationEngine.registerSubject({
-        subjectId,
-        subjectType: 'FUNDING_OPPORTUNITY_RECOGNIZED_VALUE',
-        label: `Recognized funding value for ${preparation.opportunityId}`,
-        externalReference: preparation.opportunityId,
-        identity: {
-          opportunityId: preparation.opportunityId,
-          verifiedRecordId: preparation.verifiedRecordId,
-          applicantParticipantId: preparation.applicantParticipantId,
-        },
-        provenance: { system: 'SRA', sourceProcess: 'FUNDING_VALUE_PREPARATION' },
-        permittedUses: PERMITTED_USES,
-      }, actorId);
-    }
-
-    const observation = await this.determinationEngine.recordObservation({
-      subjectId,
-      sourceId: `FUNDING_VERIFIED_RECORD:${preparation.verifiedRecordId}`,
-      sourceType: 'SRA_FUNDING_VERIFIED_RECORD',
-      value: recognizedValue,
-      currency: preparation.recognizedCurrency || preparation.currency,
-      observedAt: verifiedRecord.frozenAt || preparation.updatedAt || now(),
-      evidenceReference: preparation.verifiedRecordId,
-      permission: 'CONTRACT_REFERENCE',
-      quality: {
-        verifiedRecordStatus: verifiedRecord.status,
-        evidenceCount: preparation.evidenceIds.length,
-        agreementCount: preparation.agreementIds.length,
-        transactionCount: preparation.transactionIds.length,
-      },
-      metadata: {
-        preparationId: preparation.preparationId,
-        opportunityId: preparation.opportunityId,
-        verifiedRecordId: preparation.verifiedRecordId,
-      },
-    }, actorId);
-
-    const snapshot = await this.determinationEngine.createSnapshot({
-      subjectId,
-      observationIds: [observation.observationId],
-      observationStart: observation.observedAt,
-      observationEnd: observation.observedAt,
-      methodologyVersion: METHOD_VERSION,
-      permittedUses: PERMITTED_USES,
-      exclusions: preparation.exclusions || [],
-    }, actorId);
-
-    const canonical = await this.determinationEngine.determine({
-      snapshotId: snapshot.snapshotId,
-      methodology: 'DIRECT',
-      methodologyVersion: METHOD_VERSION,
-      directValue: recognizedValue,
-      currency: preparation.recognizedCurrency || preparation.currency,
-      confidence: {
-        level: 'DIRECT_VERIFIED_FUNDING_PREPARATION',
-        basis: 'FROZEN_FUNDING_VERIFICATION_RECORD',
-        sourceCount: 1,
-        observationCount: 1,
-        evidenceCount: preparation.evidenceIds.length,
-      },
-    }, actorId);
-
+    if (!subject) subject = await this.determinationEngine.registerSubject({ subjectId, subjectType: 'FUNDING_OPPORTUNITY_RECOGNIZED_VALUE', label: `Recognized funding value for ${preparation.opportunityId}`, externalReference: preparation.opportunityId, identity: { opportunityId: preparation.opportunityId, verifiedRecordId: preparation.verifiedRecordId, applicantParticipantId: preparation.applicantParticipantId }, provenance: { system: 'SRA', sourceProcess: 'FUNDING_VALUE_PREPARATION' }, permittedUses: PERMITTED_USES }, actorId);
+    const observation = await this.determinationEngine.recordObservation({ subjectId, sourceId: `FUNDING_VERIFIED_RECORD:${preparation.verifiedRecordId}`, sourceType: 'SRA_FUNDING_VERIFIED_RECORD', value: recognizedValue, currency: preparation.recognizedCurrency || preparation.currency, observedAt: verifiedRecord.frozenAt || preparation.updatedAt || now(), evidenceReference: preparation.verifiedRecordId, permission: 'CONTRACT_REFERENCE', quality: { verifiedRecordStatus: verifiedRecord.status, evidenceCount: preparation.evidenceIds.length, agreementCount: preparation.agreementIds.length, transactionCount: preparation.transactionIds.length }, metadata: { preparationId: preparation.preparationId, opportunityId: preparation.opportunityId, verifiedRecordId: preparation.verifiedRecordId } }, actorId);
+    const snapshot = await this.determinationEngine.createSnapshot({ subjectId, observationIds: [observation.observationId], observationStart: observation.observedAt, observationEnd: observation.observedAt, methodologyVersion: METHOD_VERSION, permittedUses: PERMITTED_USES, exclusions: preparation.exclusions || [] }, actorId);
+    const canonical = await this.determinationEngine.determine({ snapshotId: snapshot.snapshotId, methodology: 'DIRECT', methodologyVersion: METHOD_VERSION, directValue: recognizedValue, currency: preparation.recognizedCurrency || preparation.currency, confidence: { level: 'DIRECT_VERIFIED_FUNDING_PREPARATION', basis: 'FROZEN_FUNDING_VERIFICATION_RECORD', sourceCount: 1, observationCount: 1, evidenceCount: preparation.evidenceIds.length } }, actorId);
     return { subject, observation, snapshot, ...canonical };
   }
 
   async completePreparation(preparationId, actorId = null) {
     const preparation = this.getPreparation(preparationId);
     if (!preparation) throw new Error('Value preparation record was not found.');
+    if (preparation.status === 'COMPLETED') {
+      const assessment = preparation.modelAssessmentId ? this.domain.get(TYPES.MODEL_ASSESSMENT, preparation.modelAssessmentId) : null;
+      const canonicalVerifiedValueRecord = preparation.canonicalVerifiedValueRecordId ? this.domain.get(DETERMINATION_RECORD_TYPES.VERIFIED_VALUE, preparation.canonicalVerifiedValueRecordId) : null;
+      return { preparation, assessment, canonicalVerifiedValueRecord };
+    }
+    if (['CLOSED', 'CANCELLED'].includes(preparation.status)) throw new Error(`Value preparation cannot be completed from ${preparation.status}.`);
+
     const assessment = await this.saveModelAssessment(preparationId, actorId);
     const canonical = await this.createCanonicalDetermination(preparation, actorId);
     const completedAt = now();
-    const updated = {
-      ...preparation,
-      status: 'COMPLETED',
-      fundingPhase: 'FUNDING_MODEL_SELECTION_READY',
-      modelAssessmentId: assessment.assessmentId,
-      determinationSubjectId: canonical?.subject.subjectId || null,
-      observationId: canonical?.observation.observationId || null,
-      snapshotId: canonical?.snapshot.snapshotId || null,
-      determinationId: canonical?.determination.determinationId || null,
-      canonicalVerifiedValueRecordId: canonical?.verifiedValueRecord.verifiedValueRecordId || null,
-      valueReferenceArchitecture: canonical ? 'CANONICAL_VVR_REFERENCE' : 'LEGACY_COMPATIBILITY',
-      completedAt,
-      updatedAt: completedAt,
-    };
+    const updated = { ...preparation, status: 'COMPLETED', fundingPhase: 'FUNDING_MODEL_SELECTION_READY', modelAssessmentId: assessment.assessmentId, determinationSubjectId: canonical?.subject?.subjectId || null, observationId: canonical?.observation?.observationId || null, snapshotId: canonical?.snapshot?.snapshotId || null, determinationId: canonical?.determination?.determinationId || null, canonicalVerifiedValueRecordId: canonical?.verifiedValueRecord?.verifiedValueRecordId || null, valueReferenceArchitecture: canonical ? 'CANONICAL_VVR_REFERENCE' : 'LEGACY_COMPATIBILITY', completedAt, updatedAt: completedAt };
     await this.domain.put(TYPES.VALUE_PREPARATION, preparationId, updated, { actorId, eventType: 'FUNDING_VALUE_PREPARATION_COMPLETED' });
-
     const opportunity = this.domain.get(TYPES.OPPORTUNITY, preparation.opportunityId);
-    if (opportunity) {
-      await this.domain.put(TYPES.OPPORTUNITY, opportunity.opportunityId, {
-        ...opportunity,
-        status: 'VALUE_PREPARED',
-        fundingPhase: 'FUNDING_MODEL_SELECTION_READY',
-        modelAssessmentId: assessment.assessmentId,
-        canonicalVerifiedValueRecordId: updated.canonicalVerifiedValueRecordId,
-        determinationId: updated.determinationId,
-        snapshotId: updated.snapshotId,
-        valueReferenceArchitecture: updated.valueReferenceArchitecture,
-        updatedAt: completedAt,
-        history: [...(opportunity.history || []), {
-          from: opportunity.status,
-          to: 'VALUE_PREPARED',
-          at: completedAt,
-          actorId,
-          note: canonical ? 'Verified Value preparation completed with canonical VVR.' : 'Verified Value preparation completed in legacy compatibility mode.',
-        }],
-      }, { actorId, eventType: 'FUNDING_OPPORTUNITY_READY_FOR_MODEL_SELECTION' });
-    }
-
-    await this.domain.lifecycle({
-      objectType: TYPES.OPPORTUNITY,
-      objectId: preparation.opportunityId,
-      eventType: 'FUNDING_OPPORTUNITY_VALUE_PREPARED',
-      actorId,
-      payload: {
-        preparationId,
-        assessmentId: assessment.assessmentId,
-        recommendedModel: assessment.recommendedModel,
-        canonicalVerifiedValueRecordId: updated.canonicalVerifiedValueRecordId,
-        determinationId: updated.determinationId,
-        snapshotId: updated.snapshotId,
-        valueReferenceArchitecture: updated.valueReferenceArchitecture,
-      },
-    });
+    if (opportunity) await this.domain.put(TYPES.OPPORTUNITY, opportunity.opportunityId, { ...opportunity, status: 'VALUE_PREPARED', fundingPhase: 'FUNDING_MODEL_SELECTION_READY', modelAssessmentId: assessment.assessmentId, canonicalVerifiedValueRecordId: updated.canonicalVerifiedValueRecordId, determinationId: updated.determinationId, snapshotId: updated.snapshotId, valueReferenceArchitecture: updated.valueReferenceArchitecture, updatedAt: completedAt, history: [...(opportunity.history || []), { from: opportunity.status, to: 'VALUE_PREPARED', at: completedAt, actorId, note: canonical ? 'Verified Value preparation completed with canonical VVR.' : 'Verified Value preparation completed in legacy compatibility mode.' }] }, { actorId, eventType: 'FUNDING_OPPORTUNITY_READY_FOR_MODEL_SELECTION' });
+    await this.domain.lifecycle({ objectType: TYPES.OPPORTUNITY, objectId: preparation.opportunityId, eventType: 'FUNDING_OPPORTUNITY_VALUE_PREPARED', actorId, payload: { preparationId, assessmentId: assessment.assessmentId, recommendedModel: assessment.recommendedModel, canonicalVerifiedValueRecordId: updated.canonicalVerifiedValueRecordId, determinationId: updated.determinationId, snapshotId: updated.snapshotId, valueReferenceArchitecture: updated.valueReferenceArchitecture } });
     return { preparation: updated, assessment, canonicalVerifiedValueRecord: canonical?.verifiedValueRecord || null };
   }
 }

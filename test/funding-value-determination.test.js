@@ -43,14 +43,12 @@ test('funding value preparation produces a canonical VVR and writes its lineage 
   await seedVerifiedOpportunity(domain);
   const service = new FundingOpportunityValuePreparationService(domain);
   await service.initialize();
-
   const preparation = await service.createPreparation('FO-1', {
     recognizedValue: 100000,
     recognizedCurrency: 'USD',
     valueDimensions: { existingVerifiedValue: 100000, collateralOrAssetSupport: 100000 },
   }, 'ADMIN-1');
   const completed = await service.completePreparation(preparation.preparationId, 'ADMIN-1');
-
   assert.equal(completed.preparation.valueReferenceArchitecture, 'CANONICAL_VVR_REFERENCE');
   assert.ok(completed.preparation.canonicalVerifiedValueRecordId);
   assert.equal(completed.canonicalVerifiedValueRecord.value, 100000);
@@ -58,12 +56,41 @@ test('funding value preparation produces a canonical VVR and writes its lineage 
   assert.equal(completed.canonicalVerifiedValueRecord.immutable, true);
   assert.ok(completed.canonicalVerifiedValueRecord.permittedUses.includes('CONTRACT_REFERENCE'));
   assert.equal(completed.canonicalVerifiedValueRecord.contractFormationBoundary.createsInstrument, false);
-
   const opportunity = domain.get(OPPORTUNITY, 'FO-1');
   assert.equal(opportunity.canonicalVerifiedValueRecordId, completed.canonicalVerifiedValueRecord.verifiedValueRecordId);
   assert.equal(opportunity.determinationId, completed.preparation.determinationId);
   assert.equal(opportunity.snapshotId, completed.preparation.snapshotId);
   assert.equal(domain.list(DETERMINATION_RECORD_TYPES.VERIFIED_VALUE).length, 1);
+});
+
+test('unrelated PATCH updates preserve an explicit recognized value', async () => {
+  const domain = new MemoryDomain();
+  await seedVerifiedOpportunity(domain);
+  const service = new FundingOpportunityValuePreparationService(domain);
+  await service.initialize();
+  const preparation = await service.createPreparation('FO-1', {
+    recognizedValue: 100000,
+    valueDimensions: { existingVerifiedValue: 50000, collateralOrAssetSupport: 50000 },
+  }, 'ADMIN-1');
+  const updated = await service.updatePreparation(preparation.preparationId, { assumptions: ['Updated assumption only'] }, 'ADMIN-1');
+  assert.equal(updated.recognizedValue, 100000);
+  const completed = await service.completePreparation(preparation.preparationId, 'ADMIN-1');
+  assert.equal(completed.canonicalVerifiedValueRecord.value, 100000);
+});
+
+test('completion is idempotent and reuses the canonical VVR on retry', async () => {
+  const domain = new MemoryDomain();
+  await seedVerifiedOpportunity(domain);
+  const service = new FundingOpportunityValuePreparationService(domain);
+  await service.initialize();
+  const preparation = await service.createPreparation('FO-1', { recognizedValue: 95000 }, 'ADMIN-1');
+  const first = await service.completePreparation(preparation.preparationId, 'ADMIN-1');
+  const second = await service.completePreparation(preparation.preparationId, 'ADMIN-1');
+  assert.equal(second.preparation.canonicalVerifiedValueRecordId, first.preparation.canonicalVerifiedValueRecordId);
+  assert.equal(second.canonicalVerifiedValueRecord.verifiedValueRecordId, first.canonicalVerifiedValueRecord.verifiedValueRecordId);
+  assert.equal(domain.list(DETERMINATION_RECORD_TYPES.VERIFIED_VALUE).length, 1);
+  assert.equal(domain.list(DETERMINATION_RECORD_TYPES.DETERMINATION).length, 1);
+  assert.equal(domain.list(DETERMINATION_RECORD_TYPES.SNAPSHOT).length, 1);
 });
 
 test('draft instrument automatically inherits the canonical VVR from the prepared opportunity', async () => {
@@ -73,7 +100,6 @@ test('draft instrument automatically inherits the canonical VVR from the prepare
   await preparationService.initialize();
   const preparation = await preparationService.createPreparation('FO-1', { recognizedValue: 95000 }, 'ADMIN-1');
   const completed = await preparationService.completePreparation(preparation.preparationId, 'ADMIN-1');
-
   await domain.put(INSTRUMENT_REQUEST, 'FISR-1', {
     instrumentSelectionRequestId: 'FISR-1', opportunityId: 'FO-1', fundingModel: 'PROJECT_FUNDING', requestedAmount: 80000,
     currency: 'USD', candidateInstrumentFamilies: ['TRUE_BILL'], requiredCharacteristics: {}, verifiedRecordId: 'FVRD-1',
@@ -82,11 +108,9 @@ test('draft instrument automatically inherits the canonical VVR from the prepare
     instrumentSelectionId: 'FIS-1', instrumentSelectionRequestId: 'FISR-1', opportunityId: 'FO-1', fundingModel: 'PROJECT_FUNDING',
     selectedInstrumentFamily: 'TRUE_BILL', terms: {}, restrictions: [], status: 'SELECTED',
   });
-
   const selectionService = new FundingInstrumentSelectionService(domain);
   await selectionService.initialize();
   const instrument = await selectionService.createDraftInstrument('FIS-1', { settlementRule: 'NET', governingDocumentId: 'DOC-1' }, 'ADMIN-1');
-
   assert.equal(instrument.canonicalVerifiedValueRecordId, completed.canonicalVerifiedValueRecord.verifiedValueRecordId);
   assert.equal(instrument.referencedDeterminationId, completed.preparation.determinationId);
   assert.equal(instrument.referencedSnapshotId, completed.preparation.snapshotId);
@@ -103,4 +127,4 @@ test('funding preparation without a recognized value remains explicitly legacy-c
   assert.equal(completed.preparation.canonicalVerifiedValueRecordId, null);
   assert.equal(completed.preparation.valueReferenceArchitecture, 'LEGACY_COMPATIBILITY');
   assert.equal(domain.list(DETERMINATION_RECORD_TYPES.VERIFIED_VALUE).length, 0);
-}
+});
