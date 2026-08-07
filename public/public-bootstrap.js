@@ -4,7 +4,7 @@
 
   const FEATURES = [
     '/sane-skills.js',
-    '/app.js',
+    '/public-chat-runtime.js',
     '/sane-chat-format.js',
     '/interoperability.js',
     '/onboarding.js',
