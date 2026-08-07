@@ -30,18 +30,16 @@ test('rejects unsupported account types and malformed account values', () => {
   assert.throws(() => prepareManualAchDestination({ routingNumber: '021000021', accountNumber: '12345678', accountType: 'BROKERAGE' }), /CHECKING or SAVINGS/);
 });
 
-test('admin page loads the Destination Verification control directly and the fallback loader keeps shell ordering', () => {
-  const page = fs.readFileSync(new URL('../public/admin/index.html', import.meta.url), 'utf8');
-  assert.match(page, /admin-settlement-destination\.js\?v=182/);
+test('Destination Verification form is rendered natively by the settlement workspace shell', () => {
+  const shell = fs.readFileSync(new URL('../public/admin/admin-suite-shell.js', import.meta.url), 'utf8');
+  assert.match(shell, /function achDestinationControlMarkup\(\)/);
+  assert.match(shell, /data-native-ach-destination-form/);
+  assert.match(shell, /if\(id==='settlement'\) renderSettlementControls\(tab\)/);
+  assert.match(shell, /\/api\/admin\/treasury-transfer-readiness\/ach\/prepare/);
+  assert.match(shell, /Verify & Prepare Instruction/);
+  assert.match(shell, /Routing and account numbers are used only for this preparation request/);
 
-  const loader = fs.readFileSync(new URL('../public/admin/admin-button-diagnostics.js', import.meta.url), 'utf8');
-  const shellIndex = loader.indexOf('/admin/admin-suite-shell.js');
-  const destinationIndex = loader.indexOf('/admin/admin-settlement-destination.js');
-  assert.ok(shellIndex >= 0);
-  assert.ok(destinationIndex > shellIndex);
-
-  const control = fs.readFileSync(new URL('../public/admin/admin-settlement-destination.js', import.meta.url), 'utf8');
-  assert.match(control, /Destination Verification/);
-  assert.match(control, /\/api\/admin\/treasury-transfer-readiness\/ach\/prepare/);
-  assert.match(control, /Routing and account numbers are used only for this preparation request/);
+  const legacyControl = fs.readFileSync(new URL('../public/admin/admin-settlement-destination.js', import.meta.url), 'utf8');
+  assert.match(legacyControl, /data-ach-destination-form/);
+  assert.doesNotMatch(shell, /<form data-ach-destination-form/);
 });
