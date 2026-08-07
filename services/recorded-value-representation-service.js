@@ -41,10 +41,17 @@ export class RecordedValueRepresentationService {
       correctablePositionCount: correctable.length,
       currentRepresentedQuantity: Number(chains.reduce((sum, item) => sum + item.currentQuantity, 0).toFixed(8)),
       targetRepresentedQuantity: Number(chains.reduce((sum, item) => sum + (item.targetQuantity || item.currentQuantity), 0).toFixed(8)),
-      sample: correctable.slice(0, 25).map((item) => ({ coinPositionId: item.position.coinPositionId, financialRecordId: item.record?.financialRecordId || null, currentQuantity: item.currentQuantity, targetQuantity: item.targetQuantity })),
+      sample: correctable.slice(0, 25).map((item) => ({
+        coinPositionId: item.position.coinPositionId,
+        financialRecordId: item.record?.financialRecordId || null,
+        sourceAmount: item.position.sourcePosition?.amount ?? item.record?.recognizedPosition?.amount ?? null,
+        sourceUnit: item.position.sourcePosition?.unit ?? item.record?.recognizedPosition?.unit ?? null,
+        currentQuantity: item.currentQuantity,
+        targetQuantity: item.targetQuantity
+      })),
       parReference: { asset: 'SRA Coin', market: 'SRA/USD', rate: 1, rule: 'SRA_QUANTITY_EQUALS_RECOGNIZED_RECORDED_USD_VALUE' },
       approvalRequired: true,
-      effect: 'Restates SRA Coin Positions to the recognized recorded USD value at par while preserving the source quantity separately.',
+      effect: 'Restates SRA Coin Positions to the recognized recorded USD value at par while preserving the native source quantity and unit separately.',
       doesNot: ['CREATE_VALUE_WITHOUT_A_RECOGNIZED_FINANCIAL_RECORD', 'CREATE_OR_MODIFY_INSTRUMENTS', 'CREATE_OR_MODIFY_MARKETPLACE_LISTINGS', 'CHANGE_OWNERSHIP', 'CREATE_TRANSACTIONS', 'SETTLE', 'EXPORT']
     };
   }
@@ -65,6 +72,7 @@ export class RecordedValueRepresentationService {
         const unencumberedPrior = Math.max(0, priorQuantity - reserved - externalized);
         const availableRatio = unencumberedPrior > 0 ? Math.min(1, Math.max(0, availableBase / unencumberedPrior)) : 1;
         const availableQuantity = Number((Math.max(0, target - reserved - externalized) * availableRatio).toFixed(8));
+        const sourcePosition = chain.position.sourcePosition || (chain.record?.recognizedPosition ? { ...chain.record.recognizedPosition } : null);
         const changes = [];
         if (chain.record) {
           changes.push({ type: RECORD_TYPES.FINANCIAL_RECORD, id: chain.record.financialRecordId, actorId, eventType: 'FINANCIAL_RECORD_RECORDED_VALUE_CONFIRMED', payload: {
@@ -77,7 +85,8 @@ export class RecordedValueRepresentationService {
         }
         changes.push({ type: RECORD_TYPES.COIN_POSITION, id: chain.position.coinPositionId, actorId, eventType: 'COIN_POSITION_RESTATED_TO_RECORDED_VALUE', payload: {
           ...chain.position,
-          sourcePosition: { ...(chain.position.sourcePosition || {}), amount: target, unit: 'USD' },
+          sourcePosition,
+          representationBasis: { amount: target, unit: 'USD', basis: chain.record?.recordedValue?.basis || chain.record?.recognizedPosition?.basis || chain.record?.measurement?.method || 'RECOGNIZED_RECORDED_VALUE', asOf: chain.record?.recordedValue?.asOf || chain.record?.recognizedPosition?.asOf || chain.record?.measurement?.asOf || null },
           recordedValue: { amount: target, currency: 'USD' },
           quantity: target,
           availableQuantity,
@@ -85,6 +94,17 @@ export class RecordedValueRepresentationService {
           statusHistory: [...(chain.position.statusHistory || []), { state: chain.position.state, actorId, occurredAt: timestamp, reason: `Quantity restated from ${priorQuantity} to ${target} SRA using recognized recorded USD value at par.` }],
           updatedAt: timestamp
         } });
+        if (chain.position.coinAccountId) {
+          const account = this.domain.get(RECORD_TYPES.COIN_ACCOUNT, chain.position.coinAccountId);
+          if (account) {
+            const representedQuantity = Number((Math.max(0, Number(account.representedQuantity || 0) - priorQuantity + target)).toFixed(8));
+            changes.push({ type: RECORD_TYPES.COIN_ACCOUNT, id: chain.position.coinAccountId, actorId, eventType: 'COIN_ACCOUNT_REPRESENTED_QUANTITY_RESTATED', payload: {
+              ...account,
+              representedQuantity,
+              updatedAt: timestamp
+            } });
+          }
+        }
         await this.domain.atomicPut(changes);
         corrected += 1;
       } catch (error) {
