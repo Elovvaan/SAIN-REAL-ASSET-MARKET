@@ -1,5 +1,6 @@
 import { TreasuryLedgerService } from '../services/treasury-ledger-service.js';
 import { RecordedValueRepresentationService } from '../services/recorded-value-representation-service.js';
+import { CoinPositionLifecycleReadService } from '../services/coin-position-lifecycle-read-service.js';
 import {
   PlatformFundingInstrumentDepositService,
   CANONICAL_PLATFORM_FUNDING_INSTRUMENT_ID,
@@ -85,6 +86,7 @@ function eligibleFundingInstruments(domain) {
 export async function installTreasuryAdminRoutes({ router, domain, requireAdmin, database = null }) {
   const treasury = new TreasuryLedgerService(domain);
   const recordedValue = new RecordedValueRepresentationService(domain);
+  const coinPositionLifecycle = new CoinPositionLifecycleReadService(domain);
   await treasury.initialize();
   await ensureInstrumentTreasuryAccounts(domain);
   await ensureCanonicalPlatformFundingInstrument(domain);
@@ -158,5 +160,10 @@ export async function installTreasuryAdminRoutes({ router, domain, requireAdmin,
     } catch (error) { return res.status(422).json({ error: error.message, code: 'SRA_RECORDED_VALUE_REPRESENTATION_CORRECTION_FAILED' }); }
   });
 
-  return { treasury, recordedValue, fundingInstrumentDeposits };
+  router.get('/api/admin/coin-position-lifecycle', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    return res.json(coinPositionLifecycle.read());
+  });
+
+  return { treasury, recordedValue, coinPositionLifecycle, fundingInstrumentDeposits };
 }
