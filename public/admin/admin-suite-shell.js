@@ -236,7 +236,7 @@
       return combined(r.users,r.participants);
     }
     if(id==='system'){
-      if(tab==='Core Services') return Object.entries(effectiveWorkspaceStatuses()).map(([key,status])=>({id:key,recordType:'WORKSPACE_HEALTH',state:status.state,recordCount:status.recordCount,missingSources:status.missingSources}));
+      if(tab==='Core Services') return Object.entries(state.workspaceData?.workspaces||{}).map(([id,status])=>({id,recordType:'WORKSPACE_HEALTH',state:status.state,recordCount:status.recordCount,missingSources:status.missingSources}));
       if(tab==='Diagnostics') return combined(r.treasuryExceptions,list(r.outboundEvents).filter(item=>/ERROR|FAILED|EXCEPTION/i.test(recordState(item))),contains(r.lifecycleEvents,/ERROR|FAILED|EXCEPTION|DIAGNOSTIC/i));
       if(tab==='Protected Actions') return contains(r.lifecycleEvents,/APPROV|AUTHOR|PROTECT/i);
       if(tab==='Alerts') return combined(r.treasuryExceptions,contains(r.lifecycleEvents,/ALERT|WARN|ERROR|EXCEPTION/i));
@@ -325,6 +325,7 @@
     document.body.classList.add('admin-suite-ready');
     const top = admin.querySelector('.top');
     const oldLayout = admin.querySelector('.layout');
+    if(oldLayout) oldLayout.classList.add('admin-legacy-source-root');
     const suite = document.createElement('div');
     suite.className = 'admin-suite';
     suite.innerHTML = `<aside class="admin-suite-rail"><div class="admin-suite-brand"><img src="/brand-logo" alt="SRA"><div><strong>SAIN Platform</strong><span>Administration</span></div></div><nav class="admin-suite-nav">${WORKSPACES.map(([id,label],index)=>`<button type="button" data-admin-workspace="${id}" class="${index===0?'active':''}"><strong>${esc(label)}</strong></button>`).join('')}</nav></aside><main class="admin-suite-main"><header class="admin-suite-header"><div><h1 id="admin-suite-title">Dashboard</h1><p id="admin-suite-subtitle">Executive platform status</p></div><div id="admin-suite-account"></div></header><div class="admin-suite-content"></div></main>`;
@@ -333,7 +334,7 @@
     admin.insertBefore(suite,admin.firstChild);
     if(top){ suite.querySelector('#admin-suite-account').append(top); top.classList.remove('card'); }
     admin.querySelector('#metrics')?.classList.add('admin-source-metrics');
-    routeKnownSections(admin);
+    routeKnownSections(oldLayout || admin);
     observeSource(admin);
     if(oldLayout) oldLayout.classList.add('admin-source-layout');
     suite.addEventListener('click',event=>{
