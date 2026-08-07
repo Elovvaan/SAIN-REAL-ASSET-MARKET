@@ -9,6 +9,7 @@
     ['/admin/admin-settlement-execution-controls.js', 'data-sra-admin-settlement-execution-controls'],
     ['/admin/admin-coin-representation-integrity.js', 'data-sra-admin-coin-representation-integrity'],
     ['/admin/admin-coin-lifecycle-workstation.js', 'data-sra-admin-coin-lifecycle-workstation'],
+    ['/admin/admin-system-health-workstation.js', 'data-sra-admin-system-health-workstation'],
   ];
 
   let booted = false;
@@ -39,10 +40,7 @@
   }
 
   function requestAdministrationRefresh(source = 'mutation') {
-    if (refreshInFlight) {
-      refreshAgain = true;
-      return;
-    }
+    if (refreshInFlight) { refreshAgain = true; return; }
     clearTimeout(refreshTimer);
     refreshTimer = setTimeout(async () => {
       refreshInFlight = true;
@@ -50,30 +48,16 @@
         const id = activeWorkspaceId();
         document.querySelector(`[data-refresh-workspace="${CSS.escape(id)}"]`)?.click();
         await Promise.resolve(window.loadSummary?.());
-        window.dispatchEvent(new CustomEvent('sra:admin-workspace-synchronized', {
-          detail: { workspaceId: id, source, synchronizedAt: new Date().toISOString() },
-        }));
+        window.dispatchEvent(new CustomEvent('sra:admin-workspace-synchronized', { detail: { workspaceId: id, source, synchronizedAt: new Date().toISOString() } }));
       } finally {
         refreshInFlight = false;
-        if (refreshAgain) {
-          refreshAgain = false;
-          requestAdministrationRefresh(source);
-        }
+        if (refreshAgain) { refreshAgain = false; requestAdministrationRefresh(source); }
       }
     }, 180);
   }
 
-  function concealLegacyFirstPaint(admin) {
-    if (!admin) return;
-    admin.dataset.adminSuiteBooting = 'true';
-    admin.style.visibility = 'hidden';
-  }
-
-  function revealAdminSuite(admin) {
-    if (!admin) return;
-    admin.style.visibility = '';
-    delete admin.dataset.adminSuiteBooting;
-  }
+  function concealLegacyFirstPaint(admin) { if (!admin) return; admin.dataset.adminSuiteBooting = 'true'; admin.style.visibility = 'hidden'; }
+  function revealAdminSuite(admin) { if (!admin) return; admin.style.visibility = ''; delete admin.dataset.adminSuiteBooting; }
 
   async function boot() {
     if (booted) return;
@@ -91,9 +75,8 @@
       const coinWorkspace = admin.querySelector('[data-workspace="coin-positions"]');
       window.mountAdminCoinRepresentationIntegrityControls?.(coinWorkspace);
       window.mountAdminCoinLifecycleWorkstation?.(coinWorkspace);
-      window.dispatchEvent(new CustomEvent('sra:admin-booted', {
-        detail: { featureCount: FEATURES.length, bootedAt: new Date().toISOString() },
-      }));
+      window.mountAdminSystemHealthWorkstation?.(admin.querySelector('[data-workspace="system"]'));
+      window.dispatchEvent(new CustomEvent('sra:admin-booted', { detail: { featureCount: FEATURES.length, bootedAt: new Date().toISOString() } }));
     } catch (error) {
       booted = false;
       revealAdminSuite(admin);
@@ -109,10 +92,7 @@
   else void boot();
 
   const observer = new MutationObserver(() => {
-    if (document.querySelector('#admin-view:not(.hidden)')) {
-      observer.disconnect();
-      void boot();
-    }
+    if (document.querySelector('#admin-view:not(.hidden)')) { observer.disconnect(); void boot(); }
   });
   observer.observe(document.documentElement, { subtree: true, attributes: true, attributeFilter: ['class'] });
 })();
