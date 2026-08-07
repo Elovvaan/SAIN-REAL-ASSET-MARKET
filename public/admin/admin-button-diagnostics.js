@@ -11,6 +11,7 @@
   load('/admin/admin-action-reconciliation.js', 'data-sra-admin-action-reconciliation');
   load('/admin/admin-workspace-data-bridge.js', 'data-sra-admin-workspace-data-bridge');
   load('/admin/admin-suite-shell.js', 'data-sra-admin-suite-shell');
+  load('/admin/admin-settlement-destination.js', 'data-sra-admin-settlement-destination');
   load('/admin/admin-instrument-approvals.js', 'data-sra-admin-instrument-approvals');
   load('/admin/admin-workspace-sync.js', 'data-sra-admin-workspace-sync');
 })();
