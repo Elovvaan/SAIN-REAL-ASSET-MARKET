@@ -1,7 +1,17 @@
 import express from 'express';
 
 function actorId(req) {
-  return req.get('x-sra-actor-id') || req.body?.actorId || null;
+  return req.sraOperationsAuth?.actorId || null;
+}
+
+function requireAuthenticatedActor(req, res, next) {
+  if (!actorId(req)) {
+    return res.status(401).json({
+      error: 'An active authenticated SRA session is required for funding value mutations.',
+      code: 'SRA_AUTHENTICATION_REQUIRED',
+    });
+  }
+  return next();
 }
 
 function handle(res, error) {
@@ -24,12 +34,12 @@ export function createFundingOpportunityValuePreparationRouter(service) {
     return res.json(record);
   });
 
-  router.post('/opportunities/:opportunityId/preparations', async (req, res) => {
+  router.post('/opportunities/:opportunityId/preparations', requireAuthenticatedActor, async (req, res) => {
     try { return res.status(201).json(await service.createPreparation(req.params.opportunityId, req.body, actorId(req))); }
     catch (error) { return handle(res, error); }
   });
 
-  router.patch('/preparations/:preparationId', async (req, res) => {
+  router.patch('/preparations/:preparationId', requireAuthenticatedActor, async (req, res) => {
     try { return res.json(await service.updatePreparation(req.params.preparationId, req.body, actorId(req))); }
     catch (error) { return handle(res, error); }
   });
@@ -47,12 +57,12 @@ export function createFundingOpportunityValuePreparationRouter(service) {
     } catch (error) { return handle(res, error); }
   });
 
-  router.post('/preparations/:preparationId/model-assessment', async (req, res) => {
+  router.post('/preparations/:preparationId/model-assessment', requireAuthenticatedActor, async (req, res) => {
     try { return res.status(201).json(await service.saveModelAssessment(req.params.preparationId, actorId(req))); }
     catch (error) { return handle(res, error); }
   });
 
-  router.post('/preparations/:preparationId/complete', async (req, res) => {
+  router.post('/preparations/:preparationId/complete', requireAuthenticatedActor, async (req, res) => {
     try { return res.json(await service.completePreparation(req.params.preparationId, actorId(req))); }
     catch (error) { return handle(res, error); }
   });
