@@ -69,7 +69,7 @@ export class SettlementAdapterExecutionService {
     if (!LIVE_RAILS.has(String(instruction.rail || '').toUpperCase())) throw new Error(`Instruction rail ${instruction.rail} does not have a live adapter.`);
     if (Number(instruction.amount) <= 0) throw new Error('Instruction amount must be greater than zero.');
     if (!instruction.currency) throw new Error('Instruction currency is required.');
-    if (!instruction.receivingAccountReference) throw new Error('Receiving account or wallet reference is required.');
+    if (!instruction.receivingAccountReference && !instruction.transientDestination) throw new Error('Receiving account or wallet reference is required.');
     const expected = `EXECUTE ${Number(instruction.amount).toFixed(2)} ${String(instruction.currency).toUpperCase()} VIA ${String(instruction.rail).toUpperCase()}`;
     if (confirmation !== expected) {
       const error = new Error(`Live execution confirmation must exactly equal: ${expected}`);
@@ -80,12 +80,13 @@ export class SettlementAdapterExecutionService {
   }
 
   providerPayload(instruction, config) {
+    const destination = instruction.transientDestination || instruction.receivingAccountReference;
     const common = {
       clientTransferId: instruction.instructionId,
       amount: Number(instruction.amount).toFixed(2),
       currency: String(instruction.currency).toUpperCase(),
       sourceAccount: instruction.senderAccountReference || config.accountId,
-      destination: instruction.receivingAccountReference,
+      destination,
       receivingInstitution: instruction.receivingInstitutionReference || null,
       purpose: instruction.purpose || 'SRA_SETTLEMENT',
       remittanceReference: instruction.remittanceReference || instruction.settlementId,

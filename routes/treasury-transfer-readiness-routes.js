@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { TreasuryTransferReadinessService } from '../services/treasury-transfer-readiness-service.js';
 import { TreasuryLedgerService } from '../services/treasury-ledger-service.js';
+import { TreasuryLiveExecutionService } from '../services/treasury-live-execution-service.js';
 
 function digits(value) {
   return String(value || '').replace(/\D/g, '');
@@ -42,6 +43,7 @@ export async function installTreasuryTransferReadinessRoutes({ router, domain, r
   const treasury = new TreasuryLedgerService(domain);
   await treasury.initialize();
   const transfers = new TreasuryTransferReadinessService(domain, treasury);
+  const liveExecution = new TreasuryLiveExecutionService(domain);
 
   router.get('/api/admin/treasury-transfer-readiness', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
@@ -49,12 +51,18 @@ export async function installTreasuryTransferReadinessRoutes({ router, domain, r
       status: transfers.status(),
       destinations: transfers.destinations(),
       treasury: treasury.summary(),
+      execution: liveExecution.status(),
       boundaries: {
         externalSubmissionExecuted: false,
         providerConnectionRequiredForSend: true,
         finalCashReductionPosted: false,
       },
     });
+  });
+
+  router.get('/api/admin/treasury-transfer-readiness/execution/status', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    return res.json(liveExecution.status());
   });
 
   router.post('/api/admin/treasury-transfer-readiness/destinations/preview', async (req, res) => {
@@ -123,6 +131,31 @@ export async function installTreasuryTransferReadinessRoutes({ router, domain, r
       });
     } catch (error) {
       return res.status(422).json({ error: error.message, code: 'SRA_MANUAL_ACH_PREPARATION_FAILED' });
+    }
+  });
+
+  router.post('/api/admin/treasury-transfer-readiness/ach/execute-one-dollar-canary', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    try {
+      const result = await liveExecution.executeOneDollarAch(req.body || {}, session.id);
+      if (database?.audit) await database.audit({
+        actorId: session.id,
+        eventType: 'SRA_TREASURY_ONE_DOLLAR_ACH_CANARY_SUBMITTED',
+        objectType: 'EXTERNAL_TRANSFER_INSTRUCTION',
+        objectId: result.instruction.transferInstructionId,
+        payload: {
+          amountUsd: 1,
+          rail: 'ACH',
+          providerReference: result.executionEvidence.providerReference,
+          providerStatus: result.executionEvidence.providerStatus,
+          receivingConfirmationRequired: true,
+          rawBankDetailsStored: false,
+        },
+      });
+      return res.status(202).json(result);
+    } catch (error) {
+      const status = error?.code === 'LIVE_EXECUTION_CONFIRMATION_REQUIRED' ? 409 : 422;
+      return res.status(status).json({ error: error.message, code: error.code || 'SRA_TREASURY_ACH_CANARY_EXECUTION_FAILED', executionEvidence: error.executionEvidence || null });
     }
   });
 
