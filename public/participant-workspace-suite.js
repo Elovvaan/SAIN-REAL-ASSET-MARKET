@@ -114,7 +114,7 @@
   }
 
   function financingMarkup() {
-    return `<section class="participant-journey"><section class="participant-journey-section"><h3>Financing</h3><p>Prepare financing from an approved instrument. Internal platform funding operations and administrative settlement controls are not shown here.</p><div class="journey-list"><div class="journey-row"><strong>Approved instrument required</strong><span>Select an instrument in the action rail.</span></div><div class="journey-row"><strong>Capacity follows your tier</strong><span>The platform validates the requested amount before review.</span></div><div class="journey-row"><strong>SAIN prepares the request</strong><span>No financing executes without confirmation and authorization.</span></div></div></section></section>`;
+    return `<section class="participant-journey"><section class="participant-journey-section"><h3>Financing</h3><p>Funding operations are loading inside this participant workspace.</p><div class="journey-list"><div class="journey-row"><strong>Approved instrument required</strong><span>Select an instrument in the action rail.</span></div><div class="journey-row"><strong>Capacity follows your tier</strong><span>The platform validates the requested amount before review.</span></div><div class="journey-row"><strong>SAIN prepares the request</strong><span>No financing executes without confirmation and authorization.</span></div></div></section></section>`;
   }
 
   function positionsMarkup() {
@@ -240,7 +240,10 @@
     setFrame(view);
     if (view === 'marketplace') void renderMarketplace(root);
     else if (view === 'custody') void renderAssetVault(root);
-    else {
+    else if (view === 'funding-operations') {
+      if (typeof window.renderParticipantFundingOperations === 'function') void window.renderParticipantFundingOperations(root);
+      else root.innerHTML = financingMarkup();
+    } else {
       root.innerHTML = viewMarkup(view);
       root.querySelectorAll('[data-suite-view]').forEach((button) => button.addEventListener('click', () => openView(button.dataset.suiteView)));
     }
