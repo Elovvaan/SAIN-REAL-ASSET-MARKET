@@ -32,6 +32,16 @@ function safeEqual(left, right) {
   const b = Buffer.from(String(right || ''));
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
+function stateOf(record) { return String(record?.state || record?.status || record?.lifecycleState || 'UNKNOWN').toUpperCase(); }
+function sortNewest(records = []) {
+  const keys = ['updatedAt','createdAt','occurredAt','recordedAt','issuedAt','publishedAt','confirmedAt','settledAt'];
+  return [...records].sort((left, right) => {
+    const leftDate = keys.map((key) => left?.[key]).find(Boolean);
+    const rightDate = keys.map((key) => right?.[key]).find(Boolean);
+    return new Date(rightDate || 0) - new Date(leftDate || 0);
+  });
+}
+function expose(records = [], limit = 250) { return sortNewest(records).slice(0, Math.max(1, Math.min(Number(limit) || 250, 1000))); }
 
 export async function createPrivateAdminRouter({ database, domain, coinbasePublicMarket = null, nativePlatformAsset = null }) {
   const access = new AccessService({ database });
@@ -148,6 +158,42 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
 
   const treasuryAdministration = await installTreasuryAdminRoutes({ router, domain, requireAdmin, database });
   const treasuryTransferReadiness = await installTreasuryTransferReadinessRoutes({ router, domain, requireAdmin, database });
+
+  router.get('/api/admin/workspaces', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    const limit = req.query.limit;
+    const users = (await persistedUsers()).map((user) => ({ id: user.id, displayName: user.displayName, email: user.email, capacities: user.capacities || [], state: user.state || 'ACTIVE', createdAt: user.createdAt || null }));
+    const records = {
+      instruments: expose(domain.list(RECORD_TYPES.SRA_INSTRUMENT), limit),
+      marketplaceListings: expose(domain.list(RECORD_TYPES.MARKETPLACE_LISTING), limit),
+      recognitions: expose(domain.list(RECORD_TYPES.RECOGNITION_ASSESSMENT), limit),
+      ownershipRecognitions: expose(domain.list(RECORD_TYPES.OWNERSHIP_RECOGNITION), limit),
+      observations: expose(domain.list(RECORD_TYPES.MARKET_OBSERVATION), limit),
+      financialRecords: expose(domain.list(RECORD_TYPES.FINANCIAL_RECORD), limit),
+      financialHistory: expose(domain.list(RECORD_TYPES.FINANCIAL_HISTORY_RECORD), limit),
+      evidencePackages: expose(domain.list(RECORD_TYPES.EVIDENCE_PACKAGE), limit),
+      coinPositions: expose(domain.list(RECORD_TYPES.COIN_POSITION), limit),
+      coinAccounts: expose(domain.list(RECORD_TYPES.COIN_ACCOUNT), limit),
+      transactions: expose(domain.list(RECORD_TYPES.SRA_TRANSACTION), limit),
+      exportPackages: expose(domain.list(RECORD_TYPES.EXPORT_PACKAGE), limit),
+      settlementInstructions: expose(domain.list(RECORD_TYPES.SETTLEMENT_RAIL_INSTRUCTION), limit),
+      settlementAdapters: expose(domain.list(RECORD_TYPES.SETTLEMENT_RAIL_ADAPTER), limit),
+      settlements: expose(domain.list(RECORD_TYPES.SRA_SETTLEMENT), limit),
+      settlementRecords: expose(domain.list(RECORD_TYPES.SRA_SETTLEMENT_RECORD), limit),
+      paymentReceipts: expose(domain.list(RECORD_TYPES.PAYMENT_RECEIPT), limit),
+      treasuryBankConnections: expose(domain.list(RECORD_TYPES.TREASURY_BANK_CONNECTION), limit),
+      treasuryWallets: expose(domain.list(RECORD_TYPES.TREASURY_CRYPTO_WALLET), limit),
+      lifecycleEvents: expose(domain.list(RECORD_TYPES.LIFECYCLE_EVENT), limit),
+      users
+    };
+    const counts = Object.fromEntries(Object.entries(records).map(([key, value]) => [key, value.length]));
+    const states = Object.fromEntries(Object.entries(records).filter(([, value]) => Array.isArray(value)).map(([key, value]) => {
+      const byState = {};
+      for (const record of value) byState[stateOf(record)] = (byState[stateOf(record)] || 0) + 1;
+      return [key, byState];
+    }));
+    return res.json({ generatedAt: new Date().toISOString(), administrator: { id: session.id, displayName: session.displayName }, counts, states, records });
+  });
 
   router.get('/api/admin/summary', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
