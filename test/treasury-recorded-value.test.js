@@ -39,7 +39,7 @@ test('treasury posts only balanced administrator-approved journals', async () =>
   assert.equal(service.summary().journalCount, 1);
 });
 
-test('recorded-value correction carries USD value through position, instrument, and listing', async () => {
+test('recorded-value correction carries USD value only through the Financial Record and SRA Coin Position', async () => {
   const observation = { observationId: 'OBS-1', rawValues: { price: 50000, size: 0.002, notional: 100 } };
   const financialRecord = { financialRecordId: 'FR-1', observationId: 'OBS-1', recognizedPosition: { amount: 100, unit: 'USD', basis: 'SOURCE_TRANSACTION_NOTIONAL' }, state: 'RECORDED' };
   const position = { coinPositionId: 'CP-1', financialRecordId: 'FR-1', observationId: 'OBS-1', symbol: 'SRA', quantity: 0.002, state: 'REPRESENTED', restrictions: [] };
@@ -53,12 +53,16 @@ test('recorded-value correction carries USD value through position, instrument, 
     [RECORD_TYPES.MARKETPLACE_LISTING]: { 'LIST-1': listing }
   });
   const service = new RecordedValueRepresentationService(domain);
-  assert.equal(service.preview().correctablePositionCount, 1);
+  const preview = service.preview();
+  assert.equal(preview.correctablePositionCount, 1);
+  assert.ok(preview.doesNot.includes('CREATE_OR_MODIFY_INSTRUMENTS'));
+  assert.ok(preview.doesNot.includes('CREATE_OR_MODIFY_MARKETPLACE_LISTINGS'));
+
   const result = await service.approve({ approval: 'APPROVE' }, 'ADMIN-1');
   assert.equal(result.correctedPositionCount, 1);
   assert.equal(domain.get(RECORD_TYPES.COIN_POSITION, 'CP-1').quantity, 100);
-  assert.equal(domain.get(RECORD_TYPES.SRA_INSTRUMENT, 'INS-1').denomination.principalQuantity, 100);
-  assert.equal(domain.get(RECORD_TYPES.MARKETPLACE_LISTING, 'LIST-1').quantity, 100);
+  assert.equal(domain.get(RECORD_TYPES.SRA_INSTRUMENT, 'INS-1').denomination.principalQuantity, 0.002);
+  assert.equal(domain.get(RECORD_TYPES.MARKETPLACE_LISTING, 'LIST-1').quantity, 0.002);
   assert.deepEqual(domain.get(RECORD_TYPES.FINANCIAL_RECORD, 'FR-1').representation, { representedAmount: 100, unrepresentedAmount: 0, coinUnit: 'SRA', parRate: 1 });
 });
 
