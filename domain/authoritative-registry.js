@@ -1,6 +1,15 @@
 const ACTIVE_RELATIONSHIP_STATES = new Set(['PENDING', 'ACTIVE']);
 const ACTIVE_RESERVATION_STATES = new Set(['HELD', 'CONSUMING']);
 
+function isUnexpired(record, now = new Date()) {
+  return !record.expiresAt || new Date(record.expiresAt) > now;
+}
+
+function custodyMode(relationship) {
+  const mode = relationship.restrictions?.find(({ type }) => type === 'CUSTODY_MODE')?.value;
+  return String(mode || 'EXCLUSIVE').toUpperCase();
+}
+
 export const ASSET_RELATIONSHIP_TYPES = Object.freeze([
   'OWNS',
   'BENEFICIAL_OWNER_OF',
@@ -129,10 +138,7 @@ export class AssetStateSnapshot {
     this.allocatedAmount = allocatedAmount;
     this.reservedAmount = reservedAmount;
     this.encumberedAmount = encumberedAmount;
-    this.availableCapacity = Math.max(
-      0,
-      transferableCapacity - allocatedAmount - reservedAmount - encumberedAmount,
-    );
+    this.availableCapacity = Math.max(0, transferableCapacity - allocatedAmount - reservedAmount - encumberedAmount);
     this.relationships = relationships;
     this.restrictions = restrictions;
     this.sourceEventId = sourceEventId;
@@ -152,7 +158,7 @@ export class RegistryConflictError extends Error {
 export class ConflictDetectionService {
   static assertRelationshipAllowed(candidate, relationships = []) {
     const active = relationships.filter((relationship) =>
-      ACTIVE_RELATIONSHIP_STATES.has(relationship.status),
+      ACTIVE_RELATIONSHIP_STATES.has(relationship.status) && isUnexpired(relationship),
     );
 
     if (candidate.relationshipType === 'OWNS') {
@@ -171,19 +177,18 @@ export class ConflictDetectionService {
     }
 
     if (candidate.relationshipType === 'CUSTODIAN_OF') {
-      const exclusiveCustodians = active.filter((relationship) =>
+      const candidateExclusive = custodyMode(candidate) !== 'NON_EXCLUSIVE';
+      const conflictingCustodians = active.filter((relationship) =>
         relationship.assetId === candidate.assetId &&
         relationship.relationshipType === 'CUSTODIAN_OF' &&
         relationship.subjectParticipantId !== candidate.subjectParticipantId &&
-        !relationship.restrictions.some(({ type, value }) =>
-          type === 'CUSTODY_MODE' && value === 'NON_EXCLUSIVE',
-        ),
+        (candidateExclusive || custodyMode(relationship) !== 'NON_EXCLUSIVE'),
       );
-      if (exclusiveCustodians.length > 0) {
+      if (conflictingCustodians.length > 0) {
         throw new RegistryConflictError(
           'EXCLUSIVE_CUSTODY_CONFLICT',
-          'The asset already has a different exclusive custodian.',
-          { relationshipIds: exclusiveCustodians.map(({ id }) => id) },
+          'Exclusive custody cannot coexist with a different active custodian.',
+          { relationshipIds: conflictingCustodians.map(({ id }) => id) },
         );
       }
     }
@@ -198,11 +203,12 @@ export class ConflictDetectionService {
         'The reservation does not match the supplied position.',
       );
     }
+    const now = new Date();
     const activeReserved = reservations
       .filter((reservation) =>
         reservation.positionId === position.id &&
         ACTIVE_RESERVATION_STATES.has(reservation.status) &&
-        (!reservation.expiresAt || new Date(reservation.expiresAt) > new Date()),
+        isUnexpired(reservation, now),
       )
       .reduce((total, reservation) => total + reservation.amount, 0);
     const available = Math.max(0, Number(position.transferableValue || 0) - activeReserved);
@@ -228,17 +234,24 @@ export class AuthoritativeAssetRegistry {
   async registerRelationship(relationship, { expectedAssetVersion, actorId }) {
     const asset = await this.assetRepository.getById(relationship.assetId);
     if (!asset) throw new Error(`Asset not found: ${relationship.assetId}`);
-    if (expectedAssetVersion != null && asset.version !== expectedAssetVersion) {
-      throw new RegistryConflictError(
-        'STALE_ASSET_VERSION',
-        'Asset version changed before the relationship could be registered.',
-        { expectedAssetVersion, actualAssetVersion: asset.version },
-      );
-    }
-    const relationships = await this.relationshipRepository.listByAssetId(asset.id);
-    ConflictDetectionService.assertRelationshipAllowed(relationship, relationships);
-    await this.relationshipRepository.save(relationship);
-    await this.#appendLifecycle(asset, {
+    const write = async () => {
+      const currentAsset = await this.assetRepository.getById(relationship.assetId);
+      if (expectedAssetVersion != null && currentAsset.version !== expectedAssetVersion) {
+        throw new RegistryConflictError(
+          'STALE_ASSET_VERSION',
+          'Asset version changed before the relationship could be registered.',
+          { expectedAssetVersion, actualAssetVersion: currentAsset.version },
+        );
+      }
+      const relationships = await this.relationshipRepository.listByAssetId(currentAsset.id);
+      ConflictDetectionService.assertRelationshipAllowed(relationship, relationships);
+      await this.relationshipRepository.save(relationship);
+      return currentAsset;
+    };
+    const currentAsset = this.relationshipRepository.runExclusive
+      ? await this.relationshipRepository.runExclusive(asset.id, write)
+      : await write();
+    await this.#appendLifecycle(currentAsset, {
       type: 'ASSET_RELATIONSHIP_REGISTERED',
       actorId,
       relationshipId: relationship.id,
@@ -252,20 +265,27 @@ export class AuthoritativeAssetRegistry {
   async reservePosition(candidate, { expectedPositionVersion, actorId, positionRepository }) {
     const position = await positionRepository.getById(candidate.positionId);
     if (!position) throw new Error(`Position not found: ${candidate.positionId}`);
-    if (expectedPositionVersion != null && position.version !== expectedPositionVersion) {
-      throw new RegistryConflictError(
-        'STALE_POSITION_VERSION',
-        'Position version changed before capacity could be reserved.',
-        { expectedPositionVersion, actualPositionVersion: position.version },
-      );
-    }
-    const reservations = await this.reservationRepository.listByPositionId(position.id);
-    ConflictDetectionService.assertReservationAllowed({ position, candidate, reservations });
-    await this.reservationRepository.save(candidate);
-    await this.#appendLifecycle({ id: position.assetId, lifecycleRecordId: null }, {
+    const write = async () => {
+      const currentPosition = await positionRepository.getById(candidate.positionId);
+      if (expectedPositionVersion != null && currentPosition.version !== expectedPositionVersion) {
+        throw new RegistryConflictError(
+          'STALE_POSITION_VERSION',
+          'Position version changed before capacity could be reserved.',
+          { expectedPositionVersion, actualPositionVersion: currentPosition.version },
+        );
+      }
+      const reservations = await this.reservationRepository.listByPositionId(currentPosition.id);
+      ConflictDetectionService.assertReservationAllowed({ position: currentPosition, candidate, reservations });
+      await this.reservationRepository.save(candidate);
+      return currentPosition;
+    };
+    const currentPosition = this.reservationRepository.runExclusive
+      ? await this.reservationRepository.runExclusive(position.id, write)
+      : await write();
+    await this.#appendLifecycle({ id: currentPosition.assetId, lifecycleRecordId: null }, {
       type: 'POSITION_CAPACITY_RESERVED',
       actorId,
-      positionId: position.id,
+      positionId: currentPosition.id,
       reservationId: candidate.id,
       amount: candidate.amount,
       purpose: candidate.purpose,
@@ -279,8 +299,9 @@ export class AuthoritativeAssetRegistry {
     if (!asset) throw new Error(`Asset not found: ${assetId}`);
     const relationships = await this.relationshipRepository.listByAssetId(assetId);
     const reservations = await this.reservationRepository.listByAssetId(assetId);
+    const now = new Date();
     const reservedAmount = reservations
-      .filter((reservation) => ACTIVE_RESERVATION_STATES.has(reservation.status))
+      .filter((reservation) => ACTIVE_RESERVATION_STATES.has(reservation.status) && isUnexpired(reservation, now))
       .reduce((total, reservation) => total + reservation.amount, 0);
     return new AssetStateSnapshot({
       assetId,
@@ -291,7 +312,7 @@ export class AuthoritativeAssetRegistry {
       reservedAmount,
       encumberedAmount,
       relationships: relationships.filter((relationship) =>
-        ACTIVE_RELATIONSHIP_STATES.has(relationship.status),
+        ACTIVE_RELATIONSHIP_STATES.has(relationship.status) && isUnexpired(relationship, now),
       ),
       sourceEventId,
     });
