@@ -1,6 +1,5 @@
 import crypto from 'node:crypto';
 import { RECORD_TYPES } from './persistent-domain-service.js';
-import { InstrumentEngineService } from './instrument-engine-service.js';
 
 const ACTOR_ID = 'COINBASE_TRANSACTION_ASSET_PIPELINE';
 
@@ -15,17 +14,16 @@ function finitePositive(value, field) {
 }
 
 export class CoinbaseTransactionAssetPipelineService {
-  constructor({ observationLayerService, financialRecordService, instrumentEngineService, persistentDomain, environment = process.env, logger = console } = {}) {
+  constructor({ observationLayerService, financialRecordService, persistentDomain, environment = process.env, logger = console } = {}) {
     if (!observationLayerService?.recognize) throw new Error('observationLayerService is required.');
     if (!financialRecordService?.createFromRecognition || !financialRecordService?.representAsCoin) throw new Error('financialRecordService is required.');
     this.observations = observationLayerService;
     this.financialRecords = financialRecordService;
     this.domain = persistentDomain || observationLayerService.persistentDomain;
-    this.instruments = instrumentEngineService || new InstrumentEngineService(this.domain);
     this.environment = environment;
     this.logger = logger;
     this.enabled = String(environment.COINBASE_TRANSACTION_ASSET_PIPELINE_ENABLED ?? 'true').toLowerCase() !== 'false';
-    this.instrumentFormationEnabled = String(environment.COINBASE_TRANSACTION_INSTRUMENT_FORMATION_ENABLED ?? 'true').toLowerCase() !== 'false';
+    this.instrumentFormationEnabled = false;
     this.backfillLimit = Number(environment.COINBASE_TRANSACTION_ASSET_BACKFILL_LIMIT || 5000);
     this.processed = 0;
     this.recognized = 0;
@@ -43,12 +41,13 @@ export class CoinbaseTransactionAssetPipelineService {
     return {
       enabled: this.enabled,
       state: this.enabled ? 'ACTIVE' : 'DISABLED',
-      instrumentFormationEnabled: this.instrumentFormationEnabled,
+      instrumentFormationEnabled: false,
+      pipelineBoundary: 'COIN_POSITION',
       processed: this.processed,
       recognized: this.recognized,
       financialRecordsCreated: this.financialRecordsCreated,
       coinPositionsCreated: this.coinPositionsCreated,
-      instrumentsCreated: this.instrumentsCreated,
+      instrumentsCreated: 0,
       skipped: this.skipped,
       failed: this.failed,
       backfillState: this.backfillState,
@@ -73,10 +72,7 @@ export class CoinbaseTransactionAssetPipelineService {
     const coinPosition = financialRecord
       ? this.domain.list(RECORD_TYPES.COIN_POSITION).find((item) => item.financialRecordId === financialRecord.financialRecordId && item.state !== 'RETIRED')
       : null;
-    const instrument = coinPosition
-      ? this.domain.list(RECORD_TYPES.SRA_INSTRUMENT).find((item) => item.coinPositionId === coinPosition.coinPositionId && !['CANCELLED', 'MATURED', 'CLOSED'].includes(item.state))
-      : null;
-    return { recognition, financialRecord, coinPosition, instrument };
+    return { recognition, financialRecord, coinPosition };
   }
 
   async processObservation(observationOrId) {
@@ -97,7 +93,7 @@ export class CoinbaseTransactionAssetPipelineService {
       const size = finitePositive(raw.size, 'trade size');
       const subjectId = `COINBASE:${productId}`;
       const key = shortHash(subjectId);
-      let { recognition, financialRecord, coinPosition, instrument } = this.existingChain(observation);
+      let { recognition, financialRecord, coinPosition } = this.existingChain(observation);
 
       if (!recognition) {
         const result = await this.observations.recognize(observation.observationId, {
@@ -150,7 +146,7 @@ export class CoinbaseTransactionAssetPipelineService {
           ],
           obligations: [
             { type: 'SOURCE_TRACEABILITY_OBLIGATION' },
-            { type: 'VALUE_SEPARATION_OBLIGATION', scope: 'Keep source amount, Verified Value, offered price, and executed trade price separate.' }
+            { type: 'VALUE_SEPARATION_OBLIGATION', scope: 'Keep source quantity, recorded USD value, offered price, and executed trade price separate.' }
           ],
           restrictions: [
             { type: 'NO_UNDERLYING_ACCOUNT_OWNERSHIP_INFERRED' }
@@ -176,42 +172,18 @@ export class CoinbaseTransactionAssetPipelineService {
         if (result.created) this.coinPositionsCreated += 1;
       }
 
-      if (this.instrumentFormationEnabled && !instrument) {
-        const result = await this.instruments.createFromCoinPosition(coinPosition.coinPositionId, {
-          instrumentType: 'SRA_TRANSACTION_VALUE_INSTRUMENT',
-          name: `${productId} Trade ${tradeId} SRA Instrument`,
-          principalQuantity: coinPosition.quantity,
-          issuer: { type: 'SRA_PLATFORM', id: 'SAIN_REAL_ASSET_MARKET' },
-          purpose: 'MARKETPLACE_LISTING_PREPARATION',
-          transferability: 'RESTRICTED',
-          settlementUnit: 'SRA',
-          rights: [
-            { type: 'INSTRUMENT_SOURCE_LINEAGE_RIGHT', scope: 'Trace the instrument to its Coin Position, Financial Record, Recognition Assessment, and Coinbase observation.' }
-          ],
-          obligations: [
-            { type: 'OFFERING_TERMS_REQUIRED_BEFORE_LISTING' },
-            { type: 'EXECUTED_PRICE_RECORDED_SEPARATELY' }
-          ],
-          restrictions: [
-            { type: 'DRAFT_NOT_YET_LISTED' },
-            { type: 'NO_AUTOMATIC_TRANSACTION_OR_SETTLEMENT' },
-            { type: 'PUBLIC_SOURCE_TRADE_DOES_NOT_CONVEY_COINBASE_CUSTOMER_RIGHTS' }
-          ],
-          conditions: [
-            { type: 'ADMINISTRATIVE_REVIEW_REQUIRED' },
-            { type: 'LISTING_PRICE_REQUIRED' },
-            { type: 'MARKET_ACCESS_AND_SETTLEMENT_RAIL_REQUIRED' }
-          ],
-          reason: 'Draft SRA instrument formed from a transaction-backed Coin Position for marketplace listing preparation.'
-        }, ACTOR_ID);
-        instrument = result.instrument;
-        if (result.created) this.instrumentsCreated += 1;
-      }
-
       this.processed += 1;
       this.lastProcessedAt = new Date().toISOString();
       this.lastError = null;
-      return { processed: true, observation, recognition, financialRecord, coinPosition, instrument };
+      return {
+        processed: true,
+        observation,
+        recognition,
+        financialRecord,
+        coinPosition,
+        instrument: null,
+        pipelineBoundary: 'COIN_POSITION'
+      };
     } catch (error) {
       this.failed += 1;
       this.lastError = { message: error?.message || String(error), observationId: observation.observationId, at: new Date().toISOString() };
