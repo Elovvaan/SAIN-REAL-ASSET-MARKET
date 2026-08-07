@@ -65,6 +65,7 @@ import { AssetRelationshipLedgerService } from './services/asset-relationship-le
 import { DatabaseService } from './services/database-service.js';
 import { PersistentDomainService, RECORD_TYPES } from './services/persistent-domain-service.js';
 import { PersistentMarketplaceService } from './services/persistent-marketplace-service.js';
+import { installAuthoritativeAssetRegistry } from './app-authoritative-registry.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -155,6 +156,7 @@ export async function createApp(options = {}) {
     settlementService: sraSettlementService
   });
   const onboardingRouter = await createOnboardingRouter(domainStore, database, persistentDomain);
+  const authoritativeAssetRegistryService = installAuthoritativeAssetRegistry(app, { persistentDomain, accessService });
 
   app.use('/api/access', createAccessRouter(marketplace, accessService));
   app.use('/api/participation', createParticipationRouter(marketplace, accessService, persistentDomain));
@@ -199,6 +201,7 @@ export async function createApp(options = {}) {
     financialRecordService,
     financialHistoryService,
     assetRelationshipLedgerService,
+    authoritativeAssetRegistryService,
     sraAgentService,
   };
 }
