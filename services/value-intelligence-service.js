@@ -98,7 +98,7 @@ export class ValueIntelligenceService {
   }
 
   async createCanonicalMarketEventDetermination({ signal, event, realizedAmount, currency }, actorId = null) {
-    const subjectId = `ASSET-${signal.assetId}`;
+    const subjectId = `MARKET-EVENT-ASSET-${signal.assetId}`;
     let subject = this.domain.get(DETERMINATION_RECORD_TYPES.SUBJECT, subjectId);
     if (!subject) {
       subject = await this.determinationEngine.registerSubject({
@@ -141,7 +141,7 @@ export class ValueIntelligenceService {
       directValue: realizedAmount,
       currency,
       confidence: {
-        level: 'HIGH',
+        level: 'DIRECT_VERIFIED_EVENT',
         basis: 'SRA_VERIFIED_MARKET_EVENT',
         sourceCount: 1,
         observationCount: 1,
