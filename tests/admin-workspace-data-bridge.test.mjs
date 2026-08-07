@@ -18,3 +18,12 @@ test('caps the all-domain workspace payload and hides duplicated metric cards', 
   assert.match(bridge, /searchParams\.set\('limit'/);
   assert.match(bridge, /admin-workspace-controls \.metric/);
 });
+
+test('surfaces Treasury external transfer instructions in Export & Settlement', () => {
+  const bridge = fs.readFileSync(new URL('../public/admin/admin-workspace-data-bridge.js', import.meta.url), 'utf8');
+  assert.match(bridge, /EXTERNAL_TRANSFER_INSTRUCTION/);
+  assert.match(bridge, /records\.settlementInstructions/);
+  assert.match(bridge, /record\.amountUsd/);
+  assert.match(bridge, /record\.destinationReference/);
+  assert.match(bridge, /record\.transferInstructionId/);
+});
