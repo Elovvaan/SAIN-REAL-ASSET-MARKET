@@ -3,13 +3,13 @@
   window.__sraAdminBootstrapInstalled = true;
 
   const FEATURES = [
+    ['/admin/admin-suite-shell.js', 'data-sra-admin-suite-shell'],
     ['/admin/listing-authorization-ui.js', 'data-sra-listing-authorization'],
     ['/admin/hybrid-liquidity-admin.js', 'data-sra-hybrid-liquidity'],
     ['/admin/core-services-dashboard.js', 'data-sra-core-services'],
     ['/admin/operations-queue-ui.js', 'data-sra-operations-queue'],
     ['/admin/treasury-ledger-ui.js', 'data-sra-treasury-ledger'],
     ['/admin/admin-button-diagnostics-core.js', 'data-sra-admin-diagnostics-core'],
-    ['/admin/admin-suite-shell.js', 'data-sra-admin-suite-shell'],
     ['/admin/admin-instrument-approvals.js', 'data-sra-admin-instrument-approvals'],
   ];
 
@@ -65,18 +65,36 @@
     }, 180);
   }
 
+  function concealLegacyFirstPaint(admin) {
+    if (!admin) return;
+    admin.dataset.adminSuiteBooting = 'true';
+    admin.style.visibility = 'hidden';
+  }
+
+  function revealAdminSuite(admin) {
+    if (!admin) return;
+    admin.style.visibility = '';
+    delete admin.dataset.adminSuiteBooting;
+  }
+
   async function boot() {
     if (booted) return;
     const admin = document.querySelector('#admin-view:not(.hidden)');
     if (!admin) return;
     booted = true;
+    concealLegacyFirstPaint(admin);
     try {
-      for (const [source, marker] of FEATURES) await loadScript(source, marker);
+      const [shellSource, shellMarker] = FEATURES[0];
+      await loadScript(shellSource, shellMarker);
+      if (!admin.querySelector('.admin-suite')) throw new Error('Administration shell did not mount.');
+      revealAdminSuite(admin);
+      for (const [source, marker] of FEATURES.slice(1)) await loadScript(source, marker);
       window.dispatchEvent(new CustomEvent('sra:admin-booted', {
         detail: { featureCount: FEATURES.length, bootedAt: new Date().toISOString() },
       }));
     } catch (error) {
       booted = false;
+      revealAdminSuite(admin);
       console.error('SAIN Administration bootstrap failed.', error);
     }
   }
