@@ -1,0 +1,30 @@
+name: Authoritative Registry
+
+on:
+  pull_request:
+    paths:
+      - 'domain/authoritative-registry.js'
+      - 'services/authoritative-asset-registry-service.js'
+      - 'tests/authoritative-asset-registry.test.mjs'
+      - '.github/workflows/authoritative-registry.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'domain/authoritative-registry.js'
+      - 'services/authoritative-asset-registry-service.js'
+      - 'tests/authoritative-asset-registry.test.mjs'
+      - '.github/workflows/authoritative-registry.yml'
+
+jobs:
+  registry-concurrency:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Run authoritative registry tests
+        run: node --test --test-concurrency=1 tests/authoritative-asset-registry.test.mjs
