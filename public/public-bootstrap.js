@@ -60,7 +60,12 @@
   }
 
   async function boot() {
-    for (const source of FEATURES) await loadScript(source);
+    for (const source of FEATURES) {
+      await loadScript(source);
+      if (source === '/access.js' && document.readyState !== 'loading' && typeof window.initializeAccess === 'function') {
+        await window.initializeAccess();
+      }
+    }
     window.dispatchEvent(new CustomEvent('sra:public-booted', {
       detail: { featureCount: FEATURES.length, bootedAt: new Date().toISOString() },
     }));
