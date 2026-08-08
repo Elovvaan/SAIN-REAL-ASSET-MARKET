@@ -1,18 +1,20 @@
 import express from 'express';
 import { ExternalDexAdapterService } from '../services/external-dex-adapter-service.js';
+import { ExternalDexExecutorService } from '../services/external-dex-executor-service.js';
 
 function actorId(req) {
   return req.get('x-sra-actor-id') || req.body?.actorId || null;
 }
 
 function handle(res, error) {
-  const status = ['PROJECTION_INELIGIBLE','DEX_EXPORT_INELIGIBLE'].includes(error.code) ? 422 : /not found/i.test(error.message) ? 404 : 400;
-  return res.status(status).json({ error: error.message, code: error.code || 'ON_CHAIN_PROJECTION_ERROR', assessment: error.assessment || null });
+  const status = ['PROJECTION_INELIGIBLE','DEX_EXPORT_INELIGIBLE'].includes(error.code) ? 422 : error.code === 'DEX_EXECUTOR_NOT_READY' ? 503 : error.code === 'DEX_EXECUTOR_REJECTED' ? 502 : /not found/i.test(error.message) ? 404 : 400;
+  return res.status(status).json({ error: error.message, code: error.code || 'ON_CHAIN_PROJECTION_ERROR', assessment: error.assessment || null, executorStatus: error.executorStatus || null });
 }
 
 export function createOnChainProjectionRouter(service) {
   const router = express.Router();
   const dex = new ExternalDexAdapterService(service.domain, service);
+  const dexExecutor = new ExternalDexExecutorService();
 
   router.get('/status', (_req, res) => res.json(service.status()));
 
@@ -79,10 +81,11 @@ export function createOnChainProjectionRouter(service) {
   router.get('/reconciliations', (req, res) => res.json({ records: service.listReconciliations(req.query.projectionId || null) }));
 
   router.get('/dex/status', async (_req, res) => {
-    try { return res.json(await dex.status()); }
+    try { return res.json({ ...(await dex.status()), executor: dexExecutor.status() }); }
     catch (error) { return handle(res, error); }
   });
 
+  router.get('/dex/executor/status', (_req, res) => res.json(dexExecutor.status()));
   router.get('/dex/venues', (_req, res) => res.json({ records: dex.venues() }));
 
   router.get('/dex/exports', async (req, res) => {
@@ -105,6 +108,25 @@ export function createOnChainProjectionRouter(service) {
   router.post('/dex/exports', async (req, res) => {
     try { return res.status(201).json(await dex.prepare(req.body || {}, actorId(req))); }
     catch (error) { return handle(res, error); }
+  });
+
+  router.post('/dex/exports/:dexExportId/execute', async (req, res) => {
+    try {
+      const record = await dex.getExport(req.params.dexExportId);
+      if (!record) return res.status(404).json({ error: 'DEX export was not found.' });
+      const execution = await dexExecutor.execute(record, req.body || {});
+      const submitted = await dex.markSubmitted(record.dexExportId, { connectorReference: execution.connectorReference }, actorId(req));
+      if (execution.transactionSignature && execution.poolAddress) {
+        const confirmed = await dex.confirm(record.dexExportId, {
+          transactionSignature: execution.transactionSignature,
+          poolAddress: execution.poolAddress,
+          executedQuantity: execution.executedQuantity ?? record.quantity,
+          observedMarketPrice: execution.observedMarketPrice,
+        }, actorId(req));
+        return res.status(201).json({ execution, submitted, confirmed });
+      }
+      return res.status(202).json({ execution, submitted, confirmationPending: true });
+    } catch (error) { return handle(res, error); }
   });
 
   router.post('/dex/exports/:dexExportId/submitted', async (req, res) => {
