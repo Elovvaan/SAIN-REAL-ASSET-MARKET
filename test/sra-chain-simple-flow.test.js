@@ -1,0 +1,1 @@
+import test from 'node:test';import assert from 'node:assert/strict';test('simple chain flow contract',()=>{assert.deepEqual(['platform address','destination address','asset','amount','signature'],['platform address','destination address','asset','amount','signature']);});
