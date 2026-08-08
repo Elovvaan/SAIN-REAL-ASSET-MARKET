@@ -53,9 +53,10 @@ export async function installTreasuryTransferReadinessRoutes({ router, domain, r
       treasury: treasury.summary(),
       execution: liveExecution.status(),
       boundaries: {
-        externalSubmissionExecuted: false,
         providerConnectionRequiredForSend: true,
-        finalCashReductionPosted: false,
+        authoritativePaymentRecord: 'EXTERNAL_TRANSFER_INSTRUCTION',
+        receivingConfirmationRequiredForReconciliation: true,
+        accountingClassificationAfterReconciliation: true,
       },
     });
   });
@@ -102,16 +103,16 @@ export async function installTreasuryTransferReadinessRoutes({ router, domain, r
       }, session.id);
       if (database?.audit) await database.audit({
         actorId: session.id,
-        eventType: 'SRA_MANUAL_ACH_DESTINATION_PREPARED',
-        objectType: 'TRANSFER_DESTINATION',
-        objectId: destinationResult.destination.destinationId,
+        eventType: 'SRA_TREASURY_ACH_PAYMENT_AUTHORIZED',
+        objectType: 'EXTERNAL_TRANSFER_INSTRUCTION',
+        objectId: transferResult.transferInstruction.transferInstructionId,
         payload: {
           route: 'ACH',
           accountType: prepared.accountType,
           accountLast4: prepared.accountLast4,
           routingLast4: prepared.routingLast4,
           amountUsd: transferResult.transferInstruction.amountUsd,
-          transferInstructionId: transferResult.transferInstruction.transferInstructionId,
+          fundsState: transferResult.transferInstruction.fundsState,
           rawBankDetailsStored: false,
         },
       });
@@ -124,9 +125,9 @@ export async function installTreasuryTransferReadinessRoutes({ router, domain, r
           routingLast4: prepared.routingLast4,
           rawBankDetailsStored: false,
         },
-        exportPackage: transferResult.exportPackage,
         transferInstruction: transferResult.transferInstruction,
-        executionAuthorization: transferResult.executionAuthorization,
+        paymentInstruction: transferResult.paymentInstruction,
+        exportPackage: transferResult.exportPackage,
         externalSubmissionExecuted: false,
       });
     } catch (error) {
@@ -154,8 +155,29 @@ export async function installTreasuryTransferReadinessRoutes({ router, domain, r
       });
       return res.status(202).json(result);
     } catch (error) {
-      const status = error?.code === 'LIVE_EXECUTION_CONFIRMATION_REQUIRED' ? 409 : 422;
-      return res.status(status).json({ error: error.message, code: error.code || 'SRA_TREASURY_ACH_CANARY_EXECUTION_FAILED', executionEvidence: error.executionEvidence || null });
+      return res.status(422).json({ error: error.message, code: error.code || 'SRA_TREASURY_ACH_CANARY_EXECUTION_FAILED', executionEvidence: error.executionEvidence || null });
+    }
+  });
+
+  router.post('/api/admin/treasury-transfer-readiness/ach/reconcile', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    try {
+      const result = await liveExecution.reconcile(req.body || {}, session.id);
+      if (database?.audit) await database.audit({
+        actorId: session.id,
+        eventType: 'SRA_TREASURY_ACH_PAYMENT_RECONCILED',
+        objectType: 'EXTERNAL_TRANSFER_INSTRUCTION',
+        objectId: result.instruction.transferInstructionId,
+        payload: {
+          amountUsd: result.instruction.confirmedAmount,
+          providerReference: result.instruction.providerReference,
+          receivingConfirmationReference: result.instruction.receivingConfirmationReference,
+          accountingState: result.instruction.accountingState,
+        },
+      });
+      return res.json(result);
+    } catch (error) {
+      return res.status(422).json({ error: error.message, code: 'SRA_TREASURY_ACH_RECONCILIATION_FAILED' });
     }
   });
 
@@ -169,7 +191,7 @@ export async function installTreasuryTransferReadinessRoutes({ router, domain, r
     const session = await requireAdmin(req, res); if (!session) return;
     try {
       const result = await transfers.approve(req.body || {}, session.id);
-      if (database?.audit) await database.audit({ actorId: session.id, eventType: 'SRA_TREASURY_TRANSFER_READY_TO_SEND', objectType: 'EXPORT_PACKAGE', objectId: result.exportPackage.exportPackageId, payload: { amountUsd: result.exportPackage.amountUsd, route: result.exportPackage.route, destinationId: result.exportPackage.destinationId, treasuryReservationId: result.reservation.reservationId } });
+      if (database?.audit) await database.audit({ actorId: session.id, eventType: 'SRA_TREASURY_PAYMENT_AUTHORIZED', objectType: 'EXTERNAL_TRANSFER_INSTRUCTION', objectId: result.transferInstruction.transferInstructionId, payload: { amountUsd: result.transferInstruction.amountUsd, route: result.transferInstruction.route, destinationId: result.transferInstruction.destinationId, fundsState: result.transferInstruction.fundsState } });
       return res.status(result.created ? 201 : 200).json(result);
     } catch (error) { return res.status(422).json({ error: error.message, code: 'SRA_TREASURY_TRANSFER_APPROVAL_FAILED' }); }
   });
