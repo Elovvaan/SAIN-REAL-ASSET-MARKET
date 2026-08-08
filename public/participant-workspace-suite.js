@@ -185,8 +185,18 @@
     return `<button class="product-card" data-suite-view="${esc(target)}"><strong>${esc(title)}</strong><span>${esc(copy)}</span><small>Open →</small></button>`;
   }
 
+  function capability(id) {
+    return (window.accessState?.session?.capabilities || []).find((item) => item.id === id) || null;
+  }
+
   function instrumentMarkup() {
-    return `<section class="participant-journey"><section class="participant-journey-section"><h3>Create an Instrument</h3><p>Your available instrument types are based on recognized value, current tier, and approved capacity.</p><div class="capability-list"><div class="capability-item available">Tier 1 — Recorded-value instruments</div><div class="capability-item pending">Tier 2 — Commercial and project instruments require approval</div><div class="capability-item pending">Tier 3 — Transferable financing instruments require governed settlement access</div></div></section></section>`;
+    const session = window.accessState?.session || {};
+    const activeCapacity = session.activeCapacity || 'UNIVERSAL';
+    const assetProvider = capability('ASSET_PROVIDER');
+    const professional = capability('MARKET_PROFESSIONAL');
+    const institutional = capability('INSTITUTIONAL_OPERATOR');
+    const transferableReady = ['ASSET_PROVIDER','MARKET_PROFESSIONAL','INSTITUTIONAL_OPERATOR','PLATFORM_ADMIN'].includes(activeCapacity);
+    return `<section class="participant-journey"><section class="participant-journey-section"><div class="transaction-section-title"><div><p class="eyebrow">INSTRUMENT FORMATION</p><h2>Create an Instrument</h2><p>This workspace reflects the capabilities currently attached to your Universal Account. It does not treat an internal record as an issued instrument.</p></div><span class="badge open">${esc(activeCapacity.replaceAll('_',' '))}</span></div><div class="participant-home-summary"><article><span>Universal account</span><strong>${esc(session.universalAccountId || 'Linked')}</strong></article><article><span>Asset Provider</span><strong>${esc(assetProvider?.state || 'NOT ADDED')}</strong></article><article><span>Market Professional</span><strong>${esc(professional?.state || 'NOT ADDED')}</strong></article><article><span>Institutional Operator</span><strong>${esc(institutional?.state || 'NOT ADDED')}</strong></article></div><div class="journey-list"><div class="journey-row"><strong>Recorded-value formation</strong><span>SAIN can review a proposed instrument against recognized value and the records already attached to this account.</span></div><div class="journey-row"><strong>Commercial / project formation</strong><span>${assetProvider?.state === 'ACTIVE' ? 'Asset Provider capability is active for this identity.' : 'Asset Provider capability is not currently active.'}</span></div><div class="journey-row"><strong>Transferable financing instruments</strong><span>${transferableReady ? 'Your current operating tier can enter the governed financing workflow when the required underlying records exist.' : 'A governed operating capability and qualifying underlying records are required before transferable financing formation.'}</span></div><div class="journey-row"><strong>Issuance boundary</strong><span>Creating or reviewing a proposal here is not issuance. Review, authorization, and the instrument lifecycle remain separate platform stages.</span></div></div></section></section>`;
   }
 
   function financingMarkup() {
@@ -200,8 +210,8 @@
   function staticMarkup(view) {
     if (view === 'instruments') return instrumentMarkup();
     if (view === 'funding-operations') return financingMarkup();
-    if (view === 'pools') return simpleMarkup('Predictions / Liquidity', 'Reference markets and liquidity information are shown only when approved products exist.', [['Reference markets', 'No approved participant reference markets are currently available.'], ['Execution boundary', 'Reference information is separate from executed market activity.']]);
-    if (view === 'participants') return simpleMarkup('Account', 'Manage your participant identity, tier, capabilities, and account access.', [['Current workspace', window.accessState?.session?.activeCapacity || 'Universal'], ['Capabilities', 'Use the Capabilities control to review available tiers.'], ['Security', 'Session and sign-in controls remain at the top of the page.']]);
+    if (view === 'pools') return simpleMarkup('Predictions / Liquidity', 'Reference-market capability is loading.', [['Reference markets', 'Approved reference markets only.'], ['Execution boundary', 'Reference information is separate from executed market activity.']]);
+    if (view === 'participants') return simpleMarkup('Account', 'Your Universal Account and capability states are loading.', [['Identity', 'One identity and one Universal Account.'], ['Capabilities', 'Operating tiers follow the capability records on this account.']]);
     return '';
   }
 
@@ -332,8 +342,10 @@
 
   function actionMarkup(view) {
     if (view === 'marketplace') return ['Marketplace', `<div class="participant-action-ticket"><div class="ticket-stat"><span>Market</span><strong>LIVE SRA/USD</strong></div><button type="button" data-participant-prompt="Show me opportunities I can participate in.">Find opportunities</button><button type="button" data-participant-prompt="Explain what is currently LIVE in the marketplace.">Explain market</button></div>`];
-    if (view === 'instruments') return ['Create Instrument', `<div class="participant-action-ticket"><div class="ticket-stat"><span>Tier</span><strong>Tier 1 — Available</strong></div><div class="ticket-stat"><span>Representation rule</span><strong>1 SRA = 1 USD recognized value</strong></div><label>Instrument amount<input type="number" min="0" step="any" placeholder="0.00 SRA"></label><label>Purpose<select><option>Recorded-value instrument</option><option>Commercial project</option><option>Financing instrument</option></select></label><label>Term<select><option>Open term</option><option>12 months</option><option>36 months</option></select></label><button type="button" data-participant-prompt="Review my proposed instrument with SAIN.">Review with SAIN</button></div>`];
-    if (view === 'funding-operations') return ['Request Financing', `<div class="participant-action-ticket"><div class="ticket-stat"><span>Available capacity</span><strong>Based on approved tier</strong></div><label>Approved instrument<select><option>Select instrument</option></select></label><label>Amount<input type="number" min="0" step="any" placeholder="0.00 USD"></label><label>Term<select><option>Select term</option><option>12 months</option><option>36 months</option></select></label><button type="button" data-participant-prompt="Review my financing request with SAIN.">Review Financing</button></div>`];
+    if (view === 'instruments') return ['Create Instrument', `<div class="participant-action-ticket"><div class="ticket-stat"><span>Current operating tier</span><strong>${esc(String(window.accessState?.session?.activeCapacity || 'UNIVERSAL').replaceAll('_',' '))}</strong></div><div class="ticket-stat"><span>Representation rule</span><strong>1 SRA = 1 USD recognized value</strong></div><button type="button" data-participant-prompt="Review what instrument formation paths are currently available to my account.">Review formation paths</button><button type="button" data-participant-prompt="What recognized value and authority records do I need before creating an instrument?">Explain prerequisites</button></div>`];
+    if (view === 'funding-operations') return ['Request Financing', `<div class="participant-action-ticket"><div class="ticket-stat"><span>Workflow</span><strong>Verified Value → Model → Instrument → Market → Settlement</strong></div><button type="button" data-participant-prompt="Explain my current financing state and the next available action.">Explain financing state</button></div>`];
+    if (view === 'pools') return ['Predictions / Liquidity', `<div class="participant-action-ticket"><div class="ticket-stat"><span>Boundary</span><strong>REFERENCE ONLY</strong></div><button type="button" data-participant-prompt="Explain the currently approved SRA reference markets.">Explain reference markets</button></div>`];
+    if (view === 'participants') return ['Account', `<div class="participant-action-ticket"><div class="ticket-stat"><span>Universal account</span><strong>${esc(window.accessState?.session?.universalAccountId || 'Linked')}</strong></div><button type="button" data-participant-prompt="Explain my current capabilities and operating tier.">Explain my capabilities</button></div>`];
     return ['What are you trying to accomplish?', ''];
   }
 
@@ -380,9 +392,18 @@
     else if (view === 'custody') void renderAssetVault(root);
     else if (view === 'activity') void renderTransactions(root);
     else if (view === 'assets') void renderSraCoin(root);
+    else if (view === 'instruments') root.innerHTML = instrumentMarkup();
     else if (view === 'funding-operations') {
       if (typeof window.renderParticipantFundingOperations === 'function') void window.renderParticipantFundingOperations(root);
       else root.innerHTML = financingMarkup();
+    } else if (view === 'pools') {
+      if (typeof window.renderHybridLiquidityWorkspace === 'function') void window.renderHybridLiquidityWorkspace(root);
+      else root.innerHTML = staticMarkup(view);
+    } else if (view === 'participants') {
+      if (typeof window.renderCapabilities === 'function') {
+        window.renderCapabilities();
+        setFrame('participants');
+      } else root.innerHTML = staticMarkup(view);
     } else root.innerHTML = staticMarkup(view);
     bindSuiteLinks(root);
     renderAction(view);

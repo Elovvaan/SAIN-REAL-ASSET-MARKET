@@ -1,35 +1,34 @@
 (() => {
-  async function loadMarkets() {
-    const response = await fetch('/api/sane/hybrid-liquidity/markets', { headers: { Accept: 'application/json' } });
-    if (!response.ok) return;
-    const payload = await response.json();
-    render(payload.markets || [], payload.status || {});
-  }
+  if (window.__sraHybridLiquidityWorkspaceInstalled) return;
+  window.__sraHybridLiquidityWorkspaceInstalled = true;
 
-  function render(markets, status) {
-    const terminal = document.querySelector('.live-terminal');
-    if (!terminal) return;
-    let panel = document.querySelector('#hybrid-liquidity-market-view');
-    if (!panel) {
-      panel = document.createElement('section');
-      panel.id = 'hybrid-liquidity-market-view';
-      panel.style.cssText = 'margin-top:16px;border:1px solid #243a58;border-radius:16px;background:#07111f;padding:16px;color:#eef5ff';
-      terminal.insertAdjacentElement('afterend', panel);
-    }
-    panel.innerHTML = `<div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start"><div><small style="color:#e3b73b;font-weight:800;letter-spacing:.12em">HYBRID LIQUIDITY LAYER</small><h3 style="margin:4px 0">Continuous Reference Markets</h3><p style="margin:0;color:#9eb2ca">Reference prices and event probabilities around verified SRA instruments. These are not executed trades.</p></div><strong style="color:#75aef0">${String(status.boundary || 'REFERENCE_ONLY').replaceAll('_', ' ')}</strong></div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:14px">${markets.length ? markets.map(card).join('') : '<div style="color:#9eb2ca;padding:16px;border:1px dashed #2a4364;border-radius:12px">No approved reference markets yet. Administration can define one around a verified SRA instrument.</div>'}</div>`;
+  const esc = (value) => String(value ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;');
+
+  async function requestJson(url) {
+    const response = await fetch(url, { cache:'no-store', headers:{ Accept:'application/json', 'Cache-Control':'no-cache' } });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || `Request failed with ${response.status}.`);
+    return payload;
   }
 
   function card(market) {
-    const mode = String(market.mode || '').replaceAll('_', ' ');
+    const mode = String(market.mode || 'REFERENCE_ONLY').replaceAll('_', ' ');
     const sources = market.indexMethodology?.referenceSources || [];
-    return `<article style="border:1px solid #263f60;border-radius:12px;padding:13px;background:#091625"><div style="display:flex;justify-content:space-between;gap:8px"><strong>${market.marketIdentity || 'SRA / USD'}</strong><span style="color:#e3b73b;font-size:11px">${mode}</span></div><div style="font-size:12px;color:#9eb2ca;margin-top:8px">Underlying: ${market.underlyingInstrumentId || '—'}</div><div style="font-size:12px;color:#9eb2ca">Index: ${market.indexMethodology?.method || '—'}</div><div style="font-size:12px;color:#9eb2ca">Sources: ${sources.join(', ') || '—'}</div><div style="margin-top:10px;padding:8px;border-radius:8px;background:#050b13;color:#75aef0;font-size:11px">Execution ${market.executionState || 'DISABLED'} · Reference only</div></article>`;
+    return `<article class="project-row context-card"><div class="project-main"><div class="project-title"><div class="project-symbol">◇</div><div><h3>${esc(market.marketIdentity || 'SRA / USD')}</h3><p>Underlying: ${esc(market.underlyingInstrumentId || 'Not linked')}</p></div></div><div class="project-signal"><strong>${esc(mode)}</strong><span>reference mode</span></div></div><div class="project-gain-row"><div><span>Index methodology</span><strong>${esc(market.indexMethodology?.method || 'Not defined')}</strong></div><div><span>Execution</span><strong>${esc(market.executionState || 'DISABLED')}</strong></div></div><div class="project-meta"><span class="badge">REFERENCE ONLY</span><span class="badge">${esc(sources.join(', ') || 'No reference sources')}</span></div></article>`;
   }
 
-  const observer = new MutationObserver(() => { if (document.querySelector('.live-terminal')) void loadMarkets(); });
-  window.addEventListener('DOMContentLoaded', () => {
-    observer.observe(document.body, { childList: true, subtree: true });
-    setTimeout(loadMarkets, 1000);
-  });
-  window.addEventListener('sra:marketplace-refreshed', loadMarkets);
+  async function render(root) {
+    if (!root) return;
+    root.innerHTML = '<div class="loading-state">Reading approved reference markets…</div>';
+    try {
+      const payload = await requestJson('/api/sane/hybrid-liquidity/markets');
+      const markets = Array.isArray(payload.markets) ? payload.markets : [];
+      const status = payload.status || {};
+      root.innerHTML = `<section class="metric-grid compact"><article class="metric-card"><span>Approved reference markets</span><strong>${markets.length}</strong><small>Verified-instrument reference definitions</small></article><article class="metric-card"><span>Boundary</span><strong>${esc(String(status.boundary || 'REFERENCE_ONLY').replaceAll('_',' '))}</strong><small>Reference and price discovery only</small></article><article class="metric-card"><span>Execution</span><strong>SEPARATE</strong><small>Reference markets do not imply executed trades</small></article></section><section class="panel contextual-panel"><div class="panel-header"><div><p class="eyebrow">HYBRID LIQUIDITY LAYER</p><h2>Predictions / Liquidity</h2><p>Approved reference prices and event probabilities around verified SRA instruments. Internal definitions do not become participant markets until approved.</p></div><span class="badge open">REFERENCE</span></div><div class="project-list">${markets.length ? markets.map(card).join('') : '<div class="transaction-empty"><strong>No approved reference markets yet.</strong><span>Administration can define one around a verified SRA instrument; nothing is presented here as an executed trade.</span></div>'}</div></section>`;
+    } catch (error) {
+      root.innerHTML = `<div class="empty-view"><h2>Predictions / Liquidity unavailable</h2><p>${esc(error.message)}</p></div>`;
+    }
+  }
+
+  window.renderHybridLiquidityWorkspace = render;
 })();
