@@ -1,3 +1,64 @@
-import express from 'express';import { OrcaExecutorWorker } from './orca-worker.js';import { SraTokenWorker } from './sra-token-worker.js';const port=Number(process.env.PORT||3000),app=express(),worker=new OrcaExecutorWorker(process.env),chain=new SraTokenWorker(process.env);let startupState='STARTING',startupError=null;app.set('trust proxy',1);app.use(express.json({limit:'256kb'}));const auth=req=>worker.authenticate(req.get('authorization'));function guard(req,res){if(startupState!=='READY'){res.status(503).json({error:'Executor is not ready.'});return false;}if(!auth(req)){res.status(401).json({error:'Unauthorized.'});return false;}return true;}function key(req,res){const k=String(req.get('idempotency-key')||'').trim();if(!k)res.status(400).json({error:'Idempotency-Key is required.'});return k;}function fail(res,e,code){const m=String(e?.message||e);return res.status(/required|invalid|must|address|amount|idempotency|supply/i.test(m)?400:502).json({error:m,code});}
-app.get('/health',async(_req,res)=>{const status=worker.status(),ok=startupState==='READY'&&status.ready;res.status(ok?200:503).json({status:ok?'ok':'degraded',startupState,startupError,executor:status,sraToken:ok?await chain.state().catch(()=>null):null});});app.get('/wallet',(req,res)=>{if(guard(req,res))res.json(chain.platformWallet());});app.post('/transfer',async(req,res)=>{if(!guard(req,res))return;const k=key(req,res);if(!k)return;try{return res.json(await chain.transferSol(req.body||{},k));}catch(e){return fail(res,e,'SOLANA_TRANSFER_FAILED');}});app.post('/tokens/sra/mint',async(req,res)=>{if(!guard(req,res))return;const k=key(req,res);if(!k)return;try{return res.json(await chain.createSraMint(req.body||{},k));}catch(e){return fail(res,e,'SRA_TOKEN_MINT_FAILED');}});app.post('/tokens/sra/transfer',async(req,res)=>{if(!guard(req,res))return;const k=key(req,res);if(!k)return;try{return res.json(await chain.transferSra(req.body||{},k));}catch(e){return fail(res,e,'SRA_TOKEN_TRANSFER_FAILED');}});app.post('/execute',async(req,res)=>{if(!guard(req,res))return;const k=key(req,res);if(!k)return;try{return res.json(await worker.execute(req.body||{},k));}catch(e){return fail(res,e,'ORCA_EXECUTION_FAILED');}});
-const server=app.listen(port,'0.0.0.0',()=>console.log(JSON.stringify({level:'info',event:'SOLANA_EXECUTOR_LISTENING',port})));server.requestTimeout=Number(process.env.EXECUTOR_REQUEST_TIMEOUT_MS||120000);server.headersTimeout=server.requestTimeout+5000;try{await worker.initialize();await chain.initialize();startupState='READY';console.log(JSON.stringify({level:'info',event:'SOLANA_EXECUTOR_READY',platformAddress:chain.platformWallet().address}));}catch(e){startupState='FAILED';startupError={message:String(e?.message||e)};console.error(JSON.stringify({level:'error',event:'SOLANA_EXECUTOR_STARTUP_FAILED',...startupError}));}async function shutdown(){startupState='STOPPING';server.close(async()=>{try{await worker.close();await chain.close();}catch{}process.exit(0);});}process.once('SIGTERM',shutdown);process.once('SIGINT',shutdown);
+import express from 'express';
+import { OrcaExecutorWorker } from './orca-worker.js';
+
+const port = Number(process.env.PORT || 3000);
+const app = express();
+const worker = new OrcaExecutorWorker(process.env);
+let startupState = 'STARTING';
+let startupError = null;
+
+app.set('trust proxy', 1);
+app.use(express.json({ limit:'256kb' }));
+
+function authorized(req) { return worker.authenticate(req.get('authorization')); }
+
+app.get('/health', (_req,res) => {
+  const status = worker.status();
+  const ok = startupState === 'READY' && status.ready;
+  res.status(ok ? 200 : 503).json({ status:ok ? 'ok' : 'degraded', startupState, startupError, executor:status, timestamp:new Date().toISOString() });
+});
+
+app.get('/wallet', (req,res) => {
+  if (startupState !== 'READY') return res.status(503).json({ error:'Executor is not ready.', startupState });
+  if (!authorized(req)) return res.status(401).json({ error:'Unauthorized.' });
+  return res.json(worker.platformWallet());
+});
+
+app.post('/transfer', async (req,res) => {
+  if (startupState !== 'READY') return res.status(503).json({ error:'Executor is not ready.', startupState });
+  if (!authorized(req)) return res.status(401).json({ error:'Unauthorized.' });
+  const idempotencyKey = String(req.get('idempotency-key') || '').trim();
+  if (!idempotencyKey) return res.status(400).json({ error:'Idempotency-Key is required.' });
+  try { return res.json(await worker.transferSol(req.body || {}, idempotencyKey)); }
+  catch (error) {
+    const message = String(error?.message || error);
+    const status = /required|invalid|must|address|amount|idempotency|supports/i.test(message) ? 400 : 502;
+    console.error(JSON.stringify({ level:'error', event:'SOLANA_TRANSFER_FAILED', idempotencyKey, message, at:new Date().toISOString() }));
+    return res.status(status).json({ error:message, code:'SOLANA_TRANSFER_FAILED' });
+  }
+});
+
+app.post('/execute', async (req,res) => {
+  if (startupState !== 'READY') return res.status(503).json({ error:'Executor is not ready.', startupState });
+  if (!authorized(req)) return res.status(401).json({ error:'Unauthorized.' });
+  const idempotencyKey = String(req.get('idempotency-key') || '').trim();
+  if (!idempotencyKey) return res.status(400).json({ error:'Idempotency-Key is required.' });
+  try { return res.json(await worker.execute(req.body || {}, idempotencyKey)); }
+  catch (error) {
+    const message = String(error?.message || error);
+    const status = /required|unsupported|invalid|must|precision|idempotency/i.test(message) ? 400 : /already exists/i.test(message) ? 409 : 502;
+    console.error(JSON.stringify({ level:'error', event:'ORCA_EXECUTION_FAILED', idempotencyKey, message, at:new Date().toISOString() }));
+    return res.status(status).json({ error:message, code:'ORCA_EXECUTION_FAILED' });
+  }
+});
+
+const server = app.listen(port,'0.0.0.0',() => console.log(JSON.stringify({ level:'info', event:'SOLANA_EXECUTOR_LISTENING', port })));
+server.requestTimeout = Number(process.env.EXECUTOR_REQUEST_TIMEOUT_MS || 120000);
+server.headersTimeout = server.requestTimeout + 5000;
+
+try { await worker.initialize(); startupState = 'READY'; console.log(JSON.stringify({ level:'info', event:'SOLANA_EXECUTOR_READY', cluster:worker.status().cluster, platformAddress:worker.status().platformAddress, at:new Date().toISOString() })); }
+catch (error) { startupState = 'FAILED'; startupError = { name:error?.name || 'Error', message:String(error?.message || error) }; console.error(JSON.stringify({ level:'error', event:'SOLANA_EXECUTOR_STARTUP_FAILED', ...startupError, at:new Date().toISOString() })); }
+
+async function shutdown(signal) { startupState = 'STOPPING'; server.close(async () => { try { await worker.close(); } catch {} process.exit(0); }); setTimeout(() => process.exit(1),15000).unref(); console.log(JSON.stringify({ level:'info', event:'SOLANA_EXECUTOR_STOPPING', signal, at:new Date().toISOString() })); }
+process.once('SIGTERM',() => void shutdown('SIGTERM'));
+process.once('SIGINT',() => void shutdown('SIGINT'));
