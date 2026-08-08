@@ -79,7 +79,7 @@ export class PlatformChainOperationsAgentService {
     const queue = [];
     if (snapshot.reconciliationRequired) {
       queue.push({
-        jobId: 'CHAIN-SRA-RECONCILE',
+        jobId: `CHAIN-SRA-RECONCILE:${snapshot.snapshotVersion}`,
         jobType: 'RECONCILE_SRA_CHAIN_SUPPLY',
         priority: 'BLOCKING',
         authority: 'ADMIN_REVIEW_REQUIRED',
@@ -90,7 +90,7 @@ export class PlatformChainOperationsAgentService {
       });
     } else if (snapshot.pendingQuantity > 0) {
       queue.push({
-        jobId: 'CHAIN-SRA-SYNC',
+        jobId: `CHAIN-SRA-SYNC:${snapshot.snapshotVersion}`,
         jobType: snapshot.mintAddress ? 'SYNC_SRA_SUPPLY' : 'PUT_SRA_ON_CHAIN',
         priority: 'READY',
         authority: 'ADMIN_APPROVAL_REQUIRED',
@@ -109,23 +109,18 @@ export class PlatformChainOperationsAgentService {
   async execute(jobId, input = {}, actor = {}) {
     const queue = this.workQueue();
     const job = queue.queue.find((item) => item.jobId === String(jobId || ''));
-    if (!job) throw new Error('Chain operations job is not currently available.');
+    if (!job) {
+      const error = new Error('The reviewed Chain Operations job is stale or no longer available. Refresh Workflow Approvals and review the current SRA quantity.');
+      error.code = 'SRA_CHAIN_APPROVAL_SNAPSHOT_STALE';
+      throw error;
+    }
     if (job.authority !== 'ADMIN_APPROVAL_REQUIRED') throw new Error('This chain operations job cannot be executed automatically.');
     if (String(input.approval || '').toUpperCase() !== 'APPROVE') throw new Error('Explicit administrator approval is required.');
     if (!this.chainService) throw new Error('SRA chain service is unavailable.');
 
     const approvedTargetSupply = number(input.targetSupply);
-    const approvedIssuedOnChainSupply = number(input.approvedIssuedOnChainSupply);
-    const approvedSnapshotVersion = String(input.snapshotVersion || '');
-    if (!approvedTargetSupply || !approvedSnapshotVersion) {
-      throw new Error('The approved chain job target and snapshot version are required.');
-    }
-    if (
-      approvedTargetSupply !== job.targetSupply
-      || approvedIssuedOnChainSupply !== job.approvedIssuedOnChainSupply
-      || approvedSnapshotVersion !== job.snapshotVersion
-    ) {
-      const error = new Error('The reviewed Chain Operations snapshot is stale. Refresh Workflow Approvals and review the updated SRA quantity before approving.');
+    if (!approvedTargetSupply || approvedTargetSupply !== job.targetSupply) {
+      const error = new Error('The approved SRA target does not match the reviewed Chain Operations job. Refresh Workflow Approvals and review the current quantity.');
       error.code = 'SRA_CHAIN_APPROVAL_SNAPSHOT_STALE';
       throw error;
     }
