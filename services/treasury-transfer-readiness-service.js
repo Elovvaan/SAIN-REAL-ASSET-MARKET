@@ -22,13 +22,21 @@ function destinationId(input = {}) {
   if (input.destinationId) return required(input.destinationId, 'destinationId');
   return `DST-${crypto.randomUUID().toUpperCase()}`;
 }
-function packageId() { return `EXP-TRSY-${crypto.randomUUID().toUpperCase()}`; }
-function instructionId(exportPackageId) { return `XFR-${String(exportPackageId).replace(/^EXP-/, '')}`; }
-function authorizationId(transferInstructionId) { return `XAU-${String(transferInstructionId).replace(/^XFR-/, '')}`; }
+function transferInstructionId(idempotencyKey) {
+  const digest = crypto.createHash('sha256').update(String(idempotencyKey)).digest('hex').slice(0, 24).toUpperCase();
+  return `XFR-TRSY-${digest}`;
+}
+function packageId(instructionId) { return `EXP-${String(instructionId).replace(/^XFR-/, '')}`; }
 function blocked(record) {
   return Boolean(record?.frozen || record?.status === 'FROZEN' || record?.state === 'FROZEN'
     || record?.complianceHold || record?.transferRestricted || record?.externalTransferRestricted
     || record?.disputeState === 'OPEN');
+}
+function fundsHeld(record) {
+  return record?.transactionType === 'EXTERNAL_TRANSFER_INSTRUCTION'
+    && record?.sourceType === 'PLATFORM_TREASURY_CASH'
+    && ['HELD', 'SUBMITTED'].includes(String(record?.fundsState || '').toUpperCase())
+    && !['RECONCILED', 'RETURNED', 'CANCELLED', 'FAILED'].includes(String(record?.state || '').toUpperCase());
 }
 
 export class TreasuryTransferReadinessService {
@@ -64,7 +72,7 @@ export class TreasuryTransferReadinessService {
       supportedUnits: ['USD'], verificationState,
       purpose: 'TREASURY_EXTERNAL_TRANSFER',
       state: 'ELIGIBLE_FOR_DESTINATION_REGISTRATION',
-      effect: 'Register a verified ACH destination reference for a Treasury-originated transfer workflow.',
+      effect: 'Register a verified ACH destination reference for Treasury payments.',
       approvalRequired: true,
     };
   }
@@ -104,13 +112,12 @@ export class TreasuryTransferReadinessService {
     if (blocked(destination) || destination.state !== 'ACTIVE' || destination.verificationState !== 'VERIFIED') throw new Error('Destination is not verified and available.');
     if (String(destination.route || '').toUpperCase() !== 'ACH') throw new Error('Transfer Readiness v1 requires an ACH destination.');
     const summary = this.treasury.summary();
-    const activeReservations = this.domain.list(TX)
-      .filter((item) => item.transactionType === 'TREASURY_TRANSFER_RESERVATION' && ['HELD', 'READY_TO_SEND'].includes(item.state));
-    const reservedUsd = Number(activeReservations.reduce((sum, item) => sum + Number(item.amountUsd || 0), 0).toFixed(8));
+    const heldInstructions = this.domain.list(TX).filter(fundsHeld);
+    const reservedUsd = Number(heldInstructions.reduce((sum, item) => sum + Number(item.amountUsd || 0), 0).toFixed(8));
     const availableUsd = Number((Number(summary.cashBalanceUsd || 0) - reservedUsd).toFixed(8));
     if (availableUsd < transferAmount) throw new Error('Treasury cash available for transfer is insufficient.');
     return {
-      action: 'TREASURY_TRANSFER_READINESS_PREVIEW', readOnly: true,
+      action: 'TREASURY_PAYMENT_PREVIEW', readOnly: true,
       source: { treasuryProfileId: 'SRA_PLATFORM_TREASURY', accountId: TREASURY_CASH_ACCOUNT_ID, currency: 'USD' },
       destinationId: destination.destinationId,
       destinationLabel: destination.label,
@@ -119,53 +126,57 @@ export class TreasuryTransferReadinessService {
       treasuryCashBalanceUsd: Number(summary.cashBalanceUsd || 0),
       treasuryReservedUsd: reservedUsd,
       treasuryAvailableUsd: availableUsd,
-      state: 'ELIGIBLE_FOR_TRANSFER_READINESS',
-      effect: 'Create and authorize a Treasury-originated ACH export package and transfer instruction in READY_TO_SEND state while reserving, but not externally moving, the USD amount.',
-      doesNot: ['SUBMIT_TO_ACH_PROVIDER', 'MARK_EXTERNAL_COMPLETION', 'POST_FINAL_CASH_REDUCTION'],
+      state: 'ELIGIBLE_FOR_PAYMENT_AUTHORIZATION',
+      effect: 'Authorize one Treasury ACH payment instruction and hold the amount against available Treasury cash.',
+      doesNot: ['SUBMIT_TO_ACH_PROVIDER', 'MARK_EXTERNAL_COMPLETION', 'POST_ACCOUNTING_CLASSIFICATION'],
       approvalRequired: true,
     };
   }
 
   async approve(input = {}, actorId = 'SRA_PLATFORM_ADMIN') {
-    if (String(input.approval || '').toUpperCase() !== 'APPROVE') throw new Error('Explicit administrator transfer-readiness approval is required.');
-    const key = `${String(input.destinationId || '')}:${Number(input.amountUsd || 0)}:${String(input.idempotencyKey || '')}`;
+    if (String(input.approval || '').toUpperCase() !== 'APPROVE') throw new Error('Explicit administrator payment authorization is required.');
+    const idempotencyKey = required(input.idempotencyKey, 'idempotencyKey');
+    const instructionId = transferInstructionId(idempotencyKey);
+    const key = `${instructionId}:${String(input.destinationId || '')}:${Number(input.amountUsd || 0)}`;
     const prior = locks.get(key) || Promise.resolve();
     let release;
     const current = new Promise((resolve) => { release = resolve; });
     locks.set(key, prior.then(() => current));
     await prior;
     try {
-      const idempotencyKey = required(input.idempotencyKey, 'idempotencyKey');
-      const digest = crypto.createHash('sha256').update(idempotencyKey).digest('hex').slice(0, 24).toUpperCase();
-      const reservationId = `TRR-${digest}`;
-      const priorReservation = this.domain.get(TX, reservationId);
-      if (priorReservation) return { created: false, reservation: priorReservation, exportPackage: this.domain.get(RECORD_TYPES.EXPORT_PACKAGE, priorReservation.exportPackageId), transferInstruction: this.domain.get(TX, priorReservation.transferInstructionId), executionAuthorization: this.domain.get(TX, priorReservation.executionAuthorizationId) };
+      const existing = this.domain.get(TX, instructionId);
+      if (existing) return { created: false, transferInstruction: existing, paymentInstruction: existing, exportPackage: this.domain.get(RECORD_TYPES.EXPORT_PACKAGE, existing.exportPackageId) };
+
       const preview = this.preview(input);
       const destination = this.destination(preview.destinationId);
       const createdAt = now();
-      const exportPackageId = packageId();
-      const transferInstructionId = instructionId(exportPackageId);
-      const executionAuthorizationId = authorizationId(transferInstructionId);
-      const reservation = {
-        transactionId: reservationId,
-        reservationId,
-        transactionType: 'TREASURY_TRANSFER_RESERVATION',
+      const exportPackageId = packageId(instructionId);
+      const instruction = {
+        transactionId: instructionId,
+        transferInstructionId: instructionId,
+        transactionType: 'EXTERNAL_TRANSFER_INSTRUCTION',
+        exportPackageId,
+        destinationId: destination.destinationId,
+        destinationType: DESTINATION_TYPE,
+        participantId: destination.ownerId,
+        quantity: preview.amountUsd,
+        amountUsd: preview.amountUsd,
+        unit: 'USD',
+        currency: 'USD',
+        route: 'ACH',
+        destinationReference: destination.destinationReference,
+        sourceType: 'PLATFORM_TREASURY_CASH',
         treasuryProfileId: 'SRA_PLATFORM_TREASURY',
         sourceAccountId: TREASURY_CASH_ACCOUNT_ID,
-        destinationId: destination.destinationId,
-        exportPackageId,
-        transferInstructionId,
-        executionAuthorizationId,
-        amountUsd: preview.amountUsd,
-        currency: 'USD',
-        rail: 'ACH',
         state: 'READY_TO_SEND',
-        holdState: 'HELD',
-        externalTransferState: 'NOT_SUBMITTED',
+        executionState: 'AUTHORIZED',
+        fundsState: 'HELD',
+        externalWithdrawalState: 'AUTHORIZED_FOR_SEND',
         authorizedBy: actorId,
         authorizedAt: createdAt,
         createdAt,
         updatedAt: createdAt,
+        statusHistory: [{ state: 'READY_TO_SEND', actorId, occurredAt: createdAt }],
       };
       const exportPackage = {
         exportPackageId,
@@ -181,72 +192,17 @@ export class TreasuryTransferReadinessService {
         route: 'ACH',
         state: 'READY_TO_SEND',
         exportExecutionState: 'AUTHORIZED',
-        externalWithdrawalState: 'AUTHORIZED_FOR_OPERATOR',
-        treasuryReservationId: reservationId,
-        transferInstructionId,
-        executionAuthorizationId,
-        authorizedBy: actorId,
-        authorizedAt: createdAt,
+        transferInstructionId: instructionId,
+        authorizationSource: instructionId,
         createdAt,
         updatedAt: createdAt,
         statusHistory: [{ state: 'READY_TO_SEND', actorId, occurredAt: createdAt }],
-      };
-      const instruction = {
-        transactionId: transferInstructionId,
-        transferInstructionId,
-        transactionType: 'EXTERNAL_TRANSFER_INSTRUCTION',
-        exportPackageId,
-        destinationId: destination.destinationId,
-        destinationType: DESTINATION_TYPE,
-        participantId: destination.ownerId,
-        quantity: preview.amountUsd,
-        amountUsd: preview.amountUsd,
-        unit: 'USD',
-        currency: 'USD',
-        route: 'ACH',
-        destinationReference: destination.destinationReference,
-        sourceType: 'PLATFORM_TREASURY_CASH',
-        treasuryProfileId: 'SRA_PLATFORM_TREASURY',
-        sourceAccountId: TREASURY_CASH_ACCOUNT_ID,
-        treasuryReservationId: reservationId,
-        state: 'READY_TO_SEND',
-        executionState: 'AUTHORIZED',
-        externalWithdrawalState: 'AUTHORIZED_FOR_OPERATOR',
-        approvedBy: actorId,
-        approvedAt: createdAt,
-        createdAt,
-        updatedAt: createdAt,
-        statusHistory: [{ state: 'READY_TO_SEND', actorId, occurredAt: createdAt }],
-      };
-      const authorization = {
-        transactionId: executionAuthorizationId,
-        executionAuthorizationId,
-        transactionType: 'EXTERNAL_TRANSFER_EXECUTION_AUTHORIZATION',
-        transferInstructionId,
-        exportPackageId,
-        participantId: destination.ownerId,
-        quantity: preview.amountUsd,
-        amountUsd: preview.amountUsd,
-        unit: 'USD',
-        currency: 'USD',
-        route: 'ACH',
-        sourceType: 'PLATFORM_TREASURY_CASH',
-        treasuryReservationId: reservationId,
-        state: 'READY_TO_SEND',
-        executionState: 'AUTHORIZED',
-        externalWithdrawalState: 'AUTHORIZED_FOR_OPERATOR',
-        authorizedBy: actorId,
-        authorizedAt: createdAt,
-        createdAt,
-        updatedAt: createdAt,
       };
       await this.domain.atomicPut([
-        { type: TX, id: reservationId, payload: reservation, actorId, eventType: 'TREASURY_TRANSFER_AMOUNT_RESERVED' },
-        { type: RECORD_TYPES.EXPORT_PACKAGE, id: exportPackageId, payload: exportPackage, actorId, eventType: 'TREASURY_EXPORT_PACKAGE_READY_TO_SEND' },
-        { type: TX, id: transferInstructionId, payload: instruction, actorId, eventType: 'TREASURY_ACH_TRANSFER_INSTRUCTION_READY_TO_SEND' },
-        { type: TX, id: executionAuthorizationId, payload: authorization, actorId, eventType: 'TREASURY_ACH_EXECUTION_AUTHORIZED' },
+        { type: TX, id: instructionId, payload: instruction, actorId, eventType: 'TREASURY_PAYMENT_AUTHORIZED' },
+        { type: RECORD_TYPES.EXPORT_PACKAGE, id: exportPackageId, payload: exportPackage, actorId, eventType: 'TREASURY_PAYMENT_EXPORT_LINEAGE_CREATED' },
       ]);
-      return { created: true, reservation, exportPackage, transferInstruction: instruction, executionAuthorization: authorization };
+      return { created: true, transferInstruction: instruction, paymentInstruction: instruction, exportPackage };
     } finally {
       release();
       locks.delete(key);
@@ -255,7 +211,7 @@ export class TreasuryTransferReadinessService {
 
   list() {
     return this.domain.list(TX)
-      .filter((item) => item.transactionType === 'TREASURY_TRANSFER_RESERVATION')
+      .filter((item) => item.transactionType === 'EXTERNAL_TRANSFER_INSTRUCTION' && item.sourceType === 'PLATFORM_TREASURY_CASH')
       .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
   }
 
@@ -263,9 +219,10 @@ export class TreasuryTransferReadinessService {
     const transfers = this.list();
     return {
       transferCount: transfers.length,
-      readyToSend: transfers.filter((item) => item.state === 'READY_TO_SEND').length,
-      reservedUsd: Number(transfers.filter((item) => ['HELD', 'READY_TO_SEND'].includes(item.state)).reduce((sum, item) => sum + Number(item.amountUsd || 0), 0).toFixed(8)),
+      readyToSend: transfers.filter((item) => item.state === 'READY_TO_SEND' && item.executionState === 'AUTHORIZED').length,
+      reservedUsd: Number(transfers.filter(fundsHeld).reduce((sum, item) => sum + Number(item.amountUsd || 0), 0).toFixed(8)),
       latestTransfer: transfers[0] || null,
+      authoritativeRecord: 'EXTERNAL_TRANSFER_INSTRUCTION',
     };
   }
 }
