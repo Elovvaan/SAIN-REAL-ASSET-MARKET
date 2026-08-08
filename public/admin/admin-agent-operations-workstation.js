@@ -25,6 +25,9 @@
     const label = action.label || item.label || item.blocker || 'Platform operation';
     const authority = action.authority || item.authority || 'READ_ONLY';
     const quantity = Number(action.requestedQuantity || 0);
+    const targetSupply = Number(action.targetSupply || 0);
+    const approvedIssuedOnChainSupply = Number(action.approvedIssuedOnChainSupply || 0);
+    const snapshotVersion = action.snapshotVersion || '';
     const network = action.network || 'SRA';
     const canExecute = allowExecute && action.executionAction === 'EXECUTE_CHAIN_JOB' && action.executable !== false && jobId;
     return `<article class="admin-record-card" data-agent-operation-card>
@@ -34,10 +37,11 @@
         ${jobId ? `<div><span>Job</span><strong>${esc(jobId)}</strong></div>` : ''}
         <div><span>Operation</span><strong>${esc(action.jobType || item.firstMissing || action.stage || 'PLATFORM_WORK')}</strong></div>
         <div><span>Network</span><strong>${esc(network)}</strong></div>
-        ${quantity ? `<div><span>Quantity</span><strong>${quantity.toLocaleString(undefined,{maximumFractionDigits:8})} SRA</strong></div>` : ''}
-        ${action.targetSupply ? `<div><span>Target supply</span><strong>${Number(action.targetSupply).toLocaleString(undefined,{maximumFractionDigits:8})} SRA</strong></div>` : ''}
+        ${quantity ? `<div><span>Quantity reviewed</span><strong>${quantity.toLocaleString(undefined,{maximumFractionDigits:8})} SRA</strong></div>` : ''}
+        ${targetSupply ? `<div><span>Approved target supply</span><strong>${targetSupply.toLocaleString(undefined,{maximumFractionDigits:8})} SRA</strong></div>` : ''}
+        ${snapshotVersion ? `<div><span>Approval snapshot</span><strong>${esc(snapshotVersion)}</strong></div>` : ''}
       </div>
-      ${canExecute ? `<div style="margin-top:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap"><button type="button" data-agent-execute-chain-job="${esc(jobId)}">Approve & Execute</button><span data-agent-operation-result style="font-size:12px;color:#d6a92f"></span></div>` : ''}
+      ${canExecute ? `<div style="margin-top:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap"><button type="button" data-agent-execute-chain-job="${esc(jobId)}" data-target-supply="${esc(targetSupply)}" data-approved-issued-supply="${esc(approvedIssuedOnChainSupply)}" data-snapshot-version="${esc(snapshotVersion)}">Approve & Execute</button><span data-agent-operation-result style="font-size:12px;color:#d6a92f"></span></div>` : ''}
     </article>`;
   }
 
@@ -93,6 +97,9 @@
         action: 'EXECUTE_CHAIN_JOB',
         jobId,
         approval: 'APPROVE',
+        targetSupply: Number(button.dataset.targetSupply || 0),
+        approvedIssuedOnChainSupply: Number(button.dataset.approvedIssuedSupply || 0),
+        snapshotVersion: button.dataset.snapshotVersion || '',
       });
       if (result) result.textContent = `${response.status} · ${response.reconciliation?.issuedOnChainSupply ?? 0} SRA on chain`;
       window.dispatchEvent(new CustomEvent('sra:admin-refresh',{ detail:{ source:'chain-operations-agent' } }));
