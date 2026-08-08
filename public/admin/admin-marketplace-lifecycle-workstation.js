@@ -88,7 +88,7 @@
     const positions = data.positions;
     const preparations = data.settlementPreparations;
     const confirmations = data.settlementConfirmations;
-    const verifiedConfirmations = confirmations.filter((item) => text(item.status) === 'VERIFIED');
+    const verifiedConfirmations = confirmations.filter((item) => ['VERIFIED','CONSUMED'].includes(text(item.status)));
     const publishedQuantity = published.reduce((sum,item) => sum + num(item.quantity), 0);
     const reservedQuantity = reservations.reduce((sum,item) => sum + num(item.quantity), 0);
     const confirmedQuantity = confirmedOrders.reduce((sum,item) => sum + num(item.quantity), 0);
@@ -215,6 +215,11 @@
       if (event.target.closest('[data-admin-tab]')) queueMicrotask(() => void refresh(workspace,false));
       if (event.target.closest('[data-refresh-workspace="marketplace"]')) queueMicrotask(() => void refresh(workspace,true));
     });
+    document.addEventListener('click',(event) => {
+      const opener = event.target.closest('[data-admin-workspace="marketplace"],[data-open-workspace="marketplace"]');
+      if (opener) queueMicrotask(() => void refresh(workspace,true));
+    });
+    window.addEventListener('hashchange',() => { if (location.hash === '#admin-marketplace') void refresh(workspace,true); });
     window.addEventListener('sra:admin-workspace-synchronized',(event) => { if (event.detail?.workspaceId === 'marketplace') void refresh(workspace,true); });
     window.addEventListener('sra:admin-mutated',() => { state.delete(workspace); });
     void refresh(workspace,true);
