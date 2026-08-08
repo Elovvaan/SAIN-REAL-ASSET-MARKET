@@ -92,6 +92,15 @@
     delete admin.dataset.adminSuiteBooting;
   }
 
+  function retireLegacyPresentation(admin) {
+    const suite = admin?.querySelector(':scope > .admin-suite');
+    if (!admin || !suite) return;
+    for (const child of [...admin.children]) {
+      if (child !== suite) child.remove();
+    }
+    admin.dataset.presentationOwner = 'admin-suite';
+  }
+
   async function boot() {
     if (booted) return;
     const admin = document.querySelector('#admin-view:not(.hidden)');
@@ -104,6 +113,7 @@
       const [shellSource, shellMarker] = FEATURES[0];
       await loadScript(shellSource, shellMarker);
       if (!admin.querySelector('.admin-suite')) throw new Error('Administration shell did not mount.');
+      retireLegacyPresentation(admin);
       revealAdminSuite(admin);
 
       for (const [source, marker] of FEATURES.slice(1)) {
