@@ -27,7 +27,7 @@ function decimalToBaseUnits(value, decimals) {
 async function rpcCall(rpcUrl, method, params) {
   const response = await fetch(rpcUrl, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type':'application/json' },
     body: JSON.stringify({ jsonrpc:'2.0', id:crypto.randomUUID(), method, params }),
   });
   const payload = await response.json();
@@ -54,7 +54,8 @@ export class OrcaExecutorWorker {
     this.cluster = text(env.SOLANA_CLUSTER || 'devnet').toLowerCase();
     this.apiToken = text(env.DEX_ORCA_EXECUTOR_TOKEN || env.EXECUTOR_API_TOKEN);
     this.databaseUrl = text(env.DATABASE_URL || env.EXECUTOR_DATABASE_URL);
-    this.pool = this.databaseUrl ? new Pool({ connectionString:this.databaseUrl, ssl: env.PGSSLMODE === 'disable' ? false : { rejectUnauthorized:false } }) : null;
+    const sslMode = text(env.PGSSLMODE).toLowerCase();
+    this.pool = this.databaseUrl ? new Pool({ connectionString:this.databaseUrl, ...(sslMode === 'require' ? { ssl:{ rejectUnauthorized:false } } : {}) }) : null;
     this.sdk = null;
     this.ready = false;
   }
