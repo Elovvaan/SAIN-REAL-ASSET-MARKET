@@ -18,7 +18,8 @@
       && String(record?.route || '').toUpperCase() === 'ACH'
       && Number(record?.amountUsd ?? record?.amount ?? record?.quantity) === 1
       && record?.state === 'READY_TO_SEND'
-      && record?.executionState === 'AUTHORIZED');
+      && record?.executionState === 'AUTHORIZED'
+      && record?.fundsState === 'HELD');
   }
 
   async function render(workspace) {
@@ -30,7 +31,7 @@
     const section = document.createElement('section');
     section.className = 'admin-record-card';
     section.dataset.liveAchCanaryControl = 'true';
-    section.innerHTML = '<header><strong>Live ACH Canary</strong><em>CHECKING</em></header><p>Reading provider readiness and prepared $1 instructions…</p>';
+    section.innerHTML = '<header><strong>Live ACH Payment</strong><em>CHECKING</em></header><p>Reading provider readiness and authorized $1 payments…</p>';
     controls.prepend(section);
 
     try {
@@ -41,24 +42,23 @@
       if (!section.isConnected || workspace.dataset.activeTab !== 'Settlement Instructions') return;
       const ach = (status.rails || []).find((item) => item.rail === 'ACH') || {};
       const instructions = eligibleInstructions(workspaces);
-      section.innerHTML = `<header><strong>Live ACH Canary</strong><em>${ach.ready ? 'LIVE READY' : 'PROVIDER NOT READY'}</em></header>
+      section.innerHTML = `<header><strong>Live ACH Payment</strong><em>${ach.ready ? 'LIVE READY' : 'PROVIDER NOT READY'}</em></header>
         <div class="admin-record-grid">
           <div><span>Execution mode</span><strong>${esc(ach.mode || 'DISABLED')}</strong></div>
           <div><span>ACH endpoint</span><strong>${ach.endpointConfigured ? 'CONFIGURED' : 'NOT CONFIGURED'}</strong></div>
           <div><span>Credential</span><strong>${ach.credentialConfigured ? 'CONFIGURED' : 'NOT CONFIGURED'}</strong></div>
-          <div><span>Prepared $1 instructions</span><strong>${instructions.length}</strong></div>
+          <div><span>Authorized $1 payments</span><strong>${instructions.length}</strong></div>
         </div>
         <form data-live-ach-canary-form autocomplete="off" style="margin-top:14px">
           <div class="admin-record-grid">
-            <label><span>Prepared instruction</span><select name="transferInstructionId" required style="width:100%;background:#050505;border:1px solid #292929;border-radius:10px;color:#f5f5f5;padding:12px"><option value="">Select $1 instruction</option>${instructions.map((record) => `<option value="${esc(record.transferInstructionId || record.transactionId)}">${esc(record.transferInstructionId || record.transactionId)} · $1.00 ACH</option>`).join('')}</select></label>
+            <label><span>Payment</span><select name="transferInstructionId" required style="width:100%;background:#050505;border:1px solid #292929;border-radius:10px;color:#f5f5f5;padding:12px"><option value="">Select authorized $1 payment</option>${instructions.map((record) => `<option value="${esc(record.transferInstructionId || record.transactionId)}">${esc(record.transferInstructionId || record.transactionId)} · $1.00 ACH</option>`).join('')}</select></label>
             <label><span>Bank / destination label</span><input name="bankName" placeholder="Receiving bank" required></label>
             <label><span>Account type</span><select name="accountType" required style="width:100%;background:#050505;border:1px solid #292929;border-radius:10px;color:#f5f5f5;padding:12px"><option value="CHECKING">Checking</option><option value="SAVINGS">Savings</option></select></label>
             <label><span>Routing number</span><input name="routingNumber" type="text" inputmode="numeric" pattern="[0-9]{9}" maxlength="9" placeholder="9 digits" required></label>
             <label><span>Account number</span><input name="accountNumber" type="password" inputmode="numeric" pattern="[0-9]{4,17}" maxlength="17" placeholder="4–17 digits" required></label>
-            <label><span>Exact live confirmation</span><input name="confirmation" value="EXECUTE 1.00 USD VIA ACH" required></label>
           </div>
-          <p style="color:#9a9a9a;font-size:12px;line-height:1.45;margin:12px 0">The routing and account numbers are transmitted only with this live execution request and are not stored in SRA records. Provider acceptance does not mark the transfer reconciled; receiving-side confirmation remains required.</p>
-          <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><button type="submit" ${!ach.ready || instructions.length === 0 ? 'disabled' : ''}>Execute $1 ACH Canary</button><span data-live-ach-canary-result style="color:#d6a92f;font-size:12px">${instructions.length ? '' : 'Prepare a $1 ACH instruction in Destination Verification first.'}</span></div>
+          <p style="color:#9a9a9a;font-size:12px;line-height:1.45;margin:12px 0">Routing and account numbers are used only for this provider request and are not stored in SRA. The authorized payment instruction is the send authority. Receiving confirmation completes reconciliation.</p>
+          <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><button type="submit" ${!ach.ready || instructions.length === 0 ? 'disabled' : ''}>Send $1 ACH</button><span data-live-ach-canary-result style="color:#d6a92f;font-size:12px">${instructions.length ? '' : 'Authorize a $1 ACH payment first.'}</span></div>
         </form>`;
 
       section.querySelector('[data-live-ach-canary-form]')?.addEventListener('submit', async (event) => {
@@ -67,9 +67,8 @@
         const values = Object.fromEntries(new FormData(form).entries());
         const result = form.querySelector('[data-live-ach-canary-result]');
         const button = form.querySelector('button[type="submit"]');
-        if (!confirm(`Execute the prepared instruction ${values.transferInstructionId} as a live $1.00 ACH canary?`)) return;
         button.disabled = true;
-        result.textContent = 'Submitting to configured ACH provider…';
+        result.textContent = 'Sending to configured ACH provider…';
         try {
           const response = await request('/api/admin/treasury-transfer-readiness/ach/execute-one-dollar-canary', {
             method:'POST',
@@ -87,7 +86,7 @@
         }
       });
     } catch (error) {
-      section.innerHTML = `<header><strong>Live ACH Canary</strong><em>UNAVAILABLE</em></header><p>${esc(error.message)}</p>`;
+      section.innerHTML = `<header><strong>Live ACH Payment</strong><em>UNAVAILABLE</em></header><p>${esc(error.message)}</p>`;
     }
   }
 
