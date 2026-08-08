@@ -87,6 +87,7 @@ function eligibleFundingInstruments(domain) {
 export async function installTreasuryAdminRoutes({ router, domain, requireAdmin, database = null }) {
   const treasury = new TreasuryLedgerService(domain);
   const recordedValue = new RecordedValueRepresentationService(domain);
+  await domain.hydrate(['SRA_COIN_CHAIN_PROJECTION']);
   const coinPositionLifecycle = new CoinPositionLifecycleReadService(domain);
   const financingCapacity = new TreasuryFinancingCapacityService(domain);
   await treasury.initialize();
