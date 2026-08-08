@@ -1,0 +1,1 @@
+import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';test('DEX remains downstream of direct Solana controls',()=>{const b=fs.readFileSync(new URL('../public/admin/admin-bootstrap.js',import.meta.url),'utf8');assert.ok(b.indexOf('admin-solana-transfer.js')<b.indexOf('admin-external-dex-adapter.js'));});
