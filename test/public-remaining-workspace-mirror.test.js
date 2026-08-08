@@ -15,6 +15,15 @@ test('remaining participant workspaces use their authoritative capability owners
   assert.match(suite, /Issuance boundary/);
 });
 
+test('participant suite mounts after Financing and Liquidity capabilities are available', () => {
+  const fundingIndex = bootstrap.indexOf("'/funding-operations-ui.js'");
+  const liquidityIndex = bootstrap.indexOf("'/hybrid-liquidity-market.js'");
+  const suiteIndex = bootstrap.indexOf("'/participant-workspace-bootstrap.js'");
+  assert.ok(fundingIndex >= 0 && liquidityIndex >= 0 && suiteIndex >= 0);
+  assert.ok(suiteIndex > fundingIndex);
+  assert.ok(suiteIndex > liquidityIndex);
+});
+
 test('liquidity capability is explicit and observer-free', () => {
   assert.match(bootstrap, /\/hybrid-liquidity-market\.js/);
   assert.match(liquidity, /window\.renderHybridLiquidityWorkspace = render/);
