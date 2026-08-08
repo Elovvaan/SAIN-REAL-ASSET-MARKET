@@ -25,8 +25,9 @@ class FakeExecutor {
     assert.equal(instruction.amount, 1);
     assert.equal(confirmation, 'EXECUTE 1.00 USD VIA ACH');
   }
-  async execute(instruction) {
+  async execute(instruction, { confirmation } = {}) {
     this.executeCalls += 1;
+    assert.equal(confirmation, 'EXECUTE 1.00 USD VIA ACH');
     assert.equal(instruction.transientDestination.routingNumber, '021000021');
     assert.equal(instruction.transientDestination.accountNumber, '123456789');
     if (this.delayMs) await new Promise((resolve) => setTimeout(resolve, this.delayMs));
@@ -42,7 +43,7 @@ async function seedCanary(domain, id = 'XFR-1') {
   await domain.put('SRA_TRANSACTION', id, {
     transactionId: id, transferInstructionId: id, transactionType: 'EXTERNAL_TRANSFER_INSTRUCTION',
     exportPackageId: 'EXP-1', amountUsd: 1, quantity: 1, currency: 'USD', route: 'ACH',
-    destinationReference: 'ACH-DEST-OPAQUE', state: 'READY_TO_SEND', executionState: 'AUTHORIZED',
+    destinationReference: 'ACH-DEST-OPAQUE', state: 'READY_TO_SEND', executionState: 'AUTHORIZED', fundsState: 'HELD',
     statusHistory: [],
   });
   await domain.put('EXPORT_PACKAGE', 'EXP-1', { exportPackageId: 'EXP-1', state: 'READY_TO_SEND', exportExecutionState: 'AUTHORIZED' });
@@ -50,16 +51,17 @@ async function seedCanary(domain, id = 'XFR-1') {
 
 const canaryInput = (id = 'XFR-1') => ({
   transferInstructionId: id, routingNumber: '021000021', accountNumber: '123456789',
-  accountType: 'CHECKING', bankName: 'Test Bank', confirmation: 'EXECUTE 1.00 USD VIA ACH',
+  accountType: 'CHECKING', bankName: 'Test Bank',
 });
 
-test('one-dollar ACH canary uses bank details transiently and persists only provider evidence', async () => {
+test('one-dollar ACH payment uses bank details transiently and persists provider evidence on the payment instruction', async () => {
   const domain = new MemoryDomain();
   await seedCanary(domain);
   const executor = new FakeExecutor();
   const service = new TreasuryLiveExecutionService(domain, { executor });
   const result = await service.executeOneDollarAch(canaryInput(), 'ADMIN-1');
   assert.equal(result.instruction.state, 'PROVIDER_ACCEPTED');
+  assert.equal(result.instruction.fundsState, 'SUBMITTED');
   assert.equal(result.receivingConfirmationRequired, true);
   assert.equal(result.rawBankDetailsStored, false);
   assert.equal(executor.executeCalls, 1);
@@ -69,7 +71,7 @@ test('one-dollar ACH canary uses bank details transiently and persists only prov
   assert.equal(domain.get('EXPORT_PACKAGE', 'EXP-1').exportExecutionState, 'PROVIDER_ACCEPTED');
 });
 
-test('concurrent retries serialize by instruction and only one reaches the provider', async () => {
+test('concurrent retries serialize by payment instruction and only one reaches the provider', async () => {
   const domain = new MemoryDomain();
   await seedCanary(domain);
   const executor = new FakeExecutor({ delayMs: 25 });
@@ -81,11 +83,11 @@ test('concurrent retries serialize by instruction and only one reaches the provi
   assert.equal(executor.executeCalls, 1);
   assert.equal([first.status, second.status].filter((status) => status === 'fulfilled').length, 1);
   const rejected = first.status === 'rejected' ? first.reason : second.reason;
-  assert.match(rejected.message, /not READY_TO_SEND with execution authorization/);
+  assert.match(rejected.message, /not authorized and ready to send/);
   assert.equal(domain.get('SRA_TRANSACTION', 'XFR-1').state, 'PROVIDER_ACCEPTED');
 });
 
-test('HTTP-success provider rejection is not recorded as provider accepted', async () => {
+test('HTTP-success provider rejection leaves the authorized payment ready rather than recording acceptance', async () => {
   const domain = new MemoryDomain();
   await seedCanary(domain);
   const executor = new FakeExecutor({ providerStatus: 'REJECTED' });
@@ -93,30 +95,42 @@ test('HTTP-success provider rejection is not recorded as provider accepted', asy
   await assert.rejects(() => service.executeOneDollarAch(canaryInput(), 'ADMIN-1'), /terminal status REJECTED/);
   assert.equal(executor.executeCalls, 1);
   assert.equal(domain.get('SRA_TRANSACTION', 'XFR-1').state, 'READY_TO_SEND');
+  assert.equal(domain.get('SRA_TRANSACTION', 'XFR-1').fundsState, 'HELD');
   assert.equal(domain.get('SRA_TRANSACTION', 'XFR-1').providerReference, undefined);
-  assert.equal(domain.get('EXPORT_PACKAGE', 'EXP-1').exportExecutionState, 'AUTHORIZED');
 });
 
-test('canary refuses instructions other than prepared 1.00 USD ACH', async () => {
+test('canary refuses payment instructions other than authorized 1.00 USD ACH', async () => {
   const domain = new MemoryDomain();
   await domain.put('SRA_TRANSACTION', 'XFR-2', {
     transactionId: 'XFR-2', transferInstructionId: 'XFR-2', transactionType: 'EXTERNAL_TRANSFER_INSTRUCTION',
-    amountUsd: 2, currency: 'USD', route: 'ACH', state: 'READY_TO_SEND', executionState: 'AUTHORIZED',
+    amountUsd: 2, currency: 'USD', route: 'ACH', state: 'READY_TO_SEND', executionState: 'AUTHORIZED', fundsState: 'HELD',
   });
   const service = new TreasuryLiveExecutionService(domain, { executor: new FakeExecutor() });
   await assert.rejects(() => service.executeOneDollarAch({ transferInstructionId: 'XFR-2' }), /only executes a prepared 1.00 USD/);
 });
 
-test('administration mounts canary control explicitly without an observer layer', () => {
+test('receiving confirmation reconciles the same payment instruction', async () => {
+  const domain = new MemoryDomain();
+  await seedCanary(domain);
+  const service = new TreasuryLiveExecutionService(domain, { executor: new FakeExecutor({ providerStatus: 'EXECUTED' }) });
+  await service.executeOneDollarAch(canaryInput(), 'ADMIN-1');
+  const result = await service.reconcile({ transferInstructionId: 'XFR-1', receivingConfirmationReference: 'BANK-POSTED-1', confirmedAmount: 1 }, 'ADMIN-1');
+  assert.equal(result.instruction.state, 'RECONCILED');
+  assert.equal(result.instruction.fundsState, 'SETTLED');
+  assert.equal(result.instruction.receivingConfirmationReference, 'BANK-POSTED-1');
+  assert.equal(result.accountingClassificationRequired, true);
+});
+
+test('administration mounts one-click send control explicitly without an observer layer or typed confirmation phrase', () => {
   const bootstrap = fs.readFileSync(new URL('../public/admin/admin-bootstrap.js', import.meta.url), 'utf8');
   const controls = fs.readFileSync(new URL('../public/admin/admin-settlement-execution-controls.js', import.meta.url), 'utf8');
   const route = fs.readFileSync(new URL('../routes/treasury-transfer-readiness-routes.js', import.meta.url), 'utf8');
   assert.match(bootstrap, /admin-settlement-execution-controls\.js/);
   assert.match(bootstrap, /mountAdminSettlementExecutionControls/);
   assert.match(controls, /Settlement Instructions/);
-  assert.match(controls, /execute-one-dollar-canary/);
-  assert.match(controls, /EXECUTE 1\.00 USD VIA ACH/);
+  assert.match(controls, /Send \$1 ACH/);
+  assert.doesNotMatch(controls, /Exact live confirmation/);
   assert.doesNotMatch(controls, /MutationObserver/);
+  assert.match(route, /ach\/reconcile/);
   assert.match(route, /TreasuryLiveExecutionService/);
-  assert.match(route, /receivingConfirmationRequired/);
 });
