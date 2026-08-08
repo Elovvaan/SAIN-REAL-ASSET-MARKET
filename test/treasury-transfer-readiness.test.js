@@ -26,17 +26,20 @@ async function setup(cash = 10) {
   return { domain, treasury, service, destination: destination.destination };
 }
 
-test('prepares a one-dollar Treasury ACH transfer without moving external funds', async () => {
+test('authorizes one Treasury ACH payment instruction and holds funds on that record', async () => {
   const { domain, treasury, service, destination } = await setup(10);
   const preview = service.preview({ destinationId: destination.destinationId, amountUsd: 1 });
-  assert.equal(preview.state, 'ELIGIBLE_FOR_TRANSFER_READINESS');
+  assert.equal(preview.state, 'ELIGIBLE_FOR_PAYMENT_AUTHORIZATION');
   assert.equal(preview.treasuryAvailableUsd, 10);
   const result = await service.approve({ approval: 'APPROVE', destinationId: destination.destinationId, amountUsd: 1, idempotencyKey: 'ONE-DOLLAR-TEST' }, 'ADMIN-1');
   assert.equal(result.created, true);
-  assert.equal(result.exportPackage.state, 'READY_TO_SEND');
   assert.equal(result.transferInstruction.state, 'READY_TO_SEND');
+  assert.equal(result.transferInstruction.executionState, 'AUTHORIZED');
+  assert.equal(result.transferInstruction.fundsState, 'HELD');
   assert.equal(result.transferInstruction.route, 'ACH');
-  assert.equal(result.reservation.holdState, 'HELD');
+  assert.equal(result.paymentInstruction.transferInstructionId, result.transferInstruction.transferInstructionId);
+  assert.equal(domain.list(RECORD_TYPES.SRA_TRANSACTION).filter((item) => item.transactionType === 'TREASURY_TRANSFER_RESERVATION').length, 0);
+  assert.equal(domain.list(RECORD_TYPES.SRA_TRANSACTION).filter((item) => item.transactionType === 'EXTERNAL_TRANSFER_EXECUTION_AUTHORIZATION').length, 0);
   assert.equal(treasury.summary().cashBalanceUsd, 10);
   assert.equal(domain.list(RECORD_TYPES.LEDGER_ENTRY).length, 1);
 });
@@ -54,7 +57,7 @@ test('requires a verified ACH destination', async () => {
   assert.throws(() => service.preview({ destinationId: blocked.destinationId, amountUsd: 1 }), /verified/i);
 });
 
-test('approval is idempotent and does not create duplicate holds', async () => {
+test('authorization is idempotent and does not create duplicate holds', async () => {
   const { service, destination } = await setup(10);
   const input = { approval: 'APPROVE', destinationId: destination.destinationId, amountUsd: 1, idempotencyKey: 'ONE-DOLLAR-IDEMPOTENT' };
   const first = await service.approve(input, 'ADMIN-1');
@@ -63,9 +66,10 @@ test('approval is idempotent and does not create duplicate holds', async () => {
   assert.equal(second.created, false);
   assert.equal(service.status().transferCount, 1);
   assert.equal(service.status().reservedUsd, 1);
+  assert.equal(service.status().authoritativeRecord, 'EXTERNAL_TRANSFER_INSTRUCTION');
 });
 
-test('active reservations reduce available Treasury transfer capacity', async () => {
+test('held payment instructions reduce available Treasury transfer capacity', async () => {
   const { service, destination } = await setup(2);
   await service.approve({ approval: 'APPROVE', destinationId: destination.destinationId, amountUsd: 1.5, idempotencyKey: 'FIRST-HOLD' }, 'ADMIN-1');
   assert.throws(() => service.preview({ destinationId: destination.destinationId, amountUsd: 1 }), /insufficient/i);
