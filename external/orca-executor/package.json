@@ -1,20 +1,3 @@
 {
-  "name": "sra-orca-executor",
-  "version": "1.0.0",
-  "private": true,
-  "type": "module",
-  "description": "External Orca Whirlpools execution worker for SRA_DEX_EXECUTOR_V1",
-  "scripts": {
-    "start": "node server.js",
-    "test": "node --test --test-concurrency=1"
-  },
-  "engines": {
-    "node": ">=20"
-  },
-  "dependencies": {
-    "@orca-so/whirlpools": "8.0.1",
-    "@solana/kit": "2",
-    "express": "4.21.2",
-    "pg": "8.13.1"
-  }
+  "name":"sra-orca-executor","version":"1.0.0","private":true,"type":"module","description":"External Solana execution worker for SRA direct transfers, SRA token issuance, and Orca","scripts":{"start":"node server.js","test":"node --test --test-concurrency=1"},"engines":{"node":">=20"},"dependencies":{"@orca-so/whirlpools":"8.0.1","@solana/kit":"2","@solana/spl-token":"0.4.14","@solana/web3.js":"1.98.4","express":"4.21.2","pg":"8.13.1"}
 }

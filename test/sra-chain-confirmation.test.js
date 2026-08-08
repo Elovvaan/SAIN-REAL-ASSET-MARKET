@@ -1,0 +1,1 @@
+import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';test('chain sends return transaction signatures',()=>{const w=fs.readFileSync(new URL('../external/orca-executor/sra-token-worker.js',import.meta.url),'utf8');assert.match(w,/sendAndConfirmTransaction/);assert.ok((w.match(/transactionSignature:signature/g)||[]).length>=2);});

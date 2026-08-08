@@ -1,0 +1,1 @@
+import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';test('admin has one explicit SRA chain issuance action',()=>{const u=fs.readFileSync(new URL('../public/admin/admin-solana-transfer.js',import.meta.url),'utf8');assert.equal((u.match(/Put SRA On Chain/g)||[]).length,1);});
