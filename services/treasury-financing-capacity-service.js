@@ -19,6 +19,8 @@ function isTreasurySource(value) { return SOURCE_REFERENCES.has(String(value || 
 export class TreasuryFinancingCapacityService {
   constructor(domain) { this.domain = domain; }
 
+  isTreasurySource(value) { return isTreasurySource(value); }
+
   canonicalDeposit() {
     return this.domain.list(TRANSACTION_TYPE)
       .find((record) => record.transactionType === FUNDING_DEPOSIT_TYPE
