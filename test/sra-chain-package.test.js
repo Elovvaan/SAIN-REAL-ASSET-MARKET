@@ -1,0 +1,1 @@
+import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';test('executor declares standard Solana token dependencies',()=>{const pkg=JSON.parse(fs.readFileSync(new URL('../external/orca-executor/package.json',import.meta.url),'utf8'));assert.ok(pkg.dependencies['@solana/web3.js']);assert.ok(pkg.dependencies['@solana/spl-token']);});
