@@ -17,6 +17,7 @@
     ['/admin/admin-marketplace-stage-actions.js', 'data-sra-admin-marketplace-stage-actions'],
     ['/admin/admin-users-permissions-workstation.js', 'data-sra-admin-users-permissions-workstation'],
     ['/admin/admin-external-dex-adapter.js', 'data-sra-admin-external-dex-adapter'],
+    ['/admin/admin-external-dex-executor.js', 'data-sra-admin-external-dex-executor'],
     ['/admin/admin-system-health-workstation.js', 'data-sra-admin-system-health-workstation'],
   ];
 
@@ -93,6 +94,7 @@
       window.mountAdminMarketplaceStageActions?.(marketplaceWorkspace);
       window.mountAdminUsersPermissionsWorkstation?.(admin.querySelector('[data-workspace="users"]'));
       window.mountAdminExternalDexAdapter?.(admin);
+      window.mountAdminExternalDexExecutor?.(admin);
       window.mountAdminSystemHealthWorkstation?.(admin.querySelector('[data-workspace="system"]'));
       window.dispatchEvent(new CustomEvent('sra:admin-booted', { detail: { featureCount: FEATURES.length, bootedAt: new Date().toISOString() } }));
     } catch (error) {
