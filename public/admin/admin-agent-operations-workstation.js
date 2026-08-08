@@ -18,7 +18,7 @@
     return body;
   }
 
-  function workCard(item, allowExecute) {
+  function workCard(item) {
     const agent = item.agent || item.nextAction?.agent || 'SRA_ADMIN_INTELLIGENCE_AGENT';
     const action = item.nextAction || item;
     const jobId = action.jobId || item.jobId || '';
@@ -29,7 +29,8 @@
     const approvedIssuedOnChainSupply = Number(action.approvedIssuedOnChainSupply || 0);
     const snapshotVersion = action.snapshotVersion || '';
     const network = action.network || 'SRA';
-    const canExecute = allowExecute && action.executionAction === 'EXECUTE_CHAIN_JOB' && action.executable !== false && jobId;
+    const administratorBoundary = String(authority).startsWith('ADMIN_');
+    const canExecute = administratorBoundary && action.executionAction === 'EXECUTE_CHAIN_JOB' && action.executable !== false && jobId;
     return `<article class="admin-record-card" data-agent-operation-card>
       <header><strong>${esc(label)}</strong><em>${esc(authority)}</em></header>
       <div class="admin-record-grid">
@@ -76,7 +77,7 @@
 
       controls.insertAdjacentHTML('afterbegin', summaryCard(payload, tab === 'Workflow Approvals' ? 'Agent Workflow Approvals' : 'Agent Operations Brief'));
       if (items.length) {
-        controls.insertAdjacentHTML('beforeend', `<div data-agent-operation-card class="admin-record-list">${items.map((item) => workCard(item, tab === 'Workflow Approvals')).join('')}</div>`);
+        controls.insertAdjacentHTML('beforeend', `<div data-agent-operation-card class="admin-record-list">${items.map((item) => workCard(item)).join('')}</div>`);
       } else {
         controls.insertAdjacentHTML('beforeend', `<div data-agent-operation-card class="admin-placeholder">No agent work is waiting in this queue.</div>`);
       }
