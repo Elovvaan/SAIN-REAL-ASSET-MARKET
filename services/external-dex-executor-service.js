@@ -24,13 +24,12 @@ export class ExternalDexExecutorService {
     };
   }
 
-  executionRequest(dexExport) {
+  executionRequest(dexExport, input = {}) {
     if (!dexExport || dexExport.state !== 'READY_FOR_EXTERNAL_DEX') throw new Error('DEX export must be ready before live execution.');
     if (dexExport.venue !== 'ORCA_WHIRLPOOLS' || dexExport.network !== 'SOLANA') throw new Error('Only the Orca Whirlpools Solana executor is supported.');
-    const market = dexExport.market || {};
     return {
       contract: 'SRA_DEX_EXECUTOR_V1',
-      action: market.action || 'CREATE_POOL_AND_SEED_LIQUIDITY',
+      action: text(input.action || 'CREATE_POOL_AND_SEED_LIQUIDITY').toUpperCase(),
       venue: dexExport.venue,
       network: dexExport.network,
       dexExportId: dexExport.dexExportId,
@@ -40,18 +39,18 @@ export class ExternalDexExecutorService {
       pair: dexExport.pair,
       baseMintAddress: dexExport.baseMintAddress,
       quoteMintAddress: dexExport.quoteMintAddress,
-      baseLiquidityQuantity: positive(market.baseLiquidityQuantity ?? dexExport.quantity, 'baseLiquidityQuantity'),
-      quoteLiquidityQuantity: positive(market.quoteLiquidityQuantity, 'quoteLiquidityQuantity'),
-      initialMarketPrice: positive(market.initialMarketPrice, 'initialMarketPrice'),
-      tickSpacing: Math.max(1, Number.parseInt(market.tickSpacing || 64, 10)),
-      liquidityStrategy: market.liquidityStrategy || 'FULL_RANGE',
-      maxSlippageBps: Math.max(0, Number.parseInt(market.maxSlippageBps || 100, 10)),
+      baseLiquidityQuantity: positive(input.baseLiquidityQuantity ?? dexExport.quantity, 'baseLiquidityQuantity'),
+      quoteLiquidityQuantity: positive(input.quoteLiquidityQuantity, 'quoteLiquidityQuantity'),
+      initialMarketPrice: positive(input.initialMarketPrice, 'initialMarketPrice'),
+      tickSpacing: Math.max(1, Number.parseInt(input.tickSpacing || 64, 10)),
+      liquidityStrategy: text(input.liquidityStrategy || 'FULL_RANGE').toUpperCase(),
+      maxSlippageBps: Math.max(0, Number.parseInt(input.maxSlippageBps || 100, 10)),
       recordedValueReference: dexExport.recordedValueReference || null,
       marketPricePolicy: 'EXTERNAL_MARKET_PRICE_IS_OBSERVATIONAL_ONLY',
     };
   }
 
-  async execute(dexExport) {
+  async execute(dexExport, input = {}) {
     const status = this.status();
     if (!status.ready) {
       const error = new Error('External Orca executor is not configured for LIVE execution.');
@@ -60,7 +59,7 @@ export class ExternalDexExecutorService {
       throw error;
     }
     if (typeof this.fetchImpl !== 'function') throw new Error('Fetch implementation is unavailable for external DEX execution.');
-    const request = this.executionRequest(dexExport);
+    const request = this.executionRequest(dexExport, input);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
