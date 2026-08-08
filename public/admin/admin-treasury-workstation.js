@@ -60,12 +60,12 @@
     const cash = Number(data.treasury.cashBalanceUsd || 0);
     const held = Number(data.readiness.status?.reservedUsd || 0);
     const available = Math.max(0, cash - held);
-    return card('Treasury Position','CURRENT',`<div class="admin-record-grid">${field('Cash / Settlement USD',money(cash))}${field('Held for payments',money(held))}${field('Available to send',money(available))}${field('Commercial instrument USD',money(data.treasury.commercialInstrumentUsd))}${field('Available financing',money(data.treasury.availableFinancingCapacityUsd))}${field('Authorized payments',String(data.readiness.status?.readyToSend || 0))}</div><div style="margin-top:14px"><button type="button" data-treasury-start-payment>Send Payment</button></div>`);
+    return card('Treasury Position','CURRENT',`<div class="admin-record-grid">${field('Cash / Settlement USD',money(cash))}${field('Held for payments',money(held))}${field('Available to send',money(available))}${field('Commercial instrument USD',money(data.treasury.commercialInstrumentUsd))}${field('Financing capacity',money(data.treasury.totalFundingCapacityUsd))}${field('Available financing',money(data.treasury.availableFinancingCapacityUsd))}${field('Financing held',money(data.treasury.committedFinancingUsd))}${field('Financing deployed',money(data.treasury.deployedFinancingUsd))}${field('Authorized payments',String(data.readiness.status?.readyToSend || 0))}</div><div style="margin-top:14px"><button type="button" data-treasury-start-payment>Send Payment</button></div>`);
   }
 
   function renderCommercial(data) {
     const instruments = list(data.records.instruments).filter((item) => /FUNDING|COMMERCIAL|TREASURY/i.test(JSON.stringify(item)));
-    return card('Commercial Instruments', instruments.length ? 'ACTIVE' : 'EMPTY', `<div class="admin-record-grid">${field('Instrument records',String(instruments.length))}${field('Recognized instrument USD',money(data.treasury.commercialInstrumentUsd))}${field('Available financing',money(data.treasury.availableFinancingCapacityUsd))}</div><p style="color:#9a9a9a;margin:12px 0 0">Instrument issuance, Treasury recognition, and financing state are shown below from the canonical instrument records.</p>`);
+    return card('Commercial Instruments', instruments.length ? 'ACTIVE' : 'EMPTY', `<div class="admin-record-grid">${field('Instrument records',String(instruments.length))}${field('Recognized instrument USD',money(data.treasury.commercialInstrumentUsd))}${field('Total funding capacity',money(data.treasury.totalFundingCapacityUsd))}${field('Available financing',money(data.treasury.availableFinancingCapacityUsd))}</div><p style="color:#9a9a9a;margin:12px 0 0">Instrument issuance, Treasury recognition, and financing state are shown below from the canonical instrument records.</p>`);
   }
 
   function renderCash(data) {
@@ -77,12 +77,14 @@
   }
 
   function renderFinancing(data, capacity = false) {
+    const total = Number(data.treasury.totalFundingCapacityUsd || 0);
     const available = Number(data.treasury.availableFinancingCapacityUsd || 0);
-    const represented = Number(data.treasury.sraRepresentedAtParUsd || 0);
+    const committed = Number(data.treasury.committedFinancingUsd || 0);
+    const deployed = Number(data.treasury.deployedFinancingUsd || 0);
     const title = capacity ? 'Funding Capacity' : 'Available Financing';
     const body = capacity
-      ? `<div class="admin-record-grid">${field('Total represented at par',money(represented))}${field('Available capacity',money(available))}${field('Committed / unavailable',money(Math.max(0,represented-available)))}</div>`
-      : `<div class="admin-record-grid">${field('Available financing',money(available))}${field('Represented at par',money(represented))}${field('Funding instrument deposits',String(data.treasury.fundingInstrumentDeposits?.depositCount || 0))}</div>`;
+      ? `<div class="admin-record-grid">${field('Total capacity',money(total))}${field('Committed / held',money(committed))}${field('Deployed',money(deployed))}${field('Remaining capacity',money(available))}${field('Capacity used',money(committed + deployed))}${field('Source instrument deposits',String(data.treasury.fundingInstrumentDeposits?.depositCount || 0))}</div><p style="color:#9a9a9a;margin:12px 0 0">Treasury-sourced financing authorizations reserve capacity. Settled Treasury financing moves from held to deployed without being counted twice.</p>`
+      : `<div class="admin-record-grid">${field('Available now',money(available))}${field('Held for authorized financing',money(committed))}${field('Already deployed',money(deployed))}${field('Total funding capacity',money(total))}</div><p style="color:#9a9a9a;margin:12px 0 0">Available Financing is the remaining Treasury capacity after current Treasury-funded authorizations and completed deployments.</p>`;
     return card(title,'CURRENT',body);
   }
 

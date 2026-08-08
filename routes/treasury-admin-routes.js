@@ -1,6 +1,7 @@
 import { TreasuryLedgerService } from '../services/treasury-ledger-service.js';
 import { RecordedValueRepresentationService } from '../services/recorded-value-representation-service.js';
 import { CoinPositionLifecycleReadService } from '../services/coin-position-lifecycle-read-service.js';
+import { TreasuryFinancingCapacityService } from '../services/treasury-financing-capacity-service.js';
 import {
   PlatformFundingInstrumentDepositService,
   CANONICAL_PLATFORM_FUNDING_INSTRUMENT_ID,
@@ -87,6 +88,7 @@ export async function installTreasuryAdminRoutes({ router, domain, requireAdmin,
   const treasury = new TreasuryLedgerService(domain);
   const recordedValue = new RecordedValueRepresentationService(domain);
   const coinPositionLifecycle = new CoinPositionLifecycleReadService(domain);
+  const financingCapacity = new TreasuryFinancingCapacityService(domain);
   await treasury.initialize();
   await ensureInstrumentTreasuryAccounts(domain);
   await ensureCanonicalPlatformFundingInstrument(domain);
@@ -95,14 +97,26 @@ export async function installTreasuryAdminRoutes({ router, domain, requireAdmin,
   router.get('/api/admin/treasury', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
     const fundingSummary = fundingInstrumentDeposits.summary();
+    const capacity = financingCapacity.summary();
     return res.json({
       ...treasury.summary(),
       commercialInstrumentUsd: fundingSummary.depositedInstrumentValueUsd,
-      availableFinancingCapacityUsd: fundingSummary.availableFinancingCapacityUsd,
+      totalFundingCapacityUsd: capacity.totalFundingCapacityUsd,
+      committedFinancingUsd: capacity.committedFinancingUsd,
+      deployedFinancingUsd: capacity.deployedFinancingUsd,
+      usedFinancingCapacityUsd: capacity.usedFinancingCapacityUsd,
+      availableFinancingCapacityUsd: capacity.availableFinancingCapacityUsd,
+      financingCapacity: capacity,
       sraRepresentedAtParUsd: fundingSummary.representedSraQuantity,
       fundingInstrumentDeposits: fundingSummary
     });
   });
+
+  router.get('/api/admin/treasury/financing-capacity', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    return res.json(financingCapacity.summary());
+  });
+
   router.post('/api/admin/treasury/journals/preview', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
     try { return res.json(treasury.preview(req.body || {})); }
@@ -165,5 +179,5 @@ export async function installTreasuryAdminRoutes({ router, domain, requireAdmin,
     return res.json(coinPositionLifecycle.read());
   });
 
-  return { treasury, recordedValue, coinPositionLifecycle, fundingInstrumentDeposits };
+  return { treasury, recordedValue, coinPositionLifecycle, fundingInstrumentDeposits, financingCapacity };
 }

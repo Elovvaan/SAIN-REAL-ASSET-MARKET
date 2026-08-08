@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { TreasuryFinancingCapacityService } from './treasury-financing-capacity-service.js';
 
 const TYPES = Object.freeze({
   OPPORTUNITY: 'FUNDING_OPPORTUNITY', POSITION: 'FUNDING_MARKETPLACE_POSITION', SETTLEMENT_PREPARATION: 'FUNDING_MARKETPLACE_SETTLEMENT_PREPARATION',
@@ -12,7 +13,10 @@ const now = () => new Date().toISOString();
 const evidenceHash = (value) => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
 export class FundingMarketplaceSettlementService {
-  constructor(persistentDomain) { this.domain = persistentDomain; }
+  constructor(persistentDomain) {
+    this.domain = persistentDomain;
+    this.financingCapacity = new TreasuryFinancingCapacityService(persistentDomain);
+  }
   async initialize() { await this.domain.hydrate(Object.values(TYPES)); return this.status(); }
   status() { return { service: 'SRA Funding Engine Phase 12', purpose: 'VERIFIED_SETTLEMENT_AND_FINAL_OWNERSHIP_RECOGNITION', settlementReviews: this.domain.list(TYPES.SETTLEMENT_REVIEW).length, settlementAuthorizations: this.domain.list(TYPES.SETTLEMENT_AUTHORIZATION).length, settlementConfirmations: this.domain.list(TYPES.SETTLEMENT_CONFIRMATION).length, verifiedConfirmations: this.domain.list(TYPES.SETTLEMENT_CONFIRMATION).filter((r) => r.status === 'VERIFIED').length, settlementTransactions: this.domain.list(TYPES.SRA_TRANSACTION).filter((r) => r.transactionType === 'MARKETPLACE_SETTLEMENT').length }; }
   getPreparation(preparationId) { return this.domain.get(TYPES.SETTLEMENT_PREPARATION, preparationId); }
@@ -46,6 +50,10 @@ export class FundingMarketplaceSettlementService {
     const review = this.getReview(reviewId); if (!review) throw new Error('Settlement review was not found.'); if (review.status !== 'IN_REVIEW') throw new Error('Settlement review must be in review before a decision is recorded.'); if (!DECISIONS.has(input?.decision)) throw new Error(`Unsupported settlement decision: ${input?.decision}`);
     const assessment = this.assessPreparation(review.settlementPreparationId); if (input.decision === 'AUTHORIZED' && !assessment.readyForSettlementAuthorization) { const error = new Error('Settlement preparation is not ready for authorization.'); error.code = 'SETTLEMENT_REVIEW_INCOMPLETE'; error.assessment = assessment; throw error; }
     const preparation = this.getPreparation(review.settlementPreparationId), decidedAt = now();
+    let treasuryCapacity = null;
+    if (input.decision === 'AUTHORIZED' && this.financingCapacity.isTreasurySource(preparation.paymentSourceReference)) {
+      treasuryCapacity = this.financingCapacity.assertAvailable(preparation.amount);
+    }
     const updatedReview = { ...review, assessment, status: input.decision, decision: input.decision, rationale: input.rationale || null, decidedBy: actorId, decidedAt };
     const updatedPreparation = { ...preparation, status: input.decision === 'AUTHORIZED' ? 'AUTHORIZED' : input.decision, settlementStatus: input.decision === 'AUTHORIZED' ? 'AWAITING_CONFIRMATION' : preparation.settlementStatus, updatedAt: decidedAt };
     let authorization = null;
@@ -54,11 +62,11 @@ export class FundingMarketplaceSettlementService {
       { type: TYPES.SETTLEMENT_PREPARATION, id: preparation.settlementPreparationId, payload: updatedPreparation, actorId, eventType: 'FUNDING_MARKETPLACE_SETTLEMENT_PREPARATION_DECIDED' },
     ];
     if (input.decision === 'AUTHORIZED') {
-      authorization = { settlementAuthorizationId: id('FMSA'), settlementReviewId: reviewId, settlementPreparationId: preparation.settlementPreparationId, positionId: preparation.positionId, opportunityId: preparation.opportunityId, participantId: preparation.participantId, issuerParticipantId: preparation.issuerParticipantId, amount: preparation.amount, currency: preparation.currency, quantity: preparation.quantity, transactionRouteId: preparation.transactionRouteId, settlementRouteId: preparation.settlementRouteId, paymentSourceReference: preparation.paymentSourceReference, destinationReference: preparation.destinationReference, status: 'AWAITING_CONFIRMATION', authorizedBy: actorId, authorizedAt: decidedAt, verifiedConfirmationId: null, consumedAt: null, settlementTransactionId: null };
+      authorization = { settlementAuthorizationId: id('FMSA'), settlementReviewId: reviewId, settlementPreparationId: preparation.settlementPreparationId, positionId: preparation.positionId, opportunityId: preparation.opportunityId, participantId: preparation.participantId, issuerParticipantId: preparation.issuerParticipantId, amount: preparation.amount, currency: preparation.currency, quantity: preparation.quantity, transactionRouteId: preparation.transactionRouteId, settlementRouteId: preparation.settlementRouteId, paymentSourceReference: preparation.paymentSourceReference, destinationReference: preparation.destinationReference, treasuryCapacitySource: treasuryCapacity ? 'SRA_PLATFORM_TREASURY' : null, status: 'AWAITING_CONFIRMATION', authorizedBy: actorId, authorizedAt: decidedAt, verifiedConfirmationId: null, consumedAt: null, settlementTransactionId: null };
       changes.push({ type: TYPES.SETTLEMENT_AUTHORIZATION, id: authorization.settlementAuthorizationId, payload: authorization, actorId, eventType: 'FUNDING_MARKETPLACE_SETTLEMENT_AUTHORIZED' });
     }
     await this.domain.atomicPut(changes);
-    return { review: updatedReview, authorization };
+    return { review: updatedReview, authorization, treasuryCapacity: treasuryCapacity ? this.financingCapacity.summary() : null };
   }
 
   validateConfirmationAgainstAuthorization(authorization, input) {
@@ -149,7 +157,7 @@ export class FundingMarketplaceSettlementService {
     ];
     if (opportunity) changes.push({ type: TYPES.OPPORTUNITY, id: opportunity.opportunityId, payload: { ...opportunity, status: 'POSITION_SETTLED', fundingPhase: 'OWNERSHIP_RECOGNIZED', updatedAt: settledAt, history: [...(opportunity.history || []), { from: opportunity.status, to: 'POSITION_SETTLED', at: settledAt, actorId, note: position.positionId }] }, actorId, eventType: 'FUNDING_OPPORTUNITY_POSITION_SETTLED' });
     await this.domain.atomicPut(changes);
-    return { position: settledPosition, transaction, confirmation: consumedConfirmation };
+    return { position: settledPosition, transaction, confirmation: consumedConfirmation, treasuryCapacity: this.financingCapacity.isTreasurySource(authorization.paymentSourceReference) ? this.financingCapacity.summary() : null };
   }
 }
 
