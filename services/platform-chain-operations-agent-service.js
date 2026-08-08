@@ -18,6 +18,26 @@ function snapshotVersion(snapshot) {
   ].join(':');
 }
 
+function reviewedSyncJob(jobId) {
+  const value = String(jobId || '');
+  const prefix = 'CHAIN-SRA-SYNC:';
+  if (!value.startsWith(prefix)) return null;
+  const encoded = value.slice(prefix.length);
+  const parts = encoded.split(':');
+  if (parts.length < 3) return null;
+  const targetSupply = number(parts[0]);
+  const approvedIssuedOnChainSupply = number(parts[1]);
+  const mintAddress = parts.slice(2).join(':') || 'NO_MINT';
+  if (!targetSupply) return null;
+  return {
+    jobId: value,
+    snapshotVersion: encoded,
+    targetSupply,
+    approvedIssuedOnChainSupply,
+    mintAddress,
+  };
+}
+
 export class PlatformChainOperationsAgentService {
   constructor({ domain, chainService = null, database = null }) {
     this.domain = domain;
@@ -107,8 +127,37 @@ export class PlatformChainOperationsAgentService {
   }
 
   async execute(jobId, input = {}, actor = {}) {
+    const current = this.snapshot();
     const queue = this.workQueue();
-    const job = queue.queue.find((item) => item.jobId === String(jobId || ''));
+    let job = queue.queue.find((item) => item.jobId === String(jobId || ''));
+
+    // A reviewed synchronization remains valid when the only intervening change is
+    // additional authoritative SRA supply. The administrator still authorizes only
+    // the exact reviewed target; newly produced SRA remains pending for the next job.
+    if (!job) {
+      const reviewed = reviewedSyncJob(jobId);
+      const currentMint = current.mintAddress || 'NO_MINT';
+      const supplyOnlyAdvanced = reviewed
+        && current.platformSupply >= reviewed.targetSupply
+        && current.issuedOnChainSupply === reviewed.approvedIssuedOnChainSupply
+        && currentMint === reviewed.mintAddress;
+      if (supplyOnlyAdvanced) {
+        job = {
+          jobId: reviewed.jobId,
+          jobType: reviewed.mintAddress === 'NO_MINT' ? 'PUT_SRA_ON_CHAIN' : 'SYNC_SRA_SUPPLY',
+          priority: 'READY',
+          authority: 'ADMIN_APPROVAL_REQUIRED',
+          executable: Boolean(this.chainService),
+          requestedQuantity: Number((reviewed.targetSupply - reviewed.approvedIssuedOnChainSupply).toFixed(8)),
+          targetSupply: reviewed.targetSupply,
+          approvedIssuedOnChainSupply: reviewed.approvedIssuedOnChainSupply,
+          snapshotVersion: reviewed.snapshotVersion,
+          network: 'SOLANA',
+          reviewedSupplyAdvancedTo: current.platformSupply,
+        };
+      }
+    }
+
     if (!job) {
       const error = new Error('The reviewed Chain Operations job is stale or no longer available. Refresh Workflow Approvals and review the current SRA quantity.');
       error.code = 'SRA_CHAIN_APPROVAL_SNAPSHOT_STALE';
@@ -142,6 +191,7 @@ export class PlatformChainOperationsAgentService {
         approvedTargetSupply: job.targetSupply,
         approvedIssuedOnChainSupply: job.approvedIssuedOnChainSupply,
         approvedSnapshotVersion: job.snapshotVersion,
+        platformSupplyAtExecution: current.platformSupply,
         issuedOnChainSupply: reconciled.issuedOnChainSupply,
         mintAddress: result.mintAddress || null,
         transactionSignature: result.transactionSignature || null,
