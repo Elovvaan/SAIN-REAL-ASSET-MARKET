@@ -7,7 +7,7 @@
   const esc = (value) => String(value ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;');
   const money = (value) => Number(value || 0).toLocaleString(undefined,{style:'currency',currency:'USD',maximumFractionDigits:2});
   const list = (value) => Array.isArray(value) ? value : [];
-  const request = async (url) => client() ? client().json(url) : fetch(url,{credentials:'same-origin',cache:'no-store'}).then(async (response) => {
+  const request = async (url, options = {}) => client() ? client().json(url, options) : fetch(url,{credentials:'same-origin',cache:'no-store',...options}).then(async (response) => {
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || `Request failed with ${response.status}.`);
     return payload;
@@ -48,24 +48,36 @@
   }
 
   async function load() {
-    const [treasury, readiness, workspace] = await Promise.all([
+    const [treasury, readiness, eligible, workspace] = await Promise.all([
       request('/api/admin/treasury'),
       request('/api/admin/treasury-transfer-readiness'),
+      request('/api/admin/treasury/funding-instrument-deposits/eligible-instruments'),
       request('/api/admin/workspaces?limit=100'),
     ]);
-    return { treasury, readiness, records: workspace?.records || {} };
+    return { treasury, readiness, eligible, records: workspace?.records || {} };
+  }
+
+  function canonicalInstrument(data) {
+    return list(data.eligible?.instruments).find((item) => item.instrumentId === data.eligible?.canonicalInstrumentId) || null;
+  }
+  function recognitionAction(data) {
+    const instrument = canonicalInstrument(data);
+    if (!instrument || instrument.deposited) return '';
+    return `<div style="margin-top:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap"><button type="button" data-treasury-recognize-instrument>Recognize ${money(instrument.faceValueUsd)} in Treasury</button><span data-treasury-recognition-result style="color:#9a9a9a;font-size:12px">Issued instrument is awaiting Treasury recognition. This posts the existing canonical instrument once; it does not create another instrument.</span></div>`;
   }
 
   function renderOverview(data) {
     const cash = Number(data.treasury.cashBalanceUsd || 0);
     const held = Number(data.readiness.status?.reservedUsd || 0);
     const available = Math.max(0, cash - held);
-    return card('Treasury Position','CURRENT',`<div class="admin-record-grid">${field('Cash / Settlement USD',money(cash))}${field('Held for payments',money(held))}${field('Available to send',money(available))}${field('Commercial instrument USD',money(data.treasury.commercialInstrumentUsd))}${field('Financing capacity',money(data.treasury.totalFundingCapacityUsd))}${field('Available financing',money(data.treasury.availableFinancingCapacityUsd))}${field('Financing held',money(data.treasury.committedFinancingUsd))}${field('Financing deployed',money(data.treasury.deployedFinancingUsd))}${field('Authorized payments',String(data.readiness.status?.readyToSend || 0))}</div><div style="margin-top:14px"><button type="button" data-treasury-start-payment>Send Payment</button></div>`);
+    const instrument = canonicalInstrument(data);
+    return card('Treasury Position','CURRENT',`<div class="admin-record-grid">${field('Cash / Settlement USD',money(cash))}${field('Held for payments',money(held))}${field('Available to send',money(available))}${field('Commercial instrument USD',money(data.treasury.commercialInstrumentUsd))}${field('Financing capacity',money(data.treasury.totalFundingCapacityUsd))}${field('Available financing',money(data.treasury.availableFinancingCapacityUsd))}${field('Financing held',money(data.treasury.committedFinancingUsd))}${field('Financing deployed',money(data.treasury.deployedFinancingUsd))}${field('Authorized payments',String(data.readiness.status?.readyToSend || 0))}${field('Canonical $18M instrument',instrument ? (instrument.deposited ? 'TREASURY RECOGNIZED' : 'ISSUED · AWAITING TREASURY RECOGNITION') : 'NOT FOUND')}</div>${recognitionAction(data)}<div style="margin-top:14px"><button type="button" data-treasury-start-payment>Send Payment</button></div>`);
   }
 
   function renderCommercial(data) {
     const instruments = list(data.records.instruments).filter((item) => /FUNDING|COMMERCIAL|TREASURY/i.test(JSON.stringify(item)));
-    return card('Commercial Instruments', instruments.length ? 'ACTIVE' : 'EMPTY', `<div class="admin-record-grid">${field('Instrument records',String(instruments.length))}${field('Recognized instrument USD',money(data.treasury.commercialInstrumentUsd))}${field('Total funding capacity',money(data.treasury.totalFundingCapacityUsd))}${field('Available financing',money(data.treasury.availableFinancingCapacityUsd))}</div><p style="color:#9a9a9a;margin:12px 0 0">Instrument issuance, Treasury recognition, and financing state are shown below from the canonical instrument records.</p>`);
+    const instrument = canonicalInstrument(data);
+    return card('Commercial Instruments', instruments.length ? 'ACTIVE' : 'EMPTY', `<div class="admin-record-grid">${field('Instrument records',String(instruments.length))}${field('Canonical instrument',instrument?.instrumentId || 'Not found')}${field('Canonical face value',instrument ? money(instrument.faceValueUsd) : '—')}${field('Treasury state',instrument?.treasuryState || '—')}${field('Financing state',instrument?.financingState || '—')}${field('Recognized instrument USD',money(data.treasury.commercialInstrumentUsd))}${field('Total funding capacity',money(data.treasury.totalFundingCapacityUsd))}${field('Available financing',money(data.treasury.availableFinancingCapacityUsd))}</div>${recognitionAction(data)}<p style="color:#9a9a9a;margin:12px 0 0">Issued instruments remain instrument records until the governed Treasury recognition step posts them into the Treasury ledger.</p>`);
   }
 
   function renderCash(data) {
@@ -73,7 +85,7 @@
     const held = Number(data.readiness.status?.reservedUsd || 0);
     const available = Math.max(0, cash - held);
     const inFlight = list(data.records.transactions).filter((item) => item.transactionType === 'EXTERNAL_TRANSFER_INSTRUCTION' && ['HELD','SUBMITTED'].includes(String(item.fundsState || '').toUpperCase()));
-    return card('Cash Position','OPERATING',`<div class="admin-record-grid">${field('Cash / Settlement USD',money(cash))}${field('Held',money(held))}${field('Available',money(available))}${field('In-flight payments',String(inFlight.length))}</div><form data-treasury-payment-form style="margin-top:14px"><div class="admin-record-grid"><label><span>Amount USD</span><input name="amountUsd" type="number" min="0.01" step="0.01" value="1.00" required></label><label><span>Rail</span><select name="rail" style="width:100%;background:#050505;border:1px solid #292929;border-radius:10px;color:#f5f5f5;padding:12px"><option value="ACH">ACH</option></select></label></div><div style="display:flex;gap:12px;align-items:center;margin-top:12px"><button type="submit" ${available <= 0 ? 'disabled' : ''}>Send Payment</button><span style="color:#9a9a9a;font-size:12px">Continues to Destination Verification.</span></div></form>`);
+    return card('Cash Position','OPERATING',`<div class="admin-record-grid">${field('Cash / Settlement USD',money(cash))}${field('Held',money(held))}${field('Available',money(available))}${field('In-flight payments',String(inFlight.length))}</div><p style="color:#9a9a9a;margin:12px 0">Commercial instrument value and financing capacity are not cash. Cash changes only through cash/settlement accounting events.</p><form data-treasury-payment-form style="margin-top:14px"><div class="admin-record-grid"><label><span>Amount USD</span><input name="amountUsd" type="number" min="0.01" step="0.01" value="1.00" required></label><label><span>Rail</span><select name="rail" style="width:100%;background:#050505;border:1px solid #292929;border-radius:10px;color:#f5f5f5;padding:12px"><option value="ACH">ACH</option></select></label></div><div style="display:flex;gap:12px;align-items:center;margin-top:12px"><button type="submit" ${available <= 0 ? 'disabled' : ''}>Send Payment</button><span style="color:#9a9a9a;font-size:12px">Continues to Destination Verification.</span></div></form>`);
   }
 
   function renderFinancing(data, capacity = false) {
@@ -83,8 +95,8 @@
     const deployed = Number(data.treasury.deployedFinancingUsd || 0);
     const title = capacity ? 'Funding Capacity' : 'Available Financing';
     const body = capacity
-      ? `<div class="admin-record-grid">${field('Total capacity',money(total))}${field('Committed / held',money(committed))}${field('Deployed',money(deployed))}${field('Remaining capacity',money(available))}${field('Capacity used',money(committed + deployed))}${field('Source instrument deposits',String(data.treasury.fundingInstrumentDeposits?.depositCount || 0))}</div><p style="color:#9a9a9a;margin:12px 0 0">Treasury-sourced financing authorizations reserve capacity. Settled Treasury financing moves from held to deployed without being counted twice.</p>`
-      : `<div class="admin-record-grid">${field('Available now',money(available))}${field('Held for authorized financing',money(committed))}${field('Already deployed',money(deployed))}${field('Total funding capacity',money(total))}</div><p style="color:#9a9a9a;margin:12px 0 0">Available Financing is the remaining Treasury capacity after current Treasury-funded authorizations and completed deployments.</p>`;
+      ? `<div class="admin-record-grid">${field('Total capacity',money(total))}${field('Committed / held',money(committed))}${field('Deployed',money(deployed))}${field('Remaining capacity',money(available))}${field('Capacity used',money(committed + deployed))}${field('Source instrument deposits',String(data.treasury.fundingInstrumentDeposits?.depositCount || 0))}</div>${recognitionAction(data)}<p style="color:#9a9a9a;margin:12px 0 0">Treasury-sourced financing authorizations reserve capacity. Settled Treasury financing moves from held to deployed without being counted twice.</p>`
+      : `<div class="admin-record-grid">${field('Available now',money(available))}${field('Held for authorized financing',money(committed))}${field('Already deployed',money(deployed))}${field('Total funding capacity',money(total))}</div>${recognitionAction(data)}<p style="color:#9a9a9a;margin:12px 0 0">Available Financing is the remaining Treasury capacity after current Treasury-funded authorizations and completed deployments.</p>`;
     return card(title,'CURRENT',body);
   }
 
@@ -105,6 +117,29 @@
 
   function renderReports(data) {
     return card('Treasury Reports','CURRENT',`<div class="admin-record-grid">${field('Statement snapshots',String(list(data.records.financialStatementSnapshots).length))}${field('Treasury statements',String(list(data.records.treasuryStatements).length))}${field('Forecasts',String(list(data.records.treasuryForecasts).length))}${field('Exceptions',String(list(data.records.treasuryExceptions).length))}</div>`);
+  }
+
+  async function recognizeCanonicalInstrument(workspace, data) {
+    const instrument = canonicalInstrument(data);
+    if (!instrument || instrument.deposited) return;
+    const button = controls(workspace)?.querySelector('[data-treasury-recognize-instrument]');
+    const result = controls(workspace)?.querySelector('[data-treasury-recognition-result]');
+    if (button) button.disabled = true;
+    if (result) result.textContent = 'Posting canonical instrument into Treasury…';
+    try {
+      await request('/api/admin/treasury/funding-instrument-deposits/approve', {
+        method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
+          approval:'APPROVE', instrumentId:instrument.instrumentId, faceValueUsd:instrument.faceValueUsd,
+          termMonths:instrument.termMonths || 36, depositReference:`ADMIN-TREASURY-RECOGNITION-${Date.now()}`,
+        }),
+      });
+      if (result) result.textContent = 'Canonical instrument recognized in Treasury.';
+      client()?.refresh?.('treasury-instrument-recognized');
+      await render(workspace);
+    } catch (error) {
+      if (result) result.textContent = error.message;
+      if (button) button.disabled = false;
+    }
   }
 
   async function render(workspace) {
@@ -131,6 +166,7 @@
       else markup = renderReports(data);
       placeholder.outerHTML = markup;
       const current = root.querySelector('[data-treasury-workstation-card]');
+      current?.querySelector('[data-treasury-recognize-instrument]')?.addEventListener('click', () => void recognizeCanonicalInstrument(workspace, data));
       current?.querySelector('[data-treasury-start-payment]')?.addEventListener('click', () => {
         const amount = Math.min(1, Math.max(0, Number(data.treasury.cashBalanceUsd || 0) - Number(data.readiness.status?.reservedUsd || 0)));
         if (amount > 0) openSettlementDestination(amount);

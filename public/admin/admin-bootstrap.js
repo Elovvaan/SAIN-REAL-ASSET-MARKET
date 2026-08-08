@@ -9,6 +9,7 @@
     ['/admin/admin-settlement-execution-controls.js', 'data-sra-admin-settlement-execution-controls'],
     ['/admin/admin-treasury-workstation.js', 'data-sra-admin-treasury-workstation'],
     ['/admin/admin-native-platform-asset-workstation.js', 'data-sra-admin-native-platform-asset-workstation'],
+    ['/admin/admin-financial-records-workstation.js', 'data-sra-admin-financial-records-workstation'],
     ['/admin/admin-coin-representation-integrity.js', 'data-sra-admin-coin-representation-integrity'],
     ['/admin/admin-coin-lifecycle-workstation.js', 'data-sra-admin-coin-lifecycle-workstation'],
     ['/admin/admin-marketplace-lifecycle-workstation.js', 'data-sra-admin-marketplace-lifecycle-workstation'],
@@ -77,6 +78,7 @@
       window.mountAdminSettlementExecutionControls?.(admin.querySelector('[data-workspace="settlement"]'));
       window.mountAdminTreasuryWorkstation?.(admin.querySelector('[data-workspace="treasury"]'));
       window.mountAdminNativePlatformAssetWorkstation?.(admin.querySelector('[data-workspace="native-asset"]'));
+      window.mountAdminFinancialRecordsWorkstation?.(admin.querySelector('[data-workspace="records"]'));
       const coinWorkspace = admin.querySelector('[data-workspace="coin-positions"]');
       window.mountAdminCoinRepresentationIntegrityControls?.(coinWorkspace);
       window.mountAdminCoinLifecycleWorkstation?.(coinWorkspace);
