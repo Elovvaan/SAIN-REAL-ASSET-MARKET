@@ -10,6 +10,14 @@ function activeSra(position) {
     && String(position?.symbol || 'SRA').toUpperCase() === 'SRA';
 }
 
+function snapshotVersion(snapshot) {
+  return [
+    Number(snapshot.platformSupply || 0).toFixed(8),
+    Number(snapshot.issuedOnChainSupply || 0).toFixed(8),
+    snapshot.mintAddress || 'NO_MINT',
+  ].join(':');
+}
+
 export class PlatformChainOperationsAgentService {
   constructor({ domain, chainService = null, database = null }) {
     this.domain = domain;
@@ -47,7 +55,7 @@ export class PlatformChainOperationsAgentService {
     const issuedOnChainSupply = number(projection?.issuedOnChainSupply);
     const pendingQuantity = Number(Math.max(0, platformSupply - issuedOnChainSupply).toFixed(8));
     const reconciliationRequired = issuedOnChainSupply > platformSupply;
-    return {
+    const snapshot = {
       platformSupply,
       issuedOnChainSupply,
       pendingQuantity,
@@ -63,6 +71,7 @@ export class PlatformChainOperationsAgentService {
             ? 'SYNCHRONIZED'
             : 'NO_SUPPLY',
     };
+    return { ...snapshot, snapshotVersion: snapshotVersion(snapshot) };
   }
 
   workQueue() {
@@ -76,6 +85,7 @@ export class PlatformChainOperationsAgentService {
         authority: 'ADMIN_REVIEW_REQUIRED',
         executable: false,
         reason: 'On-chain issued SRA exceeds current authoritative platform supply.',
+        snapshotVersion: snapshot.snapshotVersion,
         snapshot,
       });
     } else if (snapshot.pendingQuantity > 0) {
@@ -87,6 +97,8 @@ export class PlatformChainOperationsAgentService {
         executable: Boolean(this.chainService),
         requestedQuantity: snapshot.pendingQuantity,
         targetSupply: snapshot.platformSupply,
+        approvedIssuedOnChainSupply: snapshot.issuedOnChainSupply,
+        snapshotVersion: snapshot.snapshotVersion,
         network: 'SOLANA',
         snapshot,
       });
@@ -102,7 +114,27 @@ export class PlatformChainOperationsAgentService {
     if (String(input.approval || '').toUpperCase() !== 'APPROVE') throw new Error('Explicit administrator approval is required.');
     if (!this.chainService) throw new Error('SRA chain service is unavailable.');
 
-    const result = await this.chainService.putOnChain({}, actor.id || actor.actorId || 'SRA_PLATFORM_ADMIN');
+    const approvedTargetSupply = number(input.targetSupply);
+    const approvedIssuedOnChainSupply = number(input.approvedIssuedOnChainSupply);
+    const approvedSnapshotVersion = String(input.snapshotVersion || '');
+    if (!approvedTargetSupply || !approvedSnapshotVersion) {
+      throw new Error('The approved chain job target and snapshot version are required.');
+    }
+    if (
+      approvedTargetSupply !== job.targetSupply
+      || approvedIssuedOnChainSupply !== job.approvedIssuedOnChainSupply
+      || approvedSnapshotVersion !== job.snapshotVersion
+    ) {
+      const error = new Error('The reviewed Chain Operations snapshot is stale. Refresh Workflow Approvals and review the updated SRA quantity before approving.');
+      error.code = 'SRA_CHAIN_APPROVAL_SNAPSHOT_STALE';
+      throw error;
+    }
+
+    const result = await this.chainService.putOnChain({
+      targetSupply: job.targetSupply,
+      expectedIssuedOnChainSupply: job.approvedIssuedOnChainSupply,
+      snapshotVersion: job.snapshotVersion,
+    }, actor.id || actor.actorId || 'SRA_PLATFORM_ADMIN');
     const reconciled = this.snapshot();
     if (this.database?.audit) await this.database.audit({
       actorId: actor.id || actor.actorId || 'SRA_PLATFORM_ADMIN',
@@ -112,6 +144,9 @@ export class PlatformChainOperationsAgentService {
       payload: {
         jobType: job.jobType,
         requestedQuantity: job.requestedQuantity,
+        approvedTargetSupply: job.targetSupply,
+        approvedIssuedOnChainSupply: job.approvedIssuedOnChainSupply,
+        approvedSnapshotVersion: job.snapshotVersion,
         issuedOnChainSupply: reconciled.issuedOnChainSupply,
         mintAddress: result.mintAddress || null,
         transactionSignature: result.transactionSignature || null,
