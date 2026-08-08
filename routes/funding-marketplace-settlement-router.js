@@ -44,9 +44,17 @@ function installConfirmationIdentityGuard(service) {
   domain.__settlementConfirmationIdentityGuard = true;
 }
 
+function normalizeDirectMount(req, _res, next) {
+  const prefix = '/api/funding-marketplace-settlement';
+  if (req.url === prefix) req.url = '/';
+  else if (req.url.startsWith(`${prefix}/`)) req.url = req.url.slice(prefix.length);
+  next();
+}
+
 export function createFundingMarketplaceSettlementRouter(service) {
   installConfirmationIdentityGuard(service);
   const router = express.Router();
+  router.use(normalizeDirectMount);
 
   router.get('/status', (_req, res) => res.json(service.status()));
   router.get('/preparations/:preparationId/assessment', (req, res) => { try { return res.json(service.assessPreparation(req.params.preparationId)); } catch (error) { return handle(res, error); } });

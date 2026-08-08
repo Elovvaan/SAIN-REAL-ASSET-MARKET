@@ -13,8 +13,16 @@ function handle(res, error) {
   });
 }
 
+function normalizeDirectMount(req, _res, next) {
+  const prefix = '/api/funding-marketplace-allocation';
+  if (req.url === prefix) req.url = '/';
+  else if (req.url.startsWith(`${prefix}/`)) req.url = req.url.slice(prefix.length);
+  next();
+}
+
 export function createFundingMarketplaceAllocationRouter(service) {
   const router = express.Router();
+  router.use(normalizeDirectMount);
 
   router.get('/status', (_req, res) => res.json(service.status()));
 
