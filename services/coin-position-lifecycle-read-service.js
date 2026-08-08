@@ -5,6 +5,7 @@ const idOf = (record) => record?.coinPositionId || record?.positionId || record?
 const stateOf = (record) => String(record?.state || 'UNKNOWN').toUpperCase();
 const sourceUnit = (record) => String(record?.sourcePosition?.unit || record?.nativeUnit || record?.sourceUnit || 'SOURCE').toUpperCase();
 const sourceAmount = (record) => n(record?.sourcePosition?.amount ?? record?.nativeQuantity ?? record?.sourceQuantity);
+const CHAIN_TYPE = 'SRA_COIN_CHAIN_PROJECTION';
 
 function isDerivative(record) {
   const id = idOf(record);
@@ -46,11 +47,11 @@ export class CoinPositionLifecycleReadService {
     const recordsById = new Map(financialRecords.map((record) => [record.financialRecordId, record]));
     const coinAccounts = this.domain.list(RECORD_TYPES.COIN_ACCOUNT);
     const lifecycleEvents = this.domain.list(RECORD_TYPES.LIFECYCLE_EVENT || 'LIFECYCLE_EVENT');
+    const chainProjection = this.domain.get(CHAIN_TYPE, 'SRA-SOLANA') || null;
 
     const roots = positions.filter((position) => !isDerivative(position));
     const derivatives = positions.filter(isDerivative);
     const activeRoots = roots.filter((position) => stateOf(position) !== 'RETIRED');
-    const activePositions = positions.filter((position) => stateOf(position) !== 'RETIRED');
     const retiredRoots = roots.filter((position) => stateOf(position) === 'RETIRED');
 
     const rows = activeRoots.map((position) => {
@@ -75,9 +76,12 @@ export class CoinPositionLifecycleReadService {
     const recognizedUsd = rows.reduce((sum, row) => sum + row.recognizedUsd, 0);
     const missingBasis = rows.filter((row) => !row.recognizedUsd).length;
     const mismatch = rows.filter((row) => row.recognizedUsd > 0 && Math.abs(row.representedSra - row.recognizedUsd) > 0.00000001).length;
-    const available = activePositions.reduce((sum, position) => sum + n(position.availableQuantity ?? Math.max(0, n(position.quantity) - n(position.reservedQuantity) - n(position.externalizedQuantity ?? position.externallyTransferredQuantity))), 0);
-    const reserved = activePositions.reduce((sum, position) => sum + n(position.reservedQuantity), 0);
-    const externalized = activePositions.reduce((sum, position) => sum + n(position.externalizedQuantity ?? position.externallyTransferredQuantity), 0);
+    const positionReserved = rows.reduce((sum, row) => sum + row.reservedSra, 0);
+    const positionExternalized = rows.reduce((sum, row) => sum + row.externalizedSra, 0);
+    const chainExternalized = Math.max(0, n(chainProjection?.issuedOnChainSupply));
+    const externalized = Math.max(positionExternalized, chainExternalized);
+    const reserved = positionReserved;
+    const available = Math.max(0, representedSra - reserved - externalized);
     const retired = retiredRoots.reduce((sum, position) => sum + n(position.quantity), 0);
     const accountIssuance = coinAccounts.filter((account) => String(account.symbol || '').toUpperCase() === 'SRA').reduce((sum, account) => sum + n(account.representedQuantity), 0);
 
@@ -98,6 +102,13 @@ export class CoinPositionLifecycleReadService {
         accountIssuedSra: accountIssuance,
         recognizedUsd,
       },
+      onChain: chainProjection ? {
+        network: chainProjection.network || 'SOLANA',
+        mintAddress: chainProjection.mintAddress || null,
+        issuedSra: chainExternalized,
+        pendingSra: Math.max(0, representedSra - chainExternalized),
+        lastSynchronizedAt: chainProjection.lastSynchronizedAt || chainProjection.updatedAt || chainProjection.createdAt || null,
+      } : null,
       reconciliation: {
         rootPositionCount: roots.length,
         activeRootPositionCount: activeRoots.length,
@@ -107,12 +118,14 @@ export class CoinPositionLifecycleReadService {
         parDeltaSra: representedSra - recognizedUsd,
         representationCoveragePct: rows.length ? ((rows.length - missingBasis) / rows.length) * 100 : 100,
         restrictedRootPositionCount: restricted,
+        chainSupplyDeltaSra: representedSra - chainExternalized,
       },
       sourceMix,
       history: {
         representationEventCount: lifecycleEvents.filter((event) => /COIN_POSITION_REPRESENTED|COIN_REPRESENTATION_CREATED|MINT/i.test(eventText(event))).length,
         adjustmentEventCount: lifecycleEvents.filter((event) => /ADJUST|RESTAT|CORRECT/i.test(eventText(event))).length,
         retirementEventCount: lifecycleEvents.filter((event) => /RETIR/i.test(eventText(event))).length,
+        chainSynchronizationEventCount: lifecycleEvents.filter((event) => /SRA_COIN_PUT_ON_CHAIN|SRA_COIN_ON_CHAIN_SUPPLY_SYNCHRONIZED/i.test(eventText(event))).length,
       },
       counts: {
         coinPositionCount: positions.length,
