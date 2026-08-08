@@ -3,6 +3,8 @@
   window.__sraAdminAgentOperationsWorkstationInstalled = true;
 
   const mounted = new WeakSet();
+  const conversation = [];
+  const ownedTabs = new Set(['Conversation','Suggested Actions','Workflow Approvals','Incomplete Workflows']);
   const esc = (value) => String(value ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;');
 
   async function request(payload) {
@@ -55,12 +57,42 @@
     </section>`;
   }
 
+  function conversationMarkup() {
+    const messages = conversation.length
+      ? conversation.map((message) => `<div style="padding:12px 14px;border:1px solid #292929;border-radius:10px;background:${message.role === 'admin' ? '#1d1d1d' : '#0b0b08'}"><strong style="display:block;margin-bottom:6px">${message.role === 'admin' ? 'Administrator' : 'SAIN'}</strong><span style="line-height:1.5">${esc(message.text)}</span></div>`).join('')
+      : `<div class="admin-placeholder">Ask SAIN about the platform, current work, approvals, records, or lifecycle state.</div>`;
+    return `<section class="admin-record-card" data-agent-operation-card data-agent-conversation>
+      <header><strong>SAIN Administrative Agent</strong><em>CONVERSATION</em></header>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">
+        <button type="button" data-agent-quick-question="What currently needs my approval?">Approval review</button>
+        <button type="button" data-agent-quick-question="Give me the operational brief and work queue.">Platform status</button>
+        <button type="button" data-agent-quick-question="What workflows are incomplete?">Incomplete workflows</button>
+      </div>
+      <div data-agent-conversation-log style="display:grid;gap:10px;margin:12px 0">${messages}</div>
+      <form data-agent-conversation-form>
+        <textarea name="question" rows="3" placeholder="Message SAIN about the platform..." required style="width:100%;box-sizing:border-box;background:#050505;border:1px solid #292929;border-radius:10px;color:#f5f5f5;padding:12px;resize:vertical"></textarea>
+        <div style="display:flex;gap:12px;align-items:center;margin-top:10px"><button type="submit">Send to SAIN</button><span data-agent-conversation-result style="font-size:12px;color:#d6a92f"></span></div>
+      </form>
+    </section>`;
+  }
+
+  function setPresentationOwnership(workspace, tab) {
+    const records = workspace.querySelector('.admin-workspace-records');
+    if (records) records.style.display = ownedTabs.has(tab) ? 'none' : '';
+  }
+
   async function render(workspace) {
     if (!workspace) return;
     const controls = workspace.querySelector('.admin-workspace-controls');
     if (!controls) return;
     controls.querySelectorAll('[data-agent-operation-card]').forEach((node) => node.remove());
     const tab = workspace.dataset.activeTab;
+    setPresentationOwnership(workspace, tab);
+
+    if (tab === 'Conversation') {
+      controls.insertAdjacentHTML('afterbegin', conversationMarkup());
+      return;
+    }
     if (!['Suggested Actions','Workflow Approvals','Incomplete Workflows'].includes(tab)) return;
 
     try {
@@ -84,6 +116,22 @@
     } catch (error) {
       if (workspace.dataset.activeTab === tab) controls.insertAdjacentHTML('afterbegin', `<div data-agent-operation-card class="admin-placeholder"><strong>Agent operations unavailable.</strong><br>${esc(error.message)}</div>`);
     }
+  }
+
+  async function ask(workspace, question) {
+    const text = String(question || '').trim();
+    if (!text) return;
+    conversation.push({ role:'admin', text });
+    await render(workspace);
+    const result = workspace.querySelector('[data-agent-conversation-result]');
+    if (result) result.textContent = 'SAIN is reviewing the platform…';
+    try {
+      const response = await request({ question:text });
+      conversation.push({ role:'agent', text:response.answer || response.summary || response.status || 'Request completed.' });
+    } catch (error) {
+      conversation.push({ role:'agent', text:`Unable to complete the request: ${error.message}` });
+    }
+    if (workspace.dataset.activeTab === 'Conversation') await render(workspace);
   }
 
   async function execute(workspace, button) {
@@ -117,7 +165,17 @@
     workspace.addEventListener('click', (event) => {
       const executeButton = event.target.closest('[data-agent-execute-chain-job]');
       if (executeButton) { void execute(workspace, executeButton); return; }
+      const quick = event.target.closest('[data-agent-quick-question]');
+      if (quick) { void ask(workspace, quick.dataset.agentQuickQuestion); return; }
       if (event.target.closest('[data-admin-tab]')) queueMicrotask(() => void render(workspace));
+    });
+    workspace.addEventListener('submit', (event) => {
+      const form = event.target.closest('[data-agent-conversation-form]');
+      if (!form) return;
+      event.preventDefault();
+      const question = new FormData(form).get('question');
+      form.reset();
+      void ask(workspace, question);
     });
     window.addEventListener('sra:admin-workspace-synchronized', (event) => {
       if (event.detail?.workspaceId === 'agent') void render(workspace);
