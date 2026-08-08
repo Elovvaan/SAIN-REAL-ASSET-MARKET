@@ -1,0 +1,1 @@
+import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';test('SRA transfer accepts any valid destination owner address',()=>{const w=fs.readFileSync(new URL('../external/orca-executor/sra-token-worker.js',import.meta.url),'utf8');assert.match(w,/getOrCreateAssociatedTokenAccount\(this\.connection,this\.payer,mint,owner\)/);});
