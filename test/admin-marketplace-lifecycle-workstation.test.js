@@ -7,7 +7,7 @@ const marketplace = fs.readFileSync(new URL('../public/admin/admin-marketplace-l
 
 test('Marketplace Lifecycle is explicitly loaded and mounted by Administration', () => {
   assert.match(bootstrap, /admin-marketplace-lifecycle-workstation\.js/);
-  assert.match(bootstrap, /mountAdminMarketplaceLifecycleWorkstation\?\.\(admin\.querySelector\('\[data-workspace=\\"marketplace\\"\]'\)\)/);
+  assert.match(bootstrap, /mountAdminMarketplaceLifecycleWorkstation\?\.\(admin\.querySelector\('\[data-workspace="marketplace"\]'\)\)/);
   assert.match(marketplace, /window\.mountAdminMarketplaceLifecycleWorkstation = mount/);
   assert.doesNotMatch(marketplace, /MutationObserver/);
   assert.doesNotMatch(marketplace, /DOMContentLoaded/);
@@ -30,7 +30,7 @@ test('Marketplace Lifecycle reads authoritative stage services instead of the ca
 test('Marketplace stages use lifecycle semantics instead of loose JSON keyword filters', () => {
   assert.match(marketplace, /text\(item\.status\) === 'RESERVED'/);
   assert.match(marketplace, /text\(item\.status\) === 'CONFIRMED'/);
-  assert.match(marketplace, /text\(item\.status\) === 'VERIFIED'/);
+  assert.match(marketplace, /\['VERIFIED','CONSUMED'\]\.includes\(text\(item\.status\)\)/);
   assert.match(marketplace, /isTerminalListing/);
   assert.doesNotMatch(marketplace, /JSON\.stringify\(.*ORDER/);
   assert.doesNotMatch(marketplace, /JSON\.stringify\(.*RESERV/);
@@ -53,4 +53,11 @@ test('Marketplace flow visibly reconciles all eight lifecycle stages', () => {
   assert.match(marketplace, /Confirmed order quantity/);
   assert.match(marketplace, /Allocated quantity/);
   assert.match(marketplace, /Verified settlement/);
+});
+
+test('Marketplace authoritative workstation restores itself on ordinary workspace re-entry', () => {
+  assert.match(marketplace, /data-admin-workspace="marketplace"/);
+  assert.match(marketplace, /data-open-workspace="marketplace"/);
+  assert.match(marketplace, /queueMicrotask\(\(\) => void refresh\(workspace,true\)\)/);
+  assert.match(marketplace, /location\.hash === '#admin-marketplace'/);
 });
