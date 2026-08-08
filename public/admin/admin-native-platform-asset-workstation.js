@@ -7,7 +7,7 @@
   const esc = (value) => String(value ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;');
   const money = (value) => Number(value || 0).toLocaleString(undefined,{style:'currency',currency:'USD',maximumFractionDigits:2});
   const list = (value) => Array.isArray(value) ? value : [];
-  const request = async (url) => client() ? client().json(url) : fetch(url,{credentials:'same-origin',cache:'no-store'}).then(async (response) => {
+  const request = async (url, options = {}) => client() ? client().json(url, options) : fetch(url,{credentials:'same-origin',cache:'no-store',...options}).then(async (response) => {
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || `Request failed with ${response.status}.`);
     return payload;
@@ -56,7 +56,8 @@
 
   function approval(data) {
     const created = Boolean(refs(data).instrumentId);
-    return card('Approval Status',created ? 'APPROVED / CREATED' : 'AWAITING APPROVAL',`<div class="admin-record-grid">${field('Next action',data.status.nextAction)}${field('Instrument created',created ? 'YES' : 'NO')}${field('Listing created',refs(data).listingId ? 'YES' : 'NO')}${field('Ownership recognized',refs(data).ownershipRecognitionId ? 'YES' : 'NO')}${field('Export package created',refs(data).exportPackageId ? 'YES' : 'NO')}</div>${created ? '' : '<p style="color:#9a9a9a;margin:12px 0 0">The governed bootstrap action remains the existing creation path for the native asset lifecycle.</p>'}`);
+    const action = created ? '' : `<div style="margin-top:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap"><button type="button" data-native-asset-approve>Approve & Create Native Asset</button><span data-native-asset-approval-result style="color:#9a9a9a;font-size:12px">Creates the existing governed native-asset lifecycle; it does not create the separate $18M Treasury instrument.</span></div>`;
+    return card('Approval Status',created ? 'APPROVED / CREATED' : 'AWAITING APPROVAL',`<div class="admin-record-grid">${field('Next action',data.status.nextAction)}${field('Instrument created',created ? 'YES' : 'NO')}${field('Listing created',refs(data).listingId ? 'YES' : 'NO')}${field('Ownership recognized',refs(data).ownershipRecognitionId ? 'YES' : 'NO')}${field('Export package created',refs(data).exportPackageId ? 'YES' : 'NO')}</div>${action}`);
   }
 
   function listingView(data) {
@@ -107,6 +108,22 @@
     return card('Governance',data.status.readyForExport ? 'LIFECYCLE COMPLETE' : 'GOVERNED',`<div class="admin-record-grid">${field('Platform asset',data.status.platformAssetCode)}${field('Next governed action',data.status.nextAction)}${field('Instrument',r.instrumentId || 'Not created')}${field('Listing',r.listingId || 'Not created')}${field('Settlement',r.settlementRecordId || 'Not created')}${field('Ownership',r.ownershipRecognitionId || 'Not created')}${field('Export package',r.exportPackageId || 'Not created')}${field('Ready for export',data.status.readyForExport ? 'YES' : 'NO')}</div>`);
   }
 
+  async function approveNativeAsset(workspace) {
+    const button = controls(workspace)?.querySelector('[data-native-asset-approve]');
+    const result = controls(workspace)?.querySelector('[data-native-asset-approval-result]');
+    if (button) button.disabled = true;
+    if (result) result.textContent = 'Creating governed native asset lifecycle…';
+    try {
+      await request('/api/admin/platform-asset/bootstrap', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ approval:'APPROVE' }) });
+      if (result) result.textContent = 'Native asset lifecycle created.';
+      client()?.refresh?.('native-asset-approved');
+      await render(workspace);
+    } catch (error) {
+      if (result) result.textContent = error.message;
+      if (button) button.disabled = false;
+    }
+  }
+
   async function render(workspace) {
     clear(workspace);
     removeLegacySummary(workspace);
@@ -133,6 +150,7 @@
         'Governance':governance,
       };
       placeholder.outerHTML = (renderers[tab] || currentAsset)(data);
+      root.querySelector('[data-native-asset-approve]')?.addEventListener('click', () => void approveNativeAsset(workspace));
     } catch (error) {
       placeholder.innerHTML = `<header><strong>Native Platform Asset</strong><em>UNAVAILABLE</em></header><p>${esc(error.message)}</p>`;
     }
