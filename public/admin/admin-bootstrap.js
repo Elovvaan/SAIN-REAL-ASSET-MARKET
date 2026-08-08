@@ -9,6 +9,7 @@
     ['/admin/admin-settlement-execution-controls.js', 'data-sra-admin-settlement-execution-controls'],
     ['/admin/admin-coin-representation-integrity.js', 'data-sra-admin-coin-representation-integrity'],
     ['/admin/admin-coin-lifecycle-workstation.js', 'data-sra-admin-coin-lifecycle-workstation'],
+    ['/admin/admin-marketplace-lifecycle-workstation.js', 'data-sra-admin-marketplace-lifecycle-workstation'],
     ['/admin/admin-system-health-workstation.js', 'data-sra-admin-system-health-workstation'],
   ];
 
@@ -75,6 +76,7 @@
       const coinWorkspace = admin.querySelector('[data-workspace="coin-positions"]');
       window.mountAdminCoinRepresentationIntegrityControls?.(coinWorkspace);
       window.mountAdminCoinLifecycleWorkstation?.(coinWorkspace);
+      window.mountAdminMarketplaceLifecycleWorkstation?.(admin.querySelector('[data-workspace="marketplace"]'));
       window.mountAdminSystemHealthWorkstation?.(admin.querySelector('[data-workspace="system"]'));
       window.dispatchEvent(new CustomEvent('sra:admin-booted', { detail: { featureCount: FEATURES.length, bootedAt: new Date().toISOString() } }));
     } catch (error) {
