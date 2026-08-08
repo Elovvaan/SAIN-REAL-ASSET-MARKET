@@ -15,6 +15,7 @@
     '/marketplace-tier-one.js',
     '/platform-admin-workspace.js',
     '/public-home.js',
+    '/hybrid-liquidity-market.js',
     '/participant-workspace-bootstrap.js',
     '/home-project-workspace.js',
     '/institution-workspace-loader.js',
