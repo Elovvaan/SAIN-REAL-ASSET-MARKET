@@ -15,8 +15,6 @@
     '/marketplace-tier-one.js',
     '/platform-admin-workspace.js',
     '/public-home.js',
-    '/hybrid-liquidity-market.js',
-    '/participant-workspace-bootstrap.js',
     '/home-project-workspace.js',
     '/institution-workspace-loader.js',
     '/transaction-market-ui.js',
@@ -29,6 +27,8 @@
     '/funding-market-activation-desk.js',
     '/verified-settlement-desk.js',
     '/funding-operations-ui.js',
+    '/hybrid-liquidity-market.js',
+    '/participant-workspace-bootstrap.js',
     '/sain-operations-intelligence.js',
   ];
 
