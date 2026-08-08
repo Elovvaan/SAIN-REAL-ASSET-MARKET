@@ -11,8 +11,16 @@ function handle(res, error) {
   return res.status(status).json({ error: error.message, code: error.code || 'ON_CHAIN_PROJECTION_ERROR', assessment: error.assessment || null, executorStatus: error.executorStatus || null });
 }
 
+function normalizeDirectMount(req, _res, next) {
+  const prefix = '/api/on-chain';
+  if (req.url === prefix) req.url = '/';
+  else if (req.url.startsWith(`${prefix}/`)) req.url = req.url.slice(prefix.length);
+  next();
+}
+
 export function createOnChainProjectionRouter(service) {
   const router = express.Router();
+  router.use(normalizeDirectMount);
   const dex = new ExternalDexAdapterService(service.domain, service);
   const dexExecutor = new ExternalDexExecutorService();
 
