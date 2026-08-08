@@ -12,7 +12,7 @@
       method: 'POST',
       credentials: 'same-origin',
       cache: 'no-store',
-      headers: { Accept: 'application/json', 'Content-Type':'application/json' },
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
     const body = await response.json().catch(() => ({}));
@@ -40,7 +40,8 @@
     const approvedIssuedOnChainSupply = Number(action.approvedIssuedOnChainSupply || 0);
     const snapshotVersion = action.snapshotVersion || '';
     const network = action.network || 'SRA';
-    const canExecute = executableApproval(item) && action.executionAction === 'EXECUTE_CHAIN_JOB';
+    const administratorBoundary = String(authority).startsWith('ADMIN_');
+    const canExecute = administratorBoundary && action.executionAction === 'EXECUTE_CHAIN_JOB' && executableApproval(item);
     return `<article class="admin-record-card" data-agent-operation-card>
       <header><strong>${esc(label)}</strong><em>${esc(authority)}</em></header>
       <div class="admin-record-grid">
@@ -115,13 +116,11 @@
     if (!['Suggested Actions','Workflow Approvals','Incomplete Workflows'].includes(tab)) return;
 
     try {
-      const payload = tab === 'Workflow Approvals'
-        ? await request({ question:'What needs my approval?' })
-        : await request({ question:'Give me the operational brief and work queue.' });
+      const payload = await request({ question: 'Give me the operational brief and work queue.' });
       if (workspace.dataset.activeTab !== tab) return;
 
       let items = tab === 'Workflow Approvals'
-        ? (payload.pendingActions || [])
+        ? (payload.administratorQueue || [])
         : tab === 'Incomplete Workflows'
           ? (payload.incompleteWorkflows || [])
           : [...(payload.administratorQueue || []), ...(payload.autonomousQueue || [])];
@@ -169,13 +168,13 @@
     if (result) result.textContent = 'Agent executing approved job…';
     try {
       const response = await request({
-        question:`Execute approved chain operations job ${jobId}.`,
-        action:'EXECUTE_CHAIN_JOB',
+        question: `Execute approved chain operations job ${jobId}.`,
+        action: 'EXECUTE_CHAIN_JOB',
         jobId,
-        approval:'APPROVE',
-        targetSupply:Number(button.dataset.targetSupply || 0),
-        approvedIssuedOnChainSupply:Number(button.dataset.approvedIssuedSupply || 0),
-        snapshotVersion:button.dataset.snapshotVersion || '',
+        approval: 'APPROVE',
+        targetSupply: Number(button.dataset.targetSupply || 0),
+        approvedIssuedOnChainSupply: Number(button.dataset.approvedIssuedSupply || 0),
+        snapshotVersion: button.dataset.snapshotVersion || '',
       });
       if (result) result.textContent = `${response.status} · ${response.reconciliation?.issuedOnChainSupply ?? 0} SRA on chain`;
       window.dispatchEvent(new CustomEvent('sra:admin-refresh',{ detail:{ source:'chain-operations-agent' } }));
