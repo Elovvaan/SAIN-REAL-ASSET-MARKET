@@ -33,6 +33,13 @@ test('agent workstation renders work in existing administration tabs', () => {
   assert.match(bootstrap, /mountAdminAgentOperationsWorkstation/);
 });
 
+test('administrator-bound agent work carries its approval control wherever surfaced', () => {
+  assert.match(workstation, /const administratorBoundary = String\(authority\)\.startsWith\('ADMIN_'\)/);
+  assert.match(workstation, /const canExecute = administratorBoundary && action\.executionAction === 'EXECUTE_CHAIN_JOB'/);
+  assert.match(workstation, /items\.map\(\(item\) => workCard\(item\)\)/);
+  assert.doesNotMatch(workstation, /workCard\(item, tab === 'Workflow Approvals'\)/);
+});
+
 test('reviewed chain approval is bound to a supply snapshot and target', () => {
   assert.match(chainAgent, /snapshotVersion/);
   assert.match(chainAgent, /CHAIN-SRA-SYNC:\$\{snapshot\.snapshotVersion\}/);
