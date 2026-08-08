@@ -54,7 +54,8 @@ export class TreasuryLiveExecutionService {
       const instruction = this.instruction(transferInstructionId);
       if (String(instruction.route || '').toUpperCase() !== 'ACH') throw new Error('The one-dollar canary requires an ACH transfer instruction.');
       if (Number(instruction.amountUsd ?? instruction.quantity) !== 1 || String(instruction.currency || 'USD').toUpperCase() !== 'USD') throw new Error('The canary endpoint only executes a prepared 1.00 USD transfer instruction.');
-      if (instruction.state !== 'READY_TO_SEND' || instruction.executionState !== 'AUTHORIZED') throw new Error('The transfer instruction is not READY_TO_SEND with execution authorization.');
+      if (instruction.state !== 'READY_TO_SEND' || instruction.executionState !== 'AUTHORIZED') throw new Error('The payment instruction is not authorized and ready to send.');
+      if (String(instruction.fundsState || '').toUpperCase() !== 'HELD') throw new Error('The payment amount is not reserved against Treasury cash.');
 
       const routingNumber = digits(input.routingNumber);
       if (!validRoutingNumber(routingNumber)) throw new Error('A valid 9-digit ACH routing number is required.');
@@ -79,13 +80,14 @@ export class TreasuryLiveExecutionService {
           bankName: String(input.bankName || 'ACH destination').trim() || 'ACH destination',
         },
         purpose: 'SRA_TREASURY_ONE_DOLLAR_CANARY',
-        remittanceReference: instruction.exportPackageId || transferInstructionId,
-        settlementId: instruction.exportPackageId || null,
+        remittanceReference: transferInstructionId,
+        settlementId: null,
         settlementPackageId: null,
         commitmentId: null,
         messageHash: null,
       };
-      const confirmation = String(input.confirmation || '').trim();
+
+      const confirmation = `EXECUTE 1.00 USD VIA ACH`;
       this.executor.assertCanExecute(transientInstruction, confirmation);
       const evidence = await this.executor.execute(transientInstruction, { confirmation, actorId });
       const providerClassification = classifyProviderStatus(evidence.providerStatus);
@@ -119,6 +121,7 @@ export class TreasuryLiveExecutionService {
         ...instruction,
         state: executed ? 'PROVIDER_EXECUTED' : 'PROVIDER_ACCEPTED',
         executionState: executed ? 'PROVIDER_EXECUTED' : 'PROVIDER_ACCEPTED',
+        fundsState: 'SUBMITTED',
         externalWithdrawalState: 'AWAITING_RECEIVING_CONFIRMATION',
         providerReference: evidence.providerReference,
         providerStatus: evidence.providerStatus,
@@ -138,7 +141,7 @@ export class TreasuryLiveExecutionService {
         id: pkg.exportPackageId,
         payload: { ...pkg, state: updatedInstruction.state, exportExecutionState: updatedInstruction.executionState, providerReference: evidence.providerReference, updatedAt },
         actorId,
-        eventType: 'TREASURY_EXPORT_PROVIDER_SUBMITTED',
+        eventType: 'TREASURY_EXPORT_LINEAGE_PROVIDER_SUBMITTED',
       });
       if (typeof this.domain.atomicPut !== 'function') throw new Error('Atomic execution persistence is unavailable.');
       await this.domain.atomicPut(changes);
@@ -153,6 +156,42 @@ export class TreasuryLiveExecutionService {
       release();
       if (executionLocks.get(transferInstructionId) === queued) executionLocks.delete(transferInstructionId);
     }
+  }
+
+  async reconcile(input = {}, actorId = 'SRA_PLATFORM_ADMIN') {
+    const transferInstructionId = String(input.transferInstructionId || '').trim();
+    if (!transferInstructionId) throw new Error('transferInstructionId is required.');
+    const instruction = this.instruction(transferInstructionId);
+    if (!['PROVIDER_ACCEPTED', 'PROVIDER_EXECUTED'].includes(instruction.state)) throw new Error('The payment has not reached a provider-confirmed state.');
+    const receivingConfirmationReference = String(input.receivingConfirmationReference || '').trim();
+    if (!receivingConfirmationReference) throw new Error('receivingConfirmationReference is required.');
+    const confirmedAmount = Number(input.confirmedAmount ?? instruction.amountUsd ?? instruction.quantity);
+    if (confirmedAmount !== Number(instruction.amountUsd ?? instruction.quantity)) throw new Error('Confirmed amount does not match the payment instruction.');
+    const updatedAt = new Date().toISOString();
+    const updatedInstruction = {
+      ...instruction,
+      state: 'RECONCILED',
+      executionState: 'RECONCILED',
+      fundsState: 'SETTLED',
+      externalWithdrawalState: 'COMPLETED',
+      receivingConfirmationReference,
+      confirmedAmount,
+      reconciledAt: updatedAt,
+      accountingState: instruction.accountingState || 'PENDING_CLASSIFICATION',
+      updatedAt,
+      statusHistory: [...(instruction.statusHistory || []), { state: 'RECONCILED', actorId, occurredAt: updatedAt, receivingConfirmationReference }],
+    };
+    const pkg = instruction.exportPackageId ? this.domain.get(RECORD_TYPES.EXPORT_PACKAGE, instruction.exportPackageId) : null;
+    const changes = [{ type: TX, id: transferInstructionId, payload: updatedInstruction, actorId, eventType: 'TREASURY_PAYMENT_RECONCILED' }];
+    if (pkg) changes.push({
+      type: RECORD_TYPES.EXPORT_PACKAGE,
+      id: pkg.exportPackageId,
+      payload: { ...pkg, state: 'RECONCILED', exportExecutionState: 'RECONCILED', receivingConfirmationReference, updatedAt },
+      actorId,
+      eventType: 'TREASURY_EXPORT_LINEAGE_RECONCILED',
+    });
+    await this.domain.atomicPut(changes);
+    return { instruction: updatedInstruction, accountingClassificationRequired: updatedInstruction.accountingState === 'PENDING_CLASSIFICATION' };
   }
 }
 
