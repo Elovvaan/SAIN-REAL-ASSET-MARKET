@@ -12,7 +12,7 @@
       method: 'POST',
       credentials: 'same-origin',
       cache: 'no-store',
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      headers: { Accept: 'application/json', 'Content-Type':'application/json' },
       body: JSON.stringify(payload),
     });
     const body = await response.json().catch(() => ({}));
@@ -20,9 +20,18 @@
     return body;
   }
 
+  function actionOf(item) { return item?.nextAction || item || {}; }
+  function executableApproval(item) {
+    const action = actionOf(item);
+    return String(action.authority || '').startsWith('ADMIN_')
+      && action.executable !== false
+      && Boolean(action.executionAction)
+      && Boolean(action.jobId || item?.jobId);
+  }
+
   function workCard(item) {
     const agent = item.agent || item.nextAction?.agent || 'SRA_ADMIN_INTELLIGENCE_AGENT';
-    const action = item.nextAction || item;
+    const action = actionOf(item);
     const jobId = action.jobId || item.jobId || '';
     const label = action.label || item.label || item.blocker || 'Platform operation';
     const authority = action.authority || item.authority || 'READ_ONLY';
@@ -31,8 +40,7 @@
     const approvedIssuedOnChainSupply = Number(action.approvedIssuedOnChainSupply || 0);
     const snapshotVersion = action.snapshotVersion || '';
     const network = action.network || 'SRA';
-    const administratorBoundary = String(authority).startsWith('ADMIN_');
-    const canExecute = administratorBoundary && action.executionAction === 'EXECUTE_CHAIN_JOB' && action.executable !== false && jobId;
+    const canExecute = executableApproval(item) && action.executionAction === 'EXECUTE_CHAIN_JOB';
     return `<article class="admin-record-card" data-agent-operation-card>
       <header><strong>${esc(label)}</strong><em>${esc(authority)}</em></header>
       <div class="admin-record-grid">
@@ -48,11 +56,13 @@
     </article>`;
   }
 
-  function summaryCard(data, title) {
+  function summaryCard(data, title, override = null) {
     const snapshot = data.chainSnapshot || data.delegatedAgents?.chainOperations?.snapshot || data.chainOperations?.snapshot || null;
+    const answer = override?.answer ?? data.answer ?? '';
+    const status = override?.status ?? data.status ?? 'AVAILABLE';
     return `<section class="admin-record-card" data-agent-operation-card>
-      <header><strong>${esc(title)}</strong><em>${esc(data.status || 'AVAILABLE')}</em></header>
-      <p style="color:#b8b8b8;line-height:1.5">${esc(data.answer || '')}</p>
+      <header><strong>${esc(title)}</strong><em>${esc(status)}</em></header>
+      <p style="color:#b8b8b8;line-height:1.5">${esc(answer)}</p>
       ${snapshot ? `<div class="admin-record-grid"><div><span>Platform supply</span><strong>${Number(snapshot.platformSupply || 0).toLocaleString(undefined,{maximumFractionDigits:8})} SRA</strong></div><div><span>On-chain issued</span><strong>${Number(snapshot.issuedOnChainSupply || 0).toLocaleString(undefined,{maximumFractionDigits:8})} SRA</strong></div><div><span>Pending chain work</span><strong>${Number(snapshot.pendingQuantity || 0).toLocaleString(undefined,{maximumFractionDigits:8})} SRA</strong></div><div><span>Chain state</span><strong>${esc(snapshot.state || 'UNKNOWN')}</strong></div></div>` : ''}
     </section>`;
   }
@@ -60,7 +70,7 @@
   function conversationMarkup() {
     const messages = conversation.length
       ? conversation.map((message) => `<div style="padding:12px 14px;border:1px solid #292929;border-radius:10px;background:${message.role === 'admin' ? '#1d1d1d' : '#0b0b08'}"><strong style="display:block;margin-bottom:6px">${message.role === 'admin' ? 'Administrator' : 'SAIN'}</strong><span style="line-height:1.5">${esc(message.text)}</span></div>`).join('')
-      : `<div class="admin-placeholder">Ask SAIN about the platform, current work, approvals, records, or lifecycle state.</div>`;
+      : '<div class="admin-placeholder">Ask SAIN about the platform, current work, approvals, records, or lifecycle state.</div>';
     return `<section class="admin-record-card" data-agent-operation-card data-agent-conversation>
       <header><strong>SAIN Administrative Agent</strong><em>CONVERSATION</em></header>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">
@@ -81,11 +91,20 @@
     if (records) records.style.display = ownedTabs.has(tab) ? 'none' : '';
   }
 
+  function removeForeignAgentPresentation(workspace) {
+    const controls = workspace?.querySelector('.admin-workspace-controls');
+    if (!controls) return;
+    for (const child of [...controls.children]) {
+      if (!child.matches('[data-agent-operation-card]')) child.remove();
+    }
+  }
+
   async function render(workspace) {
     if (!workspace) return;
     const controls = workspace.querySelector('.admin-workspace-controls');
     if (!controls) return;
     controls.querySelectorAll('[data-agent-operation-card]').forEach((node) => node.remove());
+    removeForeignAgentPresentation(workspace);
     const tab = workspace.dataset.activeTab;
     setPresentationOwnership(workspace, tab);
 
@@ -97,17 +116,25 @@
 
     try {
       const payload = tab === 'Workflow Approvals'
-        ? await request({ question: 'What needs my approval?' })
-        : await request({ question: 'Give me the operational brief and work queue.' });
+        ? await request({ question:'What needs my approval?' })
+        : await request({ question:'Give me the operational brief and work queue.' });
       if (workspace.dataset.activeTab !== tab) return;
 
-      const items = tab === 'Workflow Approvals'
+      let items = tab === 'Workflow Approvals'
         ? (payload.pendingActions || [])
         : tab === 'Incomplete Workflows'
           ? (payload.incompleteWorkflows || [])
           : [...(payload.administratorQueue || []), ...(payload.autonomousQueue || [])];
 
-      controls.insertAdjacentHTML('afterbegin', summaryCard(payload, tab === 'Workflow Approvals' ? 'Agent Workflow Approvals' : 'Agent Operations Brief'));
+      let summaryOverride = null;
+      if (tab === 'Workflow Approvals') {
+        items = items.filter(executableApproval);
+        summaryOverride = items.length
+          ? { status:'APPROVAL_REQUIRED', answer:`${items.length} executable agent approval${items.length === 1 ? '' : 's'} ${items.length === 1 ? 'is' : 'are'} waiting here. Approve the task in this window and the agent will dispatch the owning worker.` }
+          : { status:'NO_PENDING_APPROVAL', answer:'No executable agent approval is waiting in this window. Non-executable lifecycle blockers remain under Incomplete Workflows until an owning command is registered.' };
+      }
+
+      controls.insertAdjacentHTML('afterbegin', summaryCard(payload, tab === 'Workflow Approvals' ? 'Agent Workflow Approvals' : 'Agent Operations Brief', summaryOverride));
       if (items.length) {
         controls.insertAdjacentHTML('beforeend', `<div data-agent-operation-card class="admin-record-list">${items.map((item) => workCard(item)).join('')}</div>`);
       } else {
@@ -142,13 +169,13 @@
     if (result) result.textContent = 'Agent executing approved job…';
     try {
       const response = await request({
-        question: `Execute approved chain operations job ${jobId}.`,
-        action: 'EXECUTE_CHAIN_JOB',
+        question:`Execute approved chain operations job ${jobId}.`,
+        action:'EXECUTE_CHAIN_JOB',
         jobId,
-        approval: 'APPROVE',
-        targetSupply: Number(button.dataset.targetSupply || 0),
-        approvedIssuedOnChainSupply: Number(button.dataset.approvedIssuedSupply || 0),
-        snapshotVersion: button.dataset.snapshotVersion || '',
+        approval:'APPROVE',
+        targetSupply:Number(button.dataset.targetSupply || 0),
+        approvedIssuedOnChainSupply:Number(button.dataset.approvedIssuedSupply || 0),
+        snapshotVersion:button.dataset.snapshotVersion || '',
       });
       if (result) result.textContent = `${response.status} · ${response.reconciliation?.issuedOnChainSupply ?? 0} SRA on chain`;
       window.dispatchEvent(new CustomEvent('sra:admin-refresh',{ detail:{ source:'chain-operations-agent' } }));
@@ -162,6 +189,10 @@
   function mount(workspace) {
     if (!workspace || mounted.has(workspace)) return;
     mounted.add(workspace);
+    removeForeignAgentPresentation(workspace);
+    const controls = workspace.querySelector('.admin-workspace-controls');
+    const presentationObserver = controls ? new MutationObserver(() => removeForeignAgentPresentation(workspace)) : null;
+    presentationObserver?.observe(controls,{ childList:true });
     workspace.addEventListener('click', (event) => {
       const executeButton = event.target.closest('[data-agent-execute-chain-job]');
       if (executeButton) { void execute(workspace, executeButton); return; }
