@@ -1,16 +1,18 @@
 import express from 'express';
+import { ExternalDexAdapterService } from '../services/external-dex-adapter-service.js';
 
 function actorId(req) {
   return req.get('x-sra-actor-id') || req.body?.actorId || null;
 }
 
 function handle(res, error) {
-  const status = error.code === 'PROJECTION_INELIGIBLE' ? 422 : /not found/i.test(error.message) ? 404 : 400;
+  const status = ['PROJECTION_INELIGIBLE','DEX_EXPORT_INELIGIBLE'].includes(error.code) ? 422 : /not found/i.test(error.message) ? 404 : 400;
   return res.status(status).json({ error: error.message, code: error.code || 'ON_CHAIN_PROJECTION_ERROR', assessment: error.assessment || null });
 }
 
 export function createOnChainProjectionRouter(service) {
   const router = express.Router();
+  const dex = new ExternalDexAdapterService(service.domain, service);
 
   router.get('/status', (_req, res) => res.json(service.status()));
 
@@ -75,6 +77,45 @@ export function createOnChainProjectionRouter(service) {
   });
 
   router.get('/reconciliations', (req, res) => res.json({ records: service.listReconciliations(req.query.projectionId || null) }));
+
+  router.get('/dex/status', async (_req, res) => {
+    try { return res.json(await dex.status()); }
+    catch (error) { return handle(res, error); }
+  });
+
+  router.get('/dex/venues', (_req, res) => res.json({ records: dex.venues() }));
+
+  router.get('/dex/exports', async (req, res) => {
+    try { return res.json({ records: await dex.listExports({ state: req.query.state, venue: req.query.venue, exportPackageId: req.query.exportPackageId }) }); }
+    catch (error) { return handle(res, error); }
+  });
+
+  router.get('/dex/exports/:dexExportId', async (req, res) => {
+    try {
+      const record = await dex.getExport(req.params.dexExportId);
+      return record ? res.json(record) : res.status(404).json({ error: 'DEX export was not found.' });
+    } catch (error) { return handle(res, error); }
+  });
+
+  router.post('/dex/exports/preview', (req, res) => {
+    try { return res.json(dex.preview(req.body || {})); }
+    catch (error) { return handle(res, error); }
+  });
+
+  router.post('/dex/exports', async (req, res) => {
+    try { return res.status(201).json(await dex.prepare(req.body || {}, actorId(req))); }
+    catch (error) { return handle(res, error); }
+  });
+
+  router.post('/dex/exports/:dexExportId/submitted', async (req, res) => {
+    try { return res.json(await dex.markSubmitted(req.params.dexExportId, req.body || {}, actorId(req))); }
+    catch (error) { return handle(res, error); }
+  });
+
+  router.post('/dex/exports/:dexExportId/confirm', async (req, res) => {
+    try { return res.status(201).json(await dex.confirm(req.params.dexExportId, req.body || {}, actorId(req))); }
+    catch (error) { return handle(res, error); }
+  });
 
   return router;
 }
