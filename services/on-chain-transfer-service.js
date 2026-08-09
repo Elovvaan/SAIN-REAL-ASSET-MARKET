@@ -54,11 +54,70 @@ export class OnChainTransferService {
     });
   }
 
+  normalizeRequest(input = {}) {
+    const request = {
+      network: normalizeNetwork(input.network),
+      asset: normalizeAsset(input.asset),
+      amount: text(input.amount),
+      destinationAddress: text(input.destinationAddress),
+    };
+    if (!request.network) throw new Error('network is required.');
+    if (!request.asset) throw new Error('asset is required.');
+    if (!request.amount) throw new Error('amount is required.');
+    if (!request.destinationAddress) throw new Error('destinationAddress is required.');
+    return request;
+  }
+
+  adapterFor(network) {
+    const adapter = this.adapters.get(network);
+    if (!adapter) {
+      const error = new Error(`Unsupported on-chain network: ${network}.`);
+      error.code = 'ON_CHAIN_NETWORK_UNSUPPORTED';
+      throw error;
+    }
+    if (typeof adapter.send !== 'function') {
+      const error = new Error(`On-chain adapter for ${network} cannot send transactions.`);
+      error.code = 'ON_CHAIN_ADAPTER_INVALID';
+      throw error;
+    }
+    return adapter;
+  }
+
   sameTransfer(record, request) {
     return record.network === request.network
       && record.asset === request.asset
       && String(record.amount) === String(request.amount)
       && record.destinationAddress === request.destinationAddress;
+  }
+
+  async prepare(input = {}, actorId = null) {
+    await this.ensure();
+    const id = transferId(input.transferId);
+    const request = this.normalizeRequest(input);
+    this.adapterFor(request.network);
+
+    const existing = this.get(id);
+    if (existing && !this.sameTransfer(existing, request)) {
+      const error = new Error('transferId was already used with different transfer details.');
+      error.code = 'ON_CHAIN_TRANSFER_ID_CONFLICT';
+      throw error;
+    }
+    if (existing) return existing;
+
+    const prepared = {
+      transferId: id,
+      ...request,
+      state: 'PREPARED',
+      transactionId: null,
+      createdBy: actorId,
+      createdAt: now(),
+      updatedAt: now(),
+    };
+    await this.domain.put(TYPE, id, prepared, {
+      actorId,
+      eventType: 'ON_CHAIN_TRANSFER_PREPARED',
+    });
+    return prepared;
   }
 
   async confirmExisting(existing, adapter, actorId) {
@@ -83,63 +142,22 @@ export class OnChainTransferService {
   }
 
   async send(input = {}, actorId = null) {
-    await this.ensure();
-
-    const id = transferId(input.transferId);
+    const prepared = await this.prepare(input, actorId);
     const request = {
-      network: normalizeNetwork(input.network),
-      asset: normalizeAsset(input.asset),
-      amount: text(input.amount),
-      destinationAddress: text(input.destinationAddress),
+      network: prepared.network,
+      asset: prepared.asset,
+      amount: prepared.amount,
+      destinationAddress: prepared.destinationAddress,
     };
+    const adapter = this.adapterFor(request.network);
 
-    if (!request.network) throw new Error('network is required.');
-    if (!request.asset) throw new Error('asset is required.');
-    if (!request.amount) throw new Error('amount is required.');
-    if (!request.destinationAddress) throw new Error('destinationAddress is required.');
-
-    const adapter = this.adapters.get(request.network);
-    if (!adapter) {
-      const error = new Error(`Unsupported on-chain network: ${request.network}.`);
-      error.code = 'ON_CHAIN_NETWORK_UNSUPPORTED';
-      throw error;
-    }
-    if (typeof adapter.send !== 'function') {
-      const error = new Error(`On-chain adapter for ${request.network} cannot send transactions.`);
-      error.code = 'ON_CHAIN_ADAPTER_INVALID';
-      throw error;
-    }
-
-    const existing = this.get(id);
-    if (existing && !this.sameTransfer(existing, request)) {
-      const error = new Error('transferId was already used with different transfer details.');
-      error.code = 'ON_CHAIN_TRANSFER_ID_CONFLICT';
-      throw error;
-    }
-    if (existing?.state === 'CONFIRMED') return existing;
-    if (existing?.transactionId) return this.confirmExisting(existing, adapter, actorId);
-
-    const prepared = existing || {
-      transferId: id,
-      ...request,
-      state: 'PREPARED',
-      transactionId: null,
-      createdBy: actorId,
-      createdAt: now(),
-      updatedAt: now(),
-    };
-
-    if (!existing) {
-      await this.domain.put(TYPE, id, prepared, {
-        actorId,
-        eventType: 'ON_CHAIN_TRANSFER_PREPARED',
-      });
-    }
+    if (prepared.state === 'CONFIRMED') return prepared;
+    if (prepared.transactionId) return this.confirmExisting(prepared, adapter, actorId);
 
     try {
       // Network-specific construction, signing, broadcasting, and asset resolution
       // belong inside the adapter. The generic interface passes only the transfer intent.
-      const result = await adapter.send({ ...request, transferId: id });
+      const result = await adapter.send({ ...request, transferId: prepared.transferId });
       const transactionId = text(result?.transactionId || result?.transactionSignature);
       if (!transactionId) throw new Error('On-chain adapter did not return a transaction ID.');
 
@@ -155,13 +173,13 @@ export class OnChainTransferService {
         updatedAt: now(),
       };
 
-      await this.domain.put(TYPE, id, record, {
+      await this.domain.put(TYPE, prepared.transferId, record, {
         actorId,
         eventType: `ON_CHAIN_TRANSFER_${state}`,
       });
       await this.domain.lifecycle?.({
         objectType: TYPE,
-        objectId: id,
+        objectId: prepared.transferId,
         eventType: `ON_CHAIN_TRANSFER_${state}`,
         actorId,
         payload: { ...request, transactionId },
@@ -177,7 +195,7 @@ export class OnChainTransferService {
           submittedAt: now(),
           updatedAt: now(),
         };
-        await this.domain.put(TYPE, id, submitted, {
+        await this.domain.put(TYPE, prepared.transferId, submitted, {
           actorId,
           eventType: 'ON_CHAIN_TRANSFER_SUBMITTED',
         });

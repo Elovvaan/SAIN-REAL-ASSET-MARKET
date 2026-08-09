@@ -62,6 +62,14 @@ export function createOnChainProjectionRouter(service) {
     }
   });
 
+  router.post('/transfers/prepare', async (req, res) => {
+    try {
+      return res.status(201).json(await transfers.prepare(req.body || {}, actorId(req)));
+    } catch (error) {
+      return handle(res, error);
+    }
+  });
+
   router.post('/transfers', async (req, res) => {
     try {
       return res.status(201).json(await transfers.send(req.body || {}, actorId(req)));
