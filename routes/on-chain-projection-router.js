@@ -1,10 +1,11 @@
 import express from 'express';
 import { ExternalDexAdapterService } from '../services/external-dex-adapter-service.js';
+import { OnChainTransferService } from '../services/on-chain-transfer-service.js';
 import { SolanaTransferService } from '../services/solana-transfer-service.js';
 import { SraCoinChainService } from '../services/sra-coin-chain-service.js';
 
 function actorId(req){return req.get('x-sra-actor-id')||req.body?.actorId||null;}
-function handle(res,error){const status=['PROJECTION_INELIGIBLE','DEX_EXPORT_INELIGIBLE'].includes(error.code)?422:error.code==='SOLANA_EXECUTOR_NOT_READY'?503:error.code==='SOLANA_EXECUTOR_REJECTED'?502:/not found/i.test(error.message)?404:400;return res.status(status).json({error:error.message,code:error.code||'ON_CHAIN_PROJECTION_ERROR',assessment:error.assessment||null});}
+function handle(res,error){const status=['PROJECTION_INELIGIBLE','DEX_EXPORT_INELIGIBLE'].includes(error.code)?422:['SOLANA_NOT_READY'].includes(error.code)?503:/not found/i.test(error.message)?404:400;return res.status(status).json({error:error.message,code:error.code||'ON_CHAIN_ERROR',assessment:error.assessment||null,transactionId:error.transactionId||error.transactionSignature||null});}
 function normalizeDirectMount(req,_res,next){const prefix='/api/on-chain';if(req.url===prefix)req.url='/';else if(req.url.startsWith(`${prefix}/`))req.url=req.url.slice(prefix.length);next();}
 
 export function createOnChainProjectionRouter(service){
@@ -12,9 +13,10 @@ export function createOnChainProjectionRouter(service){
   router.use(normalizeDirectMount);
   const dex=new ExternalDexAdapterService(service.domain,service);
   const solana=new SolanaTransferService();
+  const transfers=new OnChainTransferService({domain:service.domain,adapters:{SOLANA:solana}});
   const sraCoin=new SraCoinChainService(service.domain,solana);
 
-  router.get('/status',(_q,r)=>r.json(service.status()));
+  router.get('/status',(_q,r)=>r.json({...service.status(),transfers:transfers.status()}));
   router.get('/eligibility/:instrumentId',(q,r)=>r.json(service.evaluateInstrument(q.params.instrumentId)));
   router.get('/projections',(q,r)=>r.json({records:service.listProjections({status:q.query.status,instrumentId:q.query.instrumentId,network:q.query.network})}));
   router.get('/projections/:projectionId',(q,r)=>{const x=service.getProjection(q.params.projectionId);return x?r.json(x):r.status(404).json({error:'Projection not found.'});});
@@ -28,12 +30,14 @@ export function createOnChainProjectionRouter(service){
   router.post('/events/:eventId/reconcile',async(q,r)=>{try{return r.json(await service.reconcileEvent(q.params.eventId,actorId(q)));}catch(e){return handle(r,e);}});
   router.get('/reconciliations',(q,r)=>r.json({records:service.listReconciliations(q.query.projectionId||null)}));
 
+  router.get('/transfers',(q,r)=>r.json({records:transfers.list({network:q.query.network,asset:q.query.asset,state:q.query.state})}));
+  router.get('/transfers/:transferId',(q,r)=>{const x=transfers.get(q.params.transferId);return x?r.json(x):r.status(404).json({error:'On-chain transfer not found.'});});
+  router.post('/transfers',async(q,r)=>{try{return r.status(201).json(await transfers.send(q.body||{},actorId(q)));}catch(e){return handle(r,e);}});
+
   router.get('/solana/status',async(_q,r)=>{try{return r.json(await solana.health());}catch(e){return handle(r,e);}});
   router.get('/solana/wallet',async(_q,r)=>{try{return r.json(await solana.wallet());}catch(e){return handle(r,e);}});
-  router.post('/solana/transfers',async(q,r)=>{try{return r.status(201).json(await solana.send(q.body||{}));}catch(e){return handle(r,e);}});
   router.get('/solana/sra',async(_q,r)=>{try{return r.json(await sraCoin.status());}catch(e){return handle(r,e);}});
   router.post('/solana/sra/mint',async(q,r)=>{try{return r.status(201).json(await sraCoin.putOnChain(q.body||{},actorId(q)));}catch(e){return handle(r,e);}});
-  router.post('/solana/sra/transfers',async(q,r)=>{try{return r.status(201).json(await sraCoin.send(q.body||{},actorId(q)));}catch(e){return handle(r,e);}});
 
   router.get('/dex/status',async(_q,r)=>{try{return r.json(await dex.status());}catch(e){return handle(r,e);}});
   router.get('/dex/venues',(_q,r)=>r.json({records:dex.venues()}));
