@@ -94,7 +94,8 @@ export async function installTreasuryTransferReadinessRoutes({ router, domain, r
         destinationReference: prepared.destinationReference,
         verificationState: 'VERIFIED',
       }, session.id);
-      const amountUsd = Number(req.body?.amountUsd || 1);
+      const amountUsd = Number(req.body?.amountUsd);
+      if (!Number.isFinite(amountUsd) || amountUsd <= 0) throw new Error('amountUsd must be greater than zero.');
       const transferResult = await transfers.approve({
         approval: 'APPROVE',
         destinationId: destinationResult.destination.destinationId,
@@ -135,17 +136,17 @@ export async function installTreasuryTransferReadinessRoutes({ router, domain, r
     }
   });
 
-  router.post('/api/admin/treasury-transfer-readiness/ach/execute-one-dollar-canary', async (req, res) => {
+  router.post('/api/admin/treasury-transfer-readiness/ach/execute', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
     try {
-      const result = await liveExecution.executeOneDollarAch(req.body || {}, session.id);
+      const result = await liveExecution.executeAch(req.body || {}, session.id);
       if (database?.audit) await database.audit({
         actorId: session.id,
-        eventType: 'SRA_TREASURY_ONE_DOLLAR_ACH_CANARY_SUBMITTED',
+        eventType: 'SRA_TREASURY_ACH_PAYMENT_SUBMITTED',
         objectType: 'EXTERNAL_TRANSFER_INSTRUCTION',
         objectId: result.instruction.transferInstructionId,
         payload: {
-          amountUsd: 1,
+          amountUsd: result.instruction.amountUsd ?? result.instruction.quantity,
           rail: 'ACH',
           providerReference: result.executionEvidence.providerReference,
           providerStatus: result.executionEvidence.providerStatus,
@@ -155,7 +156,7 @@ export async function installTreasuryTransferReadinessRoutes({ router, domain, r
       });
       return res.status(202).json(result);
     } catch (error) {
-      return res.status(422).json({ error: error.message, code: error.code || 'SRA_TREASURY_ACH_CANARY_EXECUTION_FAILED', executionEvidence: error.executionEvidence || null });
+      return res.status(422).json({ error: error.message, code: error.code || 'SRA_TREASURY_ACH_EXECUTION_FAILED', executionEvidence: error.executionEvidence || null });
     }
   });
 
