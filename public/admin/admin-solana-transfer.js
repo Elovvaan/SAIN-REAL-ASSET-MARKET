@@ -1,10 +1,105 @@
 (()=>{
-  if(window.__sraAdminSolanaTransferInstalled)return;window.__sraAdminSolanaTransferInstalled=true;
+  if(window.__sraAdminOnChainTransferInstalled)return;
+  window.__sraAdminOnChainTransferInstalled=true;
+
   const mounted=new WeakSet();
-  const operationId=prefix=>`${prefix}-${crypto.randomUUID().split('-')[0].toUpperCase()}`;
-  async function req(url,o={}){const r=await fetch(url,{credentials:'same-origin',cache:'no-store',headers:{Accept:'application/json',...(o.headers||{})},...o}),p=await r.json().catch(()=>({}));if(!r.ok){const e=new Error(p.error||`HTTP ${r.status}`);e.transactionId=p.transactionId||p.transactionSignature||null;throw e;}return p;}
-  async function render(w){if(!w)return;const c=w.querySelector('.admin-workspace-controls');if(!c)return;c.querySelectorAll('[data-solana-transfer]').forEach(n=>n.remove());if(w.dataset.activeTab!=='Solana')return;try{const [wallet,sra]=await Promise.all([req('/api/on-chain/solana/wallet'),req('/api/on-chain/solana/sra')]);if(w.dataset.activeTab!=='Solana')return;const chain=sra.onChain,sync=sra.synchronization||{},pending=Number(sync.pendingQuantity||0),needsSync=!chain||pending>0;c.insertAdjacentHTML('afterbegin',`<section class="admin-record-card" data-solana-transfer><header><strong>SRA Solana Wallet</strong><em>${wallet.cluster||'SOLANA'}</em></header><div class="admin-record-grid"><div><span>Platform address</span><strong style="word-break:break-all">${wallet.address}</strong></div><div><span>SRA platform supply</span><strong>${sra.platformSupply} SRA</strong></div><div><span>SRA mint</span><strong style="word-break:break-all">${chain?.mintAddress||'Not on chain'}</strong></div><div><span>On-chain issued</span><strong>${chain?.issuedOnChainSupply||0} SRA</strong></div><div><span>Pending on-chain issuance</span><strong>${pending} SRA</strong></div><div><span>Synchronization</span><strong>${sync.state||'NOT_ON_CHAIN'}</strong></div></div>${needsSync?`<button type="button" data-put-sra>${chain?'Sync New SRA On Chain':'Put SRA On Chain'}</button><span data-result></span>`:''}${chain?`<form data-send-sra><input name="destinationAddress" required placeholder="Destination Solana address"><input name="amount" type="number" min="0.00000001" step="0.00000001" required placeholder="Amount SRA"><button>Send SRA</button><span data-result></span></form>`:''}<form data-send-sol><input name="destinationAddress" required placeholder="Destination Solana address"><input name="amount" type="number" min="0.000000001" step="0.000000001" required placeholder="Amount SOL"><button>Send SOL</button><span data-result></span></form></section>`);}catch(e){if(w.dataset.activeTab==='Solana')c.insertAdjacentHTML('afterbegin',`<section class="admin-record-card" data-solana-transfer><strong>SRA Solana Wallet</strong><p>${e.message}</p></section>`);}}
-  async function send(form,asset){const v=Object.fromEntries(new FormData(form).entries()),b=form.querySelector('button'),r=form.querySelector('[data-result]');form.dataset.transferId||=operationId(asset);b.disabled=true;r.textContent='Sending…';try{const out=await req('/api/on-chain/transfers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({transferId:form.dataset.transferId,network:'SOLANA',asset,destinationAddress:v.destinationAddress,amount:v.amount})});r.textContent=`${out.state==='CONFIRMED'?'Confirmed':'Submitted'} · ${out.transactionId||out.transactionSignature}`;if(out.state==='CONFIRMED')delete form.dataset.transferId;else b.disabled=false;}catch(e){r.textContent=e.transactionId?`Submitted · ${e.transactionId} · retry to confirm`:e.message;b.disabled=false;}}
-  function mount(w){if(!w||mounted.has(w))return;mounted.add(w);w.addEventListener('click',e=>{const b=e.target.closest('[data-put-sra]');if(b){b.disabled=true;const r=b.parentElement.querySelector('[data-result]');r.textContent='Synchronizing SRA on chain…';req('/api/on-chain/solana/sra/mint',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).then(x=>{r.textContent=`Synchronized · ${x.issuedOnChainSupply} SRA · ${x.mintAddress}`;void render(w);}).catch(x=>{r.textContent=x.message;b.disabled=false;});return;}if(e.target.closest('[data-admin-tab]'))queueMicrotask(()=>void render(w));});w.addEventListener('submit',e=>{const a=e.target.closest('[data-send-sra]'),b=e.target.closest('[data-send-sol]');if(a){e.preventDefault();void send(a,'SRA');}else if(b){e.preventDefault();void send(b,'SOL');}});window.addEventListener('sra:admin-workspace-synchronized',e=>{if(e.detail?.workspaceId==='connections')void render(w);});void render(w);}
+  const operationId=()=>`OCT-${crypto.randomUUID().split('-')[0].toUpperCase()}`;
+
+  async function req(url,o={}){
+    const r=await fetch(url,{
+      credentials:'same-origin',
+      cache:'no-store',
+      headers:{Accept:'application/json',...(o.headers||{})},
+      ...o,
+    });
+    const p=await r.json().catch(()=>({}));
+    if(!r.ok){
+      const e=new Error(p.error||`HTTP ${r.status}`);
+      e.transactionId=p.transactionId||null;
+      throw e;
+    }
+    return p;
+  }
+
+  function networkOptions(status){
+    return (status.networks||[])
+      .map(({network})=>`<option value="${network}">${network}</option>`)
+      .join('');
+  }
+
+  async function render(workspace){
+    if(!workspace)return;
+    const controls=workspace.querySelector('.admin-workspace-controls');
+    if(!controls)return;
+    controls.querySelectorAll('[data-on-chain-transfer]').forEach(node=>node.remove());
+
+    try{
+      const status=await req('/api/on-chain/status');
+      controls.insertAdjacentHTML('afterbegin',`
+        <section class="admin-record-card" data-on-chain-transfer>
+          <header><strong>On-Chain Transfer</strong><em>Asset → Network</em></header>
+          <form data-send-on-chain>
+            <select name="network" required>${networkOptions(status)}</select>
+            <input name="asset" required placeholder="Asset">
+            <input name="amount" required inputmode="decimal" placeholder="Amount">
+            <input name="destinationAddress" required placeholder="Destination address">
+            <button>Send On Chain</button>
+            <span data-result></span>
+          </form>
+        </section>`);
+    }catch(error){
+      controls.insertAdjacentHTML('afterbegin',`
+        <section class="admin-record-card" data-on-chain-transfer>
+          <strong>On-Chain Transfer</strong><p>${error.message}</p>
+        </section>`);
+    }
+  }
+
+  async function send(form){
+    const values=Object.fromEntries(new FormData(form).entries());
+    const button=form.querySelector('button');
+    const result=form.querySelector('[data-result]');
+    form.dataset.transferId||=operationId();
+    button.disabled=true;
+    result.textContent='Submitting…';
+
+    try{
+      const out=await req('/api/on-chain/transfers',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          transferId:form.dataset.transferId,
+          network:values.network,
+          asset:values.asset,
+          amount:values.amount,
+          destinationAddress:values.destinationAddress,
+        }),
+      });
+      result.textContent=`${out.state} · ${out.transactionId}`;
+      if(out.state==='CONFIRMED')delete form.dataset.transferId;
+    }catch(error){
+      result.textContent=error.transactionId
+        ? `SUBMITTED · ${error.transactionId}`
+        : error.message;
+    }finally{
+      button.disabled=false;
+    }
+  }
+
+  function mount(workspace){
+    if(!workspace||mounted.has(workspace))return;
+    mounted.add(workspace);
+    workspace.addEventListener('submit',event=>{
+      const form=event.target.closest('[data-send-on-chain]');
+      if(!form)return;
+      event.preventDefault();
+      void send(form);
+    });
+    window.addEventListener('sra:admin-workspace-synchronized',event=>{
+      if(event.detail?.workspaceId==='connections')void render(workspace);
+    });
+    void render(workspace);
+  }
+
   window.mountAdminSolanaTransfer=admin=>mount(admin?.querySelector('[data-workspace="connections"]'));
 })();
