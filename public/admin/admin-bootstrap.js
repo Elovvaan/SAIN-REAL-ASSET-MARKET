@@ -54,6 +54,14 @@
       || 'dashboard';
   }
 
+  function removeUnsupportedConnectionTabs(admin) {
+    const workspace = admin?.querySelector('[data-workspace="connections"]');
+    if (!workspace) return;
+    for (const tab of ['Ethereum', 'Bitcoin']) {
+      workspace.querySelector(`[data-admin-tab="${tab}"]`)?.remove();
+    }
+  }
+
   function requestAdministrationRefresh(source = 'mutation') {
     if (refreshInFlight) {
       refreshAgain = true;
@@ -112,6 +120,7 @@
       const [shellSource, shellMarker] = FEATURES[0];
       await loadScript(shellSource, shellMarker);
       if (!admin.querySelector('.admin-suite')) throw new Error('Administration shell did not mount.');
+      removeUnsupportedConnectionTabs(admin);
       retireLegacyPresentation(admin);
       revealAdminSuite(admin);
 
