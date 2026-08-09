@@ -224,54 +224,6 @@ export class OnChainProjectionService {
     return updated;
   }
 
-  async createMint(projectionId, input = {}, actorId = null) {
-    const projection = this.getProjection(projectionId);
-    if (!projection) throw new Error('Projection not found.');
-    if (projection.status !== 'APPROVED' && projection.status !== 'MINT_PENDING') throw new Error(`Mint cannot be created from ${projection.status}.`);
-
-    const mintAddress = input.mintAddress || `SIM-${this.cluster.toUpperCase()}-${crypto.randomBytes(16).toString('hex').toUpperCase()}`;
-    const signature = input.transactionSignature || `SIMSIG-${crypto.randomBytes(24).toString('hex').toUpperCase()}`;
-    const updated = {
-      ...projection,
-      mintAddress,
-      mintAuthorityReference: input.mintAuthorityReference || 'SRA_CONTROLLED_MINT_AUTHORITY',
-      freezeAuthorityReference: input.freezeAuthorityReference || 'SRA_CONTROLLED_FREEZE_AUTHORITY',
-      status: 'ACTIVE',
-      activatedAt: now(),
-      updatedAt: now(),
-    };
-    await this.domain.put(TYPES.PROJECTION, projectionId, updated, { actorId, eventType: 'ON_CHAIN_MINT_CREATED' });
-    await this.recordChainEvent({ projectionId, eventType: 'MINT_CREATED', transactionSignature: signature, mintAddress, quantity: 0, raw: input.raw || null }, actorId);
-    return { projection: updated, transactionSignature: signature, simulated: !input.mintAddress };
-  }
-
-  async allocate(projectionId, input, actorId = null) {
-    requireFields(input, ['walletId', 'quantity']);
-    const projection = this.getProjection(projectionId);
-    if (!projection || projection.status !== 'ACTIVE') throw new Error('Projection is not active.');
-    const wallet = this.domain.get(TYPES.WALLET, input.walletId);
-    if (!wallet || !ELIGIBLE_WALLET_STATES.has(wallet.status)) throw new Error('Destination wallet is not approved.');
-    const quantity = Number(input.quantity);
-    if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Quantity must be greater than zero.');
-    if (projection.issuedSupply + quantity > projection.authorizedSupply) throw new Error('Allocation exceeds authorized SRA supply.');
-
-    const signature = input.transactionSignature || `SIMSIG-${crypto.randomBytes(24).toString('hex').toUpperCase()}`;
-    const event = await this.recordChainEvent({
-      projectionId,
-      eventType: 'INITIAL_ALLOCATION',
-      transactionSignature: signature,
-      mintAddress: projection.mintAddress,
-      recipientWalletId: wallet.walletId,
-      recipientAddress: wallet.walletAddress,
-      quantity,
-      raw: input.raw || null,
-    }, actorId);
-    const updated = { ...projection, issuedSupply: projection.issuedSupply + quantity, circulatingSupply: projection.circulatingSupply + quantity, updatedAt: now() };
-    await this.domain.put(TYPES.PROJECTION, projectionId, updated, { actorId, eventType: 'ON_CHAIN_SUPPLY_ALLOCATED' });
-    const reconciliation = await this.reconcileEvent(event.eventId, actorId);
-    return { projection: updated, chainEvent: event, reconciliation };
-  }
-
   async recordChainEvent(input, actorId = null) {
     requireFields(input, ['projectionId', 'eventType', 'transactionSignature']);
     const existing = this.domain.list(TYPES.CHAIN_EVENT).find((event) => event.transactionSignature === input.transactionSignature && event.eventType === input.eventType);
