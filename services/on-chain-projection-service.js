@@ -13,22 +13,29 @@ const ELIGIBLE_WALLET_STATES = new Set(['APPROVED', 'ACTIVE']);
 
 function id(prefix) { return `${prefix}-${crypto.randomUUID().split('-')[0].toUpperCase()}`; }
 function now() { return new Date().toISOString(); }
+function text(value) { return String(value ?? '').trim(); }
 function requireFields(payload, fields) {
   const missing = fields.filter((field) => payload?.[field] == null || payload?.[field] === '');
   if (missing.length) throw new Error(`Missing required fields: ${missing.join(', ')}`);
 }
 function copy(value) { return value == null ? value : JSON.parse(JSON.stringify(value)); }
-function authorizedSupplyOf(instrument = {}) {
-  return Number(
-    instrument.authorizedSupply
+function authorizedSupplySourceOf(instrument = {}) {
+  return instrument.authorizedSupply
     ?? instrument.authorizedAmount
     ?? instrument.quantity
     ?? instrument.faceAmount
     ?? instrument.faceValue
     ?? instrument.amount
     ?? instrument.amountUsd
-    ?? 0
-  );
+    ?? null;
+}
+function authorizedSupplyOf(instrument = {}) {
+  const source = authorizedSupplySourceOf(instrument);
+  return source == null ? 0 : Number(source);
+}
+function positiveDecimal(value) {
+  const source = text(value);
+  return /^\d+(?:\.\d+)?$/.test(source) && !/^0+(?:\.0+)?$/.test(source);
 }
 function assetCodeOf(instrument = {}, coinPosition = null) {
   return instrument.assetCode
@@ -79,6 +86,12 @@ export class OnChainProjectionService {
   }
 
   getProjection(projectionId) { return this.domain.get(TYPES.PROJECTION, projectionId); }
+
+  authorizedSupplyExactFor(instrumentId) {
+    const instrument = this.domain.get('SRA_INSTRUMENT', instrumentId);
+    const source = authorizedSupplySourceOf(instrument || {});
+    return source == null ? '' : text(source);
+  }
 
   listWallets(filters = {}) {
     return this.domain.list(TYPES.WALLET).filter((wallet) => {
@@ -133,7 +146,7 @@ export class OnChainProjectionService {
     if (representationApproval?.state !== 'APPROVED') blockers.push('INSTRUMENT_REPRESENTATION_APPROVAL_REQUIRED');
     if (!instrument.issuerId && !instrument.issuerParticipantId) blockers.push('ISSUER_ID_MISSING');
     if (!instrument.verifiedValuePackageId && !(instrument.verifiedValuePackageIds || []).length && !instrument.financialRecordId && !instrument.recognitionId) blockers.push('VERIFIED_VALUE_PACKAGE_MISSING');
-    if (authorizedSupplyOf(instrument) <= 0) blockers.push('AUTHORIZED_SUPPLY_OR_AMOUNT_MISSING');
+    if (!positiveDecimal(authorizedSupplySourceOf(instrument))) blockers.push('AUTHORIZED_SUPPLY_OR_AMOUNT_MISSING');
     if (!instrument.purpose) warnings.push('INSTRUMENT_PURPOSE_NOT_EXPLICIT');
     if (!instrument.transferabilityStatus && !instrument.transferable) warnings.push('TRANSFERABILITY_RULE_NOT_EXPLICIT');
     if (!instrument.unitDefinition && !instrument.denomination) warnings.push('UNIT_DEFINITION_NOT_EXPLICIT');
@@ -153,7 +166,10 @@ export class OnChainProjectionService {
     const instrument = assessment.instrument;
     const coinPositionId = input.coinPositionId || instrument.coinPositionId || assessment.representationApproval?.linkedCoinPositionIds?.[0] || null;
     const coinPosition = coinPositionId ? this.domain.get('COIN_POSITION', coinPositionId) : null;
-    const authorizedSupply = Number(input.authorizedSupply ?? authorizedSupplyOf(instrument));
+    const sourceSupply = input.authorizedSupplyExact ?? input.authorizedSupply ?? authorizedSupplySourceOf(instrument);
+    const authorizedSupplyExact = text(sourceSupply);
+    if (!positiveDecimal(authorizedSupplyExact)) throw new Error('Authorized supply must be a positive decimal amount.');
+    const authorizedSupply = Number(authorizedSupplyExact);
     const asset = input.asset || assetCodeOf(instrument, coinPosition) || input.instrumentId;
     const projection = {
       projectionId: input.projectionId || id('OCP'),
@@ -174,7 +190,9 @@ export class OnChainProjectionService {
       permanentAssetAccountId: input.permanentAssetAccountId || instrument.assetId || coinPosition?.coinPositionId || null,
       participationPositionId: input.participationPositionId || null,
       authorizedSupply,
+      authorizedSupplyExact,
       issuedSupply: 0,
+      issuedSupplyExact: '0',
       circulatingSupply: 0,
       retiredSupply: 0,
       decimals: input.decimals ?? null,
@@ -186,6 +204,8 @@ export class OnChainProjectionService {
       transferabilityStatus: input.transferabilityStatus || instrument.transferabilityStatus || 'RESTRICTED',
       settlementStatus: 'NOT_AVAILABLE',
       status: 'DRAFT',
+      issuanceState: 'NOT_STARTED',
+      pendingIssuance: null,
       metadataUri: input.metadataUri || null,
       metadataDigest: input.metadataDigest || null,
       governingRecordDigest: input.governingRecordDigest || instrument.governingRecordDigest || null,
@@ -207,41 +227,72 @@ export class OnChainProjectionService {
     const projection = this.getProjection(projectionId);
     if (!projection) throw new Error('Projection not found.');
     if (projection.status !== 'DRAFT' && projection.status !== 'UNDER_REVIEW') throw new Error(`Projection cannot be approved from ${projection.status}.`);
-    const approval = await this.domain.lifecycle({ objectType: TYPES.PROJECTION, objectId: projectionId, eventType: 'ON_CHAIN_PROJECTION_APPROVED', actorId, payload: { instrumentId: projection.instrumentId, authorizedSupply: projection.authorizedSupply } });
+    const approval = await this.domain.lifecycle({ objectType: TYPES.PROJECTION, objectId: projectionId, eventType: 'ON_CHAIN_PROJECTION_APPROVED', actorId, payload: { instrumentId: projection.instrumentId, authorizedSupply: projection.authorizedSupplyExact || projection.authorizedSupply } });
     const updated = { ...projection, status: 'APPROVED', approvedBy: actorId, approvalEventId: approval.id, updatedAt: now() };
     await this.domain.put(TYPES.PROJECTION, projectionId, updated, { actorId, eventType: 'ON_CHAIN_PROJECTION_APPROVED' });
+    return updated;
+  }
+
+  async recordIssuancePending(projectionId, pendingIssuance, actorId = null) {
+    const projection = this.getProjection(projectionId);
+    if (!projection) throw new Error('Projection not found.');
+    if (projection.mintAddress) return projection;
+    requireFields(pendingIssuance, ['mintAddress', 'platformTokenAccount', 'serializedTransactionBase64']);
+    const occurredAt = now();
+    const updated = {
+      ...projection,
+      cluster: pendingIssuance.cluster || projection.cluster,
+      decimals: pendingIssuance.decimals ?? projection.decimals,
+      issuanceState: 'PENDING_NETWORK',
+      pendingIssuance: copy(pendingIssuance),
+      updatedAt: occurredAt,
+      history: [...(projection.history || []), {
+        eventType: 'ON_CHAIN_REPRESENTATION_ISSUANCE_PREPARED', actorId, occurredAt,
+        mintAddress: pendingIssuance.mintAddress,
+      }],
+    };
+    await this.domain.put(TYPES.PROJECTION, projectionId, updated, { actorId, eventType: 'ON_CHAIN_REPRESENTATION_ISSUANCE_PREPARED' });
     return updated;
   }
 
   async recordIssuance(projectionId, issuance, actorId = null) {
     const projection = this.getProjection(projectionId);
     if (!projection) throw new Error('Projection not found.');
-    if (projection.mintAddress) return projection;
-    if (projection.status !== 'APPROVED') throw new Error(`Projection cannot be issued from ${projection.status}.`);
+    if (projection.mintAddress && projection.status === 'ACTIVE') return projection;
+    if (!['APPROVED', 'ACTIVE'].includes(projection.status)) throw new Error(`Projection cannot be issued from ${projection.status}.`);
     requireFields(issuance, ['mintAddress', 'platformTokenAccount', 'issuanceTransactionId']);
-    const issuedSupply = Number(issuance.issuedSupply);
-    if (!Number.isFinite(issuedSupply) || issuedSupply <= 0) throw new Error('issuedSupply must be greater than zero.');
-    if (issuedSupply > Number(projection.authorizedSupply || 0)) throw new Error('Issued supply exceeds authorized supply.');
+    const issuedSupplyExact = text(issuance.issuedSupplyExact ?? issuance.issuedSupply);
+    const issuedUnits = BigInt(text(issuance.issuedSupplyUnits));
+    const authorizedUnits = BigInt(text(issuance.authorizedSupplyUnits));
+    if (issuedUnits <= 0n) throw new Error('issuedSupply must be greater than zero.');
+    if (issuedUnits > authorizedUnits) throw new Error('Issued supply exceeds authorized supply.');
+    const issuedSupply = Number(issuedSupplyExact);
     const occurredAt = issuance.issuedAt || now();
     const updated = {
       ...projection,
+      cluster: issuance.cluster || projection.cluster,
       mintAddress: issuance.mintAddress,
       platformTokenAccount: issuance.platformTokenAccount,
       mintAuthorityAddress: issuance.mintAuthorityAddress || null,
       freezeAuthorityAddress: issuance.freezeAuthorityAddress || null,
       decimals: issuance.decimals,
       issuedSupply,
+      issuedSupplyExact,
+      issuedSupplyUnits: text(issuance.issuedSupplyUnits),
+      authorizedSupplyUnits: text(issuance.authorizedSupplyUnits),
       issuanceTransactionId: issuance.issuanceTransactionId,
       issuanceConfirmation: issuance.confirmation || null,
+      issuanceState: 'CONFIRMED',
+      pendingIssuance: null,
       status: 'ACTIVE',
       settlementStatus: 'AVAILABLE',
       activatedAt: projection.activatedAt || occurredAt,
       issuedAt: occurredAt,
       updatedAt: occurredAt,
-      history: [...(projection.history || []), { eventType: 'ON_CHAIN_REPRESENTATION_ISSUED', actorId, occurredAt, transactionId: issuance.issuanceTransactionId, mintAddress: issuance.mintAddress, issuedSupply }],
+      history: [...(projection.history || []), { eventType: 'ON_CHAIN_REPRESENTATION_ISSUED', actorId, occurredAt, transactionId: issuance.issuanceTransactionId, mintAddress: issuance.mintAddress, issuedSupply: issuedSupplyExact }],
     };
     await this.domain.put(TYPES.PROJECTION, projectionId, updated, { actorId, eventType: 'ON_CHAIN_REPRESENTATION_ISSUED' });
-    await this.domain.lifecycle({ objectType: TYPES.PROJECTION, objectId: projectionId, eventType: 'ON_CHAIN_REPRESENTATION_ISSUED', actorId, payload: { instrumentId: projection.instrumentId, asset: projection.asset, network: projection.network, mintAddress: issuance.mintAddress, issuedSupply, transactionId: issuance.issuanceTransactionId } });
+    await this.domain.lifecycle({ objectType: TYPES.PROJECTION, objectId: projectionId, eventType: 'ON_CHAIN_REPRESENTATION_ISSUED', actorId, payload: { instrumentId: projection.instrumentId, asset: projection.asset, network: projection.network, mintAddress: issuance.mintAddress, issuedSupply: issuedSupplyExact, transactionId: issuance.issuanceTransactionId } });
     return updated;
   }
 
@@ -266,7 +317,14 @@ export class OnChainProjectionService {
       const mintMatches = !event.mintAddress || event.mintAddress === projection.mintAddress;
       checks.push({ name: 'MINT_MATCH', passed: mintMatches });
       if (!mintMatches) errors.push('MINT_MISMATCH');
-      const supplyValid = projection.issuedSupply <= projection.authorizedSupply;
+      let supplyValid = true;
+      try {
+        if (projection.issuedSupplyUnits != null && projection.authorizedSupplyUnits != null) {
+          supplyValid = BigInt(projection.issuedSupplyUnits) <= BigInt(projection.authorizedSupplyUnits);
+        } else {
+          supplyValid = Number(projection.issuedSupply) <= Number(projection.authorizedSupply);
+        }
+      } catch { supplyValid = false; }
       checks.push({ name: 'SUPPLY_WITHIN_AUTHORIZATION', passed: supplyValid });
       if (!supplyValid) errors.push('SUPPLY_VARIANCE');
     }
@@ -292,4 +350,4 @@ export class OnChainProjectionService {
   listReconciliations(projectionId = null) { return this.domain.list(TYPES.RECONCILIATION).filter((record) => !projectionId || record.projectionId === projectionId); }
 }
 
-export { TYPES as ON_CHAIN_RECORD_TYPES, authorizedSupplyOf };
+export { TYPES as ON_CHAIN_RECORD_TYPES, authorizedSupplyOf, authorizedSupplySourceOf };
