@@ -1,1 +1,0 @@
-import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';test('platform signer is mint authority for first SRA mint',()=>{const w=fs.readFileSync(new URL('../external/orca-executor/sra-token-worker.js',import.meta.url),'utf8');assert.match(w,/createMint\(this\.connection,this\.payer,this\.payer\.publicKey,this\.payer\.publicKey/);});

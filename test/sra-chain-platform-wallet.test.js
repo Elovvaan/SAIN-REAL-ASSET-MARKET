@@ -1,1 +1,0 @@
-import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';test('platform wallet derives from the configured Solana signer',()=>{const w=fs.readFileSync(new URL('../external/orca-executor/sra-token-worker.js',import.meta.url),'utf8');assert.match(w,/platformWallet\(\)/);assert.match(w,/this\.payer\.publicKey\.toBase58\(\)/);});

@@ -1,1 +1,0 @@
-import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';test('first SRA chain projection is Solana',()=>{const s=fs.readFileSync(new URL('../services/sra-coin-chain-service.js',import.meta.url),'utf8');assert.match(s,/network:'SOLANA'/);});

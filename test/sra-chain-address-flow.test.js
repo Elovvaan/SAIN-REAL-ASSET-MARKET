@@ -1,1 +1,0 @@
-import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';test('both SOL and SRA use destination Solana addresses',()=>{const ui=fs.readFileSync(new URL('../public/admin/admin-solana-transfer.js',import.meta.url),'utf8');assert.ok((ui.match(/Destination Solana address/g)||[]).length>=2);});

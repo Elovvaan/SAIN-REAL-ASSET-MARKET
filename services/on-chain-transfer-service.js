@@ -11,7 +11,9 @@ function normalizeAsset(value) { return text(value).toUpperCase(); }
 export class OnChainTransferService {
   constructor({ domain, adapters = {} } = {}) {
     this.domain = domain;
-    this.adapters = new Map(Object.entries(adapters).map(([network, adapter]) => [normalizeNetwork(network), adapter]));
+    this.adapters = new Map(
+      Object.entries(adapters).map(([network, adapter]) => [normalizeNetwork(network), adapter]),
+    );
     this.hydrated = false;
   }
 
@@ -30,7 +32,10 @@ export class OnChainTransferService {
     return {
       service: 'SRA_ON_CHAIN_TRANSFER',
       interface: ['asset', 'amount', 'destinationAddress', 'network'],
-      networks: this.networks().map((network) => ({ network, ...this.adapters.get(network)?.status?.() })),
+      networks: this.networks().map((network) => ({
+        network,
+        ...this.adapters.get(network)?.status?.(),
+      })),
     };
   }
 
@@ -49,48 +54,62 @@ export class OnChainTransferService {
     });
   }
 
-  assetContext(network, asset, input = {}) {
-    if (network === 'SOLANA' && asset === 'SRA') {
-      const projection = this.domain?.get?.('SRA_COIN_CHAIN_PROJECTION', 'SRA-SOLANA') || null;
-      if (!projection?.mintAddress) throw new Error('SRA has not been put on chain yet.');
-      return {
-        mintAddress: projection.mintAddress,
-        sourceTokenAccount: projection.platformTokenAccount || null,
-      };
-    }
-    return {
-      mintAddress: text(input.mintAddress) || null,
-      sourceTokenAccount: text(input.sourceTokenAccount) || null,
-    };
+  sameTransfer(record, request) {
+    return record.network === request.network
+      && record.asset === request.asset
+      && String(record.amount) === String(request.amount)
+      && record.destinationAddress === request.destinationAddress;
   }
 
-  sameTransfer(record, { network, asset, amount, destinationAddress }) {
-    return record.network === network
-      && record.asset === asset
-      && String(record.amount) === String(amount)
-      && record.destinationAddress === destinationAddress;
+  async confirmExisting(existing, adapter, actorId) {
+    if (!existing?.transactionId || typeof adapter.confirm !== 'function') return existing;
+
+    const confirmation = await adapter.confirm(existing.transactionId);
+    const state = String(confirmation?.state || 'PENDING').toUpperCase();
+    if (state === existing.state) return { ...existing, confirmation };
+
+    const updated = {
+      ...existing,
+      state,
+      confirmation,
+      confirmedAt: state === 'CONFIRMED' ? now() : existing.confirmedAt || null,
+      updatedAt: now(),
+    };
+    await this.domain.put(TYPE, existing.transferId, updated, {
+      actorId,
+      eventType: `ON_CHAIN_TRANSFER_${state}`,
+    });
+    return updated;
   }
 
   async send(input = {}, actorId = null) {
     await this.ensure();
-    const id = transferId(input.transferId);
-    const network = normalizeNetwork(input.network);
-    const asset = normalizeAsset(input.asset);
-    const amount = text(input.amount);
-    const destinationAddress = text(input.destinationAddress);
-    if (!network) throw new Error('network is required.');
-    if (!asset) throw new Error('asset is required.');
-    if (!amount) throw new Error('amount is required.');
-    if (!destinationAddress) throw new Error('destinationAddress is required.');
 
-    const adapter = this.adapters.get(network);
+    const id = transferId(input.transferId);
+    const request = {
+      network: normalizeNetwork(input.network),
+      asset: normalizeAsset(input.asset),
+      amount: text(input.amount),
+      destinationAddress: text(input.destinationAddress),
+    };
+
+    if (!request.network) throw new Error('network is required.');
+    if (!request.asset) throw new Error('asset is required.');
+    if (!request.amount) throw new Error('amount is required.');
+    if (!request.destinationAddress) throw new Error('destinationAddress is required.');
+
+    const adapter = this.adapters.get(request.network);
     if (!adapter) {
-      const error = new Error(`Unsupported on-chain network: ${network}.`);
+      const error = new Error(`Unsupported on-chain network: ${request.network}.`);
       error.code = 'ON_CHAIN_NETWORK_UNSUPPORTED';
       throw error;
     }
+    if (typeof adapter.send !== 'function') {
+      const error = new Error(`On-chain adapter for ${request.network} cannot send transactions.`);
+      error.code = 'ON_CHAIN_ADAPTER_INVALID';
+      throw error;
+    }
 
-    const request = { network, asset, amount, destinationAddress };
     const existing = this.get(id);
     if (existing && !this.sameTransfer(existing, request)) {
       const error = new Error('transferId was already used with different transfer details.');
@@ -98,15 +117,7 @@ export class OnChainTransferService {
       throw error;
     }
     if (existing?.state === 'CONFIRMED') return existing;
-    if (existing?.state === 'SUBMITTED' && existing.transactionId && adapter.confirm) {
-      const confirmation = await adapter.confirm(existing.transactionId);
-      if (confirmation.state === 'CONFIRMED') {
-        const confirmed = { ...existing, state: 'CONFIRMED', confirmation, confirmedAt: now(), updatedAt: now() };
-        await this.domain.put(TYPE, id, confirmed, { actorId, eventType: 'ON_CHAIN_TRANSFER_CONFIRMED' });
-        return confirmed;
-      }
-      return { ...existing, confirmation };
-    }
+    if (existing?.transactionId) return this.confirmExisting(existing, adapter, actorId);
 
     const prepared = existing || {
       transferId: id,
@@ -117,30 +128,59 @@ export class OnChainTransferService {
       createdAt: now(),
       updatedAt: now(),
     };
-    if (!existing) await this.domain.put(TYPE, id, prepared, { actorId, eventType: 'ON_CHAIN_TRANSFER_PREPARED' });
 
-    const context = this.assetContext(network, asset, input);
+    if (!existing) {
+      await this.domain.put(TYPE, id, prepared, {
+        actorId,
+        eventType: 'ON_CHAIN_TRANSFER_PREPARED',
+      });
+    }
+
     try {
-      const result = await adapter.send({ ...input, ...request, transferId: id, ...context });
+      // Network-specific construction, signing, broadcasting, and asset resolution
+      // belong inside the adapter. The generic interface passes only the transfer intent.
+      const result = await adapter.send({ ...request, transferId: id });
+      const transactionId = text(result?.transactionId || result?.transactionSignature);
+      if (!transactionId) throw new Error('On-chain adapter did not return a transaction ID.');
+
+      const state = String(result?.state || 'SUBMITTED').toUpperCase();
       const record = {
         ...prepared,
-        fromAddress: result.fromAddress || null,
-        transactionId: result.transactionId || result.transactionSignature,
-        transactionSignature: result.transactionSignature || result.transactionId,
-        state: result.state || 'CONFIRMED',
-        confirmation: result.confirmation || null,
-        submittedAt: result.submittedAt || now(),
-        confirmedAt: result.state === 'CONFIRMED' ? (result.confirmedAt || now()) : null,
+        fromAddress: result?.fromAddress || null,
+        transactionId,
+        state,
+        confirmation: result?.confirmation || null,
+        submittedAt: result?.submittedAt || now(),
+        confirmedAt: state === 'CONFIRMED' ? (result?.confirmedAt || now()) : null,
         updatedAt: now(),
       };
-      await this.domain.put(TYPE, id, record, { actorId, eventType: record.state === 'CONFIRMED' ? 'ON_CHAIN_TRANSFER_CONFIRMED' : 'ON_CHAIN_TRANSFER_SUBMITTED' });
-      await this.domain.lifecycle?.({ objectType: TYPE, objectId: id, eventType: record.state === 'CONFIRMED' ? 'ON_CHAIN_TRANSFER_CONFIRMED' : 'ON_CHAIN_TRANSFER_SUBMITTED', actorId, payload: { network, asset, amount, destinationAddress, transactionId: record.transactionId } });
+
+      await this.domain.put(TYPE, id, record, {
+        actorId,
+        eventType: `ON_CHAIN_TRANSFER_${state}`,
+      });
+      await this.domain.lifecycle?.({
+        objectType: TYPE,
+        objectId: id,
+        eventType: `ON_CHAIN_TRANSFER_${state}`,
+        actorId,
+        payload: { ...request, transactionId },
+      });
       return record;
     } catch (error) {
-      const transactionId = error?.transactionId || error?.transactionSignature || null;
+      const transactionId = text(error?.transactionId || error?.transactionSignature);
       if (transactionId) {
-        const submitted = { ...prepared, transactionId, transactionSignature: transactionId, state: 'SUBMITTED', submittedAt: now(), updatedAt: now() };
-        await this.domain.put(TYPE, id, submitted, { actorId, eventType: 'ON_CHAIN_TRANSFER_SUBMITTED' });
+        const submitted = {
+          ...prepared,
+          transactionId,
+          state: 'SUBMITTED',
+          submittedAt: now(),
+          updatedAt: now(),
+        };
+        await this.domain.put(TYPE, id, submitted, {
+          actorId,
+          eventType: 'ON_CHAIN_TRANSFER_SUBMITTED',
+        });
       }
       throw error;
     }
