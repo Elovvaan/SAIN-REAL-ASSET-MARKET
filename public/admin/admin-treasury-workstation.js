@@ -18,25 +18,29 @@
   function card(title,state,body) { return `<section class="admin-record-card" data-treasury-workstation-card><header><strong>${esc(title)}</strong><em>${esc(state)}</em></header>${body}</section>`; }
   function clear(workspace) { controls(workspace)?.querySelectorAll('[data-treasury-workstation-card]').forEach((node) => node.remove()); }
 
-  function openSettlementDestination(amountUsd) {
+  function openSettlementInstruction(amountUsd) {
     sessionStorage.setItem('sra:treasury-payment-draft', JSON.stringify({ amountUsd:Number(amountUsd), rail:'ACH', createdAt:new Date().toISOString() }));
     document.querySelector('[data-admin-workspace="settlement"]')?.click();
     queueMicrotask(() => {
       const settlement = document.querySelector('[data-workspace="settlement"]');
-      settlement?.querySelector('[data-admin-tab="Destination Verification"]')?.click();
-      queueMicrotask(() => applyDraftToDestination(settlement));
+      settlement?.querySelector('[data-admin-tab="Settlement Instructions"]')?.click();
+      queueMicrotask(() => applyDraftToSettlementInstruction(settlement));
     });
   }
 
-  function applyDraftToDestination(settlementWorkspace) {
-    if (!settlementWorkspace || settlementWorkspace.dataset.activeTab !== 'Destination Verification') return;
+  function applyDraftToSettlementInstruction(settlementWorkspace) {
+    if (!settlementWorkspace || settlementWorkspace.dataset.activeTab !== 'Settlement Instructions') return;
     let draft = null;
     try { draft = JSON.parse(sessionStorage.getItem('sra:treasury-payment-draft') || 'null'); } catch {}
-    const form = settlementWorkspace.querySelector('[data-native-ach-destination-form]');
+    const form = settlementWorkspace.querySelector('[data-settlement-instruction-form]');
     if (!form || !draft?.amountUsd) return;
+    if (form.elements.route) {
+      form.elements.route.value = 'ACH';
+      form.elements.route.dispatchEvent(new Event('change', { bubbles:true }));
+    }
     if (form.elements.amountUsd) form.elements.amountUsd.value = Number(draft.amountUsd).toFixed(2);
     const button = form.querySelector('button[type="submit"]');
-    if (button) button.textContent = 'Verify Destination & Prepare Payment';
+    if (button) button.textContent = 'Prepare ACH Settlement Instruction';
     let note = form.querySelector('[data-treasury-payment-draft-note]');
     if (!note) {
       note = document.createElement('p');
@@ -85,7 +89,7 @@
     const held = Number(data.readiness.status?.reservedUsd || 0);
     const available = Math.max(0, cash - held);
     const inFlight = list(data.records.transactions).filter((item) => item.transactionType === 'EXTERNAL_TRANSFER_INSTRUCTION' && ['HELD','SUBMITTED'].includes(String(item.fundsState || '').toUpperCase()));
-    return card('Cash Position','OPERATING',`<div class="admin-record-grid">${field('Cash / Settlement USD',money(cash))}${field('Held',money(held))}${field('Available',money(available))}${field('In-flight payments',String(inFlight.length))}</div><p style="color:#9a9a9a;margin:12px 0">Commercial instrument value and financing capacity are not cash. Cash changes only through cash/settlement accounting events.</p><form data-treasury-payment-form style="margin-top:14px"><div class="admin-record-grid"><label><span>Amount USD</span><input name="amountUsd" type="number" min="0.01" step="0.01" value="1.00" required></label><label><span>Rail</span><select name="rail" style="width:100%;background:#050505;border:1px solid #292929;border-radius:10px;color:#f5f5f5;padding:12px"><option value="ACH">ACH</option></select></label></div><div style="display:flex;gap:12px;align-items:center;margin-top:12px"><button type="submit" ${available <= 0 ? 'disabled' : ''}>Send Payment</button><span style="color:#9a9a9a;font-size:12px">Continues to Destination Verification.</span></div></form>`);
+    return card('Cash Position','OPERATING',`<div class="admin-record-grid">${field('Cash / Settlement USD',money(cash))}${field('Held',money(held))}${field('Available',money(available))}${field('In-flight payments',String(inFlight.length))}</div><p style="color:#9a9a9a;margin:12px 0">Commercial instrument value and financing capacity are not cash. Cash changes only through cash/settlement accounting events.</p><form data-treasury-payment-form style="margin-top:14px"><div class="admin-record-grid"><label><span>Amount USD</span><input name="amountUsd" type="number" min="0.01" step="0.01" value="1.00" required></label><label><span>Rail</span><select name="rail" style="width:100%;background:#050505;border:1px solid #292929;border-radius:10px;color:#f5f5f5;padding:12px"><option value="ACH">ACH</option></select></label></div><div style="display:flex;gap:12px;align-items:center;margin-top:12px"><button type="submit" ${available <= 0 ? 'disabled' : ''}>Send Payment</button><span style="color:#9a9a9a;font-size:12px">Continues to Settlement Instructions.</span></div></form>`);
   }
 
   function renderFinancing(data, capacity = false) {
@@ -169,12 +173,12 @@
       current?.querySelector('[data-treasury-recognize-instrument]')?.addEventListener('click', () => void recognizeCanonicalInstrument(workspace, data));
       current?.querySelector('[data-treasury-start-payment]')?.addEventListener('click', () => {
         const amount = Math.min(1, Math.max(0, Number(data.treasury.cashBalanceUsd || 0) - Number(data.readiness.status?.reservedUsd || 0)));
-        if (amount > 0) openSettlementDestination(amount);
+        if (amount > 0) openSettlementInstruction(amount);
       });
       current?.querySelector('[data-treasury-payment-form]')?.addEventListener('submit', (event) => {
         event.preventDefault();
         const values = Object.fromEntries(new FormData(event.currentTarget).entries());
-        openSettlementDestination(Number(values.amountUsd));
+        openSettlementInstruction(Number(values.amountUsd));
       });
     } catch (error) {
       placeholder.innerHTML = `<header><strong>Treasury Workstation</strong><em>UNAVAILABLE</em></header><p>${esc(error.message)}</p>`;
@@ -189,10 +193,10 @@
     });
     window.addEventListener('sra:admin-workspace-synchronized', (event) => {
       if (event.detail?.workspaceId === 'treasury') void render(workspace);
-      if (event.detail?.workspaceId === 'settlement') applyDraftToDestination(document.querySelector('[data-workspace="settlement"]'));
+      if (event.detail?.workspaceId === 'settlement') applyDraftToSettlementInstruction(document.querySelector('[data-workspace="settlement"]'));
     });
     document.querySelector('[data-workspace="settlement"]')?.addEventListener('click', (event) => {
-      if (event.target.closest('[data-admin-tab="Destination Verification"]')) queueMicrotask(() => applyDraftToDestination(document.querySelector('[data-workspace="settlement"]')));
+      if (event.target.closest('[data-admin-tab="Settlement Instructions"]')) queueMicrotask(() => applyDraftToSettlementInstruction(document.querySelector('[data-workspace="settlement"]')));
     });
     void render(workspace);
   }
