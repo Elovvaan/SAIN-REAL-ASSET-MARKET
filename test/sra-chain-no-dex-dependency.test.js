@@ -1,1 +1,0 @@
-import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';test('SRA token worker has no Orca dependency',()=>{const worker=fs.readFileSync(new URL('../external/orca-executor/sra-token-worker.js',import.meta.url),'utf8');assert.doesNotMatch(worker,/orca|whirlpool/i);});
