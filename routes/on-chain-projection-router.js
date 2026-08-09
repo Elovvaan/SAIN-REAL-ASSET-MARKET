@@ -28,7 +28,7 @@ export function createOnChainProjectionRouter(service){
   router.post('/events/:eventId/reconcile',async(q,r)=>{try{return r.json(await service.reconcileEvent(q.params.eventId,actorId(q)));}catch(e){return handle(r,e);}});
   router.get('/reconciliations',(q,r)=>r.json({records:service.listReconciliations(q.query.projectionId||null)}));
 
-  router.get('/solana/status',(_q,r)=>r.json(solana.status()));
+  router.get('/solana/status',async(_q,r)=>{try{return r.json(await solana.health());}catch(e){return handle(r,e);}});
   router.get('/solana/wallet',async(_q,r)=>{try{return r.json(await solana.wallet());}catch(e){return handle(r,e);}});
   router.post('/solana/transfers',async(q,r)=>{try{return r.status(201).json(await solana.send(q.body||{}));}catch(e){return handle(r,e);}});
   router.get('/solana/sra',async(_q,r)=>{try{return r.json(await sraCoin.status());}catch(e){return handle(r,e);}});
