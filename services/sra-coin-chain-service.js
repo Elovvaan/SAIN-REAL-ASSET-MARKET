@@ -5,7 +5,9 @@ export class SraCoinChainService{
   constructor(domain,solana){this.domain=domain;this.solana=solana;this.hydrated=false;}
   async ensure(){if(!this.hydrated){await this.domain.hydrate([TYPE]);this.hydrated=true;}}
   supply(){return Number(this.domain.list('COIN_POSITION').filter(active).reduce((sum,p)=>sum+Number(p.quantity||0),0).toFixed(8));}
-  async status(){await this.ensure();const platformSupply=this.supply(),onChain=this.domain.get(TYPE,'SRA-SOLANA')||null;return{symbol:'SRA',network:'SOLANA',platformSupply,onChain,synchronization:{platformSupply,issuedOnChainSupply:Number(onChain?.issuedOnChainSupply||0),pendingQuantity:Number(Math.max(0,platformSupply-Number(onChain?.issuedOnChainSupply||0)).toFixed(8)),state:!onChain?'NOT_ON_CHAIN':platformSupply>Number(onChain.issuedOnChainSupply||0)?'SYNC_AVAILABLE':platformSupply===Number(onChain.issuedOnChainSupply||0)?'SYNCHRONIZED':'RECONCILIATION_REQUIRED'}};}
+  executionReadiness(){return this.solana?.status?.()||{network:'SOLANA',endpointConfigured:false,credentialConfigured:false,configured:false,ready:false};}
+  async executionHealth(){return this.solana?.health?this.solana.health():this.executionReadiness();}
+  async status(){await this.ensure();const platformSupply=this.supply(),onChain=this.domain.get(TYPE,'SRA-SOLANA')||null;return{symbol:'SRA',network:'SOLANA',platformSupply,onChain,execution:this.executionReadiness(),synchronization:{platformSupply,issuedOnChainSupply:Number(onChain?.issuedOnChainSupply||0),pendingQuantity:Number(Math.max(0,platformSupply-Number(onChain?.issuedOnChainSupply||0)).toFixed(8)),state:!onChain?'NOT_ON_CHAIN':platformSupply>Number(onChain.issuedOnChainSupply||0)?'SYNC_AVAILABLE':platformSupply===Number(onChain.issuedOnChainSupply||0)?'SYNCHRONIZED':'RECONCILIATION_REQUIRED'}};}
   async putOnChain(input={},actorId=null){
     await this.ensure();
     const currentSupply=this.supply();
@@ -15,11 +17,7 @@ export class SraCoinChainService{
     const existing=this.domain.get(TYPE,'SRA-SOLANA');
     const issued=Number(existing?.issuedOnChainSupply||0);
     if(existing&&issued>currentSupply)throw new Error('On-chain issued SRA exceeds current platform supply; reconciliation is required before another mint.');
-    if(input.expectedIssuedOnChainSupply!==undefined&&Number(input.expectedIssuedOnChainSupply)!==issued){
-      const error=new Error('The on-chain issued supply changed after approval. Refresh and review the current Chain Operations job.');
-      error.code='SRA_CHAIN_APPROVAL_SNAPSHOT_STALE';
-      throw error;
-    }
+    if(input.expectedIssuedOnChainSupply!==undefined&&Number(input.expectedIssuedOnChainSupply)!==issued){const error=new Error('The on-chain issued supply changed after approval. Refresh and review the current Chain Operations job.');error.code='SRA_CHAIN_APPROVAL_SNAPSHOT_STALE';throw error;}
     if(targetSupply<issued)throw new Error('Approved on-chain target cannot be below already issued SRA supply.');
     const result=await this.solana.createSraMint({issuanceId:`SRA-SOLANA-${targetSupply.toFixed(8)}`,authorizedSupply:targetSupply,decimals:8});
     const now=new Date().toISOString();
