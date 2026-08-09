@@ -1,8 +1,5 @@
 import { scanProductLifecycleProgress } from './product-lifecycle-progress-service.js';
 import { explainAdminState } from './admin-state-explanation-service.js';
-import { PlatformChainOperationsAgentService } from './platform-chain-operations-agent-service.js';
-import { SolanaTransferService } from './solana-transfer-service.js';
-import { SraCoinChainService } from './sra-coin-chain-service.js';
 
 const PRODUCT_DEFINITION = 'SRA_PRODUCT_DEFINITION';
 
@@ -30,11 +27,10 @@ const STAGE_LABELS = Object.freeze({
   settlement: 'settlement',
   ownershipRecognition: 'ownership recognition',
   exportPackage: 'ready-for-export packaging',
-  onChainSynchronization: 'SRA on-chain synchronization',
 });
 
 const PROTECTED_STAGES = new Set([
-  'instrument', 'listing', 'allocation', 'settlement', 'ownershipRecognition', 'exportPackage', 'onChainSynchronization',
+  'instrument', 'listing', 'allocation', 'settlement', 'ownershipRecognition', 'exportPackage',
 ]);
 
 function cleanQuestion(value) {
@@ -82,7 +78,6 @@ function allProductCodes(domain) {
 
 function intent(question, productCode) {
   const normalized = question.toLowerCase();
-  if (/(chain operations|on.chain|solana|mint.*sra|sync.*sra|sra.*sync)/.test(normalized)) return 'CHAIN_OPERATIONS';
   if (/(operational brief|operations brief|what needs attention|incomplete workflows|next actions|what should i do next|work queue)/.test(normalized)) return 'OPERATIONAL_BRIEF';
   if (productCode && /(where|status|stage|progress|far|ready|block|missing|next|why)/.test(normalized)) return 'PRODUCT_LIFECYCLE';
   if (/(what.*need.*approval|approval|approve|human.*loop|my action)/.test(normalized)) return 'APPROVALS';
@@ -107,7 +102,8 @@ function productAnswer(progress) {
   if (!progress.instrumentCount) {
     return {
       answer: `SRA does not currently contain an instrument for ${progress.productCode}. The lifecycle has not started for this product.`,
-      status: 'NOT_STARTED', blockers: ['NO_INSTRUMENT'],
+      status: 'NOT_STARTED',
+      blockers: ['NO_INSTRUMENT'],
       nextAction: { stage: 'instrument', label: `Create and approve the first ${progress.productCode} instrument from a recognized financial record.`, authority: 'ADMIN_APPROVAL_REQUIRED', autonomous: false },
       references: [],
     };
@@ -115,7 +111,9 @@ function productAnswer(progress) {
   const lead = progress.chains[0];
   const completed = lead.completedStages.map((stage) => STAGE_LABELS[stage] || stage);
   const missing = lead.firstMissing;
-  const stageText = missing ? `It has completed ${completed.join(', ')}. The first missing stage is ${STAGE_LABELS[missing] || missing}.` : 'It has completed every internal lifecycle stage and is ready for export.';
+  const stageText = missing
+    ? `It has completed ${completed.join(', ')}. The first missing stage is ${STAGE_LABELS[missing] || missing}.`
+    : 'It has completed every internal lifecycle stage and is ready for export.';
   return {
     answer: `SRA found ${progress.instrumentCount} instrument${progress.instrumentCount === 1 ? '' : 's'} for ${progress.productCode} across ${progress.instrumentFamilies.join(', ')}. The furthest chain is ${lead.instrumentId}. ${stageText}`,
     status: lead.readyForExport ? 'READY_FOR_EXPORT' : 'IN_PROGRESS',
@@ -125,65 +123,40 @@ function productAnswer(progress) {
   };
 }
 
-function chainAction(job) {
-  if (!job) return null;
-  const reconciliation = job.jobType === 'RECONCILE_SRA_CHAIN_SUPPLY';
-  return {
-    agent: 'SRA_PLATFORM_CHAIN_OPERATIONS_AGENT',
-    jobId: job.jobId,
-    jobType: job.jobType,
-    productCode: 'SRA_COIN',
-    instrumentId: null,
-    stage: 'onChainSynchronization',
-    label: reconciliation
-      ? 'Review the SRA on-chain supply reconciliation exception.'
-      : `${job.jobType === 'PUT_SRA_ON_CHAIN' ? 'Put' : 'Synchronize'} ${Number(job.requestedQuantity || 0)} SRA on Solana.`,
-    authority: job.authority,
-    autonomous: false,
-    network: job.network || 'SOLANA',
-    requestedQuantity: Number(job.requestedQuantity || 0),
-    targetSupply: Number(job.targetSupply || job.snapshot?.platformSupply || 0),
-    executable: Boolean(job.executable),
-    executionAction: reconciliation ? null : 'EXECUTE_CHAIN_JOB',
-    blocker: reconciliation ? 'SRA_CHAIN_RECONCILIATION_REQUIRED' : null,
-  };
-}
-
 export class AdminIntelligenceAgentService {
   constructor({ domain, database = null, productQualification = null }) {
     this.domain = domain;
     this.database = database;
     this.productQualification = productQualification;
-    const solana = new SolanaTransferService();
-    const sraCoin = new SraCoinChainService(domain, solana);
-    this.chainOperationsAgent = new PlatformChainOperationsAgentService({ domain, chainService: sraCoin, database });
   }
 
   capabilities() {
     return {
-      agent: 'SRA_ADMIN_INTELLIGENCE_AGENT', mode: 'AUTONOMOUS_READ_AND_REASON', writeAuthority: 'HUMAN_IN_THE_LOOP',
-      can: ['ANSWER_PLATFORM_STATUS','GENERATE_OPERATIONAL_BRIEF','DISCOVER_REGISTERED_PRODUCTS','TRACE_PRODUCT_LIFECYCLES','IDENTIFY_BLOCKERS','RECOMMEND_NEXT_ACTION','IDENTIFY_APPROVAL_BOUNDARIES','CITE_INTERNAL_RECORDS','EXPLAIN_ASSET_EXPORTABILITY','TRACE_ASSET_RELATIONSHIPS','SIMULATE_APPROVAL_IMPACT','DISPATCH_PLATFORM_CHAIN_OPERATIONS_AGENT'],
-      delegatedAgents: [this.chainOperationsAgent.capabilities()],
-      cannotWithoutApproval: ['ISSUE_INSTRUMENT','PUBLISH_LISTING','ALLOCATE_POSITION','CONFIRM_SETTLEMENT','RECOGNIZE_OWNERSHIP','CREATE_EXPORT_PACKAGE','MINT_SRA_ON_CHAIN','TRANSFER_SRA_ON_CHAIN'],
-    };
-  }
-
-  chainOperationsSummary() {
-    const work = this.chainOperationsAgent.workQueue();
-    const actions = work.queue.map(chainAction).filter(Boolean);
-    const snapshot = work.snapshot;
-    return {
-      answer: actions.length
-        ? `The Platform Chain Operations Agent has ${actions.length} job${actions.length === 1 ? '' : 's'} requiring attention. SRA platform supply is ${snapshot.platformSupply} SRA, on-chain issued supply is ${snapshot.issuedOnChainSupply} SRA, and ${snapshot.pendingQuantity} SRA is pending synchronization.`
-        : `The Platform Chain Operations Agent is clear. SRA platform supply and the current Solana projection are synchronized at ${snapshot.issuedOnChainSupply} SRA.`,
-      status: work.state,
-      agent: work.agent,
-      workQueue: actions,
-      chainSnapshot: snapshot,
-      pendingActions: actions,
-      nextAction: actions[0] || null,
-      blockers: actions.map((action) => action.blocker).filter(Boolean),
-      references: snapshot.mintAddress ? [{ stage: 'onChainSynchronization', recordId: snapshot.mintAddress, state: snapshot.state }] : [],
+      agent: 'SRA_ADMIN_INTELLIGENCE_AGENT',
+      mode: 'AUTONOMOUS_READ_AND_REASON',
+      writeAuthority: 'HUMAN_IN_THE_LOOP',
+      can: [
+        'ANSWER_PLATFORM_STATUS',
+        'GENERATE_OPERATIONAL_BRIEF',
+        'DISCOVER_REGISTERED_PRODUCTS',
+        'TRACE_PRODUCT_LIFECYCLES',
+        'IDENTIFY_BLOCKERS',
+        'RECOMMEND_NEXT_ACTION',
+        'IDENTIFY_APPROVAL_BOUNDARIES',
+        'CITE_INTERNAL_RECORDS',
+        'EXPLAIN_ASSET_EXPORTABILITY',
+        'TRACE_ASSET_RELATIONSHIPS',
+        'SIMULATE_APPROVAL_IMPACT',
+      ],
+      delegatedAgents: [],
+      cannotWithoutApproval: [
+        'ISSUE_INSTRUMENT',
+        'PUBLISH_LISTING',
+        'ALLOCATE_POSITION',
+        'CONFIRM_SETTLEMENT',
+        'RECOGNIZE_OWNERSHIP',
+        'CREATE_EXPORT_PACKAGE',
+      ],
     };
   }
 
@@ -204,12 +177,16 @@ export class AdminIntelligenceAgentService {
       EXPORT_PACKAGE: this.domain.list('EXPORT_PACKAGE').length,
     };
     const lifecycleTotal = Object.values(selected).reduce((sum, value) => sum + Number(value || 0), 0);
-    const chainOperations = this.chainOperationsAgent.workQueue();
     return {
       answer: `Live SRA snapshot as of ${snapshotAt}: ${selected.MARKET_OBSERVATION} observations, ${selected.RECOGNITION_ASSESSMENT} recognitions, ${selected.FINANCIAL_RECORD} financial records, ${selected.COIN_POSITION} Coin Positions, ${selected.SRA_INSTRUMENT} instruments, ${selected.MARKETPLACE_LISTING} marketplace listings, ${selected.SRA_SETTLEMENT_RECORD} settlement records, ${selected.OWNERSHIP_RECOGNITION} ownership recognitions, and ${selected.EXPORT_PACKAGE} export-ready packages. This snapshot contains ${lifecycleTotal} stage records in total; that total is a sum across lifecycle stages, not a count of unique assets.`,
-      status: 'AVAILABLE', snapshotAt, counts: selected, lifecycleTotal,
-      chainOperations: { state: chainOperations.state, queuedJobs: chainOperations.queue.length, snapshot: chainOperations.snapshot },
-      countMeaning: 'SUM_OF_STAGE_RECORDS_NOT_UNIQUE_ASSETS', nextAction: null, blockers: [], references: [],
+      status: 'AVAILABLE',
+      snapshotAt,
+      counts: selected,
+      lifecycleTotal,
+      countMeaning: 'SUM_OF_STAGE_RECORDS_NOT_UNIQUE_ASSETS',
+      nextAction: null,
+      blockers: [],
+      references: [],
     };
   }
 
@@ -222,12 +199,14 @@ export class AdminIntelligenceAgentService {
         if (action?.authority === 'ADMIN_APPROVAL_REQUIRED') pending.push({ productCode, instrumentId: chain.instrumentId, ...action });
       }
     }
-    const chainActions = this.chainOperationsAgent.workQueue().queue.map(chainAction).filter(Boolean);
-    pending.push(...chainActions);
     return {
-      answer: pending.length ? `SRA identified ${pending.length} action${pending.length === 1 ? '' : 's'} at a human approval or review boundary, including delegated agent work.` : 'SRA did not identify a currently reachable action requiring administrator approval.',
-      status: pending.length ? 'APPROVAL_REQUIRED' : 'NO_PENDING_APPROVAL', pendingActions: pending, blockers: chainActions.map((item) => item.blocker).filter(Boolean),
-      references: pending.filter((item) => item.instrumentId || item.jobId).map((item) => ({ stage: item.stage, recordId: item.instrumentId || item.jobId, state: item.authority || null })),
+      answer: pending.length
+        ? `SRA identified ${pending.length} action${pending.length === 1 ? '' : 's'} at a human approval or review boundary.`
+        : 'SRA did not identify a currently reachable action requiring administrator approval.',
+      status: pending.length ? 'APPROVAL_REQUIRED' : 'NO_PENDING_APPROVAL',
+      pendingActions: pending,
+      blockers: [],
+      references: pending.filter((item) => item.instrumentId).map((item) => ({ stage: item.stage, recordId: item.instrumentId, state: item.authority || null })),
       nextAction: pending[0] || null,
     };
   }
@@ -241,21 +220,15 @@ export class AdminIntelligenceAgentService {
       for (const chain of progress.chains || []) {
         if (!chain.firstMissing) continue;
         const action = nextActionFor(chain);
-        workflows.push({ productCode, instrumentId: chain.instrumentId, completedStages: chain.completedStages, firstMissing: chain.firstMissing, blocker: `MISSING_${String(chain.firstMissing).replace(/([A-Z])/g, '_$1').toUpperCase()}`, nextAction: action });
+        workflows.push({
+          productCode,
+          instrumentId: chain.instrumentId,
+          completedStages: chain.completedStages,
+          firstMissing: chain.firstMissing,
+          blocker: `MISSING_${String(chain.firstMissing).replace(/([A-Z])/g, '_$1').toUpperCase()}`,
+          nextAction: action,
+        });
       }
-    }
-    for (const job of this.chainOperationsAgent.workQueue().queue) {
-      const action = chainAction(job);
-      workflows.push({
-        agent: action.agent,
-        jobId: action.jobId,
-        productCode: 'SRA_COIN',
-        instrumentId: null,
-        completedStages: ['coinPositionSupply'],
-        firstMissing: 'onChainSynchronization',
-        blocker: action.blocker || 'PENDING_SRA_ON_CHAIN_SYNCHRONIZATION',
-        nextAction: action,
-      });
     }
     workflows.sort((a, b) => Number(Boolean(String(b.nextAction?.authority || '').startsWith('ADMIN_'))) - Number(Boolean(String(a.nextAction?.authority || '').startsWith('ADMIN_'))) || String(a.productCode).localeCompare(String(b.productCode)));
     const autonomous = workflows.filter((item) => item.nextAction?.authority === 'SRA_AGENT_AUTONOMOUS');
@@ -266,43 +239,49 @@ export class AdminIntelligenceAgentService {
       ? `Operational brief as of ${snapshot.snapshotAt}: ${readyForExport} export-ready package${readyForExport === 1 ? '' : 's'}, ${protectedQueue.length} action${protectedQueue.length === 1 ? '' : 's'} waiting at an administrator boundary, and ${autonomous.length} reachable internal action${autonomous.length === 1 ? '' : 's'}. The highest-priority next action is ${workflows[0]?.nextAction?.label || 'not available'}`
       : `Operational brief as of ${snapshot.snapshotAt}: ${readyForExport} export-ready package${readyForExport === 1 ? '' : 's'} and no currently reachable incomplete workflow requires attention.`;
     return {
-      answer, status: attention ? 'ATTENTION_REQUIRED' : 'CLEAR', snapshotAt: snapshot.snapshotAt,
-      counts: snapshot.counts, pendingActions: approvals.pendingActions, incompleteWorkflows: workflows,
-      administratorQueue: protectedQueue, autonomousQueue: autonomous,
-      delegatedAgents: { chainOperations: this.chainOperationsAgent.workQueue() },
+      answer,
+      status: attention ? 'ATTENTION_REQUIRED' : 'CLEAR',
+      snapshotAt: snapshot.snapshotAt,
+      counts: snapshot.counts,
+      pendingActions: approvals.pendingActions,
+      incompleteWorkflows: workflows,
+      administratorQueue: protectedQueue,
+      autonomousQueue: autonomous,
+      delegatedAgents: {},
       nextAction: workflows[0]?.nextAction || null,
       blockers: workflows.map((item) => item.blocker),
-      references: workflows.filter((item) => item.instrumentId || item.jobId).map((item) => ({ stage: item.firstMissing, recordId: item.instrumentId || item.jobId, state: 'INCOMPLETE' })),
-    };
-  }
-
-  async executeChainJob(input = {}, actor = {}) {
-    const result = await this.chainOperationsAgent.execute(input.jobId, input, actor);
-    return {
-      agent: 'SRA_ADMIN_INTELLIGENCE_AGENT',
-      delegatedAgent: result.agent,
-      intent: 'CHAIN_OPERATIONS_EXECUTION',
-      authorityMode: 'HUMAN_IN_THE_LOOP',
-      answeredAt: new Date().toISOString(),
-      answer: `Approved Chain Operations job ${result.job.jobId} completed. On-chain SRA supply is now ${result.reconciliation.issuedOnChainSupply} SRA.`,
-      status: result.state,
-      job: result.job,
-      result: result.result,
-      reconciliation: result.reconciliation,
-      blockers: result.state === 'RECONCILIATION_REQUIRED' ? ['SRA_CHAIN_RECONCILIATION_REQUIRED'] : [],
-      references: result.result?.transactionSignature ? [{ stage: 'onChainSynchronization', recordId: result.result.transactionSignature, state: result.state }] : [],
-      nextAction: null,
+      references: workflows.filter((item) => item.instrumentId).map((item) => ({ stage: item.firstMissing, recordId: item.instrumentId, state: 'INCOMPLETE' })),
     };
   }
 
   async ask(input = {}, actor = {}) {
-    if (String(input.action || '').toUpperCase() === 'EXECUTE_CHAIN_JOB') return this.executeChainJob(input, actor);
-
     const question = cleanQuestion(input.question);
     const stateExplanation = explainAdminState(this.domain, question);
     if (stateExplanation) {
-      const response = { agent: 'SRA_ADMIN_INTELLIGENCE_AGENT', question, intent: stateExplanation.intent, productCode: null, authorityMode: 'HUMAN_IN_THE_LOOP', actor: { id: actor.id || null, displayName: actor.displayName || null }, answeredAt: new Date().toISOString(), ...stateExplanation };
-      if (this.database?.audit) await this.database.audit({ actorId: actor.id || 'SRA_PLATFORM_ADMIN', eventType: 'ADMIN_AGENT_QUESTION_ANSWERED', objectType: 'SRA_ADMIN_INTELLIGENCE_AGENT', objectId: stateExplanation.subject?.reference || stateExplanation.intent, payload: { intent: stateExplanation.intent, status: response.status, referenceCount: response.references?.length || 0, readOnlySimulation: Boolean(response.simulation?.readOnly) } });
+      const response = {
+        agent: 'SRA_ADMIN_INTELLIGENCE_AGENT',
+        question,
+        intent: stateExplanation.intent,
+        productCode: null,
+        authorityMode: 'HUMAN_IN_THE_LOOP',
+        actor: { id: actor.id || null, displayName: actor.displayName || null },
+        answeredAt: new Date().toISOString(),
+        ...stateExplanation,
+      };
+      if (this.database?.audit) {
+        await this.database.audit({
+          actorId: actor.id || 'SRA_PLATFORM_ADMIN',
+          eventType: 'ADMIN_AGENT_QUESTION_ANSWERED',
+          objectType: 'SRA_ADMIN_INTELLIGENCE_AGENT',
+          objectId: stateExplanation.subject?.reference || stateExplanation.intent,
+          payload: {
+            intent: stateExplanation.intent,
+            status: response.status,
+            referenceCount: response.references?.length || 0,
+            readOnlySimulation: Boolean(response.simulation?.readOnly),
+          },
+        });
+      }
       return response;
     }
 
@@ -310,16 +289,50 @@ export class AdminIntelligenceAgentService {
     const productCode = requestedCode || detectProduct(this.domain, question);
     const detectedIntent = intent(question, productCode);
     let result;
-    if (detectedIntent === 'PRODUCT_LIFECYCLE') result = { ...productAnswer(scanProductLifecycleProgress(this.domain, productCode)), data: scanProductLifecycleProgress(this.domain, productCode) };
-    else if (detectedIntent === 'CHAIN_OPERATIONS') result = this.chainOperationsSummary();
-    else if (detectedIntent === 'OPERATIONAL_BRIEF') result = this.operationalBrief();
+    if (detectedIntent === 'PRODUCT_LIFECYCLE') {
+      const progress = scanProductLifecycleProgress(this.domain, productCode);
+      result = { ...productAnswer(progress), data: progress };
+    } else if (detectedIntent === 'OPERATIONAL_BRIEF') result = this.operationalBrief();
     else if (detectedIntent === 'PLATFORM_SUMMARY') result = this.platformSummary();
     else if (detectedIntent === 'APPROVALS') result = this.approvalSummary();
-    else if (detectedIntent === 'CAPABILITIES') result = { answer: 'I can generate an operational brief, discover registered SRA products, read operational records, trace product lifecycles, identify blockers, explain asset exportability and relationships, simulate approval impact, delegate defined work to platform operations agents, and tell you when administrator approval is required. Protected financial and chain state changes remain behind administrator approval.', status: 'AVAILABLE', capabilities: this.capabilities(), blockers: [], references: [], nextAction: null };
-    else result = { answer: 'I could not identify the product or operational subject in that question. Name the product or instrument, or ask for an operational brief, platform status, chain operations, blockers, relationships, next actions, or pending approvals.', status: 'NEEDS_CONTEXT', blockers: ['QUESTION_NOT_RESOLVED'], references: [], nextAction: null };
+    else if (detectedIntent === 'CAPABILITIES') {
+      result = {
+        answer: 'I can generate an operational brief, discover registered SRA products, read operational records, trace product lifecycles, identify blockers, explain asset exportability and relationships, simulate approval impact, and tell you when administrator approval is required.',
+        status: 'AVAILABLE',
+        capabilities: this.capabilities(),
+        blockers: [],
+        references: [],
+        nextAction: null,
+      };
+    } else {
+      result = {
+        answer: 'I could not identify the product or operational subject in that question. Name the product or instrument, or ask for an operational brief, platform status, blockers, relationships, next actions, or pending approvals.',
+        status: 'NEEDS_CONTEXT',
+        blockers: ['QUESTION_NOT_RESOLVED'],
+        references: [],
+        nextAction: null,
+      };
+    }
 
-    const response = { agent: 'SRA_ADMIN_INTELLIGENCE_AGENT', question, intent: detectedIntent, productCode, authorityMode: 'HUMAN_IN_THE_LOOP', actor: { id: actor.id || null, displayName: actor.displayName || null }, answeredAt: new Date().toISOString(), ...result };
-    if (this.database?.audit) await this.database.audit({ actorId: actor.id || 'SRA_PLATFORM_ADMIN', eventType: 'ADMIN_AGENT_QUESTION_ANSWERED', objectType: 'SRA_ADMIN_INTELLIGENCE_AGENT', objectId: productCode || detectedIntent, payload: { intent: detectedIntent, productCode, status: response.status, referenceCount: response.references?.length || 0 } });
+    const response = {
+      agent: 'SRA_ADMIN_INTELLIGENCE_AGENT',
+      question,
+      intent: detectedIntent,
+      productCode,
+      authorityMode: 'HUMAN_IN_THE_LOOP',
+      actor: { id: actor.id || null, displayName: actor.displayName || null },
+      answeredAt: new Date().toISOString(),
+      ...result,
+    };
+    if (this.database?.audit) {
+      await this.database.audit({
+        actorId: actor.id || 'SRA_PLATFORM_ADMIN',
+        eventType: 'ADMIN_AGENT_QUESTION_ANSWERED',
+        objectType: 'SRA_ADMIN_INTELLIGENCE_AGENT',
+        objectId: productCode || detectedIntent,
+        payload: { intent: detectedIntent, productCode, status: response.status, referenceCount: response.references?.length || 0 },
+      });
+    }
     return response;
   }
 }
