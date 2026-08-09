@@ -30,8 +30,8 @@ export function createOnChainProjectionRouter(service){
   router.post('/events/:eventId/reconcile',async(q,r)=>{try{return r.json(await service.reconcileEvent(q.params.eventId,actorId(q)));}catch(e){return handle(r,e);}});
   router.get('/reconciliations',(q,r)=>r.json({records:service.listReconciliations(q.query.projectionId||null)}));
 
-  router.get('/transfers',(q,r)=>r.json({records:transfers.list({network:q.query.network,asset:q.query.asset,state:q.query.state})}));
-  router.get('/transfers/:transferId',(q,r)=>{const x=transfers.get(q.params.transferId);return x?r.json(x):r.status(404).json({error:'On-chain transfer not found.'});});
+  router.get('/transfers',async(q,r)=>{try{await transfers.ensure();return r.json({records:transfers.list({network:q.query.network,asset:q.query.asset,state:q.query.state})});}catch(e){return handle(r,e);}});
+  router.get('/transfers/:transferId',async(q,r)=>{try{await transfers.ensure();const x=transfers.get(q.params.transferId);return x?r.json(x):r.status(404).json({error:'On-chain transfer not found.'});}catch(e){return handle(r,e);}});
   router.post('/transfers',async(q,r)=>{try{return r.status(201).json(await transfers.send(q.body||{},actorId(q)));}catch(e){return handle(r,e);}});
 
   router.get('/solana/status',async(_q,r)=>{try{return r.json(await solana.health());}catch(e){return handle(r,e);}});
