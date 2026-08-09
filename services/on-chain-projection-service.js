@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { InstrumentRepresentationApprovalService, INSTRUMENT_REPRESENTATION_APPROVAL_TYPE } from './instrument-representation-approval-service.js';
 
 const TYPES = Object.freeze({
   PROJECTION: 'ON_CHAIN_PROJECTION',
@@ -30,13 +31,14 @@ function copy(value) {
 export class OnChainProjectionService {
   constructor(persistentDomain, options = {}) {
     this.domain = persistentDomain;
+    this.representationApprovals = new InstrumentRepresentationApprovalService(persistentDomain);
     this.network = options.network || 'SOLANA';
     this.cluster = options.cluster || process.env.SOLANA_CLUSTER || 'devnet';
     this.program = options.program || process.env.SOLANA_TOKEN_PROGRAM || 'TOKEN_2022';
   }
 
   async initialize() {
-    await this.domain.hydrate(Object.values(TYPES));
+    await this.domain.hydrate([...Object.values(TYPES), INSTRUMENT_REPRESENTATION_APPROVAL_TYPE]);
     return this.status();
   }
 
@@ -136,7 +138,9 @@ export class OnChainProjectionService {
     const blockers = [];
     const warnings = [];
     const state = String(instrument.state || instrument.status || '').toUpperCase();
+    const representationApproval = this.representationApprovals.get(instrumentId);
     if (!ACTIVE_INSTRUMENT_STATES.has(state)) blockers.push('INSTRUMENT_NOT_ISSUED_OR_ACTIVE');
+    if (representationApproval?.state !== 'APPROVED') blockers.push('INSTRUMENT_REPRESENTATION_APPROVAL_REQUIRED');
     if (!instrument.issuerId && !instrument.issuerParticipantId) blockers.push('ISSUER_ID_MISSING');
     if (!instrument.verifiedValuePackageId && !(instrument.verifiedValuePackageIds || []).length) blockers.push('VERIFIED_VALUE_PACKAGE_MISSING');
     if (Number(instrument.authorizedSupply ?? instrument.authorizedAmount ?? instrument.faceValue ?? 0) <= 0) blockers.push('AUTHORIZED_SUPPLY_OR_AMOUNT_MISSING');
@@ -145,7 +149,7 @@ export class OnChainProjectionService {
     if (!instrument.unitDefinition && !instrument.denomination) warnings.push('UNIT_DEFINITION_NOT_EXPLICIT');
     if (!instrument.governingRecordDigest && !instrument.governingDocumentId) warnings.push('GOVERNING_RECORD_DIGEST_NOT_SET');
 
-    return { eligible: blockers.length === 0, instrumentId, state, blockers, warnings, instrument: copy(instrument) };
+    return { eligible: blockers.length === 0, instrumentId, state, blockers, warnings, representationApproval: copy(representationApproval), instrument: copy(instrument) };
   }
 
   async createProjection(input, actorId = null) {
@@ -192,6 +196,7 @@ export class OnChainProjectionService {
       eligibilityPolicyId: input.eligibilityPolicyId || 'SRA-OCP-ELIGIBILITY-V1',
       transferPolicyId: input.transferPolicyId || 'SRA-OCP-TRANSFER-V1',
       reconciliationPolicyId: input.reconciliationPolicyId || 'SRA-OCP-RECONCILIATION-V1',
+      representationApprovalId: assessment.representationApproval.approvalId || assessment.representationApproval.id,
       createdBy: actorId,
       approvedBy: null,
       approvalEventId: null,
