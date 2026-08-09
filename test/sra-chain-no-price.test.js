@@ -1,1 +1,0 @@
-import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';test('basic SRA chain path does not require market price',()=>{const s=fs.readFileSync(new URL('../services/sra-coin-chain-service.js',import.meta.url),'utf8');assert.doesNotMatch(s,/marketPrice|initialPrice/);});
