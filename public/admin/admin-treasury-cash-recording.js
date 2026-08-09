@@ -3,6 +3,7 @@
   window.__sraAdminTreasuryCashRecordingInstalled = true;
 
   const mounted = new WeakSet();
+  const observers = new WeakMap();
   const request = async (url, options = {}) => {
     if (window.SRAAdminDataClient) return window.SRAAdminDataClient.json(url, options);
     const response = await fetch(url, { credentials:'same-origin', cache:'no-store', ...options });
@@ -59,15 +60,12 @@
     });
   }
 
-  function render(workspace) {
-    removeCard(workspace);
-    if (!workspace || workspace.dataset.activeTab !== 'Cash Position') return;
-    const controls = workspace.querySelector('.admin-workspace-controls');
-    if (!controls) return;
-    controls.insertAdjacentHTML('afterbegin', markup());
-    const form = controls.querySelector('[data-treasury-cash-recording-form]');
-    const result = controls.querySelector('[data-treasury-cash-recording-result]');
-    form?.addEventListener('submit', async (event) => {
+  function bindForm(card) {
+    const form = card?.querySelector('[data-treasury-cash-recording-form]');
+    const result = card?.querySelector('[data-treasury-cash-recording-result]');
+    if (!form || form.dataset.bound === 'true') return;
+    form.dataset.bound = 'true';
+    form.addEventListener('submit', async (event) => {
       event.preventDefault();
       const button = form.querySelector('button[type="submit"]');
       if (button) button.disabled = true;
@@ -87,16 +85,49 @@
     });
   }
 
+  function ensureCard(workspace) {
+    if (!workspace) return;
+    if (workspace.dataset.activeTab !== 'Cash Position') {
+      removeCard(workspace);
+      return;
+    }
+    const controls = workspace.querySelector('.admin-workspace-controls');
+    if (!controls) return;
+    let card = controls.querySelector('[data-treasury-cash-recording-card]');
+    if (!card) {
+      const cashPositionCard = controls.querySelector('[data-treasury-workstation-card]');
+      if (cashPositionCard) cashPositionCard.insertAdjacentHTML('afterend', markup());
+      else controls.insertAdjacentHTML('afterbegin', markup());
+      card = controls.querySelector('[data-treasury-cash-recording-card]');
+    }
+    bindForm(card);
+  }
+
   function mount(workspace) {
     if (!workspace || mounted.has(workspace)) return;
     mounted.add(workspace);
+
+    let queued = false;
+    const scheduleEnsure = () => {
+      if (queued) return;
+      queued = true;
+      queueMicrotask(() => {
+        queued = false;
+        ensureCard(workspace);
+      });
+    };
+
     workspace.addEventListener('click', (event) => {
-      if (event.target.closest('[data-admin-tab]')) queueMicrotask(() => render(workspace));
+      if (event.target.closest('[data-admin-tab]')) scheduleEnsure();
     });
     window.addEventListener('sra:admin-workspace-synchronized', (event) => {
-      if (event.detail?.workspaceId === 'treasury') render(workspace);
+      if (event.detail?.workspaceId === 'treasury') scheduleEnsure();
     });
-    render(workspace);
+
+    const observer = new MutationObserver(() => scheduleEnsure());
+    observer.observe(workspace, { childList:true, subtree:true });
+    observers.set(workspace, observer);
+    scheduleEnsure();
   }
 
   window.mountAdminTreasuryCashRecording = mount;
