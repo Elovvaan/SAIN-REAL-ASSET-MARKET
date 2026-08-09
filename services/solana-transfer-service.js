@@ -6,9 +6,13 @@ import {
   Transaction,
 } from '@solana/web3.js';
 import {
+  createMint,
   createTransferCheckedInstruction,
   getMint,
   getOrCreateAssociatedTokenAccount,
+  mintTo,
+  TOKEN_2022_PROGRAM_ID,
+  TOKEN_PROGRAM_ID,
 } from '@solana/spl-token';
 
 const NETWORK = 'SOLANA';
@@ -26,6 +30,12 @@ function exactUnits(value, decimals, name = 'amount') {
   const units = BigInt(`${whole}${fraction.padEnd(decimals, '0')}`);
   if (units <= 0n) throw new Error(`${name} must be greater than zero.`);
   return units;
+}
+
+function decimalsValue(value) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 255) throw new Error('decimals must be an integer from 0 to 255.');
+  return parsed;
 }
 
 function keypair(value) {
@@ -52,6 +62,13 @@ function publicKey(value, name) {
   }
 }
 
+function tokenProgram(value) {
+  const normalized = normalize(value || 'TOKEN_2022');
+  if (['TOKEN_2022', 'TOKEN-2022', 'TOKEN2022'].includes(normalized)) return TOKEN_2022_PROGRAM_ID;
+  if (['TOKEN', 'SPL_TOKEN', 'ORIGINAL'].includes(normalized)) return TOKEN_PROGRAM_ID;
+  throw new Error(`Unsupported Solana token program: ${value}.`);
+}
+
 export class SolanaTransferService {
   constructor(options = {}) {
     this.domain = options.domain || null;
@@ -72,6 +89,7 @@ export class SolanaTransferService {
       signerConfigured,
       configured: rpcConfigured && signerConfigured,
       ready: rpcConfigured && signerConfigured,
+      capabilities: ['ISSUE_TOKEN_REPRESENTATION', 'TRANSFER_NATIVE', 'TRANSFER_TOKEN'],
     };
   }
 
@@ -112,6 +130,7 @@ export class SolanaTransferService {
     const record = records.find((candidate) => {
       if (normalize(candidate.network) !== NETWORK) return false;
       if (!text(candidate.mintAddress)) return false;
+      if (!['ACTIVE', 'ISSUED'].includes(normalize(candidate.status))) return false;
       const identifiers = [
         candidate.asset,
         candidate.symbol,
@@ -135,6 +154,77 @@ export class SolanaTransferService {
       assetAddress: record.mintAddress,
       sourceAccount: record.platformTokenAccount || record.sourceTokenAccount || null,
       representationId: record.projectionId || record.id || null,
+      chainProgram: record.chainProgram || 'TOKEN_2022',
+    };
+  }
+
+  async issueRepresentation(projection, input = {}) {
+    if (!projection) throw new Error('On-chain projection is required.');
+    if (normalize(projection.network) !== NETWORK) throw new Error('Projection is not for Solana.');
+    if (normalize(projection.status) !== 'APPROVED') throw new Error(`Projection must be APPROVED before issuance. Current status: ${projection.status}.`);
+    if (text(projection.mintAddress)) throw new Error('Projection already has an on-chain mint address.');
+
+    const decimals = decimalsValue(input.decimals ?? projection.decimals);
+    const amount = text(input.amount);
+    const units = exactUnits(amount, decimals, 'amount');
+    const authorizedSupply = Number(projection.authorizedSupply || 0);
+    const numericAmount = Number(amount);
+    if (!Number.isFinite(numericAmount) || numericAmount <= 0) throw new Error('amount must be greater than zero.');
+    if (authorizedSupply > 0 && numericAmount > authorizedSupply) throw new Error('Issuance amount exceeds authorized supply.');
+
+    const { connection, payer } = this.ensure();
+    const programId = tokenProgram(projection.chainProgram);
+    const mint = await createMint(
+      connection,
+      payer,
+      payer.publicKey,
+      payer.publicKey,
+      decimals,
+      undefined,
+      { commitment: 'confirmed' },
+      programId,
+    );
+    const platformTokenAccount = await getOrCreateAssociatedTokenAccount(
+      connection,
+      payer,
+      mint,
+      payer.publicKey,
+      false,
+      'confirmed',
+      { commitment: 'confirmed' },
+      programId,
+    );
+    const issuanceTransactionId = await mintTo(
+      connection,
+      payer,
+      mint,
+      platformTokenAccount.address,
+      payer,
+      units,
+      [],
+      { commitment: 'confirmed' },
+      programId,
+    );
+    const confirmation = await this.confirm(issuanceTransactionId);
+    if (confirmation.state === 'FAILED') {
+      const error = new Error('Token issuance transaction failed on network.');
+      error.transactionId = issuanceTransactionId;
+      throw error;
+    }
+
+    return {
+      network: NETWORK,
+      cluster: this.cluster,
+      chainProgram: projection.chainProgram || 'TOKEN_2022',
+      mintAddress: mint.toBase58(),
+      platformTokenAccount: platformTokenAccount.address.toBase58(),
+      mintAuthorityAddress: payer.publicKey.toBase58(),
+      freezeAuthorityAddress: payer.publicKey.toBase58(),
+      decimals,
+      issuedSupply: numericAmount,
+      issuanceTransactionId,
+      confirmation,
+      issuedAt: new Date().toISOString(),
     };
   }
 
@@ -155,13 +245,14 @@ export class SolanaTransferService {
       return { transaction, latest, destination, representation, fromAddress: payer.publicKey.toBase58() };
     }
 
+    const programId = tokenProgram(representation.chainProgram);
     const mint = publicKey(representation.assetAddress, 'assetAddress');
-    const mintInfo = await getMint(connection, mint, 'confirmed');
+    const mintInfo = await getMint(connection, mint, 'confirmed', programId);
     const amountUnits = exactUnits(input.amount, mintInfo.decimals);
     const source = representation.sourceAccount
       ? { address: publicKey(representation.sourceAccount, 'sourceAccount') }
-      : await getOrCreateAssociatedTokenAccount(connection, payer, mint, payer.publicKey);
-    const destinationAccount = await getOrCreateAssociatedTokenAccount(connection, payer, mint, destination);
+      : await getOrCreateAssociatedTokenAccount(connection, payer, mint, payer.publicKey, false, 'confirmed', { commitment:'confirmed' }, programId);
+    const destinationAccount = await getOrCreateAssociatedTokenAccount(connection, payer, mint, destination, false, 'confirmed', { commitment:'confirmed' }, programId);
     const transaction = new Transaction().add(createTransferCheckedInstruction(
       source.address,
       mint,
@@ -169,6 +260,8 @@ export class SolanaTransferService {
       payer.publicKey,
       amountUnits,
       mintInfo.decimals,
+      [],
+      programId,
     ));
 
     return {
@@ -238,3 +331,5 @@ export class SolanaTransferService {
     };
   }
 }
+
+export { tokenProgram, validRoutingNumber as undefined };
