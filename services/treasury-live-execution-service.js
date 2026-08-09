@@ -39,7 +39,7 @@ export class TreasuryLiveExecutionService {
     return record;
   }
 
-  async executeOneDollarAch(input = {}, actorId = 'SRA_PLATFORM_ADMIN') {
+  async executeAch(input = {}, actorId = 'SRA_PLATFORM_ADMIN') {
     const transferInstructionId = String(input.transferInstructionId || '').trim();
     if (!transferInstructionId) throw new Error('transferInstructionId is required.');
 
@@ -52,8 +52,10 @@ export class TreasuryLiveExecutionService {
 
     try {
       const instruction = this.instruction(transferInstructionId);
-      if (String(instruction.route || '').toUpperCase() !== 'ACH') throw new Error('The one-dollar canary requires an ACH transfer instruction.');
-      if (Number(instruction.amountUsd ?? instruction.quantity) !== 1 || String(instruction.currency || 'USD').toUpperCase() !== 'USD') throw new Error('The canary endpoint only executes a prepared 1.00 USD transfer instruction.');
+      if (String(instruction.route || '').toUpperCase() !== 'ACH') throw new Error('The payment instruction is not an ACH transfer.');
+      const amount = Number(instruction.amountUsd ?? instruction.quantity);
+      const currency = String(instruction.currency || 'USD').toUpperCase();
+      if (!Number.isFinite(amount) || amount <= 0) throw new Error('The authorized payment amount must be greater than zero.');
       if (instruction.state !== 'READY_TO_SEND' || instruction.executionState !== 'AUTHORIZED') throw new Error('The payment instruction is not authorized and ready to send.');
       if (String(instruction.fundsState || '').toUpperCase() !== 'HELD') throw new Error('The payment amount is not reserved against Treasury cash.');
 
@@ -68,8 +70,8 @@ export class TreasuryLiveExecutionService {
         instructionId: transferInstructionId,
         state: 'READY',
         rail: 'ACH',
-        amount: 1,
-        currency: 'USD',
+        amount,
+        currency,
         senderAccountReference: null,
         receivingAccountReference: instruction.destinationReference,
         transientDestination: {
@@ -79,15 +81,15 @@ export class TreasuryLiveExecutionService {
           accountType,
           bankName: String(input.bankName || 'ACH destination').trim() || 'ACH destination',
         },
-        purpose: 'SRA_TREASURY_ONE_DOLLAR_CANARY',
+        purpose: instruction.purpose || 'SRA_TREASURY_ACH_PAYMENT',
         remittanceReference: transferInstructionId,
-        settlementId: null,
-        settlementPackageId: null,
-        commitmentId: null,
-        messageHash: null,
+        settlementId: instruction.settlementId || null,
+        settlementPackageId: instruction.settlementPackageId || null,
+        commitmentId: instruction.commitmentId || null,
+        messageHash: instruction.messageHash || null,
       };
 
-      const confirmation = `EXECUTE 1.00 USD VIA ACH`;
+      const confirmation = `EXECUTE ${amount.toFixed(2)} ${currency} VIA ACH`;
       this.executor.assertCanExecute(transientInstruction, confirmation);
       const evidence = await this.executor.execute(transientInstruction, { confirmation, actorId });
       const providerClassification = classifyProviderStatus(evidence.providerStatus);
@@ -128,10 +130,7 @@ export class TreasuryLiveExecutionService {
         executionEvidence: persistedEvidence,
         updatedAt,
         statusHistory: [...(instruction.statusHistory || []), {
-          state: executed ? 'PROVIDER_EXECUTED' : 'PROVIDER_ACCEPTED',
-          actorId,
-          occurredAt: updatedAt,
-          providerReference: evidence.providerReference,
+          state: executed ? 'PROVIDER_EXECUTED' : 'PROVIDER_ACCEPTED', actorId, occurredAt: updatedAt, providerReference: evidence.providerReference,
         }],
       };
       const pkg = instruction.exportPackageId ? this.domain.get(RECORD_TYPES.EXPORT_PACKAGE, instruction.exportPackageId) : null;
@@ -145,13 +144,7 @@ export class TreasuryLiveExecutionService {
       });
       if (typeof this.domain.atomicPut !== 'function') throw new Error('Atomic execution persistence is unavailable.');
       await this.domain.atomicPut(changes);
-      return {
-        canary: true,
-        instruction: updatedInstruction,
-        executionEvidence: persistedEvidence,
-        receivingConfirmationRequired: true,
-        rawBankDetailsStored: false,
-      };
+      return { instruction: updatedInstruction, executionEvidence: persistedEvidence, receivingConfirmationRequired: true, rawBankDetailsStored: false };
     } finally {
       release();
       if (executionLocks.get(transferInstructionId) === queued) executionLocks.delete(transferInstructionId);
@@ -170,15 +163,9 @@ export class TreasuryLiveExecutionService {
     const updatedAt = new Date().toISOString();
     const updatedInstruction = {
       ...instruction,
-      state: 'RECONCILED',
-      executionState: 'RECONCILED',
-      fundsState: 'SETTLED',
-      externalWithdrawalState: 'COMPLETED',
-      receivingConfirmationReference,
-      confirmedAmount,
-      reconciledAt: updatedAt,
-      accountingState: instruction.accountingState || 'PENDING_CLASSIFICATION',
-      updatedAt,
+      state: 'RECONCILED', executionState: 'RECONCILED', fundsState: 'SETTLED', externalWithdrawalState: 'COMPLETED',
+      receivingConfirmationReference, confirmedAmount, reconciledAt: updatedAt,
+      accountingState: instruction.accountingState || 'PENDING_CLASSIFICATION', updatedAt,
       statusHistory: [...(instruction.statusHistory || []), { state: 'RECONCILED', actorId, occurredAt: updatedAt, receivingConfirmationReference }],
     };
     const pkg = instruction.exportPackageId ? this.domain.get(RECORD_TYPES.EXPORT_PACKAGE, instruction.exportPackageId) : null;
