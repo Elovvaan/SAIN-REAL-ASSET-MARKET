@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { RECORD_TYPES } from './persistent-domain-service.js';
 
 const ACTOR_ID = 'COINBASE_TRANSACTION_ASSET_PIPELINE';
+const PLATFORM_OWNER_ID = 'SRA_PLATFORM';
 
 function shortHash(value) {
   return crypto.createHash('sha256').update(String(value || '')).digest('hex').slice(0, 12).toUpperCase();
@@ -73,6 +74,37 @@ export class CoinbaseTransactionAssetPipelineService {
       ? this.domain.list(RECORD_TYPES.COIN_POSITION).find((item) => item.financialRecordId === financialRecord.financialRecordId && item.state !== 'RETIRED')
       : null;
     return { recognition, financialRecord, coinPosition };
+  }
+
+  async ensurePlatformOwnership(coinPosition) {
+    if (!coinPosition || coinPosition.ownerId) return coinPosition;
+    const updatedAt = new Date().toISOString();
+    const updated = {
+      ...coinPosition,
+      ownerId: PLATFORM_OWNER_ID,
+      ownerType: 'PLATFORM',
+      initialOwnerId: PLATFORM_OWNER_ID,
+      ownershipState: 'PLATFORM_OWNED',
+      ownershipBasis: 'VERIFIED_COINBASE_TRANSACTION_RECORD',
+      updatedAt
+    };
+    await this.domain.put(RECORD_TYPES.COIN_POSITION, coinPosition.coinPositionId, updated, {
+      actorId: ACTOR_ID,
+      eventType: 'COINBASE_SRA_PLATFORM_OWNERSHIP_RECORDED'
+    });
+    await this.domain.lifecycle({
+      objectType: RECORD_TYPES.COIN_POSITION,
+      objectId: coinPosition.coinPositionId,
+      eventType: 'COINBASE_SRA_PLATFORM_OWNERSHIP_RECORDED',
+      actorId: ACTOR_ID,
+      payload: {
+        ownerId: PLATFORM_OWNER_ID,
+        initialOwnerId: PLATFORM_OWNER_ID,
+        ownershipState: 'PLATFORM_OWNED',
+        ownershipBasis: 'VERIFIED_COINBASE_TRANSACTION_RECORD'
+      }
+    });
+    return updated;
   }
 
   async processObservation(observationOrId) {
@@ -171,6 +203,8 @@ export class CoinbaseTransactionAssetPipelineService {
         coinPosition = result.coinPosition;
         if (result.created) this.coinPositionsCreated += 1;
       }
+
+      coinPosition = await this.ensurePlatformOwnership(coinPosition);
 
       this.processed += 1;
       this.lastProcessedAt = new Date().toISOString();
