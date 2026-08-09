@@ -113,12 +113,7 @@ export class SolanaTransferService {
       const version = await connection.getVersion();
       return { ...configuration, reachable: true, ready: true, version };
     } catch (error) {
-      return {
-        ...configuration,
-        reachable: false,
-        ready: false,
-        error: String(error?.message || error),
-      };
+      return { ...configuration, reachable: false, ready: false, error: String(error?.message || error) };
     }
   }
 
@@ -131,14 +126,8 @@ export class SolanaTransferService {
       if (normalize(candidate.network) !== NETWORK) return false;
       if (!text(candidate.mintAddress)) return false;
       if (!['ACTIVE', 'ISSUED'].includes(normalize(candidate.status))) return false;
-      const identifiers = [
-        candidate.asset,
-        candidate.symbol,
-        candidate.ticker,
-        candidate.instrumentId,
-        candidate.permanentAssetAccountId,
-        candidate.authoritativeSraRecordId,
-      ].map(normalize).filter(Boolean);
+      const identifiers = [candidate.asset, candidate.symbol, candidate.ticker, candidate.instrumentId, candidate.permanentAssetAccountId, candidate.authoritativeSraRecordId]
+        .map(normalize).filter(Boolean);
       return identifiers.includes(normalizedAsset);
     });
 
@@ -174,37 +163,9 @@ export class SolanaTransferService {
 
     const { connection, payer } = this.ensure();
     const programId = tokenProgram(projection.chainProgram);
-    const mint = await createMint(
-      connection,
-      payer,
-      payer.publicKey,
-      payer.publicKey,
-      decimals,
-      undefined,
-      { commitment: 'confirmed' },
-      programId,
-    );
-    const platformTokenAccount = await getOrCreateAssociatedTokenAccount(
-      connection,
-      payer,
-      mint,
-      payer.publicKey,
-      false,
-      'confirmed',
-      { commitment: 'confirmed' },
-      programId,
-    );
-    const issuanceTransactionId = await mintTo(
-      connection,
-      payer,
-      mint,
-      platformTokenAccount.address,
-      payer,
-      units,
-      [],
-      { commitment: 'confirmed' },
-      programId,
-    );
+    const mint = await createMint(connection, payer, payer.publicKey, payer.publicKey, decimals, undefined, { commitment: 'confirmed' }, programId);
+    const platformTokenAccount = await getOrCreateAssociatedTokenAccount(connection, payer, mint, payer.publicKey, false, 'confirmed', { commitment: 'confirmed' }, programId);
+    const issuanceTransactionId = await mintTo(connection, payer, mint, platformTokenAccount.address, payer, units, [], { commitment: 'confirmed' }, programId);
     const confirmation = await this.confirm(issuanceTransactionId);
     if (confirmation.state === 'FAILED') {
       const error = new Error('Token issuance transaction failed on network.');
@@ -237,11 +198,7 @@ export class SolanaTransferService {
     if (representation.native) {
       const units = exactUnits(input.amount, 9);
       if (units > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('amount is too large for this network transaction.');
-      const transaction = new Transaction().add(SystemProgram.transfer({
-        fromPubkey: payer.publicKey,
-        toPubkey: destination,
-        lamports: Number(units),
-      }));
+      const transaction = new Transaction().add(SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: destination, lamports: Number(units) }));
       return { transaction, latest, destination, representation, fromAddress: payer.publicKey.toBase58() };
     }
 
@@ -253,26 +210,9 @@ export class SolanaTransferService {
       ? { address: publicKey(representation.sourceAccount, 'sourceAccount') }
       : await getOrCreateAssociatedTokenAccount(connection, payer, mint, payer.publicKey, false, 'confirmed', { commitment:'confirmed' }, programId);
     const destinationAccount = await getOrCreateAssociatedTokenAccount(connection, payer, mint, destination, false, 'confirmed', { commitment:'confirmed' }, programId);
-    const transaction = new Transaction().add(createTransferCheckedInstruction(
-      source.address,
-      mint,
-      destinationAccount.address,
-      payer.publicKey,
-      amountUnits,
-      mintInfo.decimals,
-      [],
-      programId,
-    ));
+    const transaction = new Transaction().add(createTransferCheckedInstruction(source.address, mint, destinationAccount.address, payer.publicKey, amountUnits, mintInfo.decimals, [], programId));
 
-    return {
-      transaction,
-      latest,
-      destination,
-      destinationAccount: destinationAccount.address,
-      sourceAccount: source.address,
-      representation,
-      fromAddress: payer.publicKey.toBase58(),
-    };
+    return { transaction, latest, destination, destinationAccount: destinationAccount.address, sourceAccount: source.address, representation, fromAddress: payer.publicKey.toBase58() };
   }
 
   sign(prepared) {
@@ -285,10 +225,7 @@ export class SolanaTransferService {
 
   async broadcast(prepared) {
     const { connection } = this.ensure();
-    const transactionId = await connection.sendRawTransaction(
-      prepared.transaction.serialize(),
-      { skipPreflight: false, maxRetries: 3 },
-    );
+    const transactionId = await connection.sendRawTransaction(prepared.transaction.serialize(), { skipPreflight: false, maxRetries: 3 });
     return { ...prepared, transactionId };
   }
 
@@ -296,20 +233,11 @@ export class SolanaTransferService {
     const { connection } = this.ensure();
     const signature = text(transactionId);
     if (!signature) throw new Error('transactionId is required.');
-    const status = (await connection.getSignatureStatuses(
-      [signature],
-      { searchTransactionHistory: true },
-    )).value[0];
-
+    const status = (await connection.getSignatureStatuses([signature], { searchTransactionHistory: true })).value[0];
     if (!status) return { state: 'PENDING', transactionId: signature };
     if (status.err) return { state: 'FAILED', transactionId: signature, error: status.err };
     const confirmed = status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized';
-    return {
-      state: confirmed ? 'CONFIRMED' : 'PENDING',
-      transactionId: signature,
-      confirmationStatus: status.confirmationStatus || null,
-      slot: status.slot,
-    };
+    return { state: confirmed ? 'CONFIRMED' : 'PENDING', transactionId: signature, confirmationStatus: status.confirmationStatus || null, slot: status.slot };
   }
 
   async send(input = {}) {
@@ -317,7 +245,6 @@ export class SolanaTransferService {
     const signed = this.sign(prepared);
     const submitted = await this.broadcast(signed);
     const confirmation = await this.confirm(submitted.transactionId);
-
     return {
       transferId: input.transferId,
       network: NETWORK,
@@ -332,4 +259,4 @@ export class SolanaTransferService {
   }
 }
 
-export { tokenProgram, validRoutingNumber as undefined };
+export { tokenProgram };
