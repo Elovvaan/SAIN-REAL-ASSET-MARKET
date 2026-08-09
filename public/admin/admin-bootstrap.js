@@ -9,6 +9,7 @@
     ['/admin/admin-settlement-execution-controls.js', 'data-sra-admin-settlement-execution-controls'],
     ['/admin/admin-treasury-workstation.js', 'data-sra-admin-treasury-workstation'],
     ['/admin/admin-treasury-presentation-owner.js', 'data-sra-admin-treasury-presentation-owner'],
+    ['/admin/admin-treasury-cash-recording.js', 'data-sra-admin-treasury-cash-recording'],
     ['/admin/admin-native-platform-asset-workstation.js', 'data-sra-admin-native-platform-asset-workstation'],
     ['/admin/admin-financial-records-workstation.js', 'data-sra-admin-financial-records-workstation'],
     ['/admin/admin-coin-representation-integrity.js', 'data-sra-admin-coin-representation-integrity'],
@@ -132,6 +133,7 @@
       const treasury = admin.querySelector('[data-workspace="treasury"]');
       window.mountAdminTreasuryWorkstation?.(treasury);
       window.mountAdminTreasuryPresentationOwner?.(treasury);
+      window.mountAdminTreasuryCashRecording?.(treasury);
 
       window.mountAdminNativePlatformAssetWorkstation?.(admin.querySelector('[data-workspace="native-asset"]'));
       window.mountAdminFinancialRecordsWorkstation?.(admin.querySelector('[data-workspace="records"]'));
