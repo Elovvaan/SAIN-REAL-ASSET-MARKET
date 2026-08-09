@@ -8,6 +8,7 @@ import { AdminIntelligenceAgentService } from '../services/admin-intelligence-ag
 import { DeterminationEngineService } from '../services/determination-engine-service.js';
 import { RECORD_TYPES } from '../services/persistent-domain-service.js';
 import { installDeterminationAdminRoutes } from './determination-admin-routes.js';
+import { installInstrumentAdminRoutes } from './instrument-admin-routes.js';
 import { installTreasuryAdminRoutes } from './treasury-admin-routes.js';
 import { installTreasuryTransferReadinessRoutes } from './treasury-transfer-readiness-routes.js';
 
@@ -166,6 +167,7 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
     } catch (error) { return res.status(422).json({ error: error.message, code: 'SRA_LISTING_PUBLICATION_BATCH_FAILED' }); }
   });
 
+  const instrumentAdministration = await installInstrumentAdminRoutes({ router, domain, requireAdmin, database });
   const determinationAdministration = await installDeterminationAdminRoutes({ router, service: determinationEngine, requireAdmin });
   const treasuryAdministration = await installTreasuryAdminRoutes({ router, domain, requireAdmin, database });
   const treasuryTransferReadiness = await installTreasuryTransferReadinessRoutes({ router, domain, requireAdmin, database });
@@ -274,6 +276,7 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
       listingPublicationBatch: listingPublicationBatch.status(),
       nativePlatformAsset: nativePlatformAsset?.status?.() || { state: 'UNAVAILABLE' },
       determinationEngine: determinationAdministration.status(),
+      instrumentAdministration: { representationApprovalCount: instrumentAdministration.representations.list().length },
       treasury,
       treasuryTransferReadiness: treasuryTransferReadiness.status(),
       recordedValueRepresentation: treasuryAdministration.recordedValue.preview(),
