@@ -100,6 +100,7 @@
       else controls.insertAdjacentHTML('afterbegin', markup());
       card = controls.querySelector('[data-treasury-cash-recording-card]');
     }
+    if (card) card.hidden = false;
     bindForm(card);
   }
 
@@ -125,7 +126,7 @@
     });
 
     const observer = new MutationObserver(() => scheduleEnsure());
-    observer.observe(workspace, { childList:true, subtree:true });
+    observer.observe(workspace, { childList:true, subtree:true, attributes:true, attributeFilter:['hidden'] });
     observers.set(workspace, observer);
     scheduleEnsure();
   }

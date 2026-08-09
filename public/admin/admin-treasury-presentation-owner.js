@@ -25,6 +25,10 @@
         child.hidden = false;
         continue;
       }
+      if (child.matches('[data-treasury-cash-recording-card]')) {
+        child.hidden = tab !== 'Cash Position';
+        continue;
+      }
       if (child.matches('[data-workstation-control="treasury-controls"]')) continue;
       child.hidden = true;
     }
