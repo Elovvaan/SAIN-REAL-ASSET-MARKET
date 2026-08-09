@@ -1,18 +1,19 @@
 # SRA Export & Settlement — Live Execution Boundary
 
-## What this adds
+## Provider settlement rails
 
-SRA already records settlement rail adapters, creates durable rail instructions, controls instruction state transitions, and reconciles completed settlement. This implementation adds the provider execution boundary between `READY` and external provider acceptance.
+SRA records settlement rail adapters, creates durable rail instructions, controls instruction state transitions, and reconciles completed settlement. This execution boundary is only for provider-mediated payment rails.
 
-Supported execution configurations:
+Supported provider execution configurations:
 
 - ACH provider adapter
 - Fedwire or bank-wire provider adapter
-- Coinbase settlement provider adapter
+
+Blockchain transfers are intentionally not executed through this provider settlement service. Direct on-chain execution lives under `/api/on-chain` and uses the chain executor, signer, public RPC, and returned transaction signature/hash.
 
 SRA does not claim direct access to ACH or Fedwire. The configured endpoint must belong to the bank, correspondent, processor, treasury provider, or other institution that is authorized to submit the payment instruction.
 
-## Execution sequence
+## Provider execution sequence
 
 ```text
 AUTHORIZED SRA SETTLEMENT
@@ -34,7 +35,39 @@ RECONCILED
 
 A provider response never automatically creates `RECONCILED`. Receiving-side confirmation is still required through the existing transition endpoint.
 
-## Safety controls
+## Direct on-chain sequence
+
+The direct chain path does not use the provider settlement executor.
+
+```text
+SRA ASSET / COIN
+        ↓
+DESTINATION ADDRESS + AMOUNT
+        ↓
+/api/on-chain
+        ↓
+CHAIN EXECUTOR
+        ↓
+PUBLIC CHAIN SDK / RPC
+        ↓
+BUILD TRANSACTION
+        ↓
+SIGN
+        ↓
+BROADCAST
+        ↓
+REAL TRANSACTION SIGNATURE / HASH
+        ↓
+CONFIRM ON CHAIN
+        ↓
+RECORD IN SRA
+```
+
+The current Solana implementation uses the public Solana SDK path in `external/orca-executor/sra-token-worker.js`: `Connection`, `PublicKey`, `SystemProgram.transfer`, transaction signing, `sendRawTransaction`, and `confirmTransaction`. SPL-token issuance and movement use the public `@solana/spl-token` functions.
+
+No simulated transaction signature is accepted as proof of an on-chain transfer in this execution path.
+
+## Safety controls for provider rails
 
 - Live mode is disabled by default.
 - No provider credentials are stored in the repository.
@@ -45,7 +78,7 @@ A provider response never automatically creates `RECONCILED`. Receiving-side con
 - Provider rejection moves the instruction into `EXCEPTION` rather than pretending settlement occurred.
 - The one-dollar canary only accepts an existing instruction for exactly `1.00 USD`.
 
-## Environment variables
+## Environment variables — provider rails
 
 Global:
 
@@ -72,26 +105,64 @@ SRA_FEDWIRE_TOKEN=...
 SRA_FEDWIRE_ACCOUNT_ID=...
 ```
 
-Coinbase:
+## Environment variables — direct Solana execution
 
 ```text
-SRA_COINBASE_ENDPOINT=https://your-approved-coinbase-transfer-endpoint.example/transfers
-SRA_COINBASE_TOKEN=...
-# or SRA_COINBASE_API_KEY=...
-SRA_COINBASE_ACCOUNT_ID=...
+SOLANA_EXECUTOR_ENDPOINT=...
+SOLANA_EXECUTOR_TOKEN=...
+SOLANA_RPC_URL=...
+SOLANA_CLUSTER=devnet|mainnet
+SOLANA_PAYER_SECRET_KEY=...
+DATABASE_URL=...
 ```
 
-The endpoint may be an internal credential-signing gateway. This keeps provider-specific authentication and private keys outside the SRA application process.
+The SRA application calls the chain executor. The chain executor uses the signer and public Solana RPC to originate the real blockchain transaction and returns the actual transaction signature.
 
 ## Runtime status
+
+Provider rails:
 
 ```http
 GET /api/settlement-rails/execution/status
 ```
 
-This returns configuration readiness without exposing secrets.
+Direct on-chain:
 
-## Execute a prepared instruction
+```http
+GET /api/on-chain/solana/status
+GET /api/on-chain/solana/wallet
+GET /api/on-chain/solana/sra
+```
+
+## Direct SOL transfer
+
+```http
+POST /api/on-chain/solana/transfers
+content-type: application/json
+
+{
+  "destinationAddress": "<solana-address>",
+  "amount": "1"
+}
+```
+
+The returned `transactionSignature` is the network transaction reference.
+
+## Direct SRA token transfer
+
+```http
+POST /api/on-chain/solana/sra/transfers
+content-type: application/json
+
+{
+  "destinationAddress": "<solana-address>",
+  "amount": "1"
+}
+```
+
+The returned `transactionSignature` is the network transaction reference.
+
+## Execute a prepared provider instruction
 
 ```http
 POST /api/settlement-rails/instructions/{instructionId}/execute
@@ -102,42 +173,8 @@ content-type: application/json
 {}
 ```
 
-## First one-dollar live canary
-
-Prerequisites:
-
-1. A completed and authorized SRA settlement exists.
-2. An active rail adapter exists.
-3. A settlement instruction exists for exactly `1.00 USD` and is in `READY` state.
-4. The destination is a controlled receiving account or wallet.
-5. The correct provider environment variables are installed in the deployment environment.
-
-Execute:
-
-```http
-POST /api/settlement-rails/instructions/{instructionId}/execute-one-dollar-canary
-x-sra-actor-id: operator-id
-x-sra-live-confirmation: EXECUTE 1.00 USD VIA ACH
-content-type: application/json
-
-{}
-```
-
-After the provider reports execution, independently verify the receiving account and reconcile through the existing state transition:
-
-```http
-POST /api/settlement-rails/instructions/{instructionId}/transition
-content-type: application/json
-
-{
-  "state": "RECONCILED",
-  "institutionTransactionReference": "provider-reference",
-  "networkReference": "network-reference",
-  "receivingConfirmationReference": "receiving-account-confirmation",
-  "confirmedAmount": 1.00
-}
-```
-
 ## Production boundary
 
-The code path is live-capable, but no real transfer should be represented as completed until a provider credential, controlled destination, provider response, and receiving-side confirmation all exist. The repository contains no credentials and cannot originate a real payment by itself.
+Provider settlement and blockchain settlement are separate execution classes.
+
+ACH/Fedwire require an authorized provider endpoint and provider credentials. Direct blockchain transfers require a configured chain executor, signer, RPC endpoint, valid destination address, and sufficient on-chain balance/fees. SRA records completion only from the real external reference returned by the provider or blockchain network.
