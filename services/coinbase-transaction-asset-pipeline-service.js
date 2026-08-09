@@ -14,6 +14,13 @@ function finitePositive(value, field) {
   return number;
 }
 
+function baseAsset(productId) {
+  const value = String(productId || '').trim().toUpperCase();
+  const [base] = value.split('-');
+  if (!base) throw new Error('Coinbase product base asset is required.');
+  return base;
+}
+
 export class CoinbaseTransactionAssetPipelineService {
   constructor({ observationLayerService, financialRecordService, persistentDomain, environment = process.env, logger = console } = {}) {
     if (!observationLayerService?.recognize) throw new Error('observationLayerService is required.');
@@ -107,6 +114,74 @@ export class CoinbaseTransactionAssetPipelineService {
     return updated;
   }
 
+  async ensureNativeSourceValuation(coinPosition, observation, { productId, tradeId, price, size, notional }) {
+    if (!coinPosition) return coinPosition;
+    const nativeUnit = baseAsset(productId);
+    const expectedSourcePosition = {
+      amount: size,
+      unit: nativeUnit,
+      asOf: observation.sourceTimestamp || observation.observedAt,
+      basis: 'COINBASE_EXECUTED_SIZE'
+    };
+    const alreadyCorrect = Number(coinPosition.sourcePosition?.amount) === size
+      && String(coinPosition.sourcePosition?.unit || '').toUpperCase() === nativeUnit
+      && Number(coinPosition.recordedValue?.amount) === notional
+      && String(coinPosition.recordedValue?.currency || '').toUpperCase() === 'USD';
+    if (alreadyCorrect) return coinPosition;
+
+    const updatedAt = new Date().toISOString();
+    const updated = {
+      ...coinPosition,
+      sourcePosition: expectedSourcePosition,
+      nativeQuantity: size,
+      nativeUnit,
+      recordedValue: { amount: notional, currency: 'USD' },
+      representedValueUsd: notional,
+      valuation: {
+        method: 'COINBASE_EXECUTED_PRICE_TIMES_SIZE',
+        source: 'COINBASE',
+        productId,
+        tradeId,
+        nativeQuantity: size,
+        nativeUnit,
+        price,
+        priceCurrency: 'USD',
+        recognizedValueUsd: notional,
+        asOf: observation.sourceTimestamp || observation.observedAt
+      },
+      conversionRule: {
+        ...(coinPosition.conversionRule || {}),
+        method: 'RECORDED_USD_VALUE_AT_PAR',
+        rate: 1,
+        sourceUnit: 'USD',
+        originalSourceUnit: nativeUnit,
+        coinUnit: 'SRA',
+        methodologyReference: 'ONE_SRA_UNIT_PER_RECORDED_USD_OF_SOURCE_TRANSACTION_NOTIONAL'
+      },
+      updatedAt
+    };
+
+    await this.domain.put(RECORD_TYPES.COIN_POSITION, coinPosition.coinPositionId, updated, {
+      actorId: ACTOR_ID,
+      eventType: 'COINBASE_NATIVE_SOURCE_AND_USD_VALUATION_RECORDED'
+    });
+    await this.domain.lifecycle({
+      objectType: RECORD_TYPES.COIN_POSITION,
+      objectId: coinPosition.coinPositionId,
+      eventType: 'COINBASE_NATIVE_SOURCE_AND_USD_VALUATION_RECORDED',
+      actorId: ACTOR_ID,
+      payload: {
+        nativeQuantity: size,
+        nativeUnit,
+        price,
+        priceCurrency: 'USD',
+        recognizedValueUsd: notional,
+        representedSra: Number(updated.quantity || 0)
+      }
+    });
+    return updated;
+  }
+
   async processObservation(observationOrId) {
     if (!this.enabled) return { processed: false, reason: 'PIPELINE_DISABLED' };
     const observation = typeof observationOrId === 'string' ? this.observations.get(observationOrId) : observationOrId;
@@ -156,7 +231,7 @@ export class CoinbaseTransactionAssetPipelineService {
             unit: 'USD',
             value: notional,
             asOf: observation.sourceTimestamp || observation.observedAt,
-            inputs: { productId, tradeId, price, size, side: raw.side || null, notional },
+            inputs: { productId, tradeId, price, size, nativeAsset: baseAsset(productId), side: raw.side || null, notional },
             methodologyReference: 'COINBASE_PRICE_MULTIPLIED_BY_EXECUTED_SIZE'
           },
           decision: 'RECOGNIZED',
@@ -204,6 +279,7 @@ export class CoinbaseTransactionAssetPipelineService {
         if (result.created) this.coinPositionsCreated += 1;
       }
 
+      coinPosition = await this.ensureNativeSourceValuation(coinPosition, observation, { productId, tradeId, price, size, notional });
       coinPosition = await this.ensurePlatformOwnership(coinPosition);
 
       this.processed += 1;
