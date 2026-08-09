@@ -6,11 +6,15 @@ import {
   Transaction,
 } from '@solana/web3.js';
 import {
-  createMint,
+  MINT_SIZE,
+  createAssociatedTokenAccountIdempotentInstruction,
+  createInitializeMint2Instruction,
+  createMintToInstruction,
   createTransferCheckedInstruction,
+  getAssociatedTokenAddressSync,
+  getMinimumBalanceForRentExemptMint,
   getMint,
   getOrCreateAssociatedTokenAccount,
-  mintTo,
   TOKEN_2022_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
 } from '@solana/spl-token';
@@ -23,16 +27,16 @@ const U64_MAX = (1n << 64n) - 1n;
 function text(value) { return String(value ?? '').trim(); }
 function normalize(value) { return text(value).toUpperCase(); }
 
-function exactUnits(value, decimals, name = 'amount', { enforceU64 = true } = {}) {
+function exactUnits(value, decimals, name = 'amount') {
   const source = text(value);
   if (!/^\d+(?:\.\d+)?$/.test(source)) throw new Error(`${name} must be a positive decimal amount.`);
   const [whole, fraction = ''] = source.split('.');
   if (fraction.length > decimals) throw new Error(`${name} cannot exceed ${decimals} decimal places.`);
   const units = BigInt(`${whole}${fraction.padEnd(decimals, '0')}`);
   if (units <= 0n) throw new Error(`${name} must be greater than zero.`);
-  if (enforceU64 && units > U64_MAX) {
-    const error = new Error(`${name} exceeds the maximum SPL token amount at ${decimals} decimals.`);
-    error.code = 'SOLANA_TOKEN_AMOUNT_U64_OVERFLOW';
+  if (units > U64_MAX) {
+    const error = new Error(`${name} exceeds the maximum token amount at ${decimals} decimals.`);
+    error.code = 'ON_CHAIN_TOKEN_AMOUNT_U64_OVERFLOW';
     throw error;
   }
   return units;
@@ -156,52 +160,117 @@ export class SolanaTransferService {
   validateIssuance(projection, input = {}) {
     if (!projection) throw new Error('On-chain projection is required.');
     if (normalize(projection.network) !== NETWORK) throw new Error('Projection is not for Solana.');
-    if (normalize(projection.status) !== 'APPROVED') throw new Error(`Projection must be APPROVED before issuance. Current status: ${projection.status}.`);
-    if (text(projection.mintAddress)) throw new Error('Projection already has an on-chain mint address.');
+    if (!['APPROVED', 'ACTIVE'].includes(normalize(projection.status))) throw new Error(`Projection must be APPROVED before issuance. Current status: ${projection.status}.`);
+    if (text(projection.mintAddress) && normalize(projection.status) === 'ACTIVE') throw new Error('Projection already has an active on-chain mint address.');
 
     const decimals = decimalsValue(input.decimals ?? projection.decimals);
-    const amount = text(input.amount);
+    const amount = text(input.amount ?? projection.pendingIssuance?.issuedSupplyExact);
     const units = exactUnits(amount, decimals, 'amount');
-    const authorizedText = text(projection.authorizedSupplyExact ?? projection.authorizedSupply);
-    const authorizedUnits = authorizedText ? exactUnits(authorizedText, decimals, 'authorizedSupply') : 0n;
-    if (authorizedUnits > 0n && units > authorizedUnits) throw new Error('Issuance amount exceeds authorized supply.');
-    const programId = tokenProgram(projection.chainProgram);
-    return { decimals, amount, units, authorizedUnits, programId };
+    const authorizedSupplyExact = text(projection.authorizedSupplyExact ?? projection.authorizedSupply);
+    const authorizedUnits = exactUnits(authorizedSupplyExact, decimals, 'authorizedSupply');
+    if (units > authorizedUnits) throw new Error('Issuance amount exceeds authorized supply.');
+    tokenProgram(projection.chainProgram);
+
+    return {
+      decimals,
+      amount,
+      units,
+      unitsText: units.toString(),
+      authorizedSupplyExact,
+      authorizedUnits,
+      authorizedUnitsText: authorizedUnits.toString(),
+    };
   }
 
-  async issueRepresentation(projection, input = {}) {
-    // Validate all amount/program constraints before ensure() or any network RPC creates resources.
-    const validated = this.validateIssuance(projection, input);
-    const { decimals, amount, units, authorizedUnits, programId } = validated;
+  async prepareIssuance(projection, input = {}) {
+    const checked = this.validateIssuance(projection, input);
     const { connection, payer } = this.ensure();
+    const programId = tokenProgram(projection.chainProgram);
+    const mint = Keypair.generate();
+    const platformTokenAccount = getAssociatedTokenAddressSync(mint.publicKey, payer.publicKey, false, programId);
+    const rent = await getMinimumBalanceForRentExemptMint(connection);
+    const latest = await connection.getLatestBlockhash('confirmed');
 
-    const mint = await createMint(connection, payer, payer.publicKey, payer.publicKey, decimals, undefined, { commitment: 'confirmed' }, programId);
-    const platformTokenAccount = await getOrCreateAssociatedTokenAccount(connection, payer, mint, payer.publicKey, false, 'confirmed', { commitment: 'confirmed' }, programId);
-    const issuanceTransactionId = await mintTo(connection, payer, mint, platformTokenAccount.address, payer, units, [], { commitment: 'confirmed' }, programId);
-    const confirmation = await this.confirm(issuanceTransactionId);
-    if (confirmation.state === 'FAILED') {
-      const error = new Error('Token issuance transaction failed on network.');
-      error.transactionId = issuanceTransactionId;
-      throw error;
-    }
+    const transaction = new Transaction({
+      feePayer: payer.publicKey,
+      recentBlockhash: latest.blockhash,
+    }).add(
+      SystemProgram.createAccount({
+        fromPubkey: payer.publicKey,
+        newAccountPubkey: mint.publicKey,
+        space: MINT_SIZE,
+        lamports: rent,
+        programId,
+      }),
+      createInitializeMint2Instruction(
+        mint.publicKey,
+        checked.decimals,
+        payer.publicKey,
+        payer.publicKey,
+        programId,
+      ),
+      createAssociatedTokenAccountIdempotentInstruction(
+        payer.publicKey,
+        platformTokenAccount,
+        payer.publicKey,
+        mint.publicKey,
+        programId,
+      ),
+      createMintToInstruction(
+        mint.publicKey,
+        platformTokenAccount,
+        payer.publicKey,
+        checked.units,
+        [],
+        programId,
+      ),
+    );
+
+    transaction.sign(payer, mint);
+    const serializedTransactionBase64 = transaction.serialize().toString('base64');
 
     return {
       network: NETWORK,
       cluster: this.cluster,
       chainProgram: projection.chainProgram || 'TOKEN_2022',
-      mintAddress: mint.toBase58(),
-      platformTokenAccount: platformTokenAccount.address.toBase58(),
+      mintAddress: mint.publicKey.toBase58(),
+      platformTokenAccount: platformTokenAccount.toBase58(),
       mintAuthorityAddress: payer.publicKey.toBase58(),
       freezeAuthorityAddress: payer.publicKey.toBase58(),
-      decimals,
-      issuedSupply: amount,
-      issuedSupplyExact: amount,
-      issuedSupplyUnits: units.toString(),
-      authorizedSupplyUnits: authorizedUnits.toString(),
+      decimals: checked.decimals,
+      issuedSupply: Number(checked.amount),
+      issuedSupplyExact: checked.amount,
+      issuedSupplyUnits: checked.unitsText,
+      authorizedSupplyUnits: checked.authorizedUnitsText,
+      serializedTransactionBase64,
+      blockhash: latest.blockhash,
+      lastValidBlockHeight: latest.lastValidBlockHeight,
+      preparedAt: new Date().toISOString(),
+    };
+  }
+
+  async submitPreparedIssuance(prepared) {
+    if (!prepared?.serializedTransactionBase64) throw new Error('Prepared issuance transaction is required.');
+    if (text(prepared.cluster) !== this.cluster) {
+      const error = new Error(`Prepared issuance cluster ${prepared.cluster} does not match configured cluster ${this.cluster}.`);
+      error.code = 'ON_CHAIN_CLUSTER_MISMATCH';
+      throw error;
+    }
+    const { connection } = this.ensure();
+    const raw = Buffer.from(prepared.serializedTransactionBase64, 'base64');
+    const issuanceTransactionId = await connection.sendRawTransaction(raw, { skipPreflight: false, maxRetries: 3 });
+    const confirmation = await this.confirm(issuanceTransactionId);
+    return {
+      ...prepared,
       issuanceTransactionId,
       confirmation,
-      issuedAt: new Date().toISOString(),
+      issuedAt: confirmation.state === 'CONFIRMED' ? new Date().toISOString() : null,
     };
+  }
+
+  async issueRepresentation(projection, input = {}) {
+    const prepared = await this.prepareIssuance(projection, input);
+    return this.submitPreparedIssuance(prepared);
   }
 
   async build(input = {}) {
@@ -211,7 +280,7 @@ export class SolanaTransferService {
     const latest = await connection.getLatestBlockhash('confirmed');
 
     if (representation.native) {
-      const units = exactUnits(input.amount, 9, 'amount', { enforceU64: false });
+      const units = exactUnits(input.amount, 9);
       if (units > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('amount is too large for this network transaction.');
       const transaction = new Transaction().add(SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: destination, lamports: Number(units) }));
       return { transaction, latest, destination, representation, fromAddress: payer.publicKey.toBase58() };
@@ -274,4 +343,4 @@ export class SolanaTransferService {
   }
 }
 
-export { tokenProgram, exactUnits, U64_MAX };
+export { exactUnits, tokenProgram, U64_MAX };
