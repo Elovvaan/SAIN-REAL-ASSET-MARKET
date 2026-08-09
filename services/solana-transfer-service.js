@@ -5,8 +5,8 @@ function exactAmount(value,decimals,name='amount'){const source=text(value);if(!
 
 export class SolanaTransferService{
   constructor(options={}){this.environment=options.environment||process.env;this.fetchImpl=options.fetchImpl||globalThis.fetch;this.timeoutMs=Math.max(1000,Number(this.environment.SOLANA_EXECUTOR_TIMEOUT_MS||120000));}
-  endpoint(){const explicit=text(this.environment.SOLANA_EXECUTOR_ENDPOINT);if(explicit)return explicit.replace(/\/$/,'');return text(this.environment.DEX_ORCA_EXECUTOR_ENDPOINT).replace(/\/execute\/?$/,'');}
-  token(){return text(this.environment.SOLANA_EXECUTOR_TOKEN||this.environment.DEX_ORCA_EXECUTOR_TOKEN);}
+  endpoint(){return text(this.environment.SOLANA_EXECUTOR_ENDPOINT).replace(/\/$/,'');}
+  token(){return text(this.environment.SOLANA_EXECUTOR_TOKEN);}
   status(){return{service:'SRA Solana Transfer',network:'SOLANA',endpointConfigured:Boolean(this.endpoint()),credentialConfigured:Boolean(this.token()),ready:Boolean(this.endpoint()&&this.token())};}
   async request(path,options={}){if(!this.status().ready){const error=new Error('Solana executor is not configured.');error.code='SOLANA_EXECUTOR_NOT_READY';throw error;}const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),this.timeoutMs);try{const response=await this.fetchImpl(`${this.endpoint()}${path}`,{...options,signal:controller.signal,headers:{Accept:'application/json',Authorization:`Bearer ${this.token()}`,...(options.headers||{})}});const payload=await response.json().catch(()=>({}));if(!response.ok){const error=new Error(payload.error||`Solana executor returned HTTP ${response.status}.`);error.code=payload.code||'SOLANA_EXECUTOR_REJECTED';throw error;}return payload;}finally{clearTimeout(timer);}}
   async wallet(){return this.request('/wallet');}
