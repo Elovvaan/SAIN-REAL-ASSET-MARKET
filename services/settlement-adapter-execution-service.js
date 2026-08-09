@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 
-const LIVE_RAILS = new Set(['ACH', 'FEDWIRE', 'WIRE', 'COINBASE']);
+const LIVE_RAILS = new Set(['ACH', 'FEDWIRE', 'WIRE']);
 const EXECUTABLE_STATES = new Set(['READY', 'EXCEPTION']);
 
 function now() { return new Date().toISOString(); }
@@ -28,7 +28,13 @@ export class SettlementAdapterExecutionService {
 
   configuration(rail) {
     const normalizedRail = required(rail, 'rail').toUpperCase();
-    if (!LIVE_RAILS.has(normalizedRail)) throw new Error(`Unsupported live settlement rail: ${normalizedRail}.`);
+    if (!LIVE_RAILS.has(normalizedRail)) {
+      const error = new Error(
+        `Unsupported provider settlement rail: ${normalizedRail}. Blockchain transfers use the direct on-chain execution path, not the provider settlement executor.`
+      );
+      error.code = 'DIRECT_ONCHAIN_EXECUTION_REQUIRED';
+      throw error;
+    }
     const prefixRail = normalizedRail === 'WIRE' ? 'FEDWIRE' : normalizedRail;
     const endpoint = this.environment[envName(prefixRail, 'ENDPOINT')] || null;
     const token = this.environment[envName(prefixRail, 'TOKEN')] || null;
@@ -49,7 +55,7 @@ export class SettlementAdapterExecutionService {
   }
 
   status() {
-    const rails = ['ACH', 'FEDWIRE', 'COINBASE'].map((rail) => {
+    const rails = ['ACH', 'FEDWIRE'].map((rail) => {
       const config = this.configuration(rail);
       return {
         rail,
@@ -60,16 +66,26 @@ export class SettlementAdapterExecutionService {
         accountConfigured: config.accountConfigured
       };
     });
-    return { service: 'SRA_EXPORT_AND_SETTLEMENT_EXECUTION', rails, liveExecutionEnabled: rails.some((item) => item.ready) };
+    return {
+      service: 'SRA_EXPORT_AND_SETTLEMENT_EXECUTION',
+      executionClass: 'PROVIDER_SETTLEMENT_RAILS_ONLY',
+      rails,
+      directOnChainExecution: '/api/on-chain',
+      liveExecutionEnabled: rails.some((item) => item.ready)
+    };
   }
 
   assertCanExecute(instruction, confirmation) {
     if (!instruction) throw new Error('Settlement Rail Instruction not found.');
     if (!EXECUTABLE_STATES.has(instruction.state)) throw new Error(`Instruction must be READY or EXCEPTION before execution. Current state: ${instruction.state}.`);
-    if (!LIVE_RAILS.has(String(instruction.rail || '').toUpperCase())) throw new Error(`Instruction rail ${instruction.rail} does not have a live adapter.`);
+    if (!LIVE_RAILS.has(String(instruction.rail || '').toUpperCase())) {
+      const error = new Error(`Instruction rail ${instruction.rail} is not a provider settlement rail. Use direct on-chain execution for blockchain transfers.`);
+      error.code = 'DIRECT_ONCHAIN_EXECUTION_REQUIRED';
+      throw error;
+    }
     if (Number(instruction.amount) <= 0) throw new Error('Instruction amount must be greater than zero.');
     if (!instruction.currency) throw new Error('Instruction currency is required.');
-    if (!instruction.receivingAccountReference && !instruction.transientDestination) throw new Error('Receiving account or wallet reference is required.');
+    if (!instruction.receivingAccountReference && !instruction.transientDestination) throw new Error('Receiving account reference is required.');
     const expected = `EXECUTE ${Number(instruction.amount).toFixed(2)} ${String(instruction.currency).toUpperCase()} VIA ${String(instruction.rail).toUpperCase()}`;
     if (confirmation !== expected) {
       const error = new Error(`Live execution confirmation must exactly equal: ${expected}`);
@@ -81,7 +97,7 @@ export class SettlementAdapterExecutionService {
 
   providerPayload(instruction, config) {
     const destination = instruction.transientDestination || instruction.receivingAccountReference;
-    const common = {
+    return {
       clientTransferId: instruction.instructionId,
       amount: Number(instruction.amount).toFixed(2),
       currency: String(instruction.currency).toUpperCase(),
@@ -98,10 +114,6 @@ export class SettlementAdapterExecutionService {
         messageHash: instruction.messageHash || null
       }
     };
-    if (String(instruction.rail).toUpperCase() === 'COINBASE') {
-      return { ...common, asset: String(instruction.currency).toUpperCase(), walletAddress: instruction.receivingAccountReference };
-    }
-    return common;
   }
 
   async execute(instruction, { confirmation, actorId = null } = {}) {
