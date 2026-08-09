@@ -2,7 +2,6 @@
   if (window.__sraAdminWorkstationControlsInstalled) return;
   window.__sraAdminWorkstationControlsInstalled = true;
 
-  const pendingInstrumentStates = new Set(['DRAFT','PENDING','PENDING_REVIEW','IN_REVIEW','REVIEW_REQUIRED','AWAITING_APPROVAL']);
   const client = () => window.SRAAdminDataClient;
   const request = async (url, options = {}) => {
     if (client()) return client().json(url, options);
@@ -110,8 +109,46 @@
 
   async function renderInstruments() {
     const root=host('instruments','instrument-approvals');if(!root)return;
-    root.innerHTML='<header><strong>Instrument Approval</strong><em>CHECKING</em></header>';
-    try{const workspace=await request(`/api/admin/workspaces?limit=100&_=${Date.now()}`);const pending=(workspace?.records?.instruments||[]).filter(i=>pendingInstrumentStates.has(String(i?.state||i?.status||'').toUpperCase()));root.innerHTML=`<header><strong>Instrument Approval</strong><em>${number(pending.length)} PENDING</em></header><p>Approve pending instruments through the governed listing-readiness transition.</p><button data-approve-instruments ${pending.length?'':'disabled'}>Approve ${number(pending.length)} Pending</button>`;root.querySelector('[data-approve-instruments]')?.addEventListener('click',async()=>{if(!pending.length||!confirm(`Approve ${pending.length} pending instrument${pending.length===1?'':'s'}?`))return;for(const instrument of pending){const id=instrument.instrumentId||instrument.id;if(id)await request('/api/admin/listing-readiness-batch/approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approval:'APPROVE',instrumentId:id})});}refreshWorkspace('instruments','instrument-approval');await renderInstruments();});}catch(error){root.innerHTML=`<header><strong>Instrument Approval</strong><em>UNAVAILABLE</em></header><p>${esc(error.message)}</p>`;}
+    root.innerHTML='<header><strong>Instrument & Representation Approval</strong><em>CHECKING</em></header>';
+    try {
+      const status=await request(`/api/admin/instruments/approval-status?_=${Date.now()}`);
+      const pending=status.pending||[];
+      const representationReady=status.representationReady||[];
+      const awaitingRepresentation=representationReady.filter((item)=>!item.representationApproved);
+      root.innerHTML=`<header><strong>Instrument & Representation Approval</strong><em>${number(pending.length + awaitingRepresentation.length)} ACTION${pending.length + awaitingRepresentation.length===1?'':'S'}</em></header>
+        <p style="color:#9a9a9a;line-height:1.5">Instrument approval belongs here. Representation approval authorizes an issued/approved instrument to support SRA coin representation and later on-chain preparation. It does not mint, move, broadcast, or publish anything.</p>
+        <div class="admin-record-grid"><div><span>Pending instrument approval</span><strong>${number(pending.length)}</strong></div><div><span>Representation ready</span><strong>${number(representationReady.length)}</strong></div><div><span>Representation approved</span><strong>${number(status.representationApprovalCount)}</strong></div><div><span>Awaiting representation approval</span><strong>${number(awaitingRepresentation.length)}</strong></div></div>
+        <div style="display:grid;gap:10px;margin-top:14px">
+          ${pending.map((instrument)=>{const id=instrument.instrumentId||instrument.id;return `<article class="admin-record-card"><header><strong>${esc(id||'Instrument')}</strong><em>${esc(instrument.state||instrument.status||'PENDING')}</em></header><div class="admin-record-grid"><div><span>Type</span><strong>${esc(instrument.instrumentType||instrument.type||'INSTRUMENT')}</strong></div><div><span>Amount / value</span><strong>${esc(instrument.amountUsd??instrument.faceValueUsd??instrument.faceValue??instrument.authorizedAmount??'—')}</strong></div></div><div style="margin-top:12px"><button data-approve-instrument="${esc(id)}">Approve Instrument</button></div></article>`;}).join('')}
+          ${representationReady.map((item)=>{const instrument=item.instrument||{};const assessment=item.assessment||{};const id=instrument.instrumentId||instrument.id;const coinCount=(assessment.linkedCoinPositionIds||[]).length;return `<article class="admin-record-card"><header><strong>${esc(id||'Instrument')}</strong><em>${item.representationApproved?'REPRESENTATION APPROVED':'READY FOR APPROVAL'}</em></header><div class="admin-record-grid"><div><span>Instrument state</span><strong>${esc(instrument.state||instrument.status||'—')}</strong></div><div><span>Type</span><strong>${esc(instrument.instrumentType||instrument.type||'INSTRUMENT')}</strong></div><div><span>Linked coin positions</span><strong>${number(coinCount)}</strong></div><div><span>On-chain preparation</span><strong>${item.representationApproved?'AUTHORIZED':'NOT YET AUTHORIZED'}</strong></div></div>${item.representationApproved?'<p style="color:#9a9a9a;margin:12px 0 0">Approval is recorded. Coin Position remains the record view; any actual on-chain movement still starts later from Settlement Instructions.</p>':`<div style="margin-top:12px"><button data-approve-representation="${esc(id)}">Approve Coin / On-Chain Readiness</button></div>`}</article>`;}).join('')}
+          ${pending.length===0&&representationReady.length===0?'<p>No instrument approval actions are currently available.</p>':''}
+        </div>`;
+
+      root.querySelectorAll('[data-approve-instrument]').forEach((button)=>button.addEventListener('click',async()=>{
+        const id=button.dataset.approveInstrument;
+        if(!id||!confirm(`Approve instrument ${id}?`))return;
+        button.disabled=true;
+        try {
+          await request(`/api/admin/instruments/${encodeURIComponent(id)}/approve`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approval:'APPROVE'})});
+          refreshWorkspace('instruments','instrument-approval');
+          await renderInstruments();
+        } catch(error) { alert(error.message); button.disabled=false; }
+      }));
+
+      root.querySelectorAll('[data-approve-representation]').forEach((button)=>button.addEventListener('click',async()=>{
+        const id=button.dataset.approveRepresentation;
+        if(!id||!confirm(`Approve ${id} for SRA coin representation and on-chain preparation? This does not mint or send anything.`))return;
+        button.disabled=true;
+        try {
+          await request(`/api/admin/instruments/${encodeURIComponent(id)}/representation/approve`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approval:'APPROVE'})});
+          refreshWorkspace('instruments','instrument-representation-approval');
+          refreshWorkspace('coin-positions','instrument-representation-approval');
+          await renderInstruments();
+        } catch(error) { alert(error.message); button.disabled=false; }
+      }));
+    } catch(error) {
+      root.innerHTML=`<header><strong>Instrument & Representation Approval</strong><em>UNAVAILABLE</em></header><p>${esc(error.message)}</p>`;
+    }
   }
 
   async function renderAll(){await Promise.allSettled([renderMarketplace(),renderOperations(),renderTreasury(),renderSystem(),renderInstruments()]);}
