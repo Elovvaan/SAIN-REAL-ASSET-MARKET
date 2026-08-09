@@ -48,6 +48,7 @@ export class InstrumentRepresentationApprovalService {
 
     const approvedAt = now();
     const record = {
+      id: approvalId(instrumentId),
       approvalId: approvalId(instrumentId),
       instrumentId,
       state: 'APPROVED',
