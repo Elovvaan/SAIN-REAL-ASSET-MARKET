@@ -20,6 +20,7 @@
     ['/admin/admin-users-permissions-workstation.js', 'data-sra-admin-users-permissions-workstation'],
     ['/admin/admin-agent-operations-workstation.js', 'data-sra-admin-agent-operations-workstation'],
     ['/admin/admin-solana-transfer.js', 'data-sra-admin-solana-transfer'],
+    ['/admin/admin-on-chain-issuance-controls.js', 'data-sra-admin-on-chain-issuance-controls'],
     ['/admin/admin-system-health-workstation.js', 'data-sra-admin-system-health-workstation'],
   ];
 
@@ -151,6 +152,7 @@
       window.mountAdminUsersPermissionsWorkstation?.(admin.querySelector('[data-workspace="users"]'));
       window.mountAdminAgentOperationsWorkstation?.(admin);
       window.mountAdminSolanaTransfer?.(admin);
+      window.mountAdminOnChainIssuanceControls?.(admin.querySelector('[data-workspace="instruments"]'));
       window.mountAdminSystemHealthWorkstation?.(admin.querySelector('[data-workspace="system"]'));
 
       window.dispatchEvent(new CustomEvent('sra:admin-booted', {

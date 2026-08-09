@@ -6,14 +6,23 @@ import {
   Transaction,
 } from '@solana/web3.js';
 import {
+  MINT_SIZE,
+  createAssociatedTokenAccountIdempotentInstruction,
+  createInitializeMint2Instruction,
+  createMintToInstruction,
   createTransferCheckedInstruction,
+  getAssociatedTokenAddressSync,
+  getMinimumBalanceForRentExemptMint,
   getMint,
   getOrCreateAssociatedTokenAccount,
+  TOKEN_2022_PROGRAM_ID,
+  TOKEN_PROGRAM_ID,
 } from '@solana/spl-token';
 
 const NETWORK = 'SOLANA';
 const NATIVE_ASSET = 'SOL';
 const REPRESENTATION_TYPE = 'ON_CHAIN_PROJECTION';
+const U64_MAX = (1n << 64n) - 1n;
 
 function text(value) { return String(value ?? '').trim(); }
 function normalize(value) { return text(value).toUpperCase(); }
@@ -25,7 +34,18 @@ function exactUnits(value, decimals, name = 'amount') {
   if (fraction.length > decimals) throw new Error(`${name} cannot exceed ${decimals} decimal places.`);
   const units = BigInt(`${whole}${fraction.padEnd(decimals, '0')}`);
   if (units <= 0n) throw new Error(`${name} must be greater than zero.`);
+  if (units > U64_MAX) {
+    const error = new Error(`${name} exceeds the maximum token amount at ${decimals} decimals.`);
+    error.code = 'ON_CHAIN_TOKEN_AMOUNT_U64_OVERFLOW';
+    throw error;
+  }
   return units;
+}
+
+function decimalsValue(value) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 255) throw new Error('decimals must be an integer from 0 to 255.');
+  return parsed;
 }
 
 function keypair(value) {
@@ -52,6 +72,13 @@ function publicKey(value, name) {
   }
 }
 
+function tokenProgram(value) {
+  const normalized = normalize(value || 'TOKEN_2022');
+  if (['TOKEN_2022', 'TOKEN-2022', 'TOKEN2022'].includes(normalized)) return TOKEN_2022_PROGRAM_ID;
+  if (['TOKEN', 'SPL_TOKEN', 'ORIGINAL'].includes(normalized)) return TOKEN_PROGRAM_ID;
+  throw new Error(`Unsupported Solana token program: ${value}.`);
+}
+
 export class SolanaTransferService {
   constructor(options = {}) {
     this.domain = options.domain || null;
@@ -72,6 +99,7 @@ export class SolanaTransferService {
       signerConfigured,
       configured: rpcConfigured && signerConfigured,
       ready: rpcConfigured && signerConfigured,
+      capabilities: ['ISSUE_TOKEN_REPRESENTATION', 'TRANSFER_NATIVE', 'TRANSFER_TOKEN'],
     };
   }
 
@@ -95,12 +123,7 @@ export class SolanaTransferService {
       const version = await connection.getVersion();
       return { ...configuration, reachable: true, ready: true, version };
     } catch (error) {
-      return {
-        ...configuration,
-        reachable: false,
-        ready: false,
-        error: String(error?.message || error),
-      };
+      return { ...configuration, reachable: false, ready: false, error: String(error?.message || error) };
     }
   }
 
@@ -112,14 +135,9 @@ export class SolanaTransferService {
     const record = records.find((candidate) => {
       if (normalize(candidate.network) !== NETWORK) return false;
       if (!text(candidate.mintAddress)) return false;
-      const identifiers = [
-        candidate.asset,
-        candidate.symbol,
-        candidate.ticker,
-        candidate.instrumentId,
-        candidate.permanentAssetAccountId,
-        candidate.authoritativeSraRecordId,
-      ].map(normalize).filter(Boolean);
+      if (!['ACTIVE', 'ISSUED'].includes(normalize(candidate.status))) return false;
+      const identifiers = [candidate.asset, candidate.symbol, candidate.ticker, candidate.instrumentId, candidate.permanentAssetAccountId, candidate.authoritativeSraRecordId]
+        .map(normalize).filter(Boolean);
       return identifiers.includes(normalizedAsset);
     });
 
@@ -135,7 +153,124 @@ export class SolanaTransferService {
       assetAddress: record.mintAddress,
       sourceAccount: record.platformTokenAccount || record.sourceTokenAccount || null,
       representationId: record.projectionId || record.id || null,
+      chainProgram: record.chainProgram || 'TOKEN_2022',
     };
+  }
+
+  validateIssuance(projection, input = {}) {
+    if (!projection) throw new Error('On-chain projection is required.');
+    if (normalize(projection.network) !== NETWORK) throw new Error('Projection is not for Solana.');
+    if (!['APPROVED', 'ACTIVE'].includes(normalize(projection.status))) throw new Error(`Projection must be APPROVED before issuance. Current status: ${projection.status}.`);
+    if (text(projection.mintAddress) && normalize(projection.status) === 'ACTIVE') throw new Error('Projection already has an active on-chain mint address.');
+
+    const decimals = decimalsValue(input.decimals ?? projection.decimals);
+    const amount = text(input.amount ?? projection.pendingIssuance?.issuedSupplyExact);
+    const units = exactUnits(amount, decimals, 'amount');
+    const authorizedSupplyExact = text(projection.authorizedSupplyExact ?? projection.authorizedSupply);
+    const authorizedUnits = exactUnits(authorizedSupplyExact, decimals, 'authorizedSupply');
+    if (units > authorizedUnits) throw new Error('Issuance amount exceeds authorized supply.');
+    tokenProgram(projection.chainProgram);
+
+    return {
+      decimals,
+      amount,
+      units,
+      unitsText: units.toString(),
+      authorizedSupplyExact,
+      authorizedUnits,
+      authorizedUnitsText: authorizedUnits.toString(),
+    };
+  }
+
+  async prepareIssuance(projection, input = {}) {
+    const checked = this.validateIssuance(projection, input);
+    const { connection, payer } = this.ensure();
+    const programId = tokenProgram(projection.chainProgram);
+    const mint = Keypair.generate();
+    const platformTokenAccount = getAssociatedTokenAddressSync(mint.publicKey, payer.publicKey, false, programId);
+    const rent = await getMinimumBalanceForRentExemptMint(connection);
+    const latest = await connection.getLatestBlockhash('confirmed');
+
+    const transaction = new Transaction({
+      feePayer: payer.publicKey,
+      recentBlockhash: latest.blockhash,
+    }).add(
+      SystemProgram.createAccount({
+        fromPubkey: payer.publicKey,
+        newAccountPubkey: mint.publicKey,
+        space: MINT_SIZE,
+        lamports: rent,
+        programId,
+      }),
+      createInitializeMint2Instruction(
+        mint.publicKey,
+        checked.decimals,
+        payer.publicKey,
+        payer.publicKey,
+        programId,
+      ),
+      createAssociatedTokenAccountIdempotentInstruction(
+        payer.publicKey,
+        platformTokenAccount,
+        payer.publicKey,
+        mint.publicKey,
+        programId,
+      ),
+      createMintToInstruction(
+        mint.publicKey,
+        platformTokenAccount,
+        payer.publicKey,
+        checked.units,
+        [],
+        programId,
+      ),
+    );
+
+    transaction.sign(payer, mint);
+    const serializedTransactionBase64 = transaction.serialize().toString('base64');
+
+    return {
+      network: NETWORK,
+      cluster: this.cluster,
+      chainProgram: projection.chainProgram || 'TOKEN_2022',
+      mintAddress: mint.publicKey.toBase58(),
+      platformTokenAccount: platformTokenAccount.toBase58(),
+      mintAuthorityAddress: payer.publicKey.toBase58(),
+      freezeAuthorityAddress: payer.publicKey.toBase58(),
+      decimals: checked.decimals,
+      issuedSupply: Number(checked.amount),
+      issuedSupplyExact: checked.amount,
+      issuedSupplyUnits: checked.unitsText,
+      authorizedSupplyUnits: checked.authorizedUnitsText,
+      serializedTransactionBase64,
+      blockhash: latest.blockhash,
+      lastValidBlockHeight: latest.lastValidBlockHeight,
+      preparedAt: new Date().toISOString(),
+    };
+  }
+
+  async submitPreparedIssuance(prepared) {
+    if (!prepared?.serializedTransactionBase64) throw new Error('Prepared issuance transaction is required.');
+    if (text(prepared.cluster) !== this.cluster) {
+      const error = new Error(`Prepared issuance cluster ${prepared.cluster} does not match configured cluster ${this.cluster}.`);
+      error.code = 'ON_CHAIN_CLUSTER_MISMATCH';
+      throw error;
+    }
+    const { connection } = this.ensure();
+    const raw = Buffer.from(prepared.serializedTransactionBase64, 'base64');
+    const issuanceTransactionId = await connection.sendRawTransaction(raw, { skipPreflight: false, maxRetries: 3 });
+    const confirmation = await this.confirm(issuanceTransactionId);
+    return {
+      ...prepared,
+      issuanceTransactionId,
+      confirmation,
+      issuedAt: confirmation.state === 'CONFIRMED' ? new Date().toISOString() : null,
+    };
+  }
+
+  async issueRepresentation(projection, input = {}) {
+    const prepared = await this.prepareIssuance(projection, input);
+    return this.submitPreparedIssuance(prepared);
   }
 
   async build(input = {}) {
@@ -147,39 +282,21 @@ export class SolanaTransferService {
     if (representation.native) {
       const units = exactUnits(input.amount, 9);
       if (units > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('amount is too large for this network transaction.');
-      const transaction = new Transaction().add(SystemProgram.transfer({
-        fromPubkey: payer.publicKey,
-        toPubkey: destination,
-        lamports: Number(units),
-      }));
+      const transaction = new Transaction().add(SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: destination, lamports: Number(units) }));
       return { transaction, latest, destination, representation, fromAddress: payer.publicKey.toBase58() };
     }
 
+    const programId = tokenProgram(representation.chainProgram);
     const mint = publicKey(representation.assetAddress, 'assetAddress');
-    const mintInfo = await getMint(connection, mint, 'confirmed');
+    const mintInfo = await getMint(connection, mint, 'confirmed', programId);
     const amountUnits = exactUnits(input.amount, mintInfo.decimals);
     const source = representation.sourceAccount
       ? { address: publicKey(representation.sourceAccount, 'sourceAccount') }
-      : await getOrCreateAssociatedTokenAccount(connection, payer, mint, payer.publicKey);
-    const destinationAccount = await getOrCreateAssociatedTokenAccount(connection, payer, mint, destination);
-    const transaction = new Transaction().add(createTransferCheckedInstruction(
-      source.address,
-      mint,
-      destinationAccount.address,
-      payer.publicKey,
-      amountUnits,
-      mintInfo.decimals,
-    ));
+      : await getOrCreateAssociatedTokenAccount(connection, payer, mint, payer.publicKey, false, 'confirmed', { commitment:'confirmed' }, programId);
+    const destinationAccount = await getOrCreateAssociatedTokenAccount(connection, payer, mint, destination, false, 'confirmed', { commitment:'confirmed' }, programId);
+    const transaction = new Transaction().add(createTransferCheckedInstruction(source.address, mint, destinationAccount.address, payer.publicKey, amountUnits, mintInfo.decimals, [], programId));
 
-    return {
-      transaction,
-      latest,
-      destination,
-      destinationAccount: destinationAccount.address,
-      sourceAccount: source.address,
-      representation,
-      fromAddress: payer.publicKey.toBase58(),
-    };
+    return { transaction, latest, destination, destinationAccount: destinationAccount.address, sourceAccount: source.address, representation, fromAddress: payer.publicKey.toBase58() };
   }
 
   sign(prepared) {
@@ -192,10 +309,7 @@ export class SolanaTransferService {
 
   async broadcast(prepared) {
     const { connection } = this.ensure();
-    const transactionId = await connection.sendRawTransaction(
-      prepared.transaction.serialize(),
-      { skipPreflight: false, maxRetries: 3 },
-    );
+    const transactionId = await connection.sendRawTransaction(prepared.transaction.serialize(), { skipPreflight: false, maxRetries: 3 });
     return { ...prepared, transactionId };
   }
 
@@ -203,20 +317,11 @@ export class SolanaTransferService {
     const { connection } = this.ensure();
     const signature = text(transactionId);
     if (!signature) throw new Error('transactionId is required.');
-    const status = (await connection.getSignatureStatuses(
-      [signature],
-      { searchTransactionHistory: true },
-    )).value[0];
-
+    const status = (await connection.getSignatureStatuses([signature], { searchTransactionHistory: true })).value[0];
     if (!status) return { state: 'PENDING', transactionId: signature };
     if (status.err) return { state: 'FAILED', transactionId: signature, error: status.err };
     const confirmed = status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized';
-    return {
-      state: confirmed ? 'CONFIRMED' : 'PENDING',
-      transactionId: signature,
-      confirmationStatus: status.confirmationStatus || null,
-      slot: status.slot,
-    };
+    return { state: confirmed ? 'CONFIRMED' : 'PENDING', transactionId: signature, confirmationStatus: status.confirmationStatus || null, slot: status.slot };
   }
 
   async send(input = {}) {
@@ -224,7 +329,6 @@ export class SolanaTransferService {
     const signed = this.sign(prepared);
     const submitted = await this.broadcast(signed);
     const confirmation = await this.confirm(submitted.transactionId);
-
     return {
       transferId: input.transferId,
       network: NETWORK,
@@ -238,3 +342,5 @@ export class SolanaTransferService {
     };
   }
 }
+
+export { exactUnits, tokenProgram, U64_MAX };
