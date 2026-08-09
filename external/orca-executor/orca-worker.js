@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
-import { Pool } from 'pg';
+import pg from 'pg';
 import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction, sendAndConfirmTransaction } from '@solana/web3.js';
+
+const { Pool } = pg;
 
 function text(value) { return String(value ?? '').trim(); }
 function required(value, field) { const out = text(value); if (!out) throw new Error(`${field} is required.`); return out; }
