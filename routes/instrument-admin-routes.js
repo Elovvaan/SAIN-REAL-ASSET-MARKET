@@ -1,5 +1,5 @@
 import { InstrumentApprovalService } from '../services/instrument-approval-service.js';
-import { InstrumentRepresentationApprovalService } from '../services/instrument-representation-approval-service.js';
+import { InstrumentRepresentationApprovalService, INSTRUMENT_REPRESENTATION_APPROVAL_TYPE } from '../services/instrument-representation-approval-service.js';
 
 const PENDING_STATES = new Set(['DRAFT', 'PENDING', 'PENDING_REVIEW', 'IN_REVIEW', 'REVIEW_REQUIRED', 'AWAITING_APPROVAL']);
 const REPRESENTATION_STATES = new Set(['APPROVED', 'ISSUED', 'ACTIVE', 'RECORDED']);
@@ -8,6 +8,7 @@ function stateOf(record) { return String(record?.state || record?.status || '').
 function idOf(record) { return record?.instrumentId || record?.id || null; }
 
 export async function installInstrumentAdminRoutes({ router, domain, requireAdmin, database = null }) {
+  await domain.hydrate?.([INSTRUMENT_REPRESENTATION_APPROVAL_TYPE]);
   const approvals = new InstrumentApprovalService(domain);
   const representations = new InstrumentRepresentationApprovalService(domain);
 
@@ -16,7 +17,7 @@ export async function installInstrumentAdminRoutes({ router, domain, requireAdmi
     const instruments = domain.list('SRA_INSTRUMENT');
     const pending = instruments.filter((instrument) => PENDING_STATES.has(stateOf(instrument)));
     const representationReady = instruments.filter((instrument) => REPRESENTATION_STATES.has(stateOf(instrument)));
-      const representationApprovals = representations.list();
+    const representationApprovals = representations.list();
     const approvedIds = new Set(representationApprovals.filter((item) => item.state === 'APPROVED').map((item) => item.instrumentId));
     return res.json({
       pending,
