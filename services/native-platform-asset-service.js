@@ -28,6 +28,7 @@ export class NativePlatformAssetService {
       return {
         platformAssetCode: PLATFORM_ASSET_CODE,
         state: 'NOT_CREATED',
+        ownerId: null,
         readyForExport: false,
         references: {},
         nextAction: 'ADMIN_APPROVAL_REQUIRED',
@@ -56,6 +57,9 @@ export class NativePlatformAssetService {
     return {
       platformAssetCode: PLATFORM_ASSET_CODE,
       state,
+      ownerId: ownership?.ownerId || instrument.ownerId || PLATFORM_OWNER_ID,
+      initialOwnerId: instrument.initialOwnerId || PLATFORM_OWNER_ID,
+      ownershipState: ownership ? 'TRANSFERRED_AFTER_SETTLEMENT' : (instrument.ownershipState || 'PLATFORM_OWNED'),
       readyForExport: Boolean(exportPackage),
       references: {
         observationId: instrument.observationId || null,
@@ -122,6 +126,11 @@ export class NativePlatformAssetService {
       coinPositionId,
       financialRecordId,
       assetCode: PLATFORM_ASSET_CODE,
+      ownerId: PLATFORM_OWNER_ID,
+      ownerType: 'PLATFORM',
+      initialOwnerId: PLATFORM_OWNER_ID,
+      ownershipState: 'PLATFORM_OWNED',
+      ownershipBasis: 'SRA_PLATFORM_FORMATION_RECORD',
       quantity,
       unitPrice,
       currency: input.currency || 'USD',
@@ -139,6 +148,9 @@ export class NativePlatformAssetService {
       instrumentFamily: 'ASSET_BACKED_NOTE',
       instrumentType: 'PLATFORM_FUNDING_INSTRUMENT',
       issuerId: PLATFORM_OWNER_ID,
+      ownerId: PLATFORM_OWNER_ID,
+      initialOwnerId: PLATFORM_OWNER_ID,
+      ownershipState: 'PLATFORM_OWNED',
       faceAmount: issuedAmount,
       quantity,
       unitPrice,
@@ -152,6 +164,9 @@ export class NativePlatformAssetService {
       listingId,
       instrumentId,
       sellerId: PLATFORM_OWNER_ID,
+      sourceOwnerId: PLATFORM_OWNER_ID,
+      offeredByOwner: true,
+      ownershipTransferMode: 'MARKETPLACE_SETTLEMENT',
       quantity,
       unitPrice,
       currency: input.currency || 'USD',
@@ -183,6 +198,8 @@ export class NativePlatformAssetService {
       actorId,
       payload: {
         platformAssetCode: PLATFORM_ASSET_CODE,
+        initialOwnerId: PLATFORM_OWNER_ID,
+        ownershipState: 'PLATFORM_OWNED',
         listingId,
       },
     });
@@ -190,6 +207,7 @@ export class NativePlatformAssetService {
     return {
       created: true,
       status: this.status(),
+      coinPosition,
       instrument,
       listing,
     };
