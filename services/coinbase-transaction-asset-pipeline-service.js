@@ -14,11 +14,11 @@ function finitePositive(value, field) {
   return number;
 }
 
-function baseAsset(productId) {
+function productAssets(productId) {
   const value = String(productId || '').trim().toUpperCase();
-  const [base] = value.split('-');
-  if (!base) throw new Error('Coinbase product base asset is required.');
-  return base;
+  const parts = value.split('-');
+  if (parts.length < 2 || !parts[0] || !parts[parts.length - 1]) throw new Error('Coinbase product must include base and quote assets.');
+  return { baseAsset: parts[0], quoteAsset: parts[parts.length - 1] };
 }
 
 export class CoinbaseTransactionAssetPipelineService {
@@ -114,9 +114,8 @@ export class CoinbaseTransactionAssetPipelineService {
     return updated;
   }
 
-  async ensureNativeSourceValuation(coinPosition, observation, { productId, tradeId, price, size, notional }) {
+  async ensureNativeSourceValuation(coinPosition, observation, { productId, tradeId, price, size, notional, nativeUnit, quoteCurrency }) {
     if (!coinPosition) return coinPosition;
-    const nativeUnit = baseAsset(productId);
     const expectedSourcePosition = {
       amount: size,
       unit: nativeUnit,
@@ -126,7 +125,7 @@ export class CoinbaseTransactionAssetPipelineService {
     const alreadyCorrect = Number(coinPosition.sourcePosition?.amount) === size
       && String(coinPosition.sourcePosition?.unit || '').toUpperCase() === nativeUnit
       && Number(coinPosition.recordedValue?.amount) === notional
-      && String(coinPosition.recordedValue?.currency || '').toUpperCase() === 'USD';
+      && String(coinPosition.recordedValue?.currency || '').toUpperCase() === quoteCurrency;
     if (alreadyCorrect) return coinPosition;
 
     const updatedAt = new Date().toISOString();
@@ -135,7 +134,7 @@ export class CoinbaseTransactionAssetPipelineService {
       sourcePosition: expectedSourcePosition,
       nativeQuantity: size,
       nativeUnit,
-      recordedValue: { amount: notional, currency: 'USD' },
+      recordedValue: { amount: notional, currency: quoteCurrency },
       representedValueUsd: notional,
       valuation: {
         method: 'COINBASE_EXECUTED_PRICE_TIMES_SIZE',
@@ -145,7 +144,7 @@ export class CoinbaseTransactionAssetPipelineService {
         nativeQuantity: size,
         nativeUnit,
         price,
-        priceCurrency: 'USD',
+        priceCurrency: quoteCurrency,
         recognizedValueUsd: notional,
         asOf: observation.sourceTimestamp || observation.observedAt
       },
@@ -174,7 +173,7 @@ export class CoinbaseTransactionAssetPipelineService {
         nativeQuantity: size,
         nativeUnit,
         price,
-        priceCurrency: 'USD',
+        priceCurrency: quoteCurrency,
         recognizedValueUsd: notional,
         representedSra: Number(updated.quantity || 0)
       }
@@ -194,6 +193,12 @@ export class CoinbaseTransactionAssetPipelineService {
     try {
       const raw = observation.rawValues || {};
       const productId = String(raw.productId || '').toUpperCase();
+      const { baseAsset: nativeUnit, quoteAsset: quoteCurrency } = productAssets(productId);
+      if (quoteCurrency !== 'USD') {
+        const error = new Error(`Coinbase product ${productId} is quoted in ${quoteCurrency}. SRA par representation requires an explicit USD valuation and does not infer FX conversion.`);
+        error.code = 'COINBASE_NON_USD_QUOTE_REQUIRES_FX_CONVERSION';
+        throw error;
+      }
       const tradeId = String(raw.tradeId || observation.sourceRecordId || '');
       const notional = finitePositive(raw.notional, 'trade notional');
       const price = finitePositive(raw.price, 'trade price');
@@ -228,10 +233,10 @@ export class CoinbaseTransactionAssetPipelineService {
           ],
           measurement: {
             method: 'SOURCE_TRANSACTION_NOTIONAL',
-            unit: 'USD',
+            unit: quoteCurrency,
             value: notional,
             asOf: observation.sourceTimestamp || observation.observedAt,
-            inputs: { productId, tradeId, price, size, nativeAsset: baseAsset(productId), side: raw.side || null, notional },
+            inputs: { productId, tradeId, price, size, nativeAsset: nativeUnit, quoteAsset: quoteCurrency, side: raw.side || null, notional },
             methodologyReference: 'COINBASE_PRICE_MULTIPLIED_BY_EXECUTED_SIZE'
           },
           decision: 'RECOGNIZED',
@@ -279,7 +284,7 @@ export class CoinbaseTransactionAssetPipelineService {
         if (result.created) this.coinPositionsCreated += 1;
       }
 
-      coinPosition = await this.ensureNativeSourceValuation(coinPosition, observation, { productId, tradeId, price, size, notional });
+      coinPosition = await this.ensureNativeSourceValuation(coinPosition, observation, { productId, tradeId, price, size, notional, nativeUnit, quoteCurrency });
       coinPosition = await this.ensurePlatformOwnership(coinPosition);
 
       this.processed += 1;

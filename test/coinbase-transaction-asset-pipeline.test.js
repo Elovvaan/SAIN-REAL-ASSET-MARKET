@@ -25,25 +25,25 @@ class MemoryDomain {
   async lifecycle(event) { this.events.push(structuredClone(event)); return event; }
 }
 
-async function seedTrade(observations, tradeId = '9001', notional = 600, price = 60000) {
+async function seedTrade(observations, tradeId = '9001', notional = 600, price = 60000, productId = 'BTC-USD') {
   const size = notional / price;
   return observations.observe({
     sourceMarket: 'COINBASE',
-    sourceRecordId: `BTC-USD:${tradeId}`,
+    sourceRecordId: `${productId}:${tradeId}`,
     sourceRecordType: 'MARKET_TRADE',
     sourceTimestamp: '2026-08-04T22:00:00.000Z',
     connectorId: 'COINBASE_PUBLIC_MARKET_TRADES',
     category: 'CRYPTO_MARKET_TRANSACTION',
     rawValues: {
       tradeId,
-      productId: 'BTC-USD',
+      productId,
       price,
       size,
       notional,
       side: 'BUY'
     },
-    rawPayload: { trade_id: tradeId, product_id: 'BTC-USD', price: String(price), size: String(size), side: 'BUY' },
-    sourceReference: `coinbase:advanced-trade:market_trades:BTC-USD:${tradeId}`
+    rawPayload: { trade_id: tradeId, product_id: productId, price: String(price), size: String(size), side: 'BUY' },
+    sourceReference: `coinbase:advanced-trade:market_trades:${productId}:${tradeId}`
   }, 'COINBASE_PUBLIC_MARKET_TRADES');
 }
 
@@ -75,6 +75,7 @@ test('Coinbase trade becomes a Recognition, Financial Record, and SRA Coin Posit
   assert.equal(result.recognition.classification.type, 'VERIFIED_MARKET_TRANSACTION');
   assert.equal(result.recognition.measurement.method, 'SOURCE_TRANSACTION_NOTIONAL');
   assert.equal(result.recognition.measurement.value, 600);
+  assert.equal(result.recognition.measurement.unit, 'USD');
 
   assert.equal(result.financialRecord.recordType, 'MARKET_TRANSACTION_FINANCIAL_ASSET');
   assert.equal(result.financialRecord.recognizedPosition.amount, 600);
@@ -138,8 +139,28 @@ test('source asset quantity remains separate from the recorded USD amount repres
   assert.equal(observation.rawValues.notional, 420000);
   assert.equal(result.recognition.measurement.value, 420000);
   assert.equal(result.financialRecord.recognizedPosition.amount, 420000);
-  assert.equal(result.coinPosition.sourcePosition.amount, 420000);
+  assert.equal(result.coinPosition.sourcePosition.amount, 4);
+  assert.equal(result.coinPosition.sourcePosition.unit, 'BTC');
+  assert.equal(result.coinPosition.recordedValue.amount, 420000);
+  assert.equal(result.coinPosition.recordedValue.currency, 'USD');
+  assert.equal(result.coinPosition.valuation.price, 105000);
+  assert.equal(result.coinPosition.valuation.priceCurrency, 'USD');
+  assert.equal(result.coinPosition.valuation.recognizedValueUsd, 420000);
   assert.equal(result.coinPosition.quantity, 420000);
+});
+
+test('non-USD Coinbase products are rejected until an explicit USD FX conversion exists', async () => {
+  const { domain, observations, pipeline } = services();
+  const { observation } = await seedTrade(observations, 'EUR-1', 100000, 50000, 'BTC-EUR');
+
+  await assert.rejects(
+    () => pipeline.processObservation(observation),
+    (error) => error?.code === 'COINBASE_NON_USD_QUOTE_REQUIRES_FX_CONVERSION' && /BTC-EUR.*EUR.*USD valuation/i.test(error.message)
+  );
+
+  assert.equal(domain.list(RECORD_TYPES.RECOGNITION_ASSESSMENT).length, 0);
+  assert.equal(domain.list(RECORD_TYPES.FINANCIAL_RECORD).length, 0);
+  assert.equal(domain.list(RECORD_TYPES.COIN_POSITION).length, 0);
 });
 
 test('an instrument can still be created explicitly from a Coin Position when requested', async () => {
