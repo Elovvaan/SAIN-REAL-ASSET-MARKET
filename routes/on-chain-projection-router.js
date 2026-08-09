@@ -20,8 +20,6 @@ export function createOnChainProjectionRouter(service){
   router.get('/projections/:projectionId',(q,r)=>{const x=service.getProjection(q.params.projectionId);return x?r.json(x):r.status(404).json({error:'Projection not found.'});});
   router.post('/projections',async(q,r)=>{try{return r.status(201).json(await service.createProjection(q.body,actorId(q)));}catch(e){return handle(r,e);}});
   router.post('/projections/:projectionId/approve',async(q,r)=>{try{return r.json(await service.approveProjection(q.params.projectionId,actorId(q)));}catch(e){return handle(r,e);}});
-  router.post('/projections/:projectionId/mint',async(q,r)=>{try{return r.status(201).json(await service.createMint(q.params.projectionId,q.body,actorId(q)));}catch(e){return handle(r,e);}});
-  router.post('/projections/:projectionId/allocate',async(q,r)=>{try{return r.status(201).json(await service.allocate(q.params.projectionId,q.body,actorId(q)));}catch(e){return handle(r,e);}});
   router.get('/wallets',(q,r)=>r.json({records:service.listWallets({participantId:q.query.participantId,status:q.query.status})}));
   router.post('/wallets',async(q,r)=>{try{return r.status(201).json(await service.registerWallet(q.body,actorId(q)));}catch(e){return handle(r,e);}});
   router.post('/wallets/:walletId/approve',async(q,r)=>{try{return r.json(await service.approveWallet(q.params.walletId,q.body,actorId(q)));}catch(e){return handle(r,e);}});
