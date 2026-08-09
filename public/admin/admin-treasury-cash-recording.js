@@ -18,16 +18,16 @@
 
   function markup() {
     return `<section class="admin-record-card" data-treasury-cash-recording-card>
-      <header><strong>Record Cash</strong><em>MANUAL TREASURY ENTRY</em></header>
-      <p style="color:#9a9a9a;margin:0 0 14px;line-height:1.5">Record USD cash that is actually held and available to the platform. This posts a balanced Treasury journal: debit Treasury Cash — USD and credit Platform Contributed Capital. It records the cash position; it does not move money from a bank or create cash from an instrument.</p>
+      <header><strong>Cash Entry</strong><em>TREASURY</em></header>
+      <p style="color:#9a9a9a;margin:0 0 14px;line-height:1.5">Record USD cash held for settlement. Enter the amount and supporting reference for the Treasury journal entry.</p>
       <form data-treasury-cash-recording-form autocomplete="off">
         <div class="admin-record-grid">
           <label><span>Amount USD</span><input name="amountUsd" type="number" min="0.01" step="0.01" placeholder="0.00" required></label>
-          <label><span>Reference</span><input name="reference" type="text" placeholder="Bank deposit, cash contribution, receipt reference" required></label>
-          <label><span>Memo</span><input name="memo" type="text" placeholder="Manual platform cash contribution" required></label>
+          <label><span>Reference</span><input name="reference" type="text" placeholder="Deposit or receipt reference" required></label>
+          <label><span>Memo</span><input name="memo" type="text" placeholder="Cash deposit" required></label>
         </div>
         <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:12px">
-          <button type="submit">Record Cash</button>
+          <button type="submit">Post Cash Entry</button>
           <span data-treasury-cash-recording-result style="color:#d6a92f;font-size:12px"></span>
         </div>
       </form>
@@ -69,16 +69,16 @@
       event.preventDefault();
       const button = form.querySelector('button[type="submit"]');
       if (button) button.disabled = true;
-      if (result) result.textContent = 'Recording cash in Treasury…';
+      if (result) result.textContent = 'Posting cash entry…';
       try {
         const response = await recordCash(form);
         const cash = Number(response?.summary?.cashBalanceUsd || 0);
-        if (result) result.textContent = `Cash recorded. Treasury Cash / Settlement USD is now ${cash.toLocaleString(undefined,{style:'currency',currency:'USD'})}.`;
+        if (result) result.textContent = `Cash entry posted. Treasury Cash / Settlement USD is now ${cash.toLocaleString(undefined,{style:'currency',currency:'USD'})}.`;
         form.reset();
         window.SRAAdminDataClient?.refresh?.('treasury-cash-recorded');
         window.dispatchEvent(new CustomEvent('sra:admin-refresh', { detail:{ source:'treasury-cash-recorded' } }));
       } catch (error) {
-        if (result) result.textContent = error.message || 'Cash recording failed.';
+        if (result) result.textContent = error.message || 'Cash entry failed.';
       } finally {
         if (button) button.disabled = false;
       }
