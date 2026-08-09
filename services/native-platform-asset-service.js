@@ -43,9 +43,19 @@ export class NativePlatformAssetService {
     const exportPackage = ownership && this.domain.list(RECORD_TYPES.EXPORT_PACKAGE)
       .find((record) => record.ownershipRecognitionId === ownership.ownershipRecognitionId && record.state === 'READY_FOR_EXPORT');
 
+    let state = 'ISSUED';
+    let nextAction = 'PUBLISH_LISTING';
+    if (listing) { state = listing.state === 'PUBLISHED' ? 'PUBLISHED' : 'LISTED'; nextAction = 'AWAIT_MARKET_PARTICIPATION'; }
+    if (participation) { state = 'PARTICIPATION_ACTIVE'; nextAction = 'AWAIT_COMMITMENT'; }
+    if (commitment) { state = 'COMMITTED'; nextAction = 'AWAIT_ALLOCATION'; }
+    if (allocation) { state = 'ALLOCATED'; nextAction = 'AWAIT_SETTLEMENT'; }
+    if (settlement) { state = 'SETTLED'; nextAction = 'RECOGNIZE_OWNERSHIP'; }
+    if (ownership) { state = 'OWNERSHIP_RECOGNIZED'; nextAction = 'PREPARE_EXPORT'; }
+    if (exportPackage) { state = 'READY_FOR_EXPORT'; nextAction = 'NONE'; }
+
     return {
       platformAssetCode: PLATFORM_ASSET_CODE,
-      state: exportPackage ? 'READY_FOR_EXPORT' : 'IN_PROGRESS',
+      state,
       readyForExport: Boolean(exportPackage),
       references: {
         observationId: instrument.observationId || null,
@@ -61,13 +71,13 @@ export class NativePlatformAssetService {
         ownershipRecognitionId: ownership?.ownershipRecognitionId || null,
         exportPackageId: exportPackage?.exportPackageId || null,
       },
-      nextAction: exportPackage ? 'NONE' : 'ADMIN_APPROVAL_REQUIRED',
+      nextAction,
     };
   }
 
   async bootstrap(input = {}, actorId = 'SRA_PLATFORM_ADMIN') {
     const current = this.status();
-    if (current.readyForExport) return { created: false, status: current };
+    if (current.references.instrumentId) return { created: false, status: current };
 
     const issuedAmount = money(input.issuedAmount || 1000000, 'issuedAmount');
     const unitPrice = money(input.unitPrice || 1, 'unitPrice');
@@ -80,10 +90,6 @@ export class NativePlatformAssetService {
     const coinPositionId = id('CP');
     const instrumentId = id('INS');
     const listingId = id('LIST');
-    const participationId = id('PART');
-    const commitmentId = id('COM');
-    const allocationId = id('ALLOC');
-    const settlementRecordId = id('SET');
 
     const observation = {
       observationId,
@@ -156,54 +162,6 @@ export class NativePlatformAssetService {
       publishedAt: createdAt,
       publishedBy: actorId,
     };
-    const participation = {
-      positionId: participationId,
-      listingId,
-      instrumentId,
-      participantId: PLATFORM_OWNER_ID,
-      quantity,
-      state: 'ACTIVE',
-      createdAt,
-      createdBy: actorId,
-    };
-    const commitment = {
-      commitmentId,
-      listingId,
-      instrumentId,
-      participantId: PLATFORM_OWNER_ID,
-      quantity,
-      amount: issuedAmount,
-      state: 'COMMITTED',
-      committedAt: createdAt,
-      committedBy: actorId,
-    };
-    const allocation = {
-      positionId: allocationId,
-      commitmentId,
-      listingId,
-      instrumentId,
-      participantId: PLATFORM_OWNER_ID,
-      quantity,
-      allocatedQuantity: quantity,
-      amount: issuedAmount,
-      state: 'ALLOCATED',
-      allocatedAt: createdAt,
-      allocatedBy: actorId,
-    };
-    const settlement = {
-      settlementRecordId,
-      allocationPositionId: allocationId,
-      commitmentId,
-      listingId,
-      instrumentId,
-      participantId: PLATFORM_OWNER_ID,
-      quantity,
-      amount: issuedAmount,
-      route: 'SRA_INTERNAL',
-      state: 'SETTLED',
-      settledAt: createdAt,
-      settledBy: actorId,
-    };
 
     const writes = [
       [RECORD_TYPES.MARKET_OBSERVATION, observationId, observation, 'SRA_PLATFORM_ASSET_OBSERVED'],
@@ -212,59 +170,20 @@ export class NativePlatformAssetService {
       [RECORD_TYPES.COIN_POSITION, coinPositionId, coinPosition, 'SRA_PLATFORM_COIN_POSITION_CREATED'],
       [RECORD_TYPES.SRA_INSTRUMENT, instrumentId, instrument, 'SRA_PLATFORM_INSTRUMENT_ISSUED'],
       [RECORD_TYPES.MARKETPLACE_LISTING, listingId, listing, 'SRA_PLATFORM_ASSET_LISTED'],
-      [RECORD_TYPES.PARTICIPATION_POSITION, participationId, participation, 'SRA_PLATFORM_PARTICIPATION_OPENED'],
-      [RECORD_TYPES.FUNDING_MARKETPLACE_COMMITMENT, commitmentId, commitment, 'SRA_PLATFORM_COMMITMENT_RECORDED'],
-      [RECORD_TYPES.FUNDING_MARKETPLACE_POSITION, allocationId, allocation, 'SRA_PLATFORM_ALLOCATION_RECORDED'],
-      [RECORD_TYPES.SRA_SETTLEMENT_RECORD, settlementRecordId, settlement, 'SRA_PLATFORM_SETTLEMENT_COMPLETED'],
     ];
 
     for (const [type, recordId, record, eventType] of writes) {
       await this.domain.put(type, recordId, record, { actorId, eventType });
     }
 
-    const ownershipResult = await this.internalLifecycle.recognizeOwnership({
-      settlementRecordId,
-      sourcePositionId: allocationId,
-      ownerId: PLATFORM_OWNER_ID,
-      ownerType: 'PLATFORM',
-      quantity,
-      unit: PLATFORM_ASSET_CODE,
-      recognitionBasis: 'SRA_NATIVE_PLATFORM_ASSET_BOOTSTRAP',
-      evidenceIds: Array.isArray(input.evidenceIds) ? input.evidenceIds : [],
-    }, actorId);
-
-    const exportResult = await this.internalLifecycle.createExportPackage({
-      references: {
-        observationId,
-        recognitionId,
-        financialRecordId,
-        coinPositionId,
-        instrumentId,
-        listingId,
-        participationId,
-        commitmentId,
-        allocationId,
-        settlementId: settlementRecordId,
-        ownershipRecognitionId: ownershipResult.ownershipRecognition.ownershipRecognitionId,
-      },
-      destinationClass: 'MULTI_RAIL_ADAPTER_READY',
-      adapterInstructions: {
-        supportedTargets: ['SOLANA', 'ACH', 'FEDWIRE', 'BANK', 'INSTITUTION', 'PARTNER'],
-        executionRequired: false,
-      },
-      evidenceIds: Array.isArray(input.evidenceIds) ? input.evidenceIds : [],
-    }, actorId);
-
     await this.domain.lifecycle({
       objectType: RECORD_TYPES.SRA_INSTRUMENT,
       objectId: instrumentId,
-      eventType: 'SRA_NATIVE_PLATFORM_ASSET_BOOTSTRAPPED',
+      eventType: 'SRA_NATIVE_PLATFORM_ASSET_CREATED_AND_LISTED',
       actorId,
       payload: {
         platformAssetCode: PLATFORM_ASSET_CODE,
         listingId,
-        ownershipRecognitionId: ownershipResult.ownershipRecognition.ownershipRecognitionId,
-        exportPackageId: exportResult.exportPackage.exportPackageId,
       },
     });
 
@@ -273,8 +192,6 @@ export class NativePlatformAssetService {
       status: this.status(),
       instrument,
       listing,
-      ownershipRecognition: ownershipResult.ownershipRecognition,
-      exportPackage: exportResult.exportPackage,
     };
   }
 }
