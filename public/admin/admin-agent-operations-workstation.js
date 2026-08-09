@@ -8,25 +8,23 @@
   const esc = (value) => String(value ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;');
 
   async function request(payload) {
-    const response = await fetch('/api/admin/agent/query', {
-      method: 'POST',
-      credentials: 'same-origin',
-      cache: 'no-store',
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
+    const response = await fetch('/api/admin/agent/query', { method:'POST', credentials:'same-origin', cache:'no-store', headers:{ Accept:'application/json','Content-Type':'application/json' }, body:JSON.stringify(payload) });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error || `Request failed with ${response.status}.`);
+    return body;
+  }
+
+  async function chainHealth() {
+    const response = await fetch('/api/on-chain/solana/status', { credentials:'same-origin', cache:'no-store', headers:{ Accept:'application/json' } });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) return { ...body, ready:false, reachable:false, error:body.error || `Chain status failed with ${response.status}.` };
     return body;
   }
 
   function actionOf(item) { return item?.nextAction || item || {}; }
   function executableApproval(item) {
     const action = actionOf(item);
-    return String(action.authority || '').startsWith('ADMIN_')
-      && action.executable !== false
-      && Boolean(action.executionAction)
-      && Boolean(action.jobId || item?.jobId);
+    return String(action.authority || '').startsWith('ADMIN_') && action.executable !== false && Boolean(action.executionAction) && Boolean(action.jobId || item?.jobId);
   }
 
   function workCard(item) {
@@ -57,48 +55,43 @@
     </article>`;
   }
 
+  function chainReadinessCard(status) {
+    const worker = status?.worker || {};
+    const wallet = status?.wallet || {};
+    const ready = Boolean(status?.ready);
+    const detail = ready ? 'The chain executor is reachable and ready. Approval can dispatch directly to signing and broadcast.' : (status?.error || 'Complete the missing executor configuration before chain approval can execute.');
+    return `<section class="admin-record-card" data-agent-operation-card>
+      <header><strong>Chain Execution Readiness</strong><em>${ready ? 'READY' : 'BLOCKED'}</em></header>
+      <div class="admin-record-grid">
+        <div><span>Network</span><strong>${esc(worker.network || status?.network || 'SOLANA')}</strong></div>
+        <div><span>Cluster</span><strong>${esc(worker.cluster || 'UNKNOWN')}</strong></div>
+        <div><span>Executor endpoint</span><strong>${status?.endpointConfigured ? 'CONFIGURED' : 'NOT CONFIGURED'}</strong></div>
+        <div><span>Executor credential</span><strong>${status?.credentialConfigured ? 'CONFIGURED' : 'NOT CONFIGURED'}</strong></div>
+        <div><span>Executor reachable</span><strong>${status?.reachable ? 'YES' : 'NO'}</strong></div>
+        <div><span>Executor process</span><strong>${status?.executorReady ? 'READY' : esc(status?.startupState || 'NOT READY')}</strong></div>
+        <div><span>RPC</span><strong>${worker.rpcConfigured ? 'CONFIGURED' : 'NOT READY'}</strong></div>
+        <div><span>Signer</span><strong>${worker.signerConfigured ? 'CONFIGURED' : 'NOT READY'}</strong></div>
+        <div><span>Executor database</span><strong>${worker.databaseConfigured ? 'CONFIGURED' : 'NOT READY'}</strong></div>
+        <div><span>Platform wallet</span><strong>${esc(wallet.address || worker.platformAddress || 'NOT AVAILABLE')}</strong></div>
+      </div>
+      <p style="color:#b8b8b8;line-height:1.5;margin:12px 0 0">${esc(detail)}</p>
+    </section>`;
+  }
+
   function summaryCard(data, title, override = null) {
     const snapshot = data.chainSnapshot || data.delegatedAgents?.chainOperations?.snapshot || data.chainOperations?.snapshot || null;
     const answer = override?.answer ?? data.answer ?? '';
     const status = override?.status ?? data.status ?? 'AVAILABLE';
-    return `<section class="admin-record-card" data-agent-operation-card>
-      <header><strong>${esc(title)}</strong><em>${esc(status)}</em></header>
-      <p style="color:#b8b8b8;line-height:1.5">${esc(answer)}</p>
-      ${snapshot ? `<div class="admin-record-grid"><div><span>Platform supply</span><strong>${Number(snapshot.platformSupply || 0).toLocaleString(undefined,{maximumFractionDigits:8})} SRA</strong></div><div><span>On-chain issued</span><strong>${Number(snapshot.issuedOnChainSupply || 0).toLocaleString(undefined,{maximumFractionDigits:8})} SRA</strong></div><div><span>Pending chain work</span><strong>${Number(snapshot.pendingQuantity || 0).toLocaleString(undefined,{maximumFractionDigits:8})} SRA</strong></div><div><span>Chain state</span><strong>${esc(snapshot.state || 'UNKNOWN')}</strong></div></div>` : ''}
-    </section>`;
+    return `<section class="admin-record-card" data-agent-operation-card><header><strong>${esc(title)}</strong><em>${esc(status)}</em></header><p style="color:#b8b8b8;line-height:1.5">${esc(answer)}</p>${snapshot ? `<div class="admin-record-grid"><div><span>Platform supply</span><strong>${Number(snapshot.platformSupply || 0).toLocaleString(undefined,{maximumFractionDigits:8})} SRA</strong></div><div><span>On-chain issued</span><strong>${Number(snapshot.issuedOnChainSupply || 0).toLocaleString(undefined,{maximumFractionDigits:8})} SRA</strong></div><div><span>Pending chain work</span><strong>${Number(snapshot.pendingQuantity || 0).toLocaleString(undefined,{maximumFractionDigits:8})} SRA</strong></div><div><span>Chain state</span><strong>${esc(snapshot.state || 'UNKNOWN')}</strong></div></div>` : ''}</section>`;
   }
 
   function conversationMarkup() {
-    const messages = conversation.length
-      ? conversation.map((message) => `<div style="padding:12px 14px;border:1px solid #292929;border-radius:10px;background:${message.role === 'admin' ? '#1d1d1d' : '#0b0b08'}"><strong style="display:block;margin-bottom:6px">${message.role === 'admin' ? 'Administrator' : 'SAIN'}</strong><span style="line-height:1.5">${esc(message.text)}</span></div>`).join('')
-      : '<div class="admin-placeholder">Ask SAIN about the platform, current work, approvals, records, or lifecycle state.</div>';
-    return `<section class="admin-record-card" data-agent-operation-card data-agent-conversation>
-      <header><strong>SAIN Administrative Agent</strong><em>CONVERSATION</em></header>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">
-        <button type="button" data-agent-quick-question="What currently needs my approval?">Approval review</button>
-        <button type="button" data-agent-quick-question="Give me the operational brief and work queue.">Platform status</button>
-        <button type="button" data-agent-quick-question="What workflows are incomplete?">Incomplete workflows</button>
-      </div>
-      <div data-agent-conversation-log style="display:grid;gap:10px;margin:12px 0">${messages}</div>
-      <form data-agent-conversation-form>
-        <textarea name="question" rows="3" placeholder="Message SAIN about the platform..." required style="width:100%;box-sizing:border-box;background:#050505;border:1px solid #292929;border-radius:10px;color:#f5f5f5;padding:12px;resize:vertical"></textarea>
-        <div style="display:flex;gap:12px;align-items:center;margin-top:10px"><button type="submit">Send to SAIN</button><span data-agent-conversation-result style="font-size:12px;color:#d6a92f"></span></div>
-      </form>
-    </section>`;
+    const messages = conversation.length ? conversation.map((message) => `<div style="padding:12px 14px;border:1px solid #292929;border-radius:10px;background:${message.role === 'admin' ? '#1d1d1d' : '#0b0b08'}"><strong style="display:block;margin-bottom:6px">${message.role === 'admin' ? 'Administrator' : 'SAIN'}</strong><span style="line-height:1.5">${esc(message.text)}</span></div>`).join('') : '<div class="admin-placeholder">Ask SAIN about the platform, current work, approvals, records, or lifecycle state.</div>';
+    return `<section class="admin-record-card" data-agent-operation-card data-agent-conversation><header><strong>SAIN Administrative Agent</strong><em>CONVERSATION</em></header><div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0"><button type="button" data-agent-quick-question="What currently needs my approval?">Approval review</button><button type="button" data-agent-quick-question="Give me the operational brief and work queue.">Platform status</button><button type="button" data-agent-quick-question="What workflows are incomplete?">Incomplete workflows</button></div><div data-agent-conversation-log style="display:grid;gap:10px;margin:12px 0">${messages}</div><form data-agent-conversation-form><textarea name="question" rows="3" placeholder="Message SAIN about the platform..." required style="width:100%;box-sizing:border-box;background:#050505;border:1px solid #292929;border-radius:10px;color:#f5f5f5;padding:12px;resize:vertical"></textarea><div style="display:flex;gap:12px;align-items:center;margin-top:10px"><button type="submit">Send to SAIN</button><span data-agent-conversation-result style="font-size:12px;color:#d6a92f"></span></div></form></section>`;
   }
 
-  function setPresentationOwnership(workspace, tab) {
-    const records = workspace.querySelector('.admin-workspace-records');
-    if (records) records.style.display = ownedTabs.has(tab) ? 'none' : '';
-  }
-
-  function removeForeignAgentPresentation(workspace) {
-    const controls = workspace?.querySelector('.admin-workspace-controls');
-    if (!controls) return;
-    for (const child of [...controls.children]) {
-      if (!child.matches('[data-agent-operation-card]')) child.remove();
-    }
-  }
+  function setPresentationOwnership(workspace, tab) { const records = workspace.querySelector('.admin-workspace-records'); if (records) records.style.display = ownedTabs.has(tab) ? 'none' : ''; }
+  function removeForeignAgentPresentation(workspace) { const controls = workspace?.querySelector('.admin-workspace-controls'); if (!controls) return; for (const child of [...controls.children]) if (!child.matches('[data-agent-operation-card]')) child.remove(); }
 
   async function render(workspace) {
     if (!workspace) return;
@@ -108,108 +101,46 @@
     removeForeignAgentPresentation(workspace);
     const tab = workspace.dataset.activeTab;
     setPresentationOwnership(workspace, tab);
-
-    if (tab === 'Conversation') {
-      controls.insertAdjacentHTML('afterbegin', conversationMarkup());
-      return;
-    }
+    if (tab === 'Conversation') { controls.insertAdjacentHTML('afterbegin', conversationMarkup()); return; }
     if (!['Suggested Actions','Workflow Approvals','Incomplete Workflows'].includes(tab)) return;
 
     try {
-      const payload = await request({ question: 'Give me the operational brief and work queue.' });
+      const [payload, health] = await Promise.all([request({ question:'Give me the operational brief and work queue.' }), chainHealth()]);
       if (workspace.dataset.activeTab !== tab) return;
-
-      let items = tab === 'Workflow Approvals'
-        ? (payload.administratorQueue || [])
-        : tab === 'Incomplete Workflows'
-          ? (payload.incompleteWorkflows || [])
-          : [...(payload.administratorQueue || []), ...(payload.autonomousQueue || [])];
-
+      let items = tab === 'Workflow Approvals' ? (payload.administratorQueue || []) : tab === 'Incomplete Workflows' ? (payload.incompleteWorkflows || []) : [...(payload.administratorQueue || []), ...(payload.autonomousQueue || [])];
       let summaryOverride = null;
       if (tab === 'Workflow Approvals') {
         items = items.filter(executableApproval);
-        summaryOverride = items.length
-          ? { status:'APPROVAL_REQUIRED', answer:`${items.length} executable agent approval${items.length === 1 ? '' : 's'} ${items.length === 1 ? 'is' : 'are'} waiting here. Approve the task in this window and the agent will dispatch the owning worker.` }
-          : { status:'NO_PENDING_APPROVAL', answer:'No executable agent approval is waiting in this window. Non-executable lifecycle blockers remain under Incomplete Workflows until an owning command is registered.' };
+        summaryOverride = items.length ? { status:'APPROVAL_REQUIRED', answer:`${items.length} executable agent approval${items.length === 1 ? '' : 's'} ${items.length === 1 ? 'is' : 'are'} waiting here. Approve the task in this window and the agent will dispatch the owning worker.` } : { status:'NO_PENDING_APPROVAL', answer:'No executable agent approval is waiting in this window. Non-executable lifecycle blockers remain under Incomplete Workflows until their execution dependency is ready.' };
       }
-
       controls.insertAdjacentHTML('afterbegin', summaryCard(payload, tab === 'Workflow Approvals' ? 'Agent Workflow Approvals' : 'Agent Operations Brief', summaryOverride));
-      if (items.length) {
-        controls.insertAdjacentHTML('beforeend', `<div data-agent-operation-card class="admin-record-list">${items.map((item) => workCard(item)).join('')}</div>`);
-      } else {
-        controls.insertAdjacentHTML('beforeend', `<div data-agent-operation-card class="admin-placeholder">No agent work is waiting in this queue.</div>`);
-      }
+      const hasChainWork = items.some((item) => String(actionOf(item).network || '').toUpperCase() === 'SOLANA' || actionOf(item).executionAction === 'EXECUTE_CHAIN_JOB');
+      if (hasChainWork) controls.insertAdjacentHTML('beforeend', chainReadinessCard(health));
+      if (items.length) controls.insertAdjacentHTML('beforeend', `<div data-agent-operation-card class="admin-record-list">${items.map((item) => workCard(item)).join('')}</div>`);
+      else controls.insertAdjacentHTML('beforeend', '<div data-agent-operation-card class="admin-placeholder">No agent work is waiting in this queue.</div>');
     } catch (error) {
       if (workspace.dataset.activeTab === tab) controls.insertAdjacentHTML('afterbegin', `<div data-agent-operation-card class="admin-placeholder"><strong>Agent operations unavailable.</strong><br>${esc(error.message)}</div>`);
     }
   }
 
   async function ask(workspace, question) {
-    const text = String(question || '').trim();
-    if (!text) return;
-    conversation.push({ role:'admin', text });
-    await render(workspace);
-    const result = workspace.querySelector('[data-agent-conversation-result]');
-    if (result) result.textContent = 'SAIN is reviewing the platform…';
-    try {
-      const response = await request({ question:text });
-      conversation.push({ role:'agent', text:response.answer || response.summary || response.status || 'Request completed.' });
-    } catch (error) {
-      conversation.push({ role:'agent', text:`Unable to complete the request: ${error.message}` });
-    }
+    const text = String(question || '').trim(); if (!text) return; conversation.push({ role:'admin', text }); await render(workspace); const result = workspace.querySelector('[data-agent-conversation-result]'); if (result) result.textContent = 'SAIN is reviewing the platform…';
+    try { const response = await request({ question:text }); conversation.push({ role:'agent', text:response.answer || response.summary || response.status || 'Request completed.' }); }
+    catch (error) { conversation.push({ role:'agent', text:`Unable to complete the request: ${error.message}` }); }
     if (workspace.dataset.activeTab === 'Conversation') await render(workspace);
   }
 
   async function execute(workspace, button) {
-    const jobId = button.dataset.agentExecuteChainJob;
-    const card = button.closest('[data-agent-operation-card]');
-    const result = card?.querySelector('[data-agent-operation-result]');
-    button.disabled = true;
-    if (result) result.textContent = 'Agent executing approved job…';
-    try {
-      const response = await request({
-        question: `Execute approved chain operations job ${jobId}.`,
-        action: 'EXECUTE_CHAIN_JOB',
-        jobId,
-        approval: 'APPROVE',
-        targetSupply: Number(button.dataset.targetSupply || 0),
-        approvedIssuedOnChainSupply: Number(button.dataset.approvedIssuedSupply || 0),
-        snapshotVersion: button.dataset.snapshotVersion || '',
-      });
-      if (result) result.textContent = `${response.status} · ${response.reconciliation?.issuedOnChainSupply ?? 0} SRA on chain`;
-      window.dispatchEvent(new CustomEvent('sra:admin-refresh',{ detail:{ source:'chain-operations-agent' } }));
-      await render(workspace);
-    } catch (error) {
-      if (result) result.textContent = error.message;
-      button.disabled = false;
-    }
+    const jobId = button.dataset.agentExecuteChainJob; const card = button.closest('[data-agent-operation-card]'); const result = card?.querySelector('[data-agent-operation-result]'); button.disabled = true; if (result) result.textContent = 'Agent executing approved job…';
+    try { const response = await request({ question:`Execute approved chain operations job ${jobId}.`, action:'EXECUTE_CHAIN_JOB', jobId, approval:'APPROVE', targetSupply:Number(button.dataset.targetSupply || 0), approvedIssuedOnChainSupply:Number(button.dataset.approvedIssuedSupply || 0), snapshotVersion:button.dataset.snapshotVersion || '' }); if (result) result.textContent = `${response.status} · ${response.reconciliation?.issuedOnChainSupply ?? 0} SRA on chain`; window.dispatchEvent(new CustomEvent('sra:admin-refresh',{ detail:{ source:'chain-operations-agent' } })); await render(workspace); }
+    catch (error) { if (result) result.textContent = error.message; button.disabled = false; }
   }
 
   function mount(workspace) {
-    if (!workspace || mounted.has(workspace)) return;
-    mounted.add(workspace);
-    removeForeignAgentPresentation(workspace);
-    const controls = workspace.querySelector('.admin-workspace-controls');
-    const presentationObserver = controls ? new MutationObserver(() => removeForeignAgentPresentation(workspace)) : null;
-    presentationObserver?.observe(controls,{ childList:true });
-    workspace.addEventListener('click', (event) => {
-      const executeButton = event.target.closest('[data-agent-execute-chain-job]');
-      if (executeButton) { void execute(workspace, executeButton); return; }
-      const quick = event.target.closest('[data-agent-quick-question]');
-      if (quick) { void ask(workspace, quick.dataset.agentQuickQuestion); return; }
-      if (event.target.closest('[data-admin-tab]')) queueMicrotask(() => void render(workspace));
-    });
-    workspace.addEventListener('submit', (event) => {
-      const form = event.target.closest('[data-agent-conversation-form]');
-      if (!form) return;
-      event.preventDefault();
-      const question = new FormData(form).get('question');
-      form.reset();
-      void ask(workspace, question);
-    });
-    window.addEventListener('sra:admin-workspace-synchronized', (event) => {
-      if (event.detail?.workspaceId === 'agent') void render(workspace);
-    });
+    if (!workspace || mounted.has(workspace)) return; mounted.add(workspace); removeForeignAgentPresentation(workspace); const controls = workspace.querySelector('.admin-workspace-controls'); const presentationObserver = controls ? new MutationObserver(() => removeForeignAgentPresentation(workspace)) : null; presentationObserver?.observe(controls,{ childList:true });
+    workspace.addEventListener('click', (event) => { const executeButton = event.target.closest('[data-agent-execute-chain-job]'); if (executeButton) { void execute(workspace, executeButton); return; } const quick = event.target.closest('[data-agent-quick-question]'); if (quick) { void ask(workspace, quick.dataset.agentQuickQuestion); return; } if (event.target.closest('[data-admin-tab]')) queueMicrotask(() => void render(workspace)); });
+    workspace.addEventListener('submit', (event) => { const form = event.target.closest('[data-agent-conversation-form]'); if (!form) return; event.preventDefault(); const question = new FormData(form).get('question'); form.reset(); void ask(workspace, question); });
+    window.addEventListener('sra:admin-workspace-synchronized', (event) => { if (event.detail?.workspaceId === 'agent') void render(workspace); });
     void render(workspace);
   }
 
