@@ -18,17 +18,23 @@ import {
 const NETWORK = 'SOLANA';
 const NATIVE_ASSET = 'SOL';
 const REPRESENTATION_TYPE = 'ON_CHAIN_PROJECTION';
+const U64_MAX = (1n << 64n) - 1n;
 
 function text(value) { return String(value ?? '').trim(); }
 function normalize(value) { return text(value).toUpperCase(); }
 
-function exactUnits(value, decimals, name = 'amount') {
+function exactUnits(value, decimals, name = 'amount', { enforceU64 = true } = {}) {
   const source = text(value);
   if (!/^\d+(?:\.\d+)?$/.test(source)) throw new Error(`${name} must be a positive decimal amount.`);
   const [whole, fraction = ''] = source.split('.');
   if (fraction.length > decimals) throw new Error(`${name} cannot exceed ${decimals} decimal places.`);
   const units = BigInt(`${whole}${fraction.padEnd(decimals, '0')}`);
   if (units <= 0n) throw new Error(`${name} must be greater than zero.`);
+  if (enforceU64 && units > U64_MAX) {
+    const error = new Error(`${name} exceeds the maximum SPL token amount at ${decimals} decimals.`);
+    error.code = 'SOLANA_TOKEN_AMOUNT_U64_OVERFLOW';
+    throw error;
+  }
   return units;
 }
 
@@ -147,7 +153,7 @@ export class SolanaTransferService {
     };
   }
 
-  async issueRepresentation(projection, input = {}) {
+  validateIssuance(projection, input = {}) {
     if (!projection) throw new Error('On-chain projection is required.');
     if (normalize(projection.network) !== NETWORK) throw new Error('Projection is not for Solana.');
     if (normalize(projection.status) !== 'APPROVED') throw new Error(`Projection must be APPROVED before issuance. Current status: ${projection.status}.`);
@@ -156,13 +162,19 @@ export class SolanaTransferService {
     const decimals = decimalsValue(input.decimals ?? projection.decimals);
     const amount = text(input.amount);
     const units = exactUnits(amount, decimals, 'amount');
-    const authorizedSupply = Number(projection.authorizedSupply || 0);
-    const numericAmount = Number(amount);
-    if (!Number.isFinite(numericAmount) || numericAmount <= 0) throw new Error('amount must be greater than zero.');
-    if (authorizedSupply > 0 && numericAmount > authorizedSupply) throw new Error('Issuance amount exceeds authorized supply.');
-
-    const { connection, payer } = this.ensure();
+    const authorizedText = text(projection.authorizedSupplyExact ?? projection.authorizedSupply);
+    const authorizedUnits = authorizedText ? exactUnits(authorizedText, decimals, 'authorizedSupply') : 0n;
+    if (authorizedUnits > 0n && units > authorizedUnits) throw new Error('Issuance amount exceeds authorized supply.');
     const programId = tokenProgram(projection.chainProgram);
+    return { decimals, amount, units, authorizedUnits, programId };
+  }
+
+  async issueRepresentation(projection, input = {}) {
+    // Validate all amount/program constraints before ensure() or any network RPC creates resources.
+    const validated = this.validateIssuance(projection, input);
+    const { decimals, amount, units, authorizedUnits, programId } = validated;
+    const { connection, payer } = this.ensure();
+
     const mint = await createMint(connection, payer, payer.publicKey, payer.publicKey, decimals, undefined, { commitment: 'confirmed' }, programId);
     const platformTokenAccount = await getOrCreateAssociatedTokenAccount(connection, payer, mint, payer.publicKey, false, 'confirmed', { commitment: 'confirmed' }, programId);
     const issuanceTransactionId = await mintTo(connection, payer, mint, platformTokenAccount.address, payer, units, [], { commitment: 'confirmed' }, programId);
@@ -182,7 +194,10 @@ export class SolanaTransferService {
       mintAuthorityAddress: payer.publicKey.toBase58(),
       freezeAuthorityAddress: payer.publicKey.toBase58(),
       decimals,
-      issuedSupply: numericAmount,
+      issuedSupply: amount,
+      issuedSupplyExact: amount,
+      issuedSupplyUnits: units.toString(),
+      authorizedSupplyUnits: authorizedUnits.toString(),
       issuanceTransactionId,
       confirmation,
       issuedAt: new Date().toISOString(),
@@ -196,7 +211,7 @@ export class SolanaTransferService {
     const latest = await connection.getLatestBlockhash('confirmed');
 
     if (representation.native) {
-      const units = exactUnits(input.amount, 9);
+      const units = exactUnits(input.amount, 9, 'amount', { enforceU64: false });
       if (units > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('amount is too large for this network transaction.');
       const transaction = new Transaction().add(SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: destination, lamports: Number(units) }));
       return { transaction, latest, destination, representation, fromAddress: payer.publicKey.toBase58() };
@@ -259,4 +274,4 @@ export class SolanaTransferService {
   }
 }
 
-export { tokenProgram };
+export { tokenProgram, exactUnits, U64_MAX };
