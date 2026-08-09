@@ -40,6 +40,7 @@ app.get('/health', async (_req, res) => {
     status:ok ? 'ok' : 'degraded',
     startupState,
     startupError,
+    executor:chain.status(),
     wallet:ok ? chain.platformWallet() : null,
     sraToken:ok ? await chain.state().catch(() => null) : null,
     timestamp:new Date().toISOString(),
