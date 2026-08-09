@@ -19,7 +19,6 @@
     ['/admin/admin-agent-operations-workstation.js', 'data-sra-admin-agent-operations-workstation'],
     ['/admin/admin-solana-transfer.js', 'data-sra-admin-solana-transfer'],
     ['/admin/admin-external-dex-adapter.js', 'data-sra-admin-external-dex-adapter'],
-    ['/admin/admin-external-dex-executor.js', 'data-sra-admin-external-dex-executor'],
     ['/admin/admin-system-health-workstation.js', 'data-sra-admin-system-health-workstation'],
   ];
 
@@ -141,11 +140,10 @@
       window.mountAdminAgentOperationsWorkstation?.(admin);
       window.mountAdminSolanaTransfer?.(admin);
       window.mountAdminExternalDexAdapter?.(admin);
-      window.mountAdminExternalDexExecutor?.(admin);
       window.mountAdminSystemHealthWorkstation?.(admin.querySelector('[data-workspace="system"]'));
 
       window.dispatchEvent(new CustomEvent('sra:admin-booted', {
-        detail: { featureCount: FEATURES.length, bootedAt: new Date().toISOString() },
+        detail: { featureCount: FEATURES.length, bootedAt:new Date().toISOString() },
       }));
     } catch (error) {
       booted = false;
@@ -158,7 +156,7 @@
   window.addEventListener('sra:admin-refresh', (event) => requestAdministrationRefresh(event.detail?.source || 'manual'));
   window.sraRefreshAdministration = requestAdministrationRefresh;
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true });
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once:true });
   else void boot();
 
   const observer = new MutationObserver(() => {
@@ -167,5 +165,5 @@
       void boot();
     }
   });
-  observer.observe(document.documentElement, { subtree: true, attributes: true, attributeFilter: ['class'] });
+  observer.observe(document.documentElement, { subtree:true, attributes:true, attributeFilter:['class'] });
 })();
