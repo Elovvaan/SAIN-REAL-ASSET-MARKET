@@ -45,14 +45,23 @@
   }
 
   async function renderConnections(workspace) {
-    if (!workspace || workspace.dataset.activeTab !== 'DEX') return;
+    if (!workspace) return;
     const controls = workspace.querySelector('.admin-workspace-controls');
     const records = workspace.querySelector('.admin-workspace-records');
     if (!controls) return;
     controls.querySelectorAll('[data-dex-connection-card]').forEach((node) => node.remove());
+    if (records && workspace.dataset.activeTab !== 'DEX') records.style.display = '';
+    if (workspace.dataset.activeTab !== 'DEX') return;
     if (records) records.style.display = 'none';
-    try { controls.insertAdjacentHTML('afterbegin', await connectionMarkup()); }
-    catch (error) { controls.insertAdjacentHTML('afterbegin', `<section class="admin-record-card" data-dex-connection-card><header><strong>External DEX Adapter</strong><em>UNAVAILABLE</em></header><p>${esc(error.message)}</p></section>`); }
+    try {
+      const markup = await connectionMarkup();
+      if (!controls.isConnected || workspace.dataset.activeTab !== 'DEX') return;
+      controls.insertAdjacentHTML('afterbegin', markup);
+    }
+    catch (error) {
+      if (!controls.isConnected || workspace.dataset.activeTab !== 'DEX') return;
+      controls.insertAdjacentHTML('afterbegin', `<section class="admin-record-card" data-dex-connection-card><header><strong>External DEX Adapter</strong><em>UNAVAILABLE</em></header><p>${esc(error.message)}</p></section>`);
+    }
   }
 
   async function renderSettlement(workspace) {
@@ -61,8 +70,15 @@
     if (!controls) return;
     controls.querySelectorAll('[data-dex-export-card]').forEach((node) => node.remove());
     if (workspace.dataset.activeTab !== 'Export Packages') return;
-    try { controls.insertAdjacentHTML('afterbegin', await settlementMarkup()); }
-    catch (error) { controls.insertAdjacentHTML('afterbegin', `<section class="admin-record-card" data-dex-export-card><header><strong>External DEX Export</strong><em>UNAVAILABLE</em></header><p>${esc(error.message)}</p></section>`); }
+    try {
+      const markup = await settlementMarkup();
+      if (!controls.isConnected || workspace.dataset.activeTab !== 'Export Packages') return;
+      controls.insertAdjacentHTML('afterbegin', markup);
+    }
+    catch (error) {
+      if (!controls.isConnected || workspace.dataset.activeTab !== 'Export Packages') return;
+      controls.insertAdjacentHTML('afterbegin', `<section class="admin-record-card" data-dex-export-card><header><strong>External DEX Export</strong><em>UNAVAILABLE</em></header><p>${esc(error.message)}</p></section>`);
+    }
   }
 
   async function prepare(form) {
@@ -89,12 +105,11 @@
       if (!event.target.closest('[data-admin-tab]')) return;
       queueMicrotask(() => {
         ensureDexTab(workspace);
-        const records = workspace.querySelector('.admin-workspace-records');
-        if (records && workspace.dataset.activeTab !== 'DEX') records.style.display = '';
         void renderConnections(workspace);
       });
     });
     window.addEventListener('sra:admin-workspace-synchronized', (event) => { if (event.detail?.workspaceId === 'connections') void renderConnections(workspace); });
+    void renderConnections(workspace);
   }
 
   function mountSettlement(workspace) {
