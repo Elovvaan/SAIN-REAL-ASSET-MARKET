@@ -1,4 +1,5 @@
-import { SettlementAdapterExecutionService } from './settlement-adapter-execution-service.js';
+import { AchSettlementExecutionService } from './ach-settlement-execution-service.js';
+import { WireSettlementExecutionService } from './wire-settlement-execution-service.js';
 import { RECORD_TYPES } from './persistent-domain-service.js';
 
 const TX = RECORD_TYPES.SRA_TRANSACTION;
@@ -7,16 +8,6 @@ const EXECUTED_PROVIDER_STATUSES = new Set(['COMPLETED','EXECUTED','SETTLED','CO
 const ACCEPTED_PROVIDER_STATUSES = new Set(['ACCEPTED','PENDING','PROCESSING','QUEUED','SUBMITTED','RECEIVED']);
 const FAILED_PROVIDER_STATUSES = new Set(['REJECTED','FAILED','CANCELED','CANCELLED','DECLINED','ERROR','RETURNED']);
 
-function digits(value) { return String(value || '').replace(/\D/g, ''); }
-function validRoutingNumber(value) {
-  const routing = digits(value);
-  if (routing.length !== 9) return false;
-  const numbers = [...routing].map(Number);
-  const checksum = 3 * (numbers[0] + numbers[3] + numbers[6])
-    + 7 * (numbers[1] + numbers[4] + numbers[7])
-    + (numbers[2] + numbers[5] + numbers[8]);
-  return checksum % 10 === 0;
-}
 function classifyProviderStatus(status) {
   const normalized = String(status || '').trim().toUpperCase();
   if (EXECUTED_PROVIDER_STATUSES.has(normalized)) return 'EXECUTED';
@@ -26,12 +17,22 @@ function classifyProviderStatus(status) {
 }
 
 export class TreasuryLiveExecutionService {
-  constructor(domain, { executor = new SettlementAdapterExecutionService() } = {}) {
+  constructor(domain, { achExecutor = new AchSettlementExecutionService(), wireExecutor = new WireSettlementExecutionService() } = {}) {
     this.domain = domain;
-    this.executor = executor;
+    this.achExecutor = achExecutor;
+    this.wireExecutor = wireExecutor;
   }
 
-  status() { return this.executor.status(); }
+  status() {
+    const ach = this.achExecutor.status();
+    const wire = this.wireExecutor.status();
+    return {
+      service: 'TREASURY_PAYMENT_EXECUTION',
+      rails: [ach, wire],
+      directOnChainExecution: '/api/on-chain',
+      liveExecutionEnabled: ach.ready || wire.ready,
+    };
+  }
 
   instruction(id) {
     const record = this.domain.get(TX, String(id || '').trim());
@@ -39,116 +40,129 @@ export class TreasuryLiveExecutionService {
     return record;
   }
 
-  async executeAch(input = {}, actorId = 'SRA_PLATFORM_ADMIN') {
-    const transferInstructionId = String(input.transferInstructionId || '').trim();
-    if (!transferInstructionId) throw new Error('transferInstructionId is required.');
-
+  async withExecutionLock(transferInstructionId, work) {
     const prior = executionLocks.get(transferInstructionId) || Promise.resolve();
     let release;
     const current = new Promise((resolve) => { release = resolve; });
     const queued = prior.then(() => current);
     executionLocks.set(transferInstructionId, queued);
     await prior;
-
-    try {
-      const instruction = this.instruction(transferInstructionId);
-      if (String(instruction.route || '').toUpperCase() !== 'ACH') throw new Error('The payment instruction is not an ACH transfer.');
-      const amount = Number(instruction.amountUsd ?? instruction.quantity);
-      const currency = String(instruction.currency || 'USD').toUpperCase();
-      if (!Number.isFinite(amount) || amount <= 0) throw new Error('The authorized payment amount must be greater than zero.');
-      if (instruction.state !== 'READY_TO_SEND' || instruction.executionState !== 'AUTHORIZED') throw new Error('The payment instruction is not authorized and ready to send.');
-      if (String(instruction.fundsState || '').toUpperCase() !== 'HELD') throw new Error('The payment amount is not reserved against Treasury cash.');
-
-      const routingNumber = digits(input.routingNumber);
-      if (!validRoutingNumber(routingNumber)) throw new Error('A valid 9-digit ACH routing number is required.');
-      const accountNumber = digits(input.accountNumber);
-      if (accountNumber.length < 4 || accountNumber.length > 17) throw new Error('ACH account number must contain 4 to 17 digits.');
-      const accountType = String(input.accountType || '').trim().toUpperCase();
-      if (!['CHECKING','SAVINGS'].includes(accountType)) throw new Error('ACH account type must be CHECKING or SAVINGS.');
-
-      const transientInstruction = {
-        instructionId: transferInstructionId,
-        state: 'READY',
-        rail: 'ACH',
-        amount,
-        currency,
-        senderAccountReference: null,
-        receivingAccountReference: instruction.destinationReference,
-        transientDestination: {
-          type: 'US_BANK_ACCOUNT',
-          routingNumber,
-          accountNumber,
-          accountType,
-          bankName: String(input.bankName || 'ACH destination').trim() || 'ACH destination',
-        },
-        purpose: instruction.purpose || 'SRA_TREASURY_ACH_PAYMENT',
-        remittanceReference: transferInstructionId,
-        settlementId: instruction.settlementId || null,
-        settlementPackageId: instruction.settlementPackageId || null,
-        commitmentId: instruction.commitmentId || null,
-        messageHash: instruction.messageHash || null,
-      };
-
-      const confirmation = `EXECUTE ${amount.toFixed(2)} ${currency} VIA ACH`;
-      this.executor.assertCanExecute(transientInstruction, confirmation);
-      const evidence = await this.executor.execute(transientInstruction, { confirmation, actorId });
-      const providerClassification = classifyProviderStatus(evidence.providerStatus);
-      if (providerClassification === 'FAILED') {
-        const error = new Error(`ACH provider returned terminal status ${String(evidence.providerStatus).toUpperCase()}.`);
-        error.code = 'ACH_PROVIDER_TERMINAL_FAILURE';
-        error.executionEvidence = evidence;
-        throw error;
-      }
-      if (providerClassification === 'UNKNOWN') {
-        const error = new Error(`ACH provider returned unsupported status ${String(evidence.providerStatus || 'UNKNOWN').toUpperCase()}.`);
-        error.code = 'ACH_PROVIDER_STATUS_UNRECOGNIZED';
-        error.executionEvidence = evidence;
-        throw error;
-      }
-
-      const executed = providerClassification === 'EXECUTED';
-      const updatedAt = new Date().toISOString();
-      const persistedEvidence = {
-        rail: evidence.rail,
-        requestId: evidence.requestId,
-        endpointHost: evidence.endpointHost,
-        httpStatus: evidence.httpStatus,
-        providerReference: evidence.providerReference,
-        providerStatus: evidence.providerStatus,
-        requestedAt: evidence.requestedAt,
-        payloadHash: evidence.payloadHash,
-        responseHash: evidence.responseHash,
-      };
-      const updatedInstruction = {
-        ...instruction,
-        state: executed ? 'PROVIDER_EXECUTED' : 'PROVIDER_ACCEPTED',
-        executionState: executed ? 'PROVIDER_EXECUTED' : 'PROVIDER_ACCEPTED',
-        fundsState: 'SUBMITTED',
-        externalWithdrawalState: 'AWAITING_RECEIVING_CONFIRMATION',
-        providerReference: evidence.providerReference,
-        providerStatus: evidence.providerStatus,
-        executionEvidence: persistedEvidence,
-        updatedAt,
-        statusHistory: [...(instruction.statusHistory || []), {
-          state: executed ? 'PROVIDER_EXECUTED' : 'PROVIDER_ACCEPTED', actorId, occurredAt: updatedAt, providerReference: evidence.providerReference,
-        }],
-      };
-      const pkg = instruction.exportPackageId ? this.domain.get(RECORD_TYPES.EXPORT_PACKAGE, instruction.exportPackageId) : null;
-      const changes = [{ type: TX, id: transferInstructionId, payload: updatedInstruction, actorId, eventType: 'TREASURY_ACH_PROVIDER_SUBMITTED' }];
-      if (pkg) changes.push({
-        type: RECORD_TYPES.EXPORT_PACKAGE,
-        id: pkg.exportPackageId,
-        payload: { ...pkg, state: updatedInstruction.state, exportExecutionState: updatedInstruction.executionState, providerReference: evidence.providerReference, updatedAt },
-        actorId,
-        eventType: 'TREASURY_EXPORT_LINEAGE_PROVIDER_SUBMITTED',
-      });
-      if (typeof this.domain.atomicPut !== 'function') throw new Error('Atomic execution persistence is unavailable.');
-      await this.domain.atomicPut(changes);
-      return { instruction: updatedInstruction, executionEvidence: persistedEvidence, receivingConfirmationRequired: true, rawBankDetailsStored: false };
-    } finally {
+    try { return await work(); }
+    finally {
       release();
       if (executionLocks.get(transferInstructionId) === queued) executionLocks.delete(transferInstructionId);
     }
+  }
+
+  assertAuthorizedInstruction(transferInstructionId, rail) {
+    if (!transferInstructionId) throw new Error('transferInstructionId is required.');
+    const instruction = this.instruction(transferInstructionId);
+    if (String(instruction.route || '').toUpperCase() !== rail) throw new Error(`The payment instruction is not a ${rail} transfer.`);
+    const amount = Number(instruction.amountUsd ?? instruction.quantity);
+    const currency = String(instruction.currency || 'USD').toUpperCase();
+    if (!Number.isFinite(amount) || amount <= 0) throw new Error('The authorized payment amount must be greater than zero.');
+    if (instruction.state !== 'READY_TO_SEND' || instruction.executionState !== 'AUTHORIZED') throw new Error('The payment instruction is not authorized and ready to send.');
+    if (String(instruction.fundsState || '').toUpperCase() !== 'HELD') throw new Error('The payment amount is not reserved against Treasury cash.');
+    return { instruction, amount, currency };
+  }
+
+  async persistProviderResult(instruction, evidence, actorId, rail) {
+    const providerClassification = classifyProviderStatus(evidence.providerStatus);
+    if (providerClassification === 'FAILED') {
+      const error = new Error(`${rail} provider returned terminal status ${String(evidence.providerStatus).toUpperCase()}.`);
+      error.code = `${rail}_PROVIDER_TERMINAL_FAILURE`;
+      error.executionEvidence = evidence;
+      throw error;
+    }
+    if (providerClassification === 'UNKNOWN') {
+      const error = new Error(`${rail} provider returned unsupported status ${String(evidence.providerStatus || 'UNKNOWN').toUpperCase()}.`);
+      error.code = `${rail}_PROVIDER_STATUS_UNRECOGNIZED`;
+      error.executionEvidence = evidence;
+      throw error;
+    }
+
+    const executed = providerClassification === 'EXECUTED';
+    const updatedAt = new Date().toISOString();
+    const persistedEvidence = {
+      rail: evidence.rail,
+      requestId: evidence.requestId,
+      endpointHost: evidence.endpointHost,
+      httpStatus: evidence.httpStatus,
+      providerReference: evidence.providerReference,
+      providerStatus: evidence.providerStatus,
+      requestedAt: evidence.requestedAt,
+      payloadHash: evidence.payloadHash,
+      responseHash: evidence.responseHash,
+    };
+    const updatedInstruction = {
+      ...instruction,
+      state: executed ? 'PROVIDER_EXECUTED' : 'PROVIDER_ACCEPTED',
+      executionState: executed ? 'PROVIDER_EXECUTED' : 'PROVIDER_ACCEPTED',
+      fundsState: 'SUBMITTED',
+      externalWithdrawalState: 'AWAITING_RECEIVING_CONFIRMATION',
+      providerReference: evidence.providerReference,
+      providerStatus: evidence.providerStatus,
+      executionEvidence: persistedEvidence,
+      updatedAt,
+      statusHistory: [...(instruction.statusHistory || []), {
+        state: executed ? 'PROVIDER_EXECUTED' : 'PROVIDER_ACCEPTED', actorId, occurredAt: updatedAt, providerReference: evidence.providerReference,
+      }],
+    };
+    const pkg = instruction.exportPackageId ? this.domain.get(RECORD_TYPES.EXPORT_PACKAGE, instruction.exportPackageId) : null;
+    const changes = [{ type: TX, id: instruction.transferInstructionId, payload: updatedInstruction, actorId, eventType: `TREASURY_${rail}_PROVIDER_SUBMITTED` }];
+    if (pkg) changes.push({
+      type: RECORD_TYPES.EXPORT_PACKAGE,
+      id: pkg.exportPackageId,
+      payload: { ...pkg, state: updatedInstruction.state, exportExecutionState: updatedInstruction.executionState, providerReference: evidence.providerReference, updatedAt },
+      actorId,
+      eventType: 'TREASURY_EXPORT_LINEAGE_PROVIDER_SUBMITTED',
+    });
+    if (typeof this.domain.atomicPut !== 'function') throw new Error('Atomic execution persistence is unavailable.');
+    await this.domain.atomicPut(changes);
+    return { instruction: updatedInstruction, executionEvidence: persistedEvidence, receivingConfirmationRequired: true, rawBankDetailsStored: false };
+  }
+
+  async executeAch(input = {}, actorId = 'SRA_PLATFORM_ADMIN') {
+    const transferInstructionId = String(input.transferInstructionId || '').trim();
+    return this.withExecutionLock(transferInstructionId, async () => {
+      const { instruction, amount, currency } = this.assertAuthorizedInstruction(transferInstructionId, 'ACH');
+      const evidence = await this.achExecutor.execute({
+        instructionId: transferInstructionId,
+        rail: 'ACH', amount, currency,
+        sourceAccountReference: null,
+        destination: {
+          routingNumber: input.routingNumber,
+          accountNumber: input.accountNumber,
+          accountType: input.accountType,
+          bankName: input.bankName,
+        },
+        remittanceReference: transferInstructionId,
+      }, { actorId });
+      return this.persistProviderResult(instruction, evidence, actorId, 'ACH');
+    });
+  }
+
+  async executeWire(input = {}, actorId = 'SRA_PLATFORM_ADMIN') {
+    const transferInstructionId = String(input.transferInstructionId || '').trim();
+    return this.withExecutionLock(transferInstructionId, async () => {
+      const { instruction, amount, currency } = this.assertAuthorizedInstruction(transferInstructionId, 'WIRE');
+      const evidence = await this.wireExecutor.execute({
+        instructionId: transferInstructionId,
+        rail: 'WIRE', amount, currency,
+        sourceAccountReference: null,
+        destination: {
+          beneficiaryName: input.beneficiaryName,
+          routingNumber: input.routingNumber,
+          accountNumber: input.accountNumber,
+          bankName: input.bankName,
+          beneficiaryAddress: input.beneficiaryAddress,
+          bankAddress: input.bankAddress,
+          furtherCredit: input.furtherCredit,
+        },
+        remittanceReference: transferInstructionId,
+      }, { actorId });
+      return this.persistProviderResult(instruction, evidence, actorId, 'WIRE');
+    });
   }
 
   async reconcile(input = {}, actorId = 'SRA_PLATFORM_ADMIN') {
@@ -182,4 +196,4 @@ export class TreasuryLiveExecutionService {
   }
 }
 
-export { validRoutingNumber, classifyProviderStatus };
+export { classifyProviderStatus };
