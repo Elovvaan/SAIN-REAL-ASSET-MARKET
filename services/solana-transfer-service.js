@@ -6,14 +6,18 @@ import {
   Transaction,
 } from '@solana/web3.js';
 import {
-  createMint,
   createTransferCheckedInstruction,
   getMint,
   getOrCreateAssociatedTokenAccount,
-  mintTo,
 } from '@solana/spl-token';
 
+const NETWORK = 'SOLANA';
+const NATIVE_ASSET = 'SOL';
+const REPRESENTATION_TYPE = 'ON_CHAIN_PROJECTION';
+
 function text(value) { return String(value ?? '').trim(); }
+function normalize(value) { return text(value).toUpperCase(); }
+
 function exactUnits(value, decimals, name = 'amount') {
   const source = text(value);
   if (!/^\d+(?:\.\d+)?$/.test(source)) throw new Error(`${name} must be a positive decimal amount.`);
@@ -23,32 +27,34 @@ function exactUnits(value, decimals, name = 'amount') {
   if (units <= 0n) throw new Error(`${name} must be greater than zero.`);
   return units;
 }
-function decimal(units, decimals) {
-  const raw = units.toString().padStart(decimals + 1, '0');
-  const whole = raw.slice(0, -decimals) || '0';
-  const fraction = decimals ? raw.slice(-decimals).replace(/0+$/, '') : '';
-  return fraction ? `${whole}.${fraction}` : whole;
-}
+
 function keypair(value) {
   const raw = text(value);
-  if (!raw) throw new Error('SOLANA_PAYER_SECRET_KEY is required.');
+  if (!raw) throw new Error('Network signer secret key is required.');
   let bytes;
   try {
-    bytes = raw.startsWith('[') ? Uint8Array.from(JSON.parse(raw)) : Uint8Array.from(Buffer.from(raw, 'base64'));
+    bytes = raw.startsWith('[')
+      ? Uint8Array.from(JSON.parse(raw))
+      : Uint8Array.from(Buffer.from(raw, 'base64'));
   } catch {
-    throw new Error('SOLANA_PAYER_SECRET_KEY must be a JSON byte array or base64 secret key.');
+    throw new Error('Network signer secret key must be a JSON byte array or base64 secret key.');
   }
   if (bytes.length === 32) return Keypair.fromSeed(bytes);
   if (bytes.length === 64) return Keypair.fromSecretKey(bytes);
-  throw new Error('SOLANA_PAYER_SECRET_KEY must contain 32 or 64 bytes.');
+  throw new Error('Network signer secret key must contain 32 or 64 bytes.');
 }
+
 function publicKey(value, name) {
-  try { return new PublicKey(text(value)); }
-  catch { throw new Error(`${name} is not a valid Solana address.`); }
+  try {
+    return new PublicKey(text(value));
+  } catch {
+    throw new Error(`${name} is not a valid destination-network address.`);
+  }
 }
 
 export class SolanaTransferService {
   constructor(options = {}) {
+    this.domain = options.domain || null;
     this.environment = options.environment || process.env;
     this.rpc = text(this.environment.SOLANA_RPC_URL);
     this.cluster = text(this.environment.SOLANA_CLUSTER || 'mainnet-beta');
@@ -60,8 +66,7 @@ export class SolanaTransferService {
     const rpcConfigured = Boolean(this.rpc);
     const signerConfigured = Boolean(text(this.environment.SOLANA_PAYER_SECRET_KEY));
     return {
-      service: 'SRA Solana Adapter',
-      network: 'SOLANA',
+      network: NETWORK,
       cluster: this.cluster,
       rpcConfigured,
       signerConfigured,
@@ -73,8 +78,8 @@ export class SolanaTransferService {
   ensure() {
     const status = this.status();
     if (!status.configured) {
-      const error = new Error('Solana RPC and signer are not configured.');
-      error.code = 'SOLANA_NOT_READY';
+      const error = new Error('Network RPC and signer are not configured.');
+      error.code = 'ON_CHAIN_NETWORK_NOT_READY';
       throw error;
     }
     if (!this.payer) this.payer = keypair(this.environment.SOLANA_PAYER_SECRET_KEY);
@@ -90,130 +95,146 @@ export class SolanaTransferService {
       const version = await connection.getVersion();
       return { ...configuration, reachable: true, ready: true, version };
     } catch (error) {
-      return { ...configuration, reachable: false, ready: false, error: String(error?.message || error) };
+      return {
+        ...configuration,
+        reachable: false,
+        ready: false,
+        error: String(error?.message || error),
+      };
     }
   }
 
-  async wallet() {
+  representation(asset) {
+    const normalizedAsset = normalize(asset);
+    if (normalizedAsset === NATIVE_ASSET) return { native: true, asset: normalizedAsset };
+
+    const records = this.domain?.list?.(REPRESENTATION_TYPE) || [];
+    const record = records.find((candidate) => {
+      if (normalize(candidate.network) !== NETWORK) return false;
+      if (!text(candidate.mintAddress)) return false;
+      const identifiers = [
+        candidate.asset,
+        candidate.symbol,
+        candidate.ticker,
+        candidate.instrumentId,
+        candidate.permanentAssetAccountId,
+        candidate.authoritativeSraRecordId,
+      ].map(normalize).filter(Boolean);
+      return identifiers.includes(normalizedAsset);
+    });
+
+    if (!record) {
+      const error = new Error(`Asset ${normalizedAsset} has no active on-chain representation on ${NETWORK}.`);
+      error.code = 'ON_CHAIN_ASSET_NOT_REPRESENTED';
+      throw error;
+    }
+
+    return {
+      native: false,
+      asset: normalizedAsset,
+      assetAddress: record.mintAddress,
+      sourceAccount: record.platformTokenAccount || record.sourceTokenAccount || null,
+      representationId: record.projectionId || record.id || null,
+    };
+  }
+
+  async build(input = {}) {
+    const { connection, payer } = this.ensure();
+    const destination = publicKey(input.destinationAddress, 'destinationAddress');
+    const representation = this.representation(input.asset);
+    const latest = await connection.getLatestBlockhash('confirmed');
+
+    if (representation.native) {
+      const units = exactUnits(input.amount, 9);
+      if (units > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('amount is too large for this network transaction.');
+      const transaction = new Transaction().add(SystemProgram.transfer({
+        fromPubkey: payer.publicKey,
+        toPubkey: destination,
+        lamports: Number(units),
+      }));
+      return { transaction, latest, destination, representation, fromAddress: payer.publicKey.toBase58() };
+    }
+
+    const mint = publicKey(representation.assetAddress, 'assetAddress');
+    const mintInfo = await getMint(connection, mint, 'confirmed');
+    const amountUnits = exactUnits(input.amount, mintInfo.decimals);
+    const source = representation.sourceAccount
+      ? { address: publicKey(representation.sourceAccount, 'sourceAccount') }
+      : await getOrCreateAssociatedTokenAccount(connection, payer, mint, payer.publicKey);
+    const destinationAccount = await getOrCreateAssociatedTokenAccount(connection, payer, mint, destination);
+    const transaction = new Transaction().add(createTransferCheckedInstruction(
+      source.address,
+      mint,
+      destinationAccount.address,
+      payer.publicKey,
+      amountUnits,
+      mintInfo.decimals,
+    ));
+
+    return {
+      transaction,
+      latest,
+      destination,
+      destinationAccount: destinationAccount.address,
+      sourceAccount: source.address,
+      representation,
+      fromAddress: payer.publicKey.toBase58(),
+    };
+  }
+
+  sign(prepared) {
     const { payer } = this.ensure();
-    return { network: 'SOLANA', cluster: this.cluster, address: payer.publicKey.toBase58() };
+    prepared.transaction.feePayer = payer.publicKey;
+    prepared.transaction.recentBlockhash = prepared.latest.blockhash;
+    prepared.transaction.sign(payer);
+    return prepared;
+  }
+
+  async broadcast(prepared) {
+    const { connection } = this.ensure();
+    const transactionId = await connection.sendRawTransaction(
+      prepared.transaction.serialize(),
+      { skipPreflight: false, maxRetries: 3 },
+    );
+    return { ...prepared, transactionId };
   }
 
   async confirm(transactionId) {
     const { connection } = this.ensure();
     const signature = text(transactionId);
     if (!signature) throw new Error('transactionId is required.');
-    const status = (await connection.getSignatureStatuses([signature], { searchTransactionHistory: true })).value[0];
+    const status = (await connection.getSignatureStatuses(
+      [signature],
+      { searchTransactionHistory: true },
+    )).value[0];
+
     if (!status) return { state: 'PENDING', transactionId: signature };
     if (status.err) return { state: 'FAILED', transactionId: signature, error: status.err };
     const confirmed = status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized';
-    return { state: confirmed ? 'CONFIRMED' : 'PENDING', transactionId: signature, confirmationStatus: status.confirmationStatus || null, slot: status.slot };
-  }
-
-  async broadcast(transaction, latestBlockhash) {
-    const { connection, payer } = this.ensure();
-    transaction.feePayer = payer.publicKey;
-    transaction.recentBlockhash = latestBlockhash.blockhash;
-    transaction.sign(payer);
-    const transactionId = await connection.sendRawTransaction(transaction.serialize(), { skipPreflight: false, maxRetries: 3 });
-    try {
-      const confirmation = await connection.confirmTransaction({ signature: transactionId, blockhash: latestBlockhash.blockhash, lastValidBlockHeight: latestBlockhash.lastValidBlockHeight }, 'confirmed');
-      if (confirmation.value.err) {
-        const error = new Error(`Solana transaction ${transactionId} failed on chain.`);
-        error.transactionId = transactionId;
-        throw error;
-      }
-      return { transactionId, confirmation: { state: 'CONFIRMED', slot: confirmation.context.slot } };
-    } catch (error) {
-      error.transactionId = transactionId;
-      throw error;
-    }
-  }
-
-  async sendNative(input) {
-    const { connection, payer } = this.ensure();
-    const destination = publicKey(input.destinationAddress, 'destinationAddress');
-    const units = exactUnits(input.amount, 9);
-    if (units > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('amount is too large for a SOL transfer.');
-    const latest = await connection.getLatestBlockhash('confirmed');
-    const transaction = new Transaction().add(SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: destination, lamports: Number(units) }));
-    const sent = await this.broadcast(transaction, latest);
     return {
-      transferId: input.transferId,
-      network: 'SOLANA',
-      asset: 'SOL',
-      fromAddress: payer.publicKey.toBase58(),
-      destinationAddress: destination.toBase58(),
-      amount: text(input.amount),
-      transactionId: sent.transactionId,
-      transactionSignature: sent.transactionId,
-      confirmation: sent.confirmation,
-      state: 'CONFIRMED',
-    };
-  }
-
-  async sendToken(input) {
-    const { connection, payer } = this.ensure();
-    const owner = publicKey(input.destinationAddress, 'destinationAddress');
-    const mint = publicKey(input.mintAddress, 'mintAddress');
-    const mintInfo = await getMint(connection, mint, 'confirmed');
-    const amountUnits = exactUnits(input.amount, mintInfo.decimals);
-    const source = input.sourceTokenAccount
-      ? { address: publicKey(input.sourceTokenAccount, 'sourceTokenAccount') }
-      : await getOrCreateAssociatedTokenAccount(connection, payer, mint, payer.publicKey);
-    const destination = await getOrCreateAssociatedTokenAccount(connection, payer, mint, owner);
-    const latest = await connection.getLatestBlockhash('confirmed');
-    const transaction = new Transaction().add(createTransferCheckedInstruction(source.address, mint, destination.address, payer.publicKey, amountUnits, mintInfo.decimals));
-    const sent = await this.broadcast(transaction, latest);
-    return {
-      transferId: input.transferId,
-      network: 'SOLANA',
-      asset: text(input.asset).toUpperCase(),
-      mintAddress: mint.toBase58(),
-      fromAddress: payer.publicKey.toBase58(),
-      sourceTokenAccount: source.address.toBase58(),
-      destinationAddress: owner.toBase58(),
-      destinationTokenAccount: destination.address.toBase58(),
-      amount: text(input.amount),
-      transactionId: sent.transactionId,
-      transactionSignature: sent.transactionId,
-      confirmation: sent.confirmation,
-      state: 'CONFIRMED',
+      state: confirmed ? 'CONFIRMED' : 'PENDING',
+      transactionId: signature,
+      confirmationStatus: status.confirmationStatus || null,
+      slot: status.slot,
     };
   }
 
   async send(input = {}) {
-    const asset = text(input.asset).toUpperCase();
-    if (!asset) throw new Error('asset is required.');
-    if (!text(input.destinationAddress)) throw new Error('destinationAddress is required.');
-    if (asset === 'SOL') return this.sendNative(input);
-    if (!text(input.mintAddress)) throw new Error(`mintAddress is required to transfer ${asset} on Solana.`);
-    return this.sendToken(input);
-  }
+    const prepared = await this.build(input);
+    const signed = this.sign(prepared);
+    const submitted = await this.broadcast(signed);
+    const confirmation = await this.confirm(submitted.transactionId);
 
-  async createSraMint(input = {}) {
-    const { connection, payer } = this.ensure();
-    const decimals = Number.isInteger(input.decimals) ? input.decimals : 8;
-    const targetUnits = exactUnits(input.authorizedSupply, decimals, 'authorizedSupply');
-    if (input.mintAddress) {
-      const mint = publicKey(input.mintAddress, 'mintAddress');
-      const mintInfo = await getMint(connection, mint, 'confirmed');
-      if (mintInfo.decimals !== decimals) throw new Error('SRA mint decimals do not match the requested decimals.');
-      const issuedUnits = exactUnits(input.issuedSupply || '0', decimals, 'issuedSupply');
-      if (targetUnits < issuedUnits) throw new Error('Platform SRA supply is below on-chain issued supply; mint synchronization cannot reduce supply.');
-      if (targetUnits === issuedUnits) return { symbol: 'SRA', mintAddress: mint.toBase58(), platformTokenAccount: input.platformTokenAccount, authorizedSupply: Number(decimal(targetUnits, decimals)), issuedSupply: Number(decimal(issuedUnits, decimals)), decimals, mintedQuantity: 0, state: 'ACTIVE', existing: true, synchronized: true };
-      const account = input.platformTokenAccount ? publicKey(input.platformTokenAccount, 'platformTokenAccount') : (await getOrCreateAssociatedTokenAccount(connection, payer, mint, payer.publicKey)).address;
-      const delta = targetUnits - issuedUnits;
-      const transactionSignature = await mintTo(connection, payer, mint, account, payer, delta);
-      return { symbol: 'SRA', mintAddress: mint.toBase58(), platformTokenAccount: account.toBase58(), authorizedSupply: Number(decimal(targetUnits, decimals)), issuedSupply: Number(decimal(targetUnits, decimals)), decimals, transactionSignature, mintedQuantity: Number(decimal(delta, decimals)), state: 'ACTIVE', existing: true, synchronized: true };
-    }
-    const mint = await createMint(connection, payer, payer.publicKey, payer.publicKey, decimals);
-    const account = await getOrCreateAssociatedTokenAccount(connection, payer, mint, payer.publicKey);
-    const transactionSignature = await mintTo(connection, payer, mint, account.address, payer, targetUnits);
-    return { symbol: 'SRA', mintAddress: mint.toBase58(), platformTokenAccount: account.address.toBase58(), authorizedSupply: Number(decimal(targetUnits, decimals)), issuedSupply: Number(decimal(targetUnits, decimals)), decimals, transactionSignature, mintedQuantity: Number(decimal(targetUnits, decimals)), state: 'ACTIVE', existing: false };
-  }
-
-  async sendSra(input = {}) {
-    return this.send({ ...input, asset: 'SRA' });
+    return {
+      transferId: input.transferId,
+      network: NETWORK,
+      asset: normalize(input.asset),
+      amount: text(input.amount),
+      fromAddress: submitted.fromAddress,
+      destinationAddress: submitted.destination.toBase58(),
+      transactionId: submitted.transactionId,
+      confirmation,
+      state: confirmation.state,
+    };
   }
 }
