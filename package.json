@@ -28,6 +28,14 @@
     "test:integration": "npm run test:security && npm run test:transaction-safety && npm run test:settlement && npm run test:runtime && npm run test:lifecycle && npm run test:products && npm run test:production-routing && npm run test:admin-agent && npm run test:platform-asset && npm run test:admin-platform-asset-ui && npm run test:financial-history && npm run test:relationships && node --test --test-concurrency=1 test/edx-pipeline.test.js test/funding-engine.integration.test.js"
   },
   "engines": { "node": ">=20" },
-  "dependencies": { "express": "^4.21.2", "multer": "^1.4.5-lts.1", "openai": "^5.20.0", "pg": "^8.13.1", "ws": "^8.18.3" },
+  "dependencies": {
+    "@solana/spl-token": "0.4.14",
+    "@solana/web3.js": "1.98.4",
+    "express": "^4.21.2",
+    "multer": "^1.4.5-lts.1",
+    "openai": "^5.20.0",
+    "pg": "^8.13.1",
+    "ws": "^8.18.3"
+  },
   "devDependencies": { "supertest": "^7.1.4" }
 }
