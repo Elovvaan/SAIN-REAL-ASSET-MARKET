@@ -46,8 +46,6 @@ async function withIssuanceLock(service, key, work) {
         error.code = 'ON_CHAIN_ISSUANCE_IN_PROGRESS';
         throw error;
       }
-      // Refresh the projection cache after acquiring the cross-process lock so a worker
-      // observes any issuance completed by the previous lock holder.
       await service.domain.hydrate?.(['ON_CHAIN_PROJECTION']);
       return await work();
     } finally {
@@ -104,7 +102,7 @@ export function createOnChainProjectionRouter(service) {
 
       const requestedNetwork = network(req.body?.network || service.network);
       const adapter = adapters.get(requestedNetwork);
-      if (!adapter || typeof adapter.issueRepresentation !== 'function') {
+      if (!adapter || typeof adapter.prepareIssuance !== 'function' || typeof adapter.submitPreparedIssuance !== 'function') {
         const error = new Error(`On-chain issuance is not available for ${requestedNetwork}.`);
         error.code = 'ON_CHAIN_ISSUANCE_UNSUPPORTED';
         throw error;
@@ -127,7 +125,9 @@ export function createOnChainProjectionRouter(service) {
         let projection = service.listProjections({ instrumentId })
           .find((item) => network(item.network) === requestedNetwork) || null;
 
-        if (projection?.mintAddress) return { created: false, projection, alreadyIssued: true };
+        if (projection?.mintAddress && String(projection.status).toUpperCase() === 'ACTIVE') {
+          return { created: false, projection, alreadyIssued: true };
+        }
 
         if (!projection) {
           projection = await service.createProjection({
@@ -145,7 +145,10 @@ export function createOnChainProjectionRouter(service) {
           throw error;
         }
 
-        const authorizedSupplyExact = text(projection.authorizedSupplyExact ?? projection.authorizedSupply);
+        const authorizedSupplyExact = text(
+          projection.authorizedSupplyExact
+          || service.authorizedSupplyExactFor(instrumentId),
+        );
         if (!authorizedSupplyExact) throw new Error('Projection authorized supply is missing.');
         if (projection.authorizedSupplyExact !== authorizedSupplyExact || projection.cluster !== adapterStatus.cluster) {
           projection = {
@@ -165,27 +168,76 @@ export function createOnChainProjectionRouter(service) {
         }
         if (String(projection.status).toUpperCase() !== 'APPROVED') throw new Error(`On-chain representation cannot be issued from ${projection.status}.`);
 
-        // This performs exact u64 and exact authorized-supply checks without RPC.
         adapter.validateIssuance(projection, { amount: req.body.amount, decimals: req.body.decimals });
-        const issuance = await adapter.issueRepresentation(projection, { amount: req.body.amount, decimals: req.body.decimals });
-        let updated = await service.recordIssuance(projection.projectionId, issuance, actor);
-        updated = {
-          ...updated,
-          cluster: issuance.cluster,
-          authorizedSupplyExact,
-          issuedSupplyExact: issuance.issuedSupplyExact,
-          issuedSupplyUnits: issuance.issuedSupplyUnits,
-          authorizedSupplyUnits: issuance.authorizedSupplyUnits,
-          updatedAt: new Date().toISOString(),
-        };
-        await service.domain.put('ON_CHAIN_PROJECTION', projection.projectionId, updated, {
-          actorId: actor,
-          eventType: 'ON_CHAIN_REPRESENTATION_ISSUANCE_FINALIZED',
-        });
+
+        let pending = projection.pendingIssuance || null;
+        if (pending) {
+          if (text(pending.issuedSupplyExact) !== text(req.body.amount) || Number(pending.decimals) !== Number(req.body.decimals)) {
+            const error = new Error('A different issuance is already pending for this instrument. Resume the pending issuance before changing amount or decimals.');
+            error.code = 'ON_CHAIN_ISSUANCE_PENDING_CONFLICT';
+            throw error;
+          }
+        } else {
+          pending = await adapter.prepareIssuance(projection, { amount: req.body.amount, decimals: req.body.decimals });
+          projection = await service.recordIssuancePending(projection.projectionId, pending, actor);
+        }
+
+        let issuance;
+        try {
+          issuance = await adapter.submitPreparedIssuance(pending);
+        } catch (error) {
+          // The exact signed transaction remains persisted on the projection. A retry
+          // rebroadcasts those same bytes rather than creating a second mint.
+          error.code = error.code || 'ON_CHAIN_ISSUANCE_SUBMISSION_UNCERTAIN';
+          throw error;
+        }
+
+        if (issuance.confirmation?.state === 'FAILED') {
+          const failed = {
+            ...projection,
+            issuanceState: 'FAILED',
+            pendingIssuance: null,
+            lastIssuanceFailure: {
+              transactionId: issuance.issuanceTransactionId,
+              confirmation: issuance.confirmation,
+              failedAt: new Date().toISOString(),
+            },
+            updatedAt: new Date().toISOString(),
+          };
+          await service.domain.put('ON_CHAIN_PROJECTION', projection.projectionId, failed, {
+            actorId: actor,
+            eventType: 'ON_CHAIN_REPRESENTATION_ISSUANCE_FAILED',
+          });
+          const error = new Error('Atomic token issuance transaction failed on network. No mint or initial supply was committed.');
+          error.code = 'ON_CHAIN_ISSUANCE_FAILED';
+          error.transactionId = issuance.issuanceTransactionId;
+          throw error;
+        }
+
+        if (issuance.confirmation?.state !== 'CONFIRMED') {
+          const stillPending = {
+            ...projection,
+            issuanceState: 'PENDING_NETWORK',
+            pendingIssuance: {
+              ...pending,
+              issuanceTransactionId: issuance.issuanceTransactionId,
+              confirmation: issuance.confirmation,
+              lastSubmittedAt: new Date().toISOString(),
+            },
+            updatedAt: new Date().toISOString(),
+          };
+          await service.domain.put('ON_CHAIN_PROJECTION', projection.projectionId, stillPending, {
+            actorId: actor,
+            eventType: 'ON_CHAIN_REPRESENTATION_ISSUANCE_PENDING',
+          });
+          return { created: false, pending: true, projection: stillPending, issuance };
+        }
+
+        const updated = await service.recordIssuance(projection.projectionId, issuance, actor);
         return { created: true, projection: updated, issuance };
       });
 
-      return res.status(result.created ? 201 : 200).json(result);
+      return res.status(result.pending ? 202 : (result.created ? 201 : 200)).json(result);
     } catch (error) { return handle(res, error); }
   });
 
