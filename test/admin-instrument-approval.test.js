@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { ListingReadinessBatchService } from '../services/listing-readiness-batch-service.js';
+import { InstrumentApprovalService } from '../services/instrument-approval-service.js';
 import { RECORD_TYPES } from '../services/persistent-domain-service.js';
 
 class MemoryDomain {
@@ -18,8 +18,8 @@ test('direct instrument approval moves DRAFT to APPROVED and clears only the ins
   const domain = new MemoryDomain();
   await domain.put(RECORD_TYPES.SRA_INSTRUMENT,'SRI-1',{instrumentId:'SRI-1',state:'DRAFT',statusHistory:[]});
   await domain.put(RECORD_TYPES.MARKETPLACE_LISTING,'ML-1',{listingId:'ML-1',instrumentId:'SRI-1',state:'PREPARED',readiness:{instrumentReviewed:false},blockers:['ADMINISTRATIVE_INSTRUMENT_REVIEW_REQUIRED','MARKET_ACCESS_RULES_REQUIRED']});
-  const service = new ListingReadinessBatchService(domain);
-  const result = await service.approve({approval:'APPROVE',instrumentId:'SRI-1'},'ADMIN-1');
+  const service = new InstrumentApprovalService(domain);
+  const result = await service.approve('SRI-1','ADMIN-1');
   assert.equal(result.instrument.state,'APPROVED');
   assert.equal(domain.get(RECORD_TYPES.SRA_INSTRUMENT,'SRI-1').approvedBy,'ADMIN-1');
   const listing=domain.get(RECORD_TYPES.MARKETPLACE_LISTING,'ML-1');
@@ -27,14 +27,17 @@ test('direct instrument approval moves DRAFT to APPROVED and clears only the ins
   assert.deepEqual(listing.blockers,['MARKET_ACCESS_RULES_REQUIRED']);
 });
 
-test('admin bootstrap includes the instrument approval control after the suite shell', () => {
+test('admin bootstrap loads workstation controls and instrument UI calls dedicated approval routes', () => {
   const bootstrap=fs.readFileSync(new URL('../public/admin/admin-bootstrap.js',import.meta.url),'utf8');
   const shell=bootstrap.indexOf('/admin/admin-suite-shell.js');
-  const approval=bootstrap.indexOf('/admin/admin-instrument-approvals.js');
-  assert.ok(shell>=0 && approval>shell);
-  const ui=fs.readFileSync(new URL('../public/admin/admin-instrument-approvals.js',import.meta.url),'utf8');
-  assert.match(ui,/data-instrument-approve/);
-  assert.match(ui,/instrumentId/);
-  assert.match(ui,/approval:\s*'APPROVE'/);
+  const workstation=bootstrap.indexOf('/admin/admin-workstation-controls.js');
+  assert.ok(shell>=0 && workstation>shell);
+
+  const ui=fs.readFileSync(new URL('../public/admin/admin-workstation-controls.js',import.meta.url),'utf8');
+  assert.match(ui,/\/api\/admin\/instruments\/approval-status/);
+  assert.match(ui,/\/api\/admin\/instruments\/\$\{encodeURIComponent\(id\)\}\/approve/);
+  assert.match(ui,/\/representation\/approve/);
+  assert.match(ui,/approval:'APPROVE'/);
   assert.match(ui,/SRAAdminDataClient/);
+  assert.doesNotMatch(ui,/listing-readiness-batch\/approve[^\n]+instrumentId/);
 });
