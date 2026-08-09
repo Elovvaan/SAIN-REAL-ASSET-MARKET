@@ -133,6 +133,121 @@ export class TreasuryTransferReadinessService {
     };
   }
 
+  async prepare(input = {}, actorId = 'SRA_PLATFORM_ADMIN') {
+    const idempotencyKey = required(input.idempotencyKey, 'idempotencyKey');
+    const instructionId = transferInstructionId(idempotencyKey);
+    const existing = this.domain.get(TX, instructionId);
+    if (existing) return {
+      created: false,
+      transferInstruction: existing,
+      paymentInstruction: existing,
+      exportPackage: this.domain.get(RECORD_TYPES.EXPORT_PACKAGE, existing.exportPackageId),
+    };
+
+    const destination = this.destination(required(input.destinationId, 'destinationId'));
+    if (blocked(destination) || destination.state !== 'ACTIVE' || destination.verificationState !== 'VERIFIED') throw new Error('Destination is not verified and available.');
+    if (String(destination.route || '').toUpperCase() !== 'ACH') throw new Error('Transfer Readiness v1 requires an ACH destination.');
+    const transferAmount = amount(input.amountUsd);
+    const createdAt = now();
+    const exportPackageId = packageId(instructionId);
+    const instruction = {
+      transactionId: instructionId,
+      transferInstructionId: instructionId,
+      transactionType: 'EXTERNAL_TRANSFER_INSTRUCTION',
+      exportPackageId,
+      destinationId: destination.destinationId,
+      destinationType: DESTINATION_TYPE,
+      participantId: destination.ownerId,
+      quantity: transferAmount,
+      amountUsd: transferAmount,
+      unit: 'USD',
+      currency: 'USD',
+      route: 'ACH',
+      destinationReference: destination.destinationReference,
+      sourceType: 'PLATFORM_TREASURY_CASH',
+      treasuryProfileId: 'SRA_PLATFORM_TREASURY',
+      sourceAccountId: TREASURY_CASH_ACCOUNT_ID,
+      state: 'PREPARED',
+      executionState: 'PREPARED',
+      fundsState: 'UNRESERVED',
+      externalWithdrawalState: 'AWAITING_EXECUTION_AUTHORIZATION',
+      preparedBy: actorId,
+      preparedAt: createdAt,
+      createdAt,
+      updatedAt: createdAt,
+      statusHistory: [{ state: 'PREPARED', actorId, occurredAt: createdAt }],
+    };
+    const exportPackage = {
+      exportPackageId,
+      sourceType: 'PLATFORM_TREASURY_CASH',
+      treasuryProfileId: 'SRA_PLATFORM_TREASURY',
+      sourceAccountId: TREASURY_CASH_ACCOUNT_ID,
+      participantId: destination.ownerId,
+      destinationId: destination.destinationId,
+      quantity: transferAmount,
+      amountUsd: transferAmount,
+      unit: 'USD',
+      currency: 'USD',
+      route: 'ACH',
+      state: 'PREPARED',
+      exportExecutionState: 'PREPARED',
+      transferInstructionId: instructionId,
+      authorizationSource: null,
+      createdAt,
+      updatedAt: createdAt,
+      statusHistory: [{ state: 'PREPARED', actorId, occurredAt: createdAt }],
+    };
+    await this.domain.atomicPut([
+      { type: TX, id: instructionId, payload: instruction, actorId, eventType: 'TREASURY_PAYMENT_PREPARED' },
+      { type: RECORD_TYPES.EXPORT_PACKAGE, id: exportPackageId, payload: exportPackage, actorId, eventType: 'TREASURY_PAYMENT_EXPORT_LINEAGE_PREPARED' },
+    ]);
+    return { created: true, transferInstruction: instruction, paymentInstruction: instruction, exportPackage };
+  }
+
+  async authorizeForExecution(transferInstructionIdValue, actorId = 'SRA_PLATFORM_ADMIN') {
+    const instructionId = required(transferInstructionIdValue, 'transferInstructionId');
+    const instruction = this.domain.get(TX, instructionId);
+    if (!instruction || instruction.transactionType !== 'EXTERNAL_TRANSFER_INSTRUCTION' || String(instruction.route || '').toUpperCase() !== 'ACH') {
+      throw new Error('Prepared ACH transfer instruction was not found.');
+    }
+    if (instruction.state === 'READY_TO_SEND' && instruction.executionState === 'AUTHORIZED' && instruction.fundsState === 'HELD') {
+      return { changed: false, transferInstruction: instruction, paymentInstruction: instruction, exportPackage: this.domain.get(RECORD_TYPES.EXPORT_PACKAGE, instruction.exportPackageId) };
+    }
+    if (instruction.state !== 'PREPARED' || instruction.executionState !== 'PREPARED' || instruction.fundsState !== 'UNRESERVED') {
+      throw new Error(`ACH transfer instruction cannot be authorized from ${instruction.state}/${instruction.executionState}/${instruction.fundsState}.`);
+    }
+
+    const preview = this.preview({ destinationId: instruction.destinationId, amountUsd: instruction.amountUsd });
+    const authorizedAt = now();
+    const authorized = {
+      ...instruction,
+      state: 'READY_TO_SEND',
+      executionState: 'AUTHORIZED',
+      fundsState: 'HELD',
+      externalWithdrawalState: 'AUTHORIZED_FOR_SEND',
+      authorizedBy: actorId,
+      authorizedAt,
+      updatedAt: authorizedAt,
+      statusHistory: [...(instruction.statusHistory || []), { state: 'READY_TO_SEND', actorId, occurredAt: authorizedAt }],
+    };
+    const pkg = instruction.exportPackageId ? this.domain.get(RECORD_TYPES.EXPORT_PACKAGE, instruction.exportPackageId) : null;
+    const changes = [{ type: TX, id: instructionId, payload: authorized, actorId, eventType: 'TREASURY_PAYMENT_AUTHORIZED' }];
+    let authorizedPackage = pkg;
+    if (pkg) {
+      authorizedPackage = {
+        ...pkg,
+        state: 'READY_TO_SEND',
+        exportExecutionState: 'AUTHORIZED',
+        authorizationSource: instructionId,
+        updatedAt: authorizedAt,
+        statusHistory: [...(pkg.statusHistory || []), { state: 'READY_TO_SEND', actorId, occurredAt: authorizedAt }],
+      };
+      changes.push({ type: RECORD_TYPES.EXPORT_PACKAGE, id: pkg.exportPackageId, payload: authorizedPackage, actorId, eventType: 'TREASURY_PAYMENT_EXPORT_LINEAGE_AUTHORIZED' });
+    }
+    await this.domain.atomicPut(changes);
+    return { changed: true, preview, transferInstruction: authorized, paymentInstruction: authorized, exportPackage: authorizedPackage };
+  }
+
   async approve(input = {}, actorId = 'SRA_PLATFORM_ADMIN') {
     if (String(input.approval || '').toUpperCase() !== 'APPROVE') throw new Error('Explicit administrator payment authorization is required.');
     const idempotencyKey = required(input.idempotencyKey, 'idempotencyKey');
@@ -144,65 +259,14 @@ export class TreasuryTransferReadinessService {
     locks.set(key, prior.then(() => current));
     await prior;
     try {
-      const existing = this.domain.get(TX, instructionId);
-      if (existing) return { created: false, transferInstruction: existing, paymentInstruction: existing, exportPackage: this.domain.get(RECORD_TYPES.EXPORT_PACKAGE, existing.exportPackageId) };
-
-      const preview = this.preview(input);
-      const destination = this.destination(preview.destinationId);
-      const createdAt = now();
-      const exportPackageId = packageId(instructionId);
-      const instruction = {
-        transactionId: instructionId,
-        transferInstructionId: instructionId,
-        transactionType: 'EXTERNAL_TRANSFER_INSTRUCTION',
-        exportPackageId,
-        destinationId: destination.destinationId,
-        destinationType: DESTINATION_TYPE,
-        participantId: destination.ownerId,
-        quantity: preview.amountUsd,
-        amountUsd: preview.amountUsd,
-        unit: 'USD',
-        currency: 'USD',
-        route: 'ACH',
-        destinationReference: destination.destinationReference,
-        sourceType: 'PLATFORM_TREASURY_CASH',
-        treasuryProfileId: 'SRA_PLATFORM_TREASURY',
-        sourceAccountId: TREASURY_CASH_ACCOUNT_ID,
-        state: 'READY_TO_SEND',
-        executionState: 'AUTHORIZED',
-        fundsState: 'HELD',
-        externalWithdrawalState: 'AUTHORIZED_FOR_SEND',
-        authorizedBy: actorId,
-        authorizedAt: createdAt,
-        createdAt,
-        updatedAt: createdAt,
-        statusHistory: [{ state: 'READY_TO_SEND', actorId, occurredAt: createdAt }],
+      const prepared = await this.prepare(input, actorId);
+      const authorized = await this.authorizeForExecution(instructionId, actorId);
+      return {
+        created: prepared.created,
+        transferInstruction: authorized.transferInstruction,
+        paymentInstruction: authorized.paymentInstruction,
+        exportPackage: authorized.exportPackage,
       };
-      const exportPackage = {
-        exportPackageId,
-        sourceType: 'PLATFORM_TREASURY_CASH',
-        treasuryProfileId: 'SRA_PLATFORM_TREASURY',
-        sourceAccountId: TREASURY_CASH_ACCOUNT_ID,
-        participantId: destination.ownerId,
-        destinationId: destination.destinationId,
-        quantity: preview.amountUsd,
-        amountUsd: preview.amountUsd,
-        unit: 'USD',
-        currency: 'USD',
-        route: 'ACH',
-        state: 'READY_TO_SEND',
-        exportExecutionState: 'AUTHORIZED',
-        transferInstructionId: instructionId,
-        authorizationSource: instructionId,
-        createdAt,
-        updatedAt: createdAt,
-        statusHistory: [{ state: 'READY_TO_SEND', actorId, occurredAt: createdAt }],
-      };
-      await this.domain.atomicPut([
-        { type: TX, id: instructionId, payload: instruction, actorId, eventType: 'TREASURY_PAYMENT_AUTHORIZED' },
-        { type: RECORD_TYPES.EXPORT_PACKAGE, id: exportPackageId, payload: exportPackage, actorId, eventType: 'TREASURY_PAYMENT_EXPORT_LINEAGE_CREATED' },
-      ]);
-      return { created: true, transferInstruction: instruction, paymentInstruction: instruction, exportPackage };
     } finally {
       release();
       locks.delete(key);
@@ -219,6 +283,7 @@ export class TreasuryTransferReadinessService {
     const transfers = this.list();
     return {
       transferCount: transfers.length,
+      prepared: transfers.filter((item) => item.state === 'PREPARED' && item.executionState === 'PREPARED').length,
       readyToSend: transfers.filter((item) => item.state === 'READY_TO_SEND' && item.executionState === 'AUTHORIZED').length,
       reservedUsd: Number(transfers.filter(fundsHeld).reduce((sum, item) => sum + Number(item.amountUsd || 0), 0).toFixed(8)),
       latestTransfer: transfers[0] || null,

@@ -14,13 +14,14 @@
   };
 
   function eligibleAchInstructions(payload) {
-    return (payload?.records?.settlementInstructions || []).filter((record) =>
-      String(record?.transactionType || '').toUpperCase() === 'EXTERNAL_TRANSFER_INSTRUCTION'
-      && String(record?.route || '').toUpperCase() === 'ACH'
-      && Number(record?.amountUsd ?? record?.amount ?? record?.quantity) > 0
-      && record?.state === 'READY_TO_SEND'
-      && record?.executionState === 'AUTHORIZED'
-      && record?.fundsState === 'HELD');
+    return (payload?.records?.settlementInstructions || []).filter((record) => {
+      if (String(record?.transactionType || '').toUpperCase() !== 'EXTERNAL_TRANSFER_INSTRUCTION') return false;
+      if (String(record?.route || '').toUpperCase() !== 'ACH') return false;
+      if (Number(record?.amountUsd ?? record?.amount ?? record?.quantity) <= 0) return false;
+      const prepared = record?.state === 'PREPARED' && record?.executionState === 'PREPARED' && record?.fundsState === 'UNRESERVED';
+      const authorizedRetry = record?.state === 'READY_TO_SEND' && record?.executionState === 'AUTHORIZED' && record?.fundsState === 'HELD';
+      return prepared || authorizedRetry;
+    });
   }
 
   function networkOptions(status) {
@@ -51,7 +52,7 @@
           <label><span>Amount</span><input name="amount" type="text" inputmode="decimal" placeholder="Amount"></label>
           <label><span>Destination address</span><input name="destinationAddress" type="text" placeholder="Destination address"></label>
         </div>
-        <p data-ach-instruction-note style="color:#9a9a9a;font-size:12px;line-height:1.45;margin:12px 0">Routing and account numbers are used only to prepare the ACH destination and are not stored in SRA. The resulting instruction stores masked destination evidence and the authorized amount.</p>
+        <p data-ach-instruction-note style="color:#9a9a9a;font-size:12px;line-height:1.45;margin:12px 0">Routing and account numbers are used only to prepare the ACH destination and are not stored in SRA. Preparation does not reserve Treasury cash; cash availability is checked and reserved only when you execute in Destination Verification.</p>
         <p data-onchain-instruction-note style="display:none;color:#9a9a9a;font-size:12px;line-height:1.45;margin:12px 0">On-chain preparation records only network + asset + amount + destination address. It does not build, sign, or broadcast until you execute the prepared instruction in Destination Verification.</p>
         <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><button type="submit">Prepare Settlement Instruction</button><span data-settlement-instruction-result style="color:#d6a92f;font-size:12px"></span></div>
       </form>
@@ -111,7 +112,7 @@
         form.elements.routingNumber.value = '';
         form.elements.accountNumber.value = '';
         const instruction = prepared.transferInstruction || prepared.paymentInstruction || {};
-        result.textContent = `Prepared ${instruction.transferInstructionId || instruction.transactionId || 'settlement instruction'} · USD ${money(instruction.amountUsd ?? values.amountUsd)} · READY TO SEND`;
+        result.textContent = `Prepared ${instruction.transferInstructionId || instruction.transactionId || 'settlement instruction'} · USD ${money(instruction.amountUsd ?? values.amountUsd)} · PREPARED`;
       }
       client()?.refresh('settlement-instruction-prepared');
       window.dispatchEvent(new CustomEvent('sra:admin-refresh',{ detail:{ source:'settlement-instruction-prepared' } }));
@@ -126,7 +127,8 @@
     return instructions.map((record) => {
       const amount = record.amountUsd ?? record.amount ?? record.quantity;
       const currency = String(record.currency || 'USD').toUpperCase();
-      return `<option value="${esc(record.transferInstructionId || record.transactionId)}">${esc(record.transferInstructionId || record.transactionId)} · ${esc(currency)} ${money(amount)}</option>`;
+      const state = String(record.state || 'PREPARED').toUpperCase();
+      return `<option value="${esc(record.transferInstructionId || record.transactionId)}">${esc(record.transferInstructionId || record.transactionId)} · ${esc(currency)} ${money(amount)} · ${esc(state)}</option>`;
     }).join('');
   }
 
@@ -139,7 +141,7 @@
     const chainReady = (onChainStatus?.networks || []).some((item) => item.ready);
     return `<section class="admin-record-card" data-settlement-execution>
       <header><strong>Execute Prepared Instruction</strong><em>DESTINATION VERIFICATION</em></header>
-      <p style="color:#9a9a9a;margin:0 0 14px;line-height:1.5">Select a prepared instruction and verify the destination details before execution. This is the point where the selected rail actually submits the transfer.</p>
+      <p style="color:#9a9a9a;margin:0 0 14px;line-height:1.5">Select a prepared instruction and verify the destination details before execution. This is the point where Treasury cash is checked/reserved and the selected rail actually submits the transfer.</p>
       <form data-settlement-execution-form autocomplete="off">
         <div class="admin-record-grid">
           <label><span>Route</span><select name="route" data-execution-route required style="width:100%;background:#050505;border:1px solid #292929;border-radius:10px;color:#f5f5f5;padding:12px"><option value="ACH">ACH</option><option value="ON_CHAIN">On-chain</option></select></label>
@@ -154,7 +156,7 @@
         <div data-onchain-execution-fields class="admin-record-grid" style="display:none;margin-top:12px">
           <label><span>On-chain instruction</span><select name="transferId" style="width:100%;background:#050505;border:1px solid #292929;border-radius:10px;color:#f5f5f5;padding:12px"><option value="">Select prepared on-chain instruction</option>${onChainInstructionOptions(onChainInstructions)}</select></label>
         </div>
-        <p data-ach-execution-status style="color:#9a9a9a;font-size:12px;line-height:1.45;margin:12px 0">ACH connection: ${achReady ? 'READY' : 'NOT READY'} · endpoint ${achStatus?.endpointConfigured ? 'configured' : 'not configured'} · credential ${achStatus?.credentialConfigured ? 'configured' : 'not configured'}. Bank details are supplied transiently at execution.</p>
+        <p data-ach-execution-status style="color:#9a9a9a;font-size:12px;line-height:1.45;margin:12px 0">ACH connection: ${achReady ? 'READY' : 'NOT READY'} · endpoint ${achStatus?.endpointConfigured ? 'configured' : 'not configured'} · credential ${achStatus?.credentialConfigured ? 'configured' : 'not configured'}. At execution, SRA checks available Treasury cash, reserves the instruction amount, then submits to the configured provider. Bank details are supplied transiently.</p>
         <p data-onchain-execution-status style="display:none;color:#9a9a9a;font-size:12px;line-height:1.45;margin:12px 0">On-chain adapter: ${chainReady ? 'READY' : 'NOT READY'}. Execution uses the prepared network + asset + amount + destination and follows build → sign → broadcast → transaction ID → confirm → record.</p>
         <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><button type="submit" data-execute-button>Execute ACH</button><span data-settlement-execution-result style="color:#d6a92f;font-size:12px"></span></div>
       </form>
@@ -201,7 +203,7 @@
         });
         result.textContent = `${response.state} · ${response.transactionId || 'transaction ID pending'}`;
       } else {
-        result.textContent = 'Submitting ACH through configured provider…';
+        result.textContent = 'Checking Treasury cash, reserving amount, and submitting ACH…';
         const response = await request('/api/admin/treasury-transfer-readiness/ach/execute', {
           method:'POST',
           headers:{'Content-Type':'application/json'},

@@ -53,6 +53,8 @@ export async function installTreasuryTransferReadinessRoutes({ router, domain, r
       treasury: treasury.summary(),
       execution: liveExecution.status(),
       boundaries: {
+        preparationReservesCash: false,
+        cashReservationOccursAtExecution: true,
         providerConnectionRequiredForSend: true,
         authoritativePaymentRecord: 'EXTERNAL_TRANSFER_INSTRUCTION',
         receivingConfirmationRequiredForReconciliation: true,
@@ -96,15 +98,14 @@ export async function installTreasuryTransferReadinessRoutes({ router, domain, r
       }, session.id);
       const amountUsd = Number(req.body?.amountUsd);
       if (!Number.isFinite(amountUsd) || amountUsd <= 0) throw new Error('amountUsd must be greater than zero.');
-      const transferResult = await transfers.approve({
-        approval: 'APPROVE',
+      const transferResult = await transfers.prepare({
         destinationId: destinationResult.destination.destinationId,
         amountUsd,
         idempotencyKey: req.body?.idempotencyKey || `MANUAL-ACH-${crypto.randomUUID().toUpperCase()}`,
       }, session.id);
       if (database?.audit) await database.audit({
         actorId: session.id,
-        eventType: 'SRA_TREASURY_ACH_PAYMENT_AUTHORIZED',
+        eventType: 'SRA_TREASURY_ACH_PAYMENT_PREPARED',
         objectType: 'EXTERNAL_TRANSFER_INSTRUCTION',
         objectId: transferResult.transferInstruction.transferInstructionId,
         payload: {
@@ -114,6 +115,7 @@ export async function installTreasuryTransferReadinessRoutes({ router, domain, r
           routingLast4: prepared.routingLast4,
           amountUsd: transferResult.transferInstruction.amountUsd,
           fundsState: transferResult.transferInstruction.fundsState,
+          cashReserved: false,
           rawBankDetailsStored: false,
         },
       });
@@ -130,6 +132,7 @@ export async function installTreasuryTransferReadinessRoutes({ router, domain, r
         paymentInstruction: transferResult.paymentInstruction,
         exportPackage: transferResult.exportPackage,
         externalSubmissionExecuted: false,
+        cashReservationExecuted: false,
       });
     } catch (error) {
       return res.status(422).json({ error: error.message, code: 'SRA_MANUAL_ACH_PREPARATION_FAILED' });
@@ -139,6 +142,10 @@ export async function installTreasuryTransferReadinessRoutes({ router, domain, r
   router.post('/api/admin/treasury-transfer-readiness/ach/execute', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
     try {
+      const transferInstructionId = String(req.body?.transferInstructionId || '').trim();
+      if (!transferInstructionId) throw new Error('transferInstructionId is required.');
+
+      const authorization = await transfers.authorizeForExecution(transferInstructionId, session.id);
       const result = await liveExecution.executeAch(req.body || {}, session.id);
       if (database?.audit) await database.audit({
         actorId: session.id,
@@ -148,15 +155,18 @@ export async function installTreasuryTransferReadinessRoutes({ router, domain, r
         payload: {
           amountUsd: result.instruction.amountUsd ?? result.instruction.quantity,
           rail: 'ACH',
+          treasuryCashBalanceUsd: authorization.preview?.treasuryCashBalanceUsd ?? null,
+          treasuryReservedUsd: authorization.preview?.treasuryReservedUsd ?? null,
+          treasuryAvailableUsd: authorization.preview?.treasuryAvailableUsd ?? null,
           providerReference: result.executionEvidence.providerReference,
           providerStatus: result.executionEvidence.providerStatus,
           receivingConfirmationRequired: true,
           rawBankDetailsStored: false,
         },
       });
-      return res.status(202).json(result);
+      return res.status(202).json({ ...result, treasuryAuthorization: authorization.preview || null });
     } catch (error) {
-      return res.status(422).json({ error: error.message, code: error.code || 'SRA_TREASURY_ACH_EXECUTION_FAILED', executionEvidence: error.executionEvidence || null });
+      return res.status(422).json({ error: error.message, code: error.code || 'SRA_TREASURY_ACH_EXECUTION_FAILED', executionEvidence: error.executionEvidence || null, assessment: error.assessment || null });
     }
   });
 
