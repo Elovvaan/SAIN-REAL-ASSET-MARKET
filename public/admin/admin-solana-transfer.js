@@ -1,149 +1,19 @@
 (()=>{
   if(window.__sraAdminOnChainTransferInstalled)return;
   window.__sraAdminOnChainTransferInstalled=true;
-
   const mounted=new WeakSet();
-  const operationId=()=>`OCT-${crypto.randomUUID().split('-')[0].toUpperCase()}`;
+  const ownedTabs=new Set(['Coinbase','FedWire','ACH','Solana','Export Adapters']);
   const esc=value=>String(value??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;');
-
-  async function req(url,o={}){
-    const r=await fetch(url,{
-      credentials:'same-origin',
-      cache:'no-store',
-      headers:{Accept:'application/json',...(o.headers||{})},
-      ...o,
-    });
-    const p=await r.json().catch(()=>({}));
-    if(!r.ok){
-      const e=new Error(p.error||`HTTP ${r.status}`);
-      e.transactionId=p.transactionId||null;
-      throw e;
-    }
-    return p;
-  }
-
-  function networkOptions(status){
-    return (status.networks||[])
-      .map(({network})=>`<option value="${esc(network)}">${esc(network)}</option>`)
-      .join('');
-  }
-
-  function clearOwnedCards(controls){
-    controls?.querySelectorAll('[data-on-chain-transfer],[data-settlement-rail-connection]').forEach(node=>node.remove());
-  }
-
-  function railMarkup(rail,status){
-    const normalized=rail==='FedWire'?'FEDWIRE':'ACH';
-    const item=(status.rails||[]).find(candidate=>String(candidate.rail||'').toUpperCase()===normalized)||{};
-    const label=normalized==='FEDWIRE'?'FedWire':'ACH';
-    return `<section class="admin-record-card" data-settlement-rail-connection>
-      <header><strong>${label} Connection</strong><em>${item.ready?'LIVE READY':'NOT READY'}</em></header>
-      <div class="admin-record-grid">
-        <div><span>Execution class</span><strong>PROVIDER SETTLEMENT RAIL</strong></div>
-        <div><span>Execution mode</span><strong>${esc(item.mode||'DISABLED')}</strong></div>
-        <div><span>Provider endpoint</span><strong>${item.endpointConfigured?'CONFIGURED':'NOT CONFIGURED'}</strong></div>
-        <div><span>Credential</span><strong>${item.credentialConfigured?'CONFIGURED':'NOT CONFIGURED'}</strong></div>
-        <div><span>Source account</span><strong>${item.accountConfigured?'CONFIGURED':'OPTIONAL / NOT CONFIGURED'}</strong></div>
-        <div><span>Automatic push</span><strong>NO</strong></div>
-      </div>
-      <p style="color:#9a9a9a;margin:14px 0 0;line-height:1.5">Operation flow: authorized payment instruction → submit to configured ${label} provider → provider reference/status → receiving confirmation → reconcile and record. This rail is separate from direct blockchain execution.</p>
-    </section>`;
-  }
-
-  async function render(workspace){
-    if(!workspace)return;
-    const controls=workspace.querySelector('.admin-workspace-controls');
-    if(!controls)return;
-    clearOwnedCards(controls);
-
-    const tab=workspace.dataset.activeTab;
-    if(tab==='ACH'||tab==='FedWire'){
-      try{
-        const status=await req('/api/admin/treasury-transfer-readiness/execution/status');
-        if(!controls.isConnected||workspace.dataset.activeTab!==tab)return;
-        controls.insertAdjacentHTML('afterbegin',railMarkup(tab,status));
-      }catch(error){
-        if(!controls.isConnected||workspace.dataset.activeTab!==tab)return;
-        controls.insertAdjacentHTML('afterbegin',`<section class="admin-record-card" data-settlement-rail-connection><header><strong>${esc(tab)} Connection</strong><em>UNAVAILABLE</em></header><p>${esc(error.message)}</p></section>`);
-      }
-      return;
-    }
-
-    if(tab!=='Solana')return;
-    try{
-      const status=await req('/api/on-chain/status');
-      if(!controls.isConnected||workspace.dataset.activeTab!=='Solana')return;
-      controls.insertAdjacentHTML('afterbegin',`
-        <section class="admin-record-card" data-on-chain-transfer>
-          <header><strong>On-Chain Transfer</strong><em>Asset → Network</em></header>
-          <form data-send-on-chain>
-            <select name="network" required>${networkOptions(status)}</select>
-            <input name="asset" required placeholder="Asset">
-            <input name="amount" required inputmode="decimal" placeholder="Amount">
-            <input name="destinationAddress" required placeholder="Destination address">
-            <button>Send On Chain</button>
-            <span data-result></span>
-          </form>
-          <p style="color:#9a9a9a;margin:14px 0 0;line-height:1.5">Operation flow: asset + amount + destination + network → build → sign → broadcast → transaction ID → confirm → record. Nothing is automatically pushed on-chain by this screen.</p>
-        </section>`);
-    }catch(error){
-      if(!controls.isConnected||workspace.dataset.activeTab!=='Solana')return;
-      controls.insertAdjacentHTML('afterbegin',`
-        <section class="admin-record-card" data-on-chain-transfer>
-          <strong>On-Chain Transfer</strong><p>${esc(error.message)}</p>
-        </section>`);
-    }
-  }
-
-  async function send(form){
-    const values=Object.fromEntries(new FormData(form).entries());
-    const button=form.querySelector('button');
-    const result=form.querySelector('[data-result]');
-    form.dataset.transferId||=operationId();
-    button.disabled=true;
-    result.textContent='Submitting…';
-
-    try{
-      const out=await req('/api/on-chain/transfers',{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({
-          transferId:form.dataset.transferId,
-          network:values.network,
-          asset:values.asset,
-          amount:values.amount,
-          destinationAddress:values.destinationAddress,
-        }),
-      });
-      result.textContent=`${out.state} · ${out.transactionId}`;
-      if(out.state==='CONFIRMED')delete form.dataset.transferId;
-    }catch(error){
-      result.textContent=error.transactionId
-        ? `SUBMITTED · ${error.transactionId}`
-        : error.message;
-    }finally{
-      button.disabled=false;
-    }
-  }
-
-  function mount(workspace){
-    if(!workspace||mounted.has(workspace))return;
-    mounted.add(workspace);
-    workspace.addEventListener('click',event=>{
-      if(!event.target.closest('[data-admin-tab]'))return;
-      queueMicrotask(()=>void render(workspace));
-    });
-    workspace.addEventListener('submit',event=>{
-      const form=event.target.closest('[data-send-on-chain]');
-      if(!form)return;
-      event.preventDefault();
-      void send(form);
-    });
-    window.addEventListener('sra:admin-workspace-synchronized',event=>{
-      if(event.detail?.workspaceId==='connections')void render(workspace);
-    });
-    void render(workspace);
-  }
-
+  const field=(label,value)=>`<div><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`;
+  async function req(url){const r=await fetch(url,{credentials:'same-origin',cache:'no-store',headers:{Accept:'application/json'}});const p=await r.json().catch(()=>({}));if(!r.ok)throw new Error(p.error||`HTTP ${r.status}`);return p;}
+  function clear(controls){controls?.querySelectorAll('[data-platform-connection-registry]').forEach(node=>node.remove());}
+  function configKeys(keys){return `<p style="color:#9a9a9a;margin:14px 0 0;line-height:1.5">Runtime configuration: ${keys.map(esc).join(' · ')}. Secret values are not displayed here.</p>`;}
+  function coinbaseMarkup(status){const connected=String(status.state||'').toUpperCase()==='CONNECTED';return `<section class="admin-record-card" data-platform-connection-registry><header><strong>Coinbase</strong><em>${connected?'CONNECTED':esc(status.state||'NOT CONNECTED')}</em></header><div class="admin-record-grid">${field('Connector',status.connectorId||'COINBASE_PUBLIC_MARKET_TRADES')}${field('Connection type','PUBLIC MARKET DATA')}${field('Feed',status.feed||'ADVANCED_TRADE_PUBLIC_MARKET_DATA')}${field('Channel',status.channel||'market_trades')}${field('Authentication required',status.authenticationRequired?'YES':'NO')}${field('Endpoint',status.endpoint||'—')}${field('Products',(status.products||[]).join(', ')||'—')}${field('Connected at',status.connectedAt||'—')}${field('Last trade',status.lastTradeAt||'—')}${field('Recorded trades',String(status.recordedTrades??0))}${field('Pipeline processed',String(status.pipelineProcessedTrades??0))}${field('Automatic outbound movement','NO')}</div><p style="color:#9a9a9a;margin:14px 0 0;line-height:1.5">Capability: inbound Coinbase market-trade observation. This connection records public trade data and feeds the existing observation / recognition / SRA representation pipeline. It is not an authenticated Coinbase brokerage, custody, trading, or withdrawal connection.</p>${configKeys(['COINBASE_PUBLIC_MARKET_ENABLED','COINBASE_PUBLIC_MARKET_WS_URL','COINBASE_PUBLIC_MARKET_PRODUCTS','COINBASE_PUBLIC_MARKET_MAX_TRADES_PER_MINUTE'])}</section>`;}
+  function railItem(status,rail){return (status.rails||[]).find(item=>String(item.rail||'').toUpperCase()===rail)||{};}
+  function railMarkup(status,rail){const item=railItem(status,rail);const label=rail==='FEDWIRE'?'FedWire':'ACH';const prefix=rail==='FEDWIRE'?'SRA_FEDWIRE':'SRA_ACH';return `<section class="admin-record-card" data-platform-connection-registry><header><strong>${label}</strong><em>${item.ready?'LIVE READY':'NOT READY'}</em></header><div class="admin-record-grid">${field('Connection type','PROVIDER SETTLEMENT RAIL')}${field('Execution mode',item.mode||'DISABLED')}${field('Provider endpoint',item.endpointConfigured?'CONFIGURED':'NOT CONFIGURED')}${field('Credential',item.credentialConfigured?'CONFIGURED':'NOT CONFIGURED')}${field('Source account',item.accountConfigured?'CONFIGURED':'NOT CONFIGURED')}${field('Direction','OUTBOUND SETTLEMENT')}${field('Operation owner','TREASURY / EXPORT & SETTLEMENT')}${field('Automatic push','NO')}</div><p style="color:#9a9a9a;margin:14px 0 0;line-height:1.5">Capability: submit an already-authorized payment instruction through the configured ${label} provider. Platform Connections only reports the connection. Payment preparation, authorization, submission evidence, receiving confirmation, and reconciliation remain in the Treasury / Export & Settlement workflow.</p>${configKeys(['SRA_SETTLEMENT_EXECUTION_MODE',`${prefix}_ENDPOINT`,`${prefix}_TOKEN or ${prefix}_API_KEY`,`${prefix}_ACCOUNT_ID`])}</section>`;}
+  function solanaMarkup(status){const network=(status.networks||[]).find(item=>String(item.network||'').toUpperCase()==='SOLANA')||{};return `<section class="admin-record-card" data-platform-connection-registry><header><strong>Solana</strong><em>${network.ready?'READY':'NOT READY'}</em></header><div class="admin-record-grid">${field('Connection type','DIRECT BLOCKCHAIN NETWORK')}${field('Network',network.network||'SOLANA')}${field('Cluster',network.cluster||'—')}${field('RPC',network.rpcConfigured?'CONFIGURED':'NOT CONFIGURED')}${field('Signer',network.signerConfigured?'CONFIGURED':'NOT CONFIGURED')}${field('Direction','ON-CHAIN TRANSFER')}${field('Execution API','/api/on-chain/transfers')}${field('Automatic push','NO')}</div><p style="color:#9a9a9a;margin:14px 0 0;line-height:1.5">Capability: generic on-chain transfer using asset + amount + destination + network → build → sign → broadcast → transaction ID → confirm → record. Platform Connections only reports network readiness; it does not execute a transfer.</p>${configKeys(['SOLANA_RPC_URL','SOLANA_CLUSTER','SOLANA_PAYER_SECRET_KEY'])}</section>`;}
+  function adapterSummary(coinbase,settlement,onchain){const cb=String(coinbase?.state||'').toUpperCase()==='CONNECTED';const ach=railItem(settlement||{},'ACH');const fed=railItem(settlement||{},'FEDWIRE');const sol=(onchain?.networks||[]).find(item=>String(item.network||'').toUpperCase()==='SOLANA')||{};const adapters=[['Coinbase Public Market','INBOUND MARKET DATA',cb?'CONNECTED':coinbase?.state||'NOT CONNECTED','Observation / recognition pipeline'],['ACH','OUTBOUND SETTLEMENT',ach.ready?'LIVE READY':'NOT READY','Treasury / Export & Settlement'],['FedWire','OUTBOUND SETTLEMENT',fed.ready?'LIVE READY':'NOT READY','Treasury / Export & Settlement'],['Solana','DIRECT ON-CHAIN',sol.ready?'READY':'NOT READY','Generic on-chain transfer API']];return `<section class="admin-record-card" data-platform-connection-registry><header><strong>Export & Connection Adapters</strong><em>REGISTERED CAPABILITIES</em></header><div class="admin-record-list" style="margin-top:12px">${adapters.map(([name,type,state,owner])=>`<article style="border-top:1px solid #292929;padding:12px 0"><strong>${esc(name)}</strong><div class="admin-record-grid" style="margin-top:8px">${field('Capability',type)}${field('State',state)}${field('Operational owner',owner)}</div></article>`).join('')}</div><p style="color:#9a9a9a;margin:14px 0 0;line-height:1.5">This inventory shows adapters the repository actually has. It does not advertise DEX, Bitcoin, Ethereum, brokerage, custody, or transfer capabilities that are not currently wired.</p></section>`;}
+  async function render(workspace){if(!workspace)return;const controls=workspace.querySelector('.admin-workspace-controls');const records=workspace.querySelector('.admin-workspace-records');if(!controls)return;clear(controls);const tab=workspace.dataset.activeTab;if(records)records.style.display=ownedTabs.has(tab)?'none':'';if(!ownedTabs.has(tab))return;try{if(tab==='Coinbase'){const s=await req('/api/connectors/coinbase-public/status');if(workspace.dataset.activeTab!==tab)return;controls.insertAdjacentHTML('afterbegin',coinbaseMarkup(s));return;}if(tab==='ACH'||tab==='FedWire'){const s=await req('/api/admin/treasury-transfer-readiness/execution/status');if(workspace.dataset.activeTab!==tab)return;controls.insertAdjacentHTML('afterbegin',railMarkup(s,tab==='ACH'?'ACH':'FEDWIRE'));return;}if(tab==='Solana'){const s=await req('/api/on-chain/status');if(workspace.dataset.activeTab!==tab)return;controls.insertAdjacentHTML('afterbegin',solanaMarkup(s));return;}const results=await Promise.allSettled([req('/api/connectors/coinbase-public/status'),req('/api/admin/treasury-transfer-readiness/execution/status'),req('/api/on-chain/status')]);if(workspace.dataset.activeTab!==tab)return;controls.insertAdjacentHTML('afterbegin',adapterSummary(results[0].status==='fulfilled'?results[0].value:null,results[1].status==='fulfilled'?results[1].value:null,results[2].status==='fulfilled'?results[2].value:null));}catch(error){if(workspace.dataset.activeTab!==tab)return;controls.insertAdjacentHTML('afterbegin',`<section class="admin-record-card" data-platform-connection-registry><header><strong>${esc(tab)}</strong><em>UNAVAILABLE</em></header><p>${esc(error.message)}</p></section>`);}}
+  function mount(workspace){if(!workspace||mounted.has(workspace))return;mounted.add(workspace);workspace.addEventListener('click',event=>{if(event.target.closest('[data-admin-tab]'))queueMicrotask(()=>void render(workspace));});window.addEventListener('sra:admin-workspace-synchronized',event=>{if(event.detail?.workspaceId==='connections')void render(workspace);});void render(workspace);}
   window.mountAdminSolanaTransfer=admin=>mount(admin?.querySelector('[data-workspace="connections"]'));
 })();
