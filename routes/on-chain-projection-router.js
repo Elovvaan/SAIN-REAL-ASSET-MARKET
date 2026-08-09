@@ -1,13 +1,16 @@
+import crypto from 'node:crypto';
 import express from 'express';
 import { OnChainTransferService } from '../services/on-chain-transfer-service.js';
 import { SolanaTransferService } from '../services/solana-transfer-service.js';
 
+const localIssuanceLocks = new Set();
+
 function actorId(req) {
-  return req.get('x-sra-actor-id') || req.body?.actorId || null;
+  return req.sraOperationsAuth?.actorId || req.sraIdentity?.actorId || null;
 }
 
 function handle(res, error) {
-  const status = /not found/i.test(error.message) ? 404 : 400;
+  const status = /not found/i.test(error.message) ? 404 : (error.code === 'ON_CHAIN_ISSUANCE_IN_PROGRESS' ? 409 : 400);
   return res.status(status).json({
     error: error.message,
     code: error.code || 'ON_CHAIN_ERROR',
@@ -25,6 +28,43 @@ function normalizeDirectMount(req, _res, next) {
 
 function text(value) { return String(value ?? '').trim(); }
 function network(value) { return text(value).toUpperCase(); }
+function projectionIdFor(instrumentId, networkName) {
+  const digest = crypto.createHash('sha256').update(`${instrumentId}|${networkName}`).digest('hex').slice(0, 16).toUpperCase();
+  return `OCP-${digest}`;
+}
+
+async function withIssuanceLock(service, key, work) {
+  const pool = service.domain?.database?.pool;
+  if (pool) {
+    const client = await pool.connect();
+    let acquired = false;
+    try {
+      const result = await client.query('SELECT pg_try_advisory_lock(hashtext($1)) AS acquired', [`ON_CHAIN_ISSUANCE:${key}`]);
+      acquired = Boolean(result.rows?.[0]?.acquired);
+      if (!acquired) {
+        const error = new Error('On-chain issuance for this instrument and network is already in progress.');
+        error.code = 'ON_CHAIN_ISSUANCE_IN_PROGRESS';
+        throw error;
+      }
+      // Refresh the projection cache after acquiring the cross-process lock so a worker
+      // observes any issuance completed by the previous lock holder.
+      await service.domain.hydrate?.(['ON_CHAIN_PROJECTION']);
+      return await work();
+    } finally {
+      if (acquired) await client.query('SELECT pg_advisory_unlock(hashtext($1))', [`ON_CHAIN_ISSUANCE:${key}`]).catch(() => {});
+      client.release();
+    }
+  }
+
+  if (localIssuanceLocks.has(key)) {
+    const error = new Error('On-chain issuance for this instrument and network is already in progress.');
+    error.code = 'ON_CHAIN_ISSUANCE_IN_PROGRESS';
+    throw error;
+  }
+  localIssuanceLocks.add(key);
+  try { return await work(); }
+  finally { localIssuanceLocks.delete(key); }
+}
 
 export function createOnChainProjectionRouter(service) {
   const router = express.Router();
@@ -52,40 +92,100 @@ export function createOnChainProjectionRouter(service) {
   router.post('/representations/issue', async (req, res) => {
     const actor = actorId(req);
     try {
+      if (!actor) {
+        const error = new Error('Authenticated SRA actor identity is required for on-chain issuance.');
+        error.code = 'SRA_AUTHENTICATION_REQUIRED';
+        throw error;
+      }
       const instrumentId = text(req.body?.instrumentId);
       if (!instrumentId) throw new Error('instrumentId is required.');
       if (req.body?.amount == null || text(req.body.amount) === '') throw new Error('amount is required.');
       if (req.body?.decimals == null || text(req.body.decimals) === '') throw new Error('decimals is required.');
 
-      let projection = service.listProjections({ instrumentId })
-        .find((item) => network(item.network) === network(req.body?.network || service.network)) || null;
-
-      if (projection?.mintAddress) return res.status(200).json({ created: false, projection, alreadyIssued: true });
-
-      if (!projection) {
-        projection = await service.createProjection({
-          instrumentId,
-          cluster: req.body?.cluster,
-          chainProgram: req.body?.chainProgram,
-          decimals: Number(req.body.decimals),
-        }, actor);
-      }
-
-      if (['DRAFT', 'UNDER_REVIEW'].includes(String(projection.status).toUpperCase())) {
-        projection = await service.approveProjection(projection.projectionId, actor);
-      }
-      if (String(projection.status).toUpperCase() !== 'APPROVED') throw new Error(`On-chain representation cannot be issued from ${projection.status}.`);
-
-      const adapter = adapters.get(network(projection.network));
+      const requestedNetwork = network(req.body?.network || service.network);
+      const adapter = adapters.get(requestedNetwork);
       if (!adapter || typeof adapter.issueRepresentation !== 'function') {
-        const error = new Error(`On-chain issuance is not available for ${projection.network}.`);
+        const error = new Error(`On-chain issuance is not available for ${requestedNetwork}.`);
         error.code = 'ON_CHAIN_ISSUANCE_UNSUPPORTED';
         throw error;
       }
+      const adapterStatus = adapter.status();
+      if (!adapterStatus.ready) {
+        const error = new Error(`${requestedNetwork} is not ready for on-chain issuance.`);
+        error.code = 'ON_CHAIN_NETWORK_NOT_READY';
+        throw error;
+      }
+      const requestedCluster = text(req.body?.cluster);
+      if (requestedCluster && requestedCluster !== adapterStatus.cluster) {
+        const error = new Error(`Requested cluster ${requestedCluster} does not match the configured network cluster ${adapterStatus.cluster}.`);
+        error.code = 'ON_CHAIN_CLUSTER_MISMATCH';
+        throw error;
+      }
 
-      const issuance = await adapter.issueRepresentation(projection, { amount: req.body.amount, decimals: req.body.decimals });
-      const updated = await service.recordIssuance(projection.projectionId, issuance, actor);
-      return res.status(201).json({ created: true, projection: updated, issuance });
+      const lockKey = `${instrumentId}|${requestedNetwork}`;
+      const result = await withIssuanceLock(service, lockKey, async () => {
+        let projection = service.listProjections({ instrumentId })
+          .find((item) => network(item.network) === requestedNetwork) || null;
+
+        if (projection?.mintAddress) return { created: false, projection, alreadyIssued: true };
+
+        if (!projection) {
+          projection = await service.createProjection({
+            projectionId: projectionIdFor(instrumentId, requestedNetwork),
+            instrumentId,
+            cluster: adapterStatus.cluster,
+            chainProgram: req.body?.chainProgram,
+            decimals: Number(req.body.decimals),
+          }, actor);
+        }
+
+        if (text(projection.cluster) && text(projection.cluster) !== adapterStatus.cluster) {
+          const error = new Error(`Projection cluster ${projection.cluster} does not match the configured network cluster ${adapterStatus.cluster}.`);
+          error.code = 'ON_CHAIN_CLUSTER_MISMATCH';
+          throw error;
+        }
+
+        const authorizedSupplyExact = text(projection.authorizedSupplyExact ?? projection.authorizedSupply);
+        if (!authorizedSupplyExact) throw new Error('Projection authorized supply is missing.');
+        if (projection.authorizedSupplyExact !== authorizedSupplyExact || projection.cluster !== adapterStatus.cluster) {
+          projection = {
+            ...projection,
+            authorizedSupplyExact,
+            cluster: adapterStatus.cluster,
+            updatedAt: new Date().toISOString(),
+          };
+          await service.domain.put('ON_CHAIN_PROJECTION', projection.projectionId, projection, {
+            actorId: actor,
+            eventType: 'ON_CHAIN_PROJECTION_ISSUANCE_PREPARED',
+          });
+        }
+
+        if (['DRAFT', 'UNDER_REVIEW'].includes(String(projection.status).toUpperCase())) {
+          projection = await service.approveProjection(projection.projectionId, actor);
+        }
+        if (String(projection.status).toUpperCase() !== 'APPROVED') throw new Error(`On-chain representation cannot be issued from ${projection.status}.`);
+
+        // This performs exact u64 and exact authorized-supply checks without RPC.
+        adapter.validateIssuance(projection, { amount: req.body.amount, decimals: req.body.decimals });
+        const issuance = await adapter.issueRepresentation(projection, { amount: req.body.amount, decimals: req.body.decimals });
+        let updated = await service.recordIssuance(projection.projectionId, issuance, actor);
+        updated = {
+          ...updated,
+          cluster: issuance.cluster,
+          authorizedSupplyExact,
+          issuedSupplyExact: issuance.issuedSupplyExact,
+          issuedSupplyUnits: issuance.issuedSupplyUnits,
+          authorizedSupplyUnits: issuance.authorizedSupplyUnits,
+          updatedAt: new Date().toISOString(),
+        };
+        await service.domain.put('ON_CHAIN_PROJECTION', projection.projectionId, updated, {
+          actorId: actor,
+          eventType: 'ON_CHAIN_REPRESENTATION_ISSUANCE_FINALIZED',
+        });
+        return { created: true, projection: updated, issuance };
+      });
+
+      return res.status(result.created ? 201 : 200).json(result);
     } catch (error) { return handle(res, error); }
   });
 
