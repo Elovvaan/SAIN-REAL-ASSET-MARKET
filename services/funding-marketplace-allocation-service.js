@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 
 const TYPES = Object.freeze({
-  OPPORTUNITY: 'FUNDING_OPPORTUNITY', PARTICIPANT: 'PARTICIPANT', MARKETPLACE_LISTING: 'MARKETPLACE_LISTING',
+  PARTICIPANT: 'PARTICIPANT', MARKETPLACE_LISTING: 'MARKETPLACE_LISTING',
   COMMITMENT_WINDOW: 'FUNDING_MARKETPLACE_COMMITMENT_WINDOW', COMMITMENT: 'FUNDING_MARKETPLACE_COMMITMENT',
   ALLOCATION_REVIEW: 'FUNDING_MARKETPLACE_ALLOCATION_REVIEW', POSITION: 'FUNDING_MARKETPLACE_POSITION',
   SETTLEMENT_PREPARATION: 'FUNDING_MARKETPLACE_SETTLEMENT_PREPARATION', LIFECYCLE_EVENT: 'LIFECYCLE_EVENT',
@@ -13,7 +13,7 @@ const now = () => new Date().toISOString();
 export class FundingMarketplaceAllocationService {
   constructor(persistentDomain) { this.domain = persistentDomain; }
   async initialize() { await this.domain.hydrate(Object.values(TYPES)); return this.status(); }
-  status() { return { service: 'SRA Funding Engine Phase 11', purpose: 'COMMITMENT_CLOSING_ALLOCATION_AND_SETTLEMENT_PREPARATION', allocationReviews: this.domain.list(TYPES.ALLOCATION_REVIEW).length, positions: this.domain.list(TYPES.POSITION).length, settlementPreparations: this.domain.list(TYPES.SETTLEMENT_PREPARATION).length }; }
+  status() { return { service: 'SRA Funding Engine Phase 11', purpose: 'POSITION_DISTRIBUTION_ALLOCATION_AND_SETTLEMENT_PREPARATION', allocationReviews: this.domain.list(TYPES.ALLOCATION_REVIEW).length, positions: this.domain.list(TYPES.POSITION).length, settlementPreparations: this.domain.list(TYPES.SETTLEMENT_PREPARATION).length }; }
   getWindow(windowId) { return this.domain.get(TYPES.COMMITMENT_WINDOW, windowId); }
   getReview(reviewId) { return this.domain.get(TYPES.ALLOCATION_REVIEW, reviewId); }
   listReviews(filters = {}) { return this.domain.list(TYPES.ALLOCATION_REVIEW).filter((r) => (!filters.windowId || r.windowId === filters.windowId) && (!filters.status || r.status === filters.status)); }
@@ -60,9 +60,11 @@ export class FundingMarketplaceAllocationService {
     for (const commitment of commitments) {
       const existing = this.domain.list(TYPES.POSITION).find((r) => r.commitmentId === commitment.commitmentId); if (existing) { created.push(existing); continue; }
       if (!this.domain.get(TYPES.PARTICIPANT, commitment.participantId)) throw new Error(`Participant was not found for commitment ${commitment.commitmentId}.`);
-      const position = { positionId: id('FMPOS'), allocationReviewId: reviewId, commitmentId: commitment.commitmentId, windowId: commitment.windowId, listingId: commitment.listingId, instrumentId: commitment.instrumentId, opportunityId: commitment.opportunityId, participantId: commitment.participantId, quantity: commitment.quantity, unitPrice: commitment.unitPrice, totalAmount: commitment.totalAmount, currency: commitment.currency, ownershipStatus: 'PENDING_SETTLEMENT', status: 'CREATED', settlementStatus: 'NOT_STARTED', onChainStatus: 'NOT_PROJECTED', createdBy: actorId, createdAt: timestamp };
+      const listing = this.domain.get(TYPES.MARKETPLACE_LISTING, commitment.listingId); if (!listing) throw new Error(`Marketplace listing was not found for commitment ${commitment.commitmentId}.`);
+      if (!listing.positionId) throw new Error('Marketplace listing is not linked to a funded position.');
+      const position = { positionId: id('FMPOS'), financedPositionId: listing.positionId, distributionAuthorizationId: listing.distributionAuthorizationId || null, allocationReviewId: reviewId, commitmentId: commitment.commitmentId, windowId: commitment.windowId, listingId: commitment.listingId, instrumentId: commitment.instrumentId, opportunityId: commitment.opportunityId, participantId: commitment.participantId, quantity: commitment.quantity, unitPrice: commitment.unitPrice, totalAmount: commitment.totalAmount, currency: commitment.currency, ownershipStatus: 'PENDING_SETTLEMENT', status: 'CREATED', settlementStatus: 'NOT_STARTED', onChainStatus: 'NOT_PROJECTED', createdBy: actorId, createdAt: timestamp };
       changes.push({ type: TYPES.POSITION, id: position.positionId, payload: position, actorId, eventType: 'FUNDING_MARKETPLACE_POSITION_CREATED' });
-      changes.push({ type: TYPES.COMMITMENT, id: commitment.commitmentId, payload: { ...commitment, allocationStatus: 'ALLOCATED', positionId: position.positionId, updatedAt: timestamp }, actorId, eventType: 'FUNDING_MARKETPLACE_COMMITMENT_ALLOCATED' });
+      changes.push({ type: TYPES.COMMITMENT, id: commitment.commitmentId, payload: { ...commitment, allocationStatus: 'ALLOCATED', positionId: position.positionId, financedPositionId: listing.positionId, updatedAt: timestamp }, actorId, eventType: 'FUNDING_MARKETPLACE_COMMITMENT_ALLOCATED' });
       created.push(position);
     }
     if (changes.length) await this.domain.atomicPut(changes);
@@ -74,17 +76,15 @@ export class FundingMarketplaceAllocationService {
     const listing = this.domain.get(TYPES.MARKETPLACE_LISTING, position.listingId); if (!listing) throw new Error('Marketplace listing was not found.');
     const existing = this.domain.list(TYPES.SETTLEMENT_PREPARATION).find((r) => r.positionId === positionId && !['CANCELLED', 'CLOSED'].includes(r.status)); if (existing) return existing;
     const timestamp = now();
-    const preparation = { settlementPreparationId: input.settlementPreparationId || id('FMSP'), positionId, commitmentId: position.commitmentId, listingId: position.listingId, instrumentId: position.instrumentId, opportunityId: position.opportunityId, participantId: position.participantId, issuerParticipantId: listing.issuerParticipantId, amount: position.totalAmount, currency: position.currency, quantity: position.quantity, transactionRouteId: listing.transactionRouteId, settlementRouteId: listing.settlementRouteId, paymentSourceReference: input.paymentSourceReference || null, destinationReference: input.destinationReference || null, status: 'PREPARED', settlementStatus: 'NOT_STARTED', createdBy: actorId, createdAt: timestamp, updatedAt: timestamp };
+    const preparation = { settlementPreparationId: input.settlementPreparationId || id('FMSP'), positionId, financedPositionId: position.financedPositionId, distributionAuthorizationId: position.distributionAuthorizationId || null, commitmentId: position.commitmentId, listingId: position.listingId, instrumentId: position.instrumentId, opportunityId: position.opportunityId, participantId: position.participantId, issuerParticipantId: listing.issuerParticipantId, amount: position.totalAmount, currency: position.currency, quantity: position.quantity, transactionRouteId: listing.transactionRouteId, settlementRouteId: listing.settlementRouteId, paymentSourceReference: input.paymentSourceReference || null, destinationReference: input.destinationReference || null, status: 'PREPARED', settlementStatus: 'NOT_STARTED', createdBy: actorId, createdAt: timestamp, updatedAt: timestamp };
     const updatedPosition = { ...position, status: 'SETTLEMENT_PREPARED', settlementPreparationId: preparation.settlementPreparationId };
-    const opportunity = this.domain.get(TYPES.OPPORTUNITY, position.opportunityId);
-    const lifecycle = { id: id('LE'), objectType: TYPES.POSITION, objectId: positionId, eventType: 'FUNDING_MARKETPLACE_POSITION_PREPARED_FOR_SETTLEMENT', actorId, payload: { settlementPreparationId: preparation.settlementPreparationId, amount: preparation.amount, currency: preparation.currency, onChainStatus: 'NOT_PROJECTED' }, occurredAt: timestamp };
-    const changes = [
+    const lifecycle = { id: id('LE'), objectType: TYPES.POSITION, objectId: positionId, eventType: 'FUNDING_MARKETPLACE_POSITION_PREPARED_FOR_SETTLEMENT', actorId, payload: { financedPositionId: position.financedPositionId, settlementPreparationId: preparation.settlementPreparationId, amount: preparation.amount, currency: preparation.currency, onChainStatus: 'NOT_PROJECTED' }, occurredAt: timestamp };
+    await this.domain.atomicPut([
       { type: TYPES.SETTLEMENT_PREPARATION, id: preparation.settlementPreparationId, payload: preparation, actorId, eventType: 'FUNDING_MARKETPLACE_SETTLEMENT_PREPARED' },
       { type: TYPES.POSITION, id: positionId, payload: updatedPosition, actorId, eventType: 'FUNDING_MARKETPLACE_POSITION_SETTLEMENT_PREPARED' },
       { type: TYPES.LIFECYCLE_EVENT, id: lifecycle.id, payload: lifecycle, actorId, eventType: lifecycle.eventType },
-    ];
-    if (opportunity) changes.push({ type: TYPES.OPPORTUNITY, id: opportunity.opportunityId, payload: { ...opportunity, status: 'ALLOCATION_CREATED', fundingPhase: 'SETTLEMENT_PREPARATION', updatedAt: timestamp }, actorId, eventType: 'FUNDING_OPPORTUNITY_ALLOCATION_CREATED' });
-    await this.domain.atomicPut(changes); return preparation;
+    ]);
+    return preparation;
   }
 }
 
