@@ -60,7 +60,7 @@ export class FinancedPositionDistributionService {
       principalPositive: Number(position.currentPrincipal) > 0,
       instrumentExists: Boolean(instrument),
       instrumentIssued: instrument?.state === 'ISSUED' && instrument?.issuanceStatus === 'ISSUED',
-      transferabilityDefined: Boolean(instrument?.transferabilityStatus),
+      instrumentTransferable: Boolean(instrument?.transferabilityStatus) && instrument.transferabilityStatus !== 'NON_TRANSFERABLE',
       settlementRulePresent: Boolean(instrument?.settlementRule),
       governingDocumentPresent: Boolean(instrument?.governingDocumentId),
     };
