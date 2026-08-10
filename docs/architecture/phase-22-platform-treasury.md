@@ -118,4 +118,4 @@ POST /exceptions/:exceptionId/resolve
 
 ## Boundary
 
-Phase 22 manages SRA's internal operating treasury view. It does not establish direct access to Fedwire, create a master account, authorize use of restricted customer funds, replace bank account reconciliation, or make regulatory liquidity and capital calculations. Those require actual account agreements, bank data, legal restrictions, accounting policies, and applicable regulatory frameworks.
+Phase 22 manages SRA's internal operating treasury view. It does not establish direct external payment-network access, create an external account relationship, authorize use of restricted customer funds, replace account reconciliation, or make regulatory liquidity and capital calculations. Those require actual account agreements, external data, legal restrictions, accounting policies, and applicable regulatory frameworks.
