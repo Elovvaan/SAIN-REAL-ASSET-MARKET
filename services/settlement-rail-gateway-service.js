@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { RECORD_TYPES } from './persistent-domain-service.js';
 
 const INSTRUCTION_STATES = new Set(['DRAFT','READY','DISPATCHED','ACCEPTED','EXECUTED','REJECTED','RETURNED','EXCEPTION','RECONCILED','CANCELLED']);
-const SUPPORTED_RAILS = new Set(['WIRE','FEDWIRE','ACH','INTERNAL_TRANSFER','OTHER_APPROVED_RAIL']);
+const SUPPORTED_RAILS = new Set(['INTERNAL_TRANSFER','OTHER_APPROVED_RAIL']);
 
 function now(){return new Date().toISOString();}
 function id(prefix){return `${prefix}-${crypto.randomUUID().split('-')[0].toUpperCase()}`;}
