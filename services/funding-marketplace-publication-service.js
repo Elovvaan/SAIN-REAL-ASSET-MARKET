@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 
 const TYPES = Object.freeze({
-  OPPORTUNITY: 'FUNDING_OPPORTUNITY', SRA_INSTRUMENT: 'SRA_INSTRUMENT', MARKETPLACE_LISTING: 'MARKETPLACE_LISTING',
+  SRA_INSTRUMENT: 'SRA_INSTRUMENT', FINANCED_POSITION: 'FINANCED_POSITION', MARKETPLACE_LISTING: 'MARKETPLACE_LISTING',
   PUBLICATION_REVIEW: 'FUNDING_MARKETPLACE_PUBLICATION_REVIEW', PUBLICATION_AUTHORIZATION: 'FUNDING_MARKETPLACE_PUBLICATION_AUTHORIZATION',
   LIFECYCLE_EVENT: 'LIFECYCLE_EVENT',
 });
@@ -12,7 +12,7 @@ const now = () => new Date().toISOString();
 export class FundingMarketplacePublicationService {
   constructor(persistentDomain) { this.domain = persistentDomain; }
   async initialize() { await this.domain.hydrate(Object.values(TYPES)); return this.status(); }
-  status() { return { service: 'SRA Funding Engine Phase 9', purpose: 'MARKETPLACE_PUBLICATION_AND_LIVE_ACTIVATION', publicationReviews: this.domain.list(TYPES.PUBLICATION_REVIEW).length, publicationAuthorizations: this.domain.list(TYPES.PUBLICATION_AUTHORIZATION).length, liveListings: this.domain.list(TYPES.MARKETPLACE_LISTING).filter((r) => r.state === 'LIVE' && r.publicationStatus === 'PUBLISHED').length }; }
+  status() { return { service: 'SRA Funding Engine Phase 9', purpose: 'FUNDED_POSITION_MARKETPLACE_PUBLICATION', publicationReviews: this.domain.list(TYPES.PUBLICATION_REVIEW).length, publicationAuthorizations: this.domain.list(TYPES.PUBLICATION_AUTHORIZATION).length, liveListings: this.domain.list(TYPES.MARKETPLACE_LISTING).filter((r) => r.state === 'LIVE' && r.publicationStatus === 'PUBLISHED').length }; }
   getListing(listingId) { return this.domain.get(TYPES.MARKETPLACE_LISTING, listingId); }
   getReview(reviewId) { return this.domain.get(TYPES.PUBLICATION_REVIEW, reviewId); }
   listReviews(filters = {}) { return this.domain.list(TYPES.PUBLICATION_REVIEW).filter((r) => (!filters.listingId || r.listingId === filters.listingId) && (!filters.status || r.status === filters.status)); }
@@ -21,16 +21,25 @@ export class FundingMarketplacePublicationService {
   assessListing(listingId) {
     const listing = this.getListing(listingId); if (!listing) throw new Error('Marketplace listing was not found.');
     const instrument = this.domain.get(TYPES.SRA_INSTRUMENT, listing.instrumentId); if (!instrument) throw new Error('Issued instrument was not found.');
-    const checks = { listingPrepared: listing.state === 'PREPARED', listingNotLive: listing.status === 'NOT_LIVE', notPublished: listing.publicationStatus === 'NOT_PUBLISHED', instrumentIssued: instrument.state === 'ISSUED' && instrument.issuanceStatus === 'ISSUED', priceConfigured: listing.pricing?.state === 'CONFIGURED' && Number(listing.pricing?.askingPrice) > 0, accessConfigured: listing.access?.state === 'CONFIGURED' && Boolean(listing.access?.eligibilityRule), quantityValid: Number(listing.quantity) > 0, transactionRouteConnected: Boolean(listing.transactionRouteId), settlementRouteConnected: Boolean(listing.settlementRouteId), disclosuresPresent: Array.isArray(listing.disclosures) && listing.disclosures.length > 0, noBlockers: Array.isArray(listing.blockers) && listing.blockers.length === 0 };
+    const position = listing.positionId ? this.domain.get(TYPES.FINANCED_POSITION, listing.positionId) : null;
+    const checks = {
+      listingPrepared: listing.state === 'PREPARED', listingNotLive: listing.status === 'NOT_LIVE', notPublished: listing.publicationStatus === 'NOT_PUBLISHED',
+      fundedPositionLinked: Boolean(position), positionInMarket: position?.distributionStatus === 'IN_MARKET',
+      distributionAuthorizationLinked: Boolean(listing.distributionAuthorizationId),
+      instrumentIssued: instrument.state === 'ISSUED' && instrument.issuanceStatus === 'ISSUED', priceConfigured: listing.pricing?.state === 'CONFIGURED' && Number(listing.pricing?.askingPrice) > 0,
+      accessConfigured: listing.access?.state === 'CONFIGURED' && Boolean(listing.access?.eligibilityRule), quantityValid: Number(listing.quantity) > 0,
+      transactionRouteConnected: Boolean(listing.transactionRouteId), settlementRouteConnected: Boolean(listing.settlementRouteId), disclosuresPresent: Array.isArray(listing.disclosures) && listing.disclosures.length > 0,
+      noBlockers: Array.isArray(listing.blockers) && listing.blockers.length === 0,
+    };
     const blockers = Object.entries(checks).filter(([, passed]) => !passed).map(([name]) => name);
-    return { listingId, instrumentId: listing.instrumentId, checks, blockers, readyForPublicationAuthorization: blockers.length === 0 };
+    return { listingId, positionId: listing.positionId || null, instrumentId: listing.instrumentId, checks, blockers, readyForPublicationAuthorization: blockers.length === 0 };
   }
 
   async startReview(listingId, input = {}, actorId = null) {
     const listing = this.getListing(listingId); if (!listing) throw new Error('Marketplace listing was not found.');
     const existing = this.domain.list(TYPES.PUBLICATION_REVIEW).find((r) => r.listingId === listingId && r.status === 'IN_REVIEW'); if (existing) return existing;
     const timestamp = now();
-    const review = { publicationReviewId: input.publicationReviewId || id('FMPRV'), listingId, instrumentId: listing.instrumentId, opportunityId: listing.opportunityId, assessment: this.assessListing(listingId), status: 'IN_REVIEW', startedBy: actorId, startedAt: timestamp, decision: null, rationale: null, decidedBy: null, decidedAt: null };
+    const review = { publicationReviewId: input.publicationReviewId || id('FMPRV'), listingId, positionId: listing.positionId || null, instrumentId: listing.instrumentId, opportunityId: listing.opportunityId, assessment: this.assessListing(listingId), status: 'IN_REVIEW', startedBy: actorId, startedAt: timestamp, decision: null, rationale: null, decidedBy: null, decidedAt: null };
     await this.domain.atomicPut([
       { type: TYPES.PUBLICATION_REVIEW, id: review.publicationReviewId, payload: review, actorId, eventType: 'FUNDING_MARKETPLACE_PUBLICATION_REVIEW_STARTED' },
       { type: TYPES.MARKETPLACE_LISTING, id: listingId, payload: { ...listing, status: 'PUBLICATION_REVIEW', publicationReviewId: review.publicationReviewId, updatedAt: timestamp }, actorId, eventType: 'FUNDING_MARKETPLACE_LISTING_PUBLICATION_REVIEW_STARTED' },
@@ -50,7 +59,7 @@ export class FundingMarketplacePublicationService {
       { type: TYPES.MARKETPLACE_LISTING, id: listing.listingId, payload: updatedListing, actorId, eventType: 'FUNDING_MARKETPLACE_LISTING_PUBLICATION_DECIDED' },
     ];
     if (input.decision === 'AUTHORIZED_FOR_PUBLICATION') {
-      authorization = { publicationAuthorizationId: id('FMPA'), publicationReviewId: reviewId, listingId: listing.listingId, instrumentId: listing.instrumentId, opportunityId: listing.opportunityId, effectiveFrom: input.effectiveFrom || null, effectiveUntil: input.effectiveUntil || null, status: 'AUTHORIZED', authorizedBy: actorId, authorizedAt: decidedAt, consumedAt: null };
+      authorization = { publicationAuthorizationId: id('FMPA'), publicationReviewId: reviewId, listingId: listing.listingId, positionId: listing.positionId || null, instrumentId: listing.instrumentId, opportunityId: listing.opportunityId, effectiveFrom: input.effectiveFrom || null, effectiveUntil: input.effectiveUntil || null, status: 'AUTHORIZED', authorizedBy: actorId, authorizedAt: decidedAt, consumedAt: null };
       changes.push({ type: TYPES.PUBLICATION_AUTHORIZATION, id: authorization.publicationAuthorizationId, payload: authorization, actorId, eventType: 'FUNDING_MARKETPLACE_PUBLICATION_AUTHORIZED' });
     }
     await this.domain.atomicPut(changes);
@@ -64,15 +73,15 @@ export class FundingMarketplacePublicationService {
     const publishedAt = input.publishedAt || now();
     const liveListing = { ...listing, state: 'LIVE', status: 'ACTIVE', publicationStatus: 'PUBLISHED', publicationAuthorizationId: authorizationId, publishedBy: actorId, publishedAt, updatedAt: publishedAt };
     const consumed = { ...authorization, status: 'CONSUMED', consumedAt: publishedAt };
-    const opportunity = this.domain.get(TYPES.OPPORTUNITY, listing.opportunityId);
-    const lifecycle = { id: id('LE'), objectType: TYPES.MARKETPLACE_LISTING, objectId: listing.listingId, eventType: 'FUNDING_MARKETPLACE_LISTING_PUBLISHED', actorId, payload: { instrumentId: listing.instrumentId, publicationAuthorizationId: authorizationId, status: 'ACTIVE', commitmentsStatus: 'NOT_OPENED', settlementStatus: 'NOT_STARTED', onChainStatus: 'NOT_PROJECTED' }, occurredAt: publishedAt };
-    const changes = [
+    const position = this.domain.get(TYPES.FINANCED_POSITION, listing.positionId);
+    const positionUpdated = { ...position, distributionStatus: 'MARKETPLACE_LIVE', marketplaceListingId: listing.listingId, publishedAt, updatedAt: publishedAt };
+    const lifecycle = { id: id('LE'), objectType: TYPES.MARKETPLACE_LISTING, objectId: listing.listingId, eventType: 'FUNDED_POSITION_MARKETPLACE_LISTING_PUBLISHED', actorId, payload: { positionId: listing.positionId, instrumentId: listing.instrumentId, publicationAuthorizationId: authorizationId, status: 'ACTIVE', commitmentsStatus: 'NOT_OPENED', settlementStatus: 'NOT_STARTED', onChainStatus: 'NOT_PROJECTED' }, occurredAt: publishedAt };
+    await this.domain.atomicPut([
       { type: TYPES.MARKETPLACE_LISTING, id: listing.listingId, payload: liveListing, actorId, eventType: 'FUNDING_MARKETPLACE_LISTING_PUBLISHED' },
       { type: TYPES.PUBLICATION_AUTHORIZATION, id: authorizationId, payload: consumed, actorId, eventType: 'FUNDING_MARKETPLACE_PUBLICATION_AUTHORIZATION_CONSUMED' },
+      { type: TYPES.FINANCED_POSITION, id: listing.positionId, payload: positionUpdated, actorId, eventType: 'FINANCED_POSITION_MARKETPLACE_LIVE' },
       { type: TYPES.LIFECYCLE_EVENT, id: lifecycle.id, payload: lifecycle, actorId, eventType: lifecycle.eventType },
-    ];
-    if (opportunity) changes.push({ type: TYPES.OPPORTUNITY, id: opportunity.opportunityId, payload: { ...opportunity, status: 'MARKETPLACE_LIVE', fundingPhase: 'MARKETPLACE_PARTICIPATION', marketplacePublicationAuthorizationId: authorizationId, updatedAt: publishedAt, history: [...(opportunity.history || []), { from: opportunity.status, to: 'MARKETPLACE_LIVE', at: publishedAt, actorId, note: listing.listingId }] }, actorId, eventType: 'FUNDING_OPPORTUNITY_MARKETPLACE_PUBLISHED' });
-    await this.domain.atomicPut(changes);
+    ]);
     return liveListing;
   }
 }
