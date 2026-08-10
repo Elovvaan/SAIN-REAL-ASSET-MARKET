@@ -11,6 +11,12 @@ const STATES = Object.freeze([
   'VERIFICATION_IN_PROGRESS',
   'WITHDRAWN',
 ]);
+const STARTUP_TYPE = 'STARTUP_BUSINESS';
+const STARTUP_READINESS_KEYS = Object.freeze([
+  'entityFormation', 'equipmentIdentified', 'suppliersIdentified', 'pricingEstablished',
+  'workspaceIdentified', 'salesChannelPlan', 'licensesPermitsResearched', 'insuranceNeedsIdentified',
+  'initialCustomersOrLeads', 'ownerContribution',
+]);
 
 function now() {
   return new Date().toISOString();
@@ -27,6 +33,115 @@ function requireFields(payload, fields) {
 
 function unique(values = []) {
   return [...new Set(values.filter(Boolean))];
+}
+
+function hasValue(value) {
+  return value !== null && value !== undefined && String(value).trim() !== '';
+}
+
+function numericOrNull(value) {
+  if (value === '' || value === null || value === undefined) return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? Number(n.toFixed(2)) : null;
+}
+
+function normalizeUseOfFunds(items = []) {
+  if (!Array.isArray(items)) return [];
+  return items.map((item = {}) => ({
+    item: String(item.item || item.use || '').trim(),
+    estimatedCost: numericOrNull(item.estimatedCost ?? item.cost),
+    evidenceSource: String(item.evidenceSource || item.source || '').trim() || null,
+  })).filter((item) => item.item || item.estimatedCost != null || item.evidenceSource);
+}
+
+function normalizeStartupPackage(input = {}, current = {}) {
+  const startup = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
+  const previous = current && typeof current === 'object' && !Array.isArray(current) ? current : {};
+  const revenue = { ...(previous.revenueRepaymentModel || {}), ...(startup.revenueRepaymentModel || {}) };
+  const customer = { ...(previous.customerSalesPlan || {}), ...(startup.customerSalesPlan || {}) };
+  const readinessInput = startup.startupReadiness || {};
+  const readinessPrevious = previous.startupReadiness || {};
+  const readiness = Object.fromEntries(STARTUP_READINESS_KEYS.map((key) => [key, Boolean(readinessInput[key] ?? readinessPrevious[key] ?? false)]));
+  return {
+    applicantBusiness: {
+      ...(previous.applicantBusiness || {}),
+      ...(startup.applicantBusiness || {}),
+    },
+    businessDescription: startup.businessDescription ?? previous.businessDescription ?? null,
+    requestedLaunchDate: startup.requestedLaunchDate ?? previous.requestedLaunchDate ?? null,
+    exactFundingPurpose: startup.exactFundingPurpose ?? previous.exactFundingPurpose ?? null,
+    useOfFunds: startup.useOfFunds === undefined ? normalizeUseOfFunds(previous.useOfFunds || []) : normalizeUseOfFunds(startup.useOfFunds),
+    revenueRepaymentModel: {
+      primaryProductService: revenue.primaryProductService ?? null,
+      averageSellingPrice: numericOrNull(revenue.averageSellingPrice),
+      estimatedDirectCostPerSale: numericOrNull(revenue.estimatedDirectCostPerSale),
+      expectedMonthlySalesVolume: numericOrNull(revenue.expectedMonthlySalesVolume),
+      expectedMonthlyRevenue: numericOrNull(revenue.expectedMonthlyRevenue),
+      expectedMonthlyOperatingExpenses: numericOrNull(revenue.expectedMonthlyOperatingExpenses),
+      expectedMonthlyAvailableBeforeDebtPayments: numericOrNull(revenue.expectedMonthlyAvailableBeforeDebtPayments),
+    },
+    customerSalesPlan: {
+      targetCustomer: customer.targetCustomer ?? null,
+      salesChannel: customer.salesChannel ?? null,
+      demandEvidence: customer.demandEvidence ?? null,
+    },
+    startupReadiness: readiness,
+    supportingEvidenceChecklist: Array.isArray(startup.supportingEvidenceChecklist)
+      ? unique(startup.supportingEvidenceChecklist)
+      : unique(previous.supportingEvidenceChecklist || []),
+    applicantStatement: {
+      ...(previous.applicantStatement || {}),
+      ...(startup.applicantStatement || {}),
+      certifiedAccurate: Boolean(startup.applicantStatement?.certifiedAccurate ?? previous.applicantStatement?.certifiedAccurate ?? false),
+    },
+  };
+}
+
+function startupCompleteness(record) {
+  const startup = record.startupFundingRequest || {};
+  const business = startup.applicantBusiness || {};
+  const revenue = startup.revenueRepaymentModel || {};
+  const customer = startup.customerSalesPlan || {};
+  const statement = startup.applicantStatement || {};
+  const useOfFunds = Array.isArray(startup.useOfFunds) ? startup.useOfFunds : [];
+  const useOfFundsTotal = Number(useOfFunds.reduce((sum, line) => sum + Number(line.estimatedCost || 0), 0).toFixed(2));
+  const requestedAmount = Number(record.requestedAmount || 0);
+  const useOfFundsMatchesRequest = requestedAmount > 0 && Math.abs(useOfFundsTotal - requestedAmount) < 0.01;
+  return {
+    required: {
+      businessLegalEntityName: hasValue(business.businessLegalEntityName),
+      businessLocation: hasValue(business.businessLocation),
+      applicantContact: hasValue(business.emailPhone),
+      businessFormationStatus: hasValue(business.businessFormationStatus),
+      businessDescription: hasValue(startup.businessDescription),
+      requestedLaunchDate: hasValue(startup.requestedLaunchDate),
+      exactFundingPurpose: hasValue(startup.exactFundingPurpose),
+      useOfFunds: useOfFunds.length > 0 && useOfFunds.every((line) => hasValue(line.item) && Number(line.estimatedCost) >= 0),
+      useOfFundsMatchesRequest,
+      primaryProductService: hasValue(revenue.primaryProductService),
+      averageSellingPrice: revenue.averageSellingPrice != null,
+      estimatedDirectCostPerSale: revenue.estimatedDirectCostPerSale != null,
+      expectedMonthlySalesVolume: revenue.expectedMonthlySalesVolume != null,
+      expectedMonthlyRevenue: revenue.expectedMonthlyRevenue != null,
+      expectedMonthlyOperatingExpenses: revenue.expectedMonthlyOperatingExpenses != null,
+      expectedMonthlyAvailableBeforeDebtPayments: revenue.expectedMonthlyAvailableBeforeDebtPayments != null,
+      targetCustomer: hasValue(customer.targetCustomer),
+      salesChannel: hasValue(customer.salesChannel),
+      demandEvidence: hasValue(customer.demandEvidence),
+      applicantCertification: statement.certifiedAccurate === true,
+      applicantPrintedName: hasValue(statement.printedName),
+      applicantCertificationDate: hasValue(statement.date),
+    },
+    recommended: {
+      tradeName: hasValue(business.businessTradeName),
+      evidenceForUseOfFunds: useOfFunds.some((line) => hasValue(line.evidenceSource)),
+      supportingEvidenceRegistered: Array.isArray(record.evidenceRecordIds) && record.evidenceRecordIds.length > 0,
+      supportingEvidenceChecklist: Array.isArray(startup.supportingEvidenceChecklist) && startup.supportingEvidenceChecklist.length > 0,
+    },
+    useOfFundsTotal,
+    useOfFundsDifference: Number((requestedAmount - useOfFundsTotal).toFixed(2)),
+    readiness: startup.startupReadiness || {},
+  };
 }
 
 export class FundingOpportunityIntakeService {
@@ -47,6 +162,7 @@ export class FundingOpportunityIntakeService {
       count: this.domain.list(RECORD_TYPE).length,
       evidenceCount: this.domain.list(EVIDENCE_RECORD_TYPE).length,
       verificationRequestCount: this.domain.list(VERIFICATION_REQUEST_TYPE).length,
+      startupBusinessCount: this.domain.list(RECORD_TYPE).filter((record) => record.opportunityType === STARTUP_TYPE).length,
     };
   }
 
@@ -80,20 +196,23 @@ export class FundingOpportunityIntakeService {
     if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) {
       throw new Error('Requested amount must be greater than zero.');
     }
+    const opportunityType = String(input.opportunityType).toUpperCase();
+    const startupFundingRequest = opportunityType === STARTUP_TYPE ? normalizeStartupPackage(input.startupFundingRequest || {}) : null;
 
     const record = {
       opportunityId: input.opportunityId || id('FOR'),
       applicantParticipantId: input.applicantParticipantId,
       applicantType: input.applicantType || participant.type || 'PARTICIPANT',
       title: input.title,
-      opportunityType: input.opportunityType,
+      opportunityType,
       purpose: input.purpose,
-      description: input.description || null,
+      description: input.description || startupFundingRequest?.businessDescription || null,
       requestedAmount,
       currency: String(input.currency).toUpperCase(),
-      preferredFundingDate: input.preferredFundingDate || null,
+      preferredFundingDate: input.preferredFundingDate || startupFundingRequest?.requestedLaunchDate || null,
       expectedCompletionDate: input.expectedCompletionDate || null,
       fundingStages: input.fundingStages || [],
+      startupFundingRequest,
       supportingDocumentIds: unique(input.supportingDocumentIds || []),
       evidenceRecordIds: [],
       relatedParticipantIds: unique([input.applicantParticipantId, ...(input.relatedParticipantIds || [])]),
@@ -114,9 +233,20 @@ export class FundingOpportunityIntakeService {
       history: [],
     };
 
+    if (opportunityType === STARTUP_TYPE) {
+      const startup = startupCompleteness(record);
+      const missingRequired = Object.entries(startup.required).filter(([, present]) => !present).map(([field]) => `startup.${field}`);
+      if (missingRequired.length) {
+        const error = new Error(`Startup business funding request is incomplete: ${missingRequired.join(', ')}`);
+        error.code = 'INTAKE_INCOMPLETE';
+        error.completeness = { opportunityId: record.opportunityId, intakeComplete: false, missingRequired, startup };
+        throw error;
+      }
+    }
+
     await this.domain.put(RECORD_TYPE, record.opportunityId, record, {
       actorId,
-      eventType: 'FUNDING_OPPORTUNITY_CREATED',
+      eventType: opportunityType === STARTUP_TYPE ? 'STARTUP_BUSINESS_FUNDING_REQUEST_CREATED' : 'FUNDING_OPPORTUNITY_CREATED',
     });
     await this.domain.lifecycle({
       objectType: RECORD_TYPE,
@@ -137,18 +267,23 @@ export class FundingOpportunityIntakeService {
     const current = this.get(opportunityId);
     if (!current) throw new Error('Funding opportunity was not found.');
     if (current.status === 'WITHDRAWN') throw new Error('A withdrawn opportunity cannot be updated.');
+    const opportunityType = String(input.opportunityType ?? current.opportunityType).toUpperCase();
+    const startupFundingRequest = opportunityType === STARTUP_TYPE
+      ? normalizeStartupPackage(input.startupFundingRequest === undefined ? current.startupFundingRequest || {} : input.startupFundingRequest, current.startupFundingRequest || {})
+      : null;
 
     const updated = {
       ...current,
       title: input.title ?? current.title,
-      opportunityType: input.opportunityType ?? current.opportunityType,
+      opportunityType,
       purpose: input.purpose ?? current.purpose,
-      description: input.description ?? current.description,
+      description: input.description ?? startupFundingRequest?.businessDescription ?? current.description,
       requestedAmount: input.requestedAmount == null ? current.requestedAmount : Number(input.requestedAmount),
       currency: input.currency ? String(input.currency).toUpperCase() : current.currency,
-      preferredFundingDate: input.preferredFundingDate ?? current.preferredFundingDate,
+      preferredFundingDate: input.preferredFundingDate ?? startupFundingRequest?.requestedLaunchDate ?? current.preferredFundingDate,
       expectedCompletionDate: input.expectedCompletionDate ?? current.expectedCompletionDate,
       fundingStages: input.fundingStages ?? current.fundingStages,
+      startupFundingRequest,
       supportingDocumentIds: unique(input.supportingDocumentIds ?? current.supportingDocumentIds),
       relatedParticipantIds: unique(input.relatedParticipantIds ?? current.relatedParticipantIds),
       relatedAgreementIds: unique(input.relatedAgreementIds ?? current.relatedAgreementIds),
@@ -165,7 +300,7 @@ export class FundingOpportunityIntakeService {
 
     await this.domain.put(RECORD_TYPE, opportunityId, updated, {
       actorId,
-      eventType: 'FUNDING_OPPORTUNITY_UPDATED',
+      eventType: opportunityType === STARTUP_TYPE ? 'STARTUP_BUSINESS_FUNDING_REQUEST_UPDATED' : 'FUNDING_OPPORTUNITY_UPDATED',
     });
     return updated;
   }
@@ -243,6 +378,13 @@ export class FundingOpportunityIntakeService {
       evidenceRecordsRegistered: Array.isArray(record.evidenceRecordIds) && record.evidenceRecordIds.length > 0,
     };
 
+    let startup = null;
+    if (record.opportunityType === STARTUP_TYPE) {
+      startup = startupCompleteness(record);
+      Object.assign(required, Object.fromEntries(Object.entries(startup.required).map(([key, value]) => [`startup.${key}`, value])));
+      Object.assign(recommended, Object.fromEntries(Object.entries(startup.recommended).map(([key, value]) => [`startup.${key}`, value])));
+    }
+
     const missingRequired = Object.entries(required).filter(([, present]) => !present).map(([field]) => field);
     const missingRecommended = Object.entries(recommended).filter(([, present]) => !present).map(([field]) => field);
 
@@ -253,6 +395,7 @@ export class FundingOpportunityIntakeService {
       recommended,
       missingRequired,
       missingRecommended,
+      startup,
       nextPhase: missingRequired.length === 0 ? 'PENDING_VERIFICATION' : 'OPPORTUNITY_INTAKE',
     };
   }
@@ -278,13 +421,13 @@ export class FundingOpportunityIntakeService {
       updatedAt: completedAt,
       history: [
         ...(current.history || []),
-        { from: current.status, to: 'INTAKE_COMPLETE', at: completedAt, actorId, note: 'Standardized opportunity intake completed.' },
+        { from: current.status, to: 'INTAKE_COMPLETE', at: completedAt, actorId, note: current.opportunityType === STARTUP_TYPE ? 'Startup Business Funding Request Package intake completed.' : 'Standardized opportunity intake completed.' },
       ],
     };
 
     await this.domain.put(RECORD_TYPE, opportunityId, updated, {
       actorId,
-      eventType: 'FUNDING_OPPORTUNITY_INTAKE_COMPLETED',
+      eventType: current.opportunityType === STARTUP_TYPE ? 'STARTUP_BUSINESS_FUNDING_INTAKE_COMPLETED' : 'FUNDING_OPPORTUNITY_INTAKE_COMPLETED',
     });
     await this.domain.lifecycle({
       objectType: RECORD_TYPE,
@@ -297,6 +440,7 @@ export class FundingOpportunityIntakeService {
         evidenceRecordCount: updated.evidenceRecordIds.length,
         relatedAgreementCount: updated.relatedAgreementIds.length,
         sourceTransactionCount: updated.sourceTransactionIds.length,
+        startupBusiness: current.opportunityType === STARTUP_TYPE,
       },
     });
     return updated;
@@ -308,8 +452,21 @@ export class FundingOpportunityIntakeService {
     if (!['INTAKE_COMPLETE', 'PENDING_VERIFICATION'].includes(opportunity.status)) {
       throw new Error(`Verification cannot begin from ${opportunity.status}.`);
     }
+    const completeness = this.assessCompleteness(opportunityId);
+    if (!completeness.intakeComplete) {
+      const error = new Error(`Funding opportunity intake is incomplete: ${completeness.missingRequired.join(', ')}`);
+      error.code = 'INTAKE_INCOMPLETE';
+      error.completeness = completeness;
+      throw error;
+    }
 
     const evidenceIds = unique(input.evidenceIds?.length ? input.evidenceIds : opportunity.evidenceRecordIds || []);
+    const startupChecks = opportunity.opportunityType === STARTUP_TYPE ? [
+      'STARTUP_USE_OF_FUNDS_SUPPORT',
+      'STARTUP_REVENUE_ASSUMPTIONS',
+      'STARTUP_DEMAND_EVIDENCE',
+      'STARTUP_READINESS_EVIDENCE',
+    ] : [];
     const request = {
       verificationRequestId: input.verificationRequestId || id('FVR'),
       opportunityId,
@@ -326,6 +483,7 @@ export class FundingOpportunityIntakeService {
         'TRANSACTION_EXISTENCE',
         'AMOUNT_CONSISTENCY',
         'RELATIONSHIP_CONSISTENCY',
+        ...startupChecks,
       ],
       status: 'PENDING',
       requestedBy: actorId,
@@ -397,4 +555,5 @@ export {
   EVIDENCE_RECORD_TYPE as FUNDING_OPPORTUNITY_EVIDENCE_RECORD_TYPE,
   VERIFICATION_REQUEST_TYPE as FUNDING_OPPORTUNITY_VERIFICATION_REQUEST_TYPE,
   STATES as FUNDING_OPPORTUNITY_STATES,
+  STARTUP_TYPE as STARTUP_BUSINESS_OPPORTUNITY_TYPE,
 };

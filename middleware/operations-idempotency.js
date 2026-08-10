@@ -20,6 +20,7 @@ function isProtectedOperationsPath(path) {
     '/api/funding-marketplace-allocation',
     '/api/funding-marketplace-settlement',
     '/api/funding-operations',
+    '/api/financing-closing',
     '/api/sain/intelligence',
   ].some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
 }
@@ -56,6 +57,7 @@ function resourceKey(req, currentFingerprint) {
     'marketplacePreparationId', 'publicationReviewId', 'publicationAuthorizationId',
     'listingId', 'windowId', 'commitmentId', 'allocationReviewId', 'positionId',
     'settlementPreparationId', 'settlementReviewId', 'settlementAuthorizationId',
+    'closingId', 'conditionId', 'disbursementId',
   ];
   const bodyId = identifiers.map((field) => req.body?.[field]).find(Boolean);
   const pathId = req.path.split('/').find((segment) => /^[A-Za-z]{1,20}-[A-Za-z0-9-]{2,}$/.test(segment));

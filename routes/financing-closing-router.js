@@ -1,6 +1,6 @@
 import express from 'express';
 
-function actorId(req) { return req.sraIdentity?.actorId || req.get('x-sra-actor-id') || req.body?.actorId || null; }
+function actorId(req) { return req.sraOperationsAuth?.actorId || req.sraIdentity?.actorId || null; }
 function fail(res, error) { const message = error?.message || 'Unexpected financing closing error.'; return res.status(/not found/i.test(message) ? 404 : 422).json({ error: message, code: error?.code || 'FINANCING_CLOSING_ERROR' }); }
 
 export function createFinancingClosingRouter(service) {
