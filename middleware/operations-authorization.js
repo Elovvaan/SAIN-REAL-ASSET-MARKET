@@ -20,15 +20,19 @@ export function createOperationsAuthorization({accessServiceProvider=defaultAcce
     try{
       const standardToken=readCookie(req,'sra_session');
       const privateAdminToken=req.path.startsWith('/api/on-chain')?readCookie(req,'sra_admin_session'):'';
-      const token=standardToken||privateAdminToken;
       const service=await accessServiceProvider();
-      const session=token?await service.getSession(token):null;
+      let session=standardToken?await service.getSession(standardToken):null;
+      let source=session?'SERVER_SESSION':null;
+      if(!session&&privateAdminToken){
+        session=await service.getSession(privateAdminToken);
+        if(session)source='PRIVATE_ADMIN_SESSION';
+      }
       if(!session)return res.status(401).json({error:'An active authenticated SRA session is required.',code:'SRA_AUTHENTICATION_REQUIRED'});
       const roles=[...new Set([session.activeCapacity,...(session.capacities||[]).map((capacity)=>capacity.id||capacity),...(session.roles||[]).map((role)=>role.id||role)].filter(Boolean).map((role)=>String(role).toUpperCase()))];
       const required=requiredRoles(req.path);
       if(!roles.some((role)=>required.has(role)))return res.status(403).json({error:'The authenticated account is not authorized for this SRA operation.',code:'SRA_SERVER_ROLE_REQUIRED',requiredRoles:[...required]});
       req.sraIdentity={actorId:session.id,universalAccountId:session.universalAccountId,email:session.email,activeCapacity:session.activeCapacity};
-      req.sraOperationsAuth={actorId:session.id,roles,source:standardToken?'SERVER_SESSION':'PRIVATE_ADMIN_SESSION'};
+      req.sraOperationsAuth={actorId:session.id,roles,source};
       return next();
     }catch{return res.status(500).json({error:'SRA could not validate the authenticated session.',code:'SRA_SESSION_VALIDATION_FAILED'});}
   };
