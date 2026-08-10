@@ -209,8 +209,8 @@ export function createAccessRouter(marketplace, service = new AccessService()) {
       const session = await requireSession(req, res); if (!session) return;
       const requestedAmount = amount(req.body?.amount);
       if (requestedAmount <= 0) return res.status(400).json({ error: 'Funding amount must be greater than zero.' });
-      const rail = String(req.body?.rail || 'ACH').toUpperCase();
-      if (!['ACH', 'WIRE', 'EXTERNAL_TRANSFER'].includes(rail)) return res.status(400).json({ error: 'Supported funding rails are ACH, wire, or external transfer.' });
+      const rail = String(req.body?.rail || 'EXTERNAL_TRANSFER').toUpperCase();
+      if (rail !== 'EXTERNAL_TRANSFER') return res.status(400).json({ error: 'Supported funding rail is external transfer.' });
       const record = {
         fundingInstructionId: id('FUND'), purpose: 'ASSET_VAULT_FUNDING', participantId: session.id,
         accountId: session.universalAccountId, amount: requestedAmount, currency: 'USD', rail,
@@ -282,8 +282,8 @@ export function createAccessRouter(marketplace, service = new AccessService()) {
       if (!invoice) return res.status(404).json({ error: 'Fee invoice not found.' });
       if (![session.id, session.universalAccountId].includes(invoice.payerId)) return res.status(403).json({ error: 'That invoice does not belong to this account.' });
       if (invoice.state === 'PAID') return res.status(409).json({ error: 'That invoice is already paid.' });
-      const rail = String(req.body?.rail || 'ACH').toUpperCase();
-      if (!['ACH', 'WIRE', 'CARD', 'EXTERNAL_TRANSFER'].includes(rail)) return res.status(400).json({ error: 'Unsupported fee payment rail.' });
+      const rail = String(req.body?.rail || 'EXTERNAL_TRANSFER').toUpperCase();
+      if (!['CARD', 'EXTERNAL_TRANSFER'].includes(rail)) return res.status(400).json({ error: 'Unsupported fee payment rail.' });
       const record = {
         fundingInstructionId: id('PAY'), purpose: 'PLATFORM_FEE_PAYMENT', participantId: session.id,
         accountId: session.universalAccountId, invoiceId, amount: amount(invoice.total), currency: invoice.currency || 'USD', rail,

@@ -18,52 +18,19 @@
   function card(title,state,body) { return `<section class="admin-record-card" data-treasury-workstation-card><header><strong>${esc(title)}</strong><em>${esc(state)}</em></header>${body}</section>`; }
   function clear(workspace) { controls(workspace)?.querySelectorAll('[data-treasury-workstation-card]').forEach((node) => node.remove()); }
 
-  function openSettlementInstruction(amountUsd) {
-    sessionStorage.setItem('sra:treasury-payment-draft', JSON.stringify({ amountUsd:Number(amountUsd), rail:'ACH', createdAt:new Date().toISOString() }));
-    document.querySelector('[data-admin-workspace="settlement"]')?.click();
-    queueMicrotask(() => {
-      const settlement = document.querySelector('[data-workspace="settlement"]');
-      settlement?.querySelector('[data-admin-tab="Settlement Instructions"]')?.click();
-      queueMicrotask(() => applyDraftToSettlementInstruction(settlement));
-    });
-  }
-
-  function applyDraftToSettlementInstruction(settlementWorkspace) {
-    if (!settlementWorkspace || settlementWorkspace.dataset.activeTab !== 'Settlement Instructions') return;
-    let draft = null;
-    try { draft = JSON.parse(sessionStorage.getItem('sra:treasury-payment-draft') || 'null'); } catch {}
-    const form = settlementWorkspace.querySelector('[data-settlement-instruction-form]');
-    if (!form || !draft?.amountUsd) return;
-    if (form.elements.route) {
-      form.elements.route.value = 'ACH';
-      form.elements.route.dispatchEvent(new Event('change', { bubbles:true }));
-    }
-    if (form.elements.amountUsd) form.elements.amountUsd.value = Number(draft.amountUsd).toFixed(2);
-    const button = form.querySelector('button[type="submit"]');
-    if (button) button.textContent = 'Prepare ACH Settlement Instruction';
-    let note = form.querySelector('[data-treasury-payment-draft-note]');
-    if (!note) {
-      note = document.createElement('p');
-      note.dataset.treasuryPaymentDraftNote = 'true';
-      note.style.cssText = 'color:#d6a92f;font-size:12px;line-height:1.45;margin:10px 0';
-      form.prepend(note);
-    }
-    note.textContent = `Treasury payment draft · ${money(draft.amountUsd)} · ACH · source: Cash / Settlement USD`;
-  }
-
   async function load() {
-    const [treasury, readiness, eligible, workspace] = await Promise.all([
+    const [treasury, eligible, workspace] = await Promise.all([
       request('/api/admin/treasury'),
-      request('/api/admin/treasury-transfer-readiness'),
       request('/api/admin/treasury/funding-instrument-deposits/eligible-instruments'),
       request('/api/admin/workspaces?limit=100'),
     ]);
-    return { treasury, readiness, eligible, records: workspace?.records || {} };
+    return { treasury, eligible, records: workspace?.records || {} };
   }
 
   function canonicalInstrument(data) {
     return list(data.eligible?.instruments).find((item) => item.instrumentId === data.eligible?.canonicalInstrumentId) || null;
   }
+
   function recognitionAction(data) {
     const instrument = canonicalInstrument(data);
     if (!instrument || instrument.deposited) return '';
@@ -71,11 +38,8 @@
   }
 
   function renderOverview(data) {
-    const cash = Number(data.treasury.cashBalanceUsd || 0);
-    const held = Number(data.readiness.status?.reservedUsd || 0);
-    const available = Math.max(0, cash - held);
     const instrument = canonicalInstrument(data);
-    return card('Treasury Position','CURRENT',`<div class="admin-record-grid">${field('Cash / Settlement USD',money(cash))}${field('Held for payments',money(held))}${field('Available to send',money(available))}${field('Commercial instrument USD',money(data.treasury.commercialInstrumentUsd))}${field('Financing capacity',money(data.treasury.totalFundingCapacityUsd))}${field('Available financing',money(data.treasury.availableFinancingCapacityUsd))}${field('Financing held',money(data.treasury.committedFinancingUsd))}${field('Financing deployed',money(data.treasury.deployedFinancingUsd))}${field('Authorized payments',String(data.readiness.status?.readyToSend || 0))}${field('Canonical $18M instrument',instrument ? (instrument.deposited ? 'TREASURY RECOGNIZED' : 'ISSUED · AWAITING TREASURY RECOGNITION') : 'NOT FOUND')}</div>${recognitionAction(data)}<div style="margin-top:14px"><button type="button" data-treasury-start-payment>Send Payment</button></div>`);
+    return card('Treasury Position','CURRENT',`<div class="admin-record-grid">${field('Cash / Settlement USD',money(data.treasury.cashBalanceUsd))}${field('Commercial instrument USD',money(data.treasury.commercialInstrumentUsd))}${field('Financing capacity',money(data.treasury.totalFundingCapacityUsd))}${field('Available financing',money(data.treasury.availableFinancingCapacityUsd))}${field('Financing held',money(data.treasury.committedFinancingUsd))}${field('Financing deployed',money(data.treasury.deployedFinancingUsd))}${field('Canonical $18M instrument',instrument ? (instrument.deposited ? 'TREASURY RECOGNIZED' : 'ISSUED · AWAITING TREASURY RECOGNITION') : 'NOT FOUND')}</div>${recognitionAction(data)}`);
   }
 
   function renderCommercial(data) {
@@ -85,11 +49,7 @@
   }
 
   function renderCash(data) {
-    const cash = Number(data.treasury.cashBalanceUsd || 0);
-    const held = Number(data.readiness.status?.reservedUsd || 0);
-    const available = Math.max(0, cash - held);
-    const inFlight = list(data.records.transactions).filter((item) => item.transactionType === 'EXTERNAL_TRANSFER_INSTRUCTION' && ['HELD','SUBMITTED'].includes(String(item.fundsState || '').toUpperCase()));
-    return card('Cash Position','OPERATING',`<div class="admin-record-grid">${field('Cash / Settlement USD',money(cash))}${field('Held',money(held))}${field('Available',money(available))}${field('In-flight payments',String(inFlight.length))}</div><p style="color:#9a9a9a;margin:12px 0">Commercial instrument value and financing capacity are not cash. Cash changes only through cash/settlement accounting events.</p><form data-treasury-payment-form style="margin-top:14px"><div class="admin-record-grid"><label><span>Amount USD</span><input name="amountUsd" type="number" min="0.01" step="0.01" value="1.00" required></label><label><span>Rail</span><select name="rail" style="width:100%;background:#050505;border:1px solid #292929;border-radius:10px;color:#f5f5f5;padding:12px"><option value="ACH">ACH</option></select></label></div><div style="display:flex;gap:12px;align-items:center;margin-top:12px"><button type="submit" ${available <= 0 ? 'disabled' : ''}>Send Payment</button><span style="color:#9a9a9a;font-size:12px">Continues to Settlement Instructions.</span></div></form>`);
+    return card('Cash Position','OPERATING',`<div class="admin-record-grid">${field('Cash / Settlement USD',money(data.treasury.cashBalanceUsd))}</div><p style="color:#9a9a9a;margin:12px 0">Commercial instrument value and financing capacity are not cash. Cash changes only through cash/settlement accounting events.</p>`);
   }
 
   function renderFinancing(data, capacity = false) {
@@ -171,15 +131,6 @@
       placeholder.outerHTML = markup;
       const current = root.querySelector('[data-treasury-workstation-card]');
       current?.querySelector('[data-treasury-recognize-instrument]')?.addEventListener('click', () => void recognizeCanonicalInstrument(workspace, data));
-      current?.querySelector('[data-treasury-start-payment]')?.addEventListener('click', () => {
-        const amount = Math.min(1, Math.max(0, Number(data.treasury.cashBalanceUsd || 0) - Number(data.readiness.status?.reservedUsd || 0)));
-        if (amount > 0) openSettlementInstruction(amount);
-      });
-      current?.querySelector('[data-treasury-payment-form]')?.addEventListener('submit', (event) => {
-        event.preventDefault();
-        const values = Object.fromEntries(new FormData(event.currentTarget).entries());
-        openSettlementInstruction(Number(values.amountUsd));
-      });
     } catch (error) {
       placeholder.innerHTML = `<header><strong>Treasury Workstation</strong><em>UNAVAILABLE</em></header><p>${esc(error.message)}</p>`;
     }
@@ -193,10 +144,6 @@
     });
     window.addEventListener('sra:admin-workspace-synchronized', (event) => {
       if (event.detail?.workspaceId === 'treasury') void render(workspace);
-      if (event.detail?.workspaceId === 'settlement') applyDraftToSettlementInstruction(document.querySelector('[data-workspace="settlement"]'));
-    });
-    document.querySelector('[data-workspace="settlement"]')?.addEventListener('click', (event) => {
-      if (event.target.closest('[data-admin-tab="Settlement Instructions"]')) queueMicrotask(() => applyDraftToSettlementInstruction(document.querySelector('[data-workspace="settlement"]')));
     });
     void render(workspace);
   }
