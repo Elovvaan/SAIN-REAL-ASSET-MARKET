@@ -38,9 +38,35 @@ export class PrivateDocumentService {
   async initialize() {
     if (this.ready) return;
     await fs.mkdir(this.root, { recursive: true });
-    if (this.database) {
+    if (this.database?.pool) {
+      await this.database.pool.query(`
+        CREATE TABLE IF NOT EXISTS sra_private_document_bodies (
+          document_id TEXT PRIMARY KEY,
+          content BYTEA NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+      await this.database.pool.query(`
+        INSERT INTO sra_private_document_bodies (document_id, content)
+        SELECT document_id, decode(payload->>'contentBase64', 'base64')
+        FROM sra_private_documents
+        WHERE payload ? 'contentBase64' AND COALESCE(payload->>'contentBase64', '') <> ''
+        ON CONFLICT (document_id) DO NOTHING
+      `);
+      await this.database.pool.query(`
+        UPDATE sra_private_documents
+        SET payload = payload - 'contentBase64', updated_at = NOW()
+        WHERE payload ? 'contentBase64'
+      `);
+      const result = await this.database.pool.query("SELECT payload - 'contentBase64' AS payload FROM sra_private_documents ORDER BY created_at");
+      result.rows.forEach((row) => this.records.set(row.payload.id, row.payload));
+    } else if (this.database) {
       const records = await this.database.listDocuments();
-      records.forEach((record) => this.records.set(record.id, record));
+      records.forEach((record) => {
+        const { contentBase64, ...metadata } = record;
+        this.records.set(metadata.id, metadata);
+      });
     }
     this.ready = true;
   }
@@ -67,12 +93,36 @@ export class PrivateDocumentService {
       size: file.size, sha256: digest, storageClass: 'PRIVATE_EVIDENCE',
       accessState: 'RESTRICTED', uploaderId, uploadedAt,
       reviewState: 'SUBMITTED', public: false, storagePath,
-      contentBase64: this.database ? file.buffer.toString('base64') : null,
       ...retentionMetadata({ uploadedAt, retentionPolicy, retentionReferenceId }),
     };
+    if (this.database?.pool) {
+      const client = await this.database.pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(
+          `INSERT INTO sra_private_document_bodies (document_id, content) VALUES ($1, $2)
+           ON CONFLICT (document_id) DO UPDATE SET content = EXCLUDED.content, updated_at = NOW()`,
+          [id, file.buffer]
+        );
+        const persisted = { ...record };
+        delete persisted.storagePath;
+        await client.query(
+          `INSERT INTO sra_private_documents (document_id, payload) VALUES ($1, $2::jsonb)
+           ON CONFLICT (document_id) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()`,
+          [id, JSON.stringify(persisted)]
+        );
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw error;
+      } finally {
+        client.release();
+      }
+    } else if (this.database) {
+      await this.database.putDocument(id, record);
+    }
     this.records.set(id, record);
     if (this.database) {
-      await this.database.putDocument(id, record);
       await this.database.audit({
         actorId: uploaderId,
         eventType: 'PRIVATE_DOCUMENT_STORED',
@@ -96,7 +146,10 @@ export class PrivateDocumentService {
   async read(id) {
     const record = this.get(id);
     if (!record) return null;
-    if (record.contentBase64) return Buffer.from(record.contentBase64, 'base64');
+    if (this.database?.pool) {
+      const result = await this.database.pool.query('SELECT content FROM sra_private_document_bodies WHERE document_id = $1', [id]);
+      if (result.rows[0]?.content) return result.rows[0].content;
+    }
     try { return await fs.readFile(record.storagePath); } catch { return null; }
   }
 
@@ -111,7 +164,9 @@ export class PrivateDocumentService {
     };
     this.records.set(id, updated);
     if (this.database) {
-      await this.database.putDocument(id, updated);
+      const persisted = { ...updated };
+      delete persisted.storagePath;
+      await this.database.putDocument(id, persisted);
       await this.database.audit({ actorId, eventType: 'PRIVATE_DOCUMENT_ACCESSED', objectType: 'PRIVATE_DOCUMENT', objectId: id, payload: { retentionReviewAt: updated.retentionReviewAt } });
     }
     return this.toPublicMetadata(updated);
