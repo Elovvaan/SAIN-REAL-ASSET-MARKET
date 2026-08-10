@@ -10,6 +10,7 @@ const CAPACITY_DEFINITIONS = {
 };
 
 const CAPACITY_STATES = ['NOT_ADDED','APPLICATION_STARTED','INFORMATION_REQUIRED','UNDER_REVIEW','ACTIVE','SUSPENDED','CLOSED'];
+const RUNTIME_SESSIONS = new Map();
 
 function normalizeEmail(value) { return typeof value === 'string' ? value.trim().toLowerCase().slice(0, 180) : ''; }
 function clean(value, max = 160) { return typeof value === 'string' ? value.trim().slice(0, max) : ''; }
@@ -113,6 +114,7 @@ export class AccessService {
     const tokenHash = hashToken(token);
     const session = { tokenHash, userId: user.id, email: user.email, activeCapacity: user.capacities[0], createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 12).toISOString() };
     this.sessions.set(tokenHash, session);
+    RUNTIME_SESSIONS.set(tokenHash, { session, user });
     if (this.database) {
       await this.database.putSession(tokenHash, session);
       await this.database.audit({ actorId: user.id, eventType: 'SESSION_STARTED', objectType: 'SESSION', objectId: tokenHash.slice(0, 16) });
@@ -122,25 +124,34 @@ export class AccessService {
 
   async getSession(token) {
     const tokenHash = token ? hashToken(token) : '';
-    const session = tokenHash ? this.sessions.get(tokenHash) : null;
+    const runtime = tokenHash ? RUNTIME_SESSIONS.get(tokenHash) : null;
+    const session = tokenHash ? (this.sessions.get(tokenHash) || runtime?.session || null) : null;
     if (!session || new Date(session.expiresAt).getTime() < Date.now()) {
       if (tokenHash) {
         this.sessions.delete(tokenHash);
+        RUNTIME_SESSIONS.delete(tokenHash);
         if (this.database) await this.database.deleteSession(tokenHash);
       }
       return null;
     }
-    const user = this.users.get(session.email);
-    return user ? this.sanitizeUser(user, session.activeCapacity) : null;
+    const user = this.users.get(session.email) || runtime?.user || null;
+    if (!user) return null;
+    this.sessions.set(tokenHash, session);
+    this.users.set(user.email, user);
+    RUNTIME_SESSIONS.set(tokenHash, { session, user });
+    return this.sanitizeUser(user, session.activeCapacity);
   }
 
   async switchRole(token, capacity) {
     const tokenHash = hashToken(token || '');
-    const session = this.sessions.get(tokenHash);
+    const session = this.sessions.get(tokenHash) || RUNTIME_SESSIONS.get(tokenHash)?.session;
     if (!session) throw new Error('Session not found.');
-    const user = this.users.get(session.email);
+    const user = this.users.get(session.email) || RUNTIME_SESSIONS.get(tokenHash)?.user;
     if (!user || !user.capacities.includes(capacity)) throw new Error('That account capacity is not active for this identity.');
     session.activeCapacity = capacity;
+    this.sessions.set(tokenHash, session);
+    this.users.set(user.email, user);
+    RUNTIME_SESSIONS.set(tokenHash, { session, user });
     if (this.database) {
       await this.database.putSession(tokenHash, session);
       await this.database.audit({ actorId: user.id, eventType: 'OPERATING_TIER_CHANGED', objectType: 'USER', objectId: user.id, payload: { activeCapacity: capacity } });
@@ -172,11 +183,11 @@ export class AccessService {
 
   async activateCapacity(token, capacity) {
     const tokenHash = hashToken(token || '');
-    const session = this.sessions.get(tokenHash);
+    const session = this.sessions.get(tokenHash) || RUNTIME_SESSIONS.get(tokenHash)?.session;
     if (!session) throw new Error('Session not found.');
     const definition = CAPACITY_DEFINITIONS[capacity];
     if (!definition || !definition.selfService) throw new Error('That capacity requires institutional authorization.');
-    const user = this.users.get(session.email);
+    const user = this.users.get(session.email) || RUNTIME_SESSIONS.get(tokenHash)?.user;
     const record = user.capabilityRecords[capacity];
     const now = new Date().toISOString();
     if (!user.capacities.includes(capacity)) user.capacities.push(capacity);
@@ -185,6 +196,9 @@ export class AccessService {
     record.activatedAt = now;
     record.updatedAt = now;
     session.activeCapacity = capacity;
+    this.sessions.set(tokenHash, session);
+    this.users.set(user.email, user);
+    RUNTIME_SESSIONS.set(tokenHash, { session, user });
     if (this.database) {
       await this.database.putUser(user.email, user);
       await this.database.putSession(tokenHash, session);
@@ -196,8 +210,9 @@ export class AccessService {
   async signout(token) {
     const tokenHash = token ? hashToken(token) : '';
     if (tokenHash) {
-      const session = this.sessions.get(tokenHash);
+      const session = this.sessions.get(tokenHash) || RUNTIME_SESSIONS.get(tokenHash)?.session;
       this.sessions.delete(tokenHash);
+      RUNTIME_SESSIONS.delete(tokenHash);
       if (this.database) {
         await this.database.deleteSession(tokenHash);
         await this.database.audit({ actorId: session?.userId || null, eventType: 'SESSION_ENDED', objectType: 'SESSION', objectId: tokenHash.slice(0, 16) });
