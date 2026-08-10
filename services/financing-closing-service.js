@@ -5,17 +5,19 @@ const CLOSING_TYPE = 'FINANCING_CLOSING';
 const CONDITION_TYPE = 'FINANCING_CLOSING_CONDITION';
 const DISBURSEMENT_TYPE = 'FINANCING_DISBURSEMENT';
 const POSITION_TYPE = 'FINANCED_POSITION';
+const EXPORT_PACKAGE_TYPE = 'EXPORT_PACKAGE';
 const LOAN_FINANCING_TYPE = 'LOAN_FINANCING_AUTHORIZATION';
 const id = (prefix) => `${prefix}-${crypto.randomUUID().split('-')[0].toUpperCase()}`;
 const now = () => new Date().toISOString();
 const positiveAmount = (value) => { const n = Number(value); if (!Number.isFinite(n) || n <= 0) throw new Error('Funding amount must be greater than zero.'); return Number(n.toFixed(8)); };
 const required = (value, field) => { const text = String(value || '').trim(); if (!text) throw new Error(`${field} is required.`); return text; };
+const financingExportId = (disbursementId) => `EXP-${disbursementId}`;
 
 export class FinancingClosingService {
   constructor(domain, assetServicingService = null) { this.domain = domain; this.assetServicingService = assetServicingService; }
 
   async initialize() {
-    await this.domain.hydrate([CLOSING_TYPE, CONDITION_TYPE, DISBURSEMENT_TYPE, POSITION_TYPE, RECORD_TYPES.SRA_TRANSACTION]);
+    await this.domain.hydrate([CLOSING_TYPE, CONDITION_TYPE, DISBURSEMENT_TYPE, POSITION_TYPE, EXPORT_PACKAGE_TYPE, RECORD_TYPES.SRA_TRANSACTION]);
     return this.status();
   }
 
@@ -26,11 +28,19 @@ export class FinancingClosingService {
   conditions(closingId) { return this.domain.list(CONDITION_TYPE).filter((r) => r.closingId === closingId); }
   disbursements(closingId) { return this.domain.list(DISBURSEMENT_TYPE).filter((r) => r.closingId === closingId); }
   positionForFinancing(financingTransactionId) { return this.domain.list(POSITION_TYPE).find((r) => r.financingTransactionId === financingTransactionId) || null; }
+  exportPackageForDisbursement(disbursementId) { return this.domain.get(EXPORT_PACKAGE_TYPE, financingExportId(disbursementId)); }
 
   detail(closingId) {
     const closing = this.get(closingId);
     if (!closing) return null;
-    return { closing, conditions: this.conditions(closingId), disbursements: this.disbursements(closingId), financedPosition: this.positionForFinancing(closing.financingTransactionId) };
+    const disbursements = this.disbursements(closingId);
+    return {
+      closing,
+      conditions: this.conditions(closingId),
+      disbursements,
+      financedPosition: this.positionForFinancing(closing.financingTransactionId),
+      exportPackages: disbursements.map((record) => this.exportPackageForDisbursement(record.disbursementId)).filter(Boolean),
+    };
   }
 
   financing(financingTransactionId) {
@@ -106,7 +116,7 @@ export class FinancingClosingService {
     const finalFundingAmount = positiveAmount(input.finalFundingAmount ?? current.finalFundingAmount ?? current.approvedAmount);
     if (finalFundingAmount > Number(current.approvedAmount)) throw new Error('Final funding amount cannot exceed the approved financing amount.');
     const beneficiaryName = required(input.beneficiaryName || current.beneficiaryName, 'beneficiaryName');
-    const settlementMethod = required(input.settlementMethod || current.settlementMethod, 'settlementMethod').toUpperCase();
+    const settlementMethod = String(input.settlementMethod || current.settlementMethod || '').trim().toUpperCase() || null;
     const timestamp = now();
     const updated = { ...current, finalFundingAmount, beneficiaryName, settlementMethod, settlementInstructions: input.settlementInstructions || current.settlementInstructions || {}, status: 'READY_TO_FUND', readyAt: timestamp, updatedAt: timestamp };
     await this.domain.put(CLOSING_TYPE, closingId, updated, { actorId, eventType: 'FINANCING_CLOSING_READY_TO_FUND' });
@@ -120,24 +130,57 @@ export class FinancingClosingService {
     if (open.length) throw new Error(`Required closing conditions remain open: ${open.map((c) => c.title).join(', ')}`);
     if (String(input.approval || '').toUpperCase() !== 'APPROVE') throw new Error('Explicit administrator funding approval is required.');
     const existing = this.disbursements(closingId).find((d) => !['FAILED','CANCELLED'].includes(d.status));
-    if (existing) return { closing: current, disbursement: existing, created: false };
+    if (existing) return { closing: current, disbursement: existing, exportPackage: this.exportPackageForDisbursement(existing.disbursementId), created: false };
     const timestamp = now();
     const disbursementId = id('FDB');
-    const disbursement = { disbursementId, closingId, financingTransactionId: current.financingTransactionId, opportunityId: current.opportunityId, instrumentId: current.instrumentId, amount: current.finalFundingAmount, currency: current.currency, beneficiaryName: current.beneficiaryName, settlementMethod: current.settlementMethod, settlementInstructions: current.settlementInstructions || {}, status: 'AUTHORIZED', externalReference: null, authorizedBy: actorId, authorizedAt: timestamp, submittedAt: null, settledAt: null, createdAt: timestamp, updatedAt: timestamp };
-    const updated = { ...current, status: 'AUTHORIZED', authorizedBy: actorId, authorizedAt: timestamp, updatedAt: timestamp };
+    const exportPackageId = financingExportId(disbursementId);
+    const disbursement = { disbursementId, closingId, financingTransactionId: current.financingTransactionId, opportunityId: current.opportunityId, instrumentId: current.instrumentId, amount: current.finalFundingAmount, currency: current.currency, beneficiaryName: current.beneficiaryName, settlementMethod: current.settlementMethod, settlementInstructions: current.settlementInstructions || {}, exportPackageId, status: 'AUTHORIZED', externalReference: null, authorizedBy: actorId, authorizedAt: timestamp, submittedAt: null, settledAt: null, createdAt: timestamp, updatedAt: timestamp };
+    const exportPackage = {
+      exportPackageId,
+      exportKind: 'FINANCING_DISBURSEMENT',
+      sourceType: 'FINANCING_DISBURSEMENT',
+      financingTransactionId: current.financingTransactionId,
+      closingId,
+      disbursementId,
+      opportunityId: current.opportunityId,
+      instrumentId: current.instrumentId,
+      participantId: current.borrowerParticipantId,
+      borrowerParticipantId: current.borrowerParticipantId,
+      beneficiaryName: current.beneficiaryName,
+      amount: current.finalFundingAmount,
+      currency: current.currency || 'USD',
+      preferredRail: current.settlementMethod || null,
+      selectedRail: null,
+      settlementInstructionId: null,
+      state: 'READY_FOR_SETTLEMENT_INSTRUCTION',
+      exportExecutionState: 'NOT_STARTED',
+      externalSettlementReference: null,
+      authorizedBy: actorId,
+      authorizedAt: timestamp,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      statusHistory: [{ state: 'READY_FOR_SETTLEMENT_INSTRUCTION', actorId, occurredAt: timestamp }],
+    };
+    const updated = { ...current, status: 'AUTHORIZED', exportPackageId, authorizedBy: actorId, authorizedAt: timestamp, updatedAt: timestamp };
     await this.domain.atomicPut([
       { type: DISBURSEMENT_TYPE, id: disbursementId, payload: disbursement, actorId, eventType: 'FINANCING_DISBURSEMENT_AUTHORIZED' },
+      { type: EXPORT_PACKAGE_TYPE, id: exportPackageId, payload: exportPackage, actorId, eventType: 'FINANCING_EXPORT_PACKAGE_CREATED' },
       { type: CLOSING_TYPE, id: closingId, payload: updated, actorId, eventType: 'FINANCING_CLOSING_AUTHORIZED' },
     ]);
-    return { closing: updated, disbursement, created: true };
+    await this.domain.lifecycle({ objectType: EXPORT_PACKAGE_TYPE, objectId: exportPackageId, eventType: 'FINANCING_EXPORT_PACKAGE_READY', actorId, payload: { financingTransactionId: current.financingTransactionId, closingId, disbursementId, amount: current.finalFundingAmount, currency: current.currency || 'USD' } });
+    return { closing: updated, disbursement, exportPackage, created: true };
   }
 
   async submitDisbursement(closingId, disbursementId, input = {}, actorId = null) {
     const closing = this.get(closingId); if (!closing) throw new Error('Financing closing was not found.');
     const current = this.domain.get(DISBURSEMENT_TYPE, disbursementId); if (!current || current.closingId !== closingId) throw new Error('Financing disbursement was not found.');
     if (current.status !== 'AUTHORIZED') throw new Error('Only an authorized disbursement can be submitted.');
-    const updated = { ...current, status: 'SUBMITTED', externalReference: input.externalReference || current.externalReference || null, submittedAt: now(), updatedAt: now(), submittedBy: actorId };
-    await this.domain.put(DISBURSEMENT_TYPE, disbursementId, updated, { actorId, eventType: 'FINANCING_DISBURSEMENT_SUBMITTED' });
+    const timestamp = now();
+    const updated = { ...current, status: 'SUBMITTED', externalReference: input.externalReference || current.externalReference || null, submittedAt: timestamp, updatedAt: timestamp, submittedBy: actorId };
+    const exportPackage = this.exportPackageForDisbursement(disbursementId);
+    const changes = [{ type: DISBURSEMENT_TYPE, id: disbursementId, payload: updated, actorId, eventType: 'FINANCING_DISBURSEMENT_SUBMITTED' }];
+    if (exportPackage) changes.push({ type: EXPORT_PACKAGE_TYPE, id: exportPackage.exportPackageId, payload: { ...exportPackage, state: 'SUBMITTED', exportExecutionState: 'IN_PROGRESS', updatedAt: timestamp, statusHistory: [...(exportPackage.statusHistory || []), { state: 'SUBMITTED', actorId, occurredAt: timestamp }] }, actorId, eventType: 'FINANCING_EXPORT_PACKAGE_SUBMITTED' });
+    await this.domain.atomicPut(changes);
     return updated;
   }
 
@@ -178,15 +221,18 @@ export class FinancingClosingService {
     const settled = { ...disbursement, status: 'SETTLED', externalReference, submittedAt: disbursement.submittedAt || timestamp, settledAt: timestamp, settledBy: actorId, updatedAt: timestamp };
     const funded = { ...closing, status: 'FUNDED', financedPositionId: positionId, fundedAt: timestamp, updatedAt: timestamp };
     const financingUpdated = { ...financing, status: 'FUNDED', financedPositionId: positionId, externalDisbursementAuthorized: true, externalSettlementReference: externalReference, fundedAt: timestamp, updatedAt: timestamp };
-    await this.domain.atomicPut([
+    const exportPackage = this.exportPackageForDisbursement(disbursementId);
+    const changes = [
       { type: DISBURSEMENT_TYPE, id: disbursementId, payload: settled, actorId, eventType: 'FINANCING_DISBURSEMENT_SETTLED' },
       { type: CLOSING_TYPE, id: closingId, payload: funded, actorId, eventType: 'FINANCING_CLOSING_FUNDED' },
       { type: RECORD_TYPES.SRA_TRANSACTION, id: financing.transactionId, payload: financingUpdated, actorId, eventType: 'LOAN_FINANCING_FUNDED' },
       { type: POSITION_TYPE, id: positionId, payload: financedPosition, actorId, eventType: existingPosition ? 'FINANCED_POSITION_CONFIRMED' : 'FINANCED_POSITION_CREATED' },
-    ]);
+    ];
+    if (exportPackage) changes.push({ type: EXPORT_PACKAGE_TYPE, id: exportPackage.exportPackageId, payload: { ...exportPackage, state: 'SETTLED', exportExecutionState: 'COMPLETED', externalSettlementReference: externalReference, settledAt: timestamp, updatedAt: timestamp, statusHistory: [...(exportPackage.statusHistory || []), { state: 'SETTLED', actorId, occurredAt: timestamp }] }, actorId, eventType: 'FINANCING_EXPORT_PACKAGE_SETTLED' });
+    await this.domain.atomicPut(changes);
     await this.domain.lifecycle({ objectType: CLOSING_TYPE, objectId: closingId, eventType: 'FINANCING_EXTERNAL_SETTLEMENT_RECORDED', actorId, payload: { disbursementId, externalReference, amount: settled.amount, settlementMethod: settled.settlementMethod, financedPositionId: positionId } });
     await this.domain.lifecycle({ objectType: POSITION_TYPE, objectId: positionId, eventType: 'FINANCED_POSITION_CREATED_FROM_FUNDED_FINANCING', actorId, payload: { financingTransactionId: financing.transactionId, opportunityId: closing.opportunityId, instrumentId: closing.instrumentId, principal, ownerId: 'SRA' } });
-    return { closing: funded, disbursement: settled, financing: financingUpdated, financedPosition };
+    return { closing: funded, disbursement: settled, financing: financingUpdated, financedPosition, exportPackage: exportPackage ? this.domain.get(EXPORT_PACKAGE_TYPE, exportPackage.exportPackageId) : null };
   }
 
   async boardToServicing(closingId, input = {}, actorId = null) {
@@ -209,7 +255,7 @@ export class FinancingClosingService {
 
   status() {
     const records = this.domain.list(CLOSING_TYPE);
-    return { service: 'SRA_FINANCING_CLOSING', count: records.length, inProgress: records.filter((r) => r.status === 'IN_PROGRESS').length, readyToFund: records.filter((r) => r.status === 'READY_TO_FUND').length, authorized: records.filter((r) => r.status === 'AUTHORIZED').length, funded: records.filter((r) => r.status === 'FUNDED').length, servicing: records.filter((r) => r.status === 'SERVICING').length, financedPositions: this.domain.list(POSITION_TYPE).length };
+    return { service: 'SRA_FINANCING_CLOSING', count: records.length, inProgress: records.filter((r) => r.status === 'IN_PROGRESS').length, readyToFund: records.filter((r) => r.status === 'READY_TO_FUND').length, authorized: records.filter((r) => r.status === 'AUTHORIZED').length, funded: records.filter((r) => r.status === 'FUNDED').length, servicing: records.filter((r) => r.status === 'SERVICING').length, financedPositions: this.domain.list(POSITION_TYPE).length, financingExportPackages: this.domain.list(EXPORT_PACKAGE_TYPE).filter((r) => r.exportKind === 'FINANCING_DISBURSEMENT').length };
   }
 }
 
