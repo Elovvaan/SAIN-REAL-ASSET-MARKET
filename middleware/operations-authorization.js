@@ -19,7 +19,8 @@ export function createOperationsAuthorization({accessServiceProvider=defaultAcce
     if(!isProtectedOperationsPath(req.path)||!requiresSession(req)||isConnectorCallback(req.path))return next();
     try{
       const standardToken=readCookie(req,'sra_session');
-      const privateAdminToken=req.path.startsWith('/api/on-chain')?readCookie(req,'sra_admin_session'):'';
+      const privateAdminAllowed=req.path.startsWith('/api/on-chain')||req.path.startsWith('/api/funding')||req.path.startsWith('/api/financing-closing');
+      const privateAdminToken=privateAdminAllowed?readCookie(req,'sra_admin_session'):'';
       const service=await accessServiceProvider();
       let session=standardToken?await service.getSession(standardToken):null;
       let source=session?'SERVER_SESSION':null;
