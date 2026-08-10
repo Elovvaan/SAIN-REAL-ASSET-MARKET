@@ -27,6 +27,7 @@
     '/funding-market-activation-desk.js',
     '/verified-settlement-desk.js',
     '/funding-operations-ui.js',
+    '/funding-intake-identity-evidence.js',
     '/hybrid-liquidity-market.js',
     '/participant-workspace-bootstrap.js',
     '/sain-operations-intelligence.js',

@@ -38,6 +38,7 @@ const customer = {
   id: 'USR-CUSTOMER',
   universalAccountId: 'UA-CUSTOMER',
   email: 'customer@example.com',
+  displayName: 'Customer',
   activeCapacity: 'UNIVERSAL',
   capacities: [{ id: 'UNIVERSAL' }],
   roles: [{ id: 'UNIVERSAL' }],
@@ -75,9 +76,26 @@ test('forged staff headers without session remain unauthorized', async () => {
   assert.equal(response.statusCode, 401);
 });
 
-test('customer session cannot perform staff write', async () => {
-  const middleware = createOperationsAuthorization({ accessServiceProvider: provider({ customer: customer }) });
-  const { response, nextCalled } = await run(middleware, req({ cookie: 'sra_session=customer' }));
+test('authenticated participant can create their own funding intake', async () => {
+  const middleware = createOperationsAuthorization({ accessServiceProvider: provider({ customer }) });
+  const request = req({ cookie: 'sra_session=customer', headers: { 'x-sra-actor-id': 'FORGED-ACTOR' } });
+  const { response, nextCalled } = await run(middleware, request);
+  assert.equal(response.statusCode, 200);
+  assert.equal(nextCalled, true);
+  assert.equal(request.sraIdentity.actorId, 'USR-CUSTOMER');
+  assert.equal(request.sraOperationsAuth.source, 'SERVER_SESSION');
+});
+
+test('authenticated participant can upload evidence to funding intake', async () => {
+  const middleware = createOperationsAuthorization({ accessServiceProvider: provider({ customer }) });
+  const { response, nextCalled } = await run(middleware, req({ path: '/api/funding/opportunities/FOR-1/documents', cookie: 'sra_session=customer' }));
+  assert.equal(response.statusCode, 200);
+  assert.equal(nextCalled, true);
+});
+
+test('customer session cannot perform staff-controlled funding write', async () => {
+  const middleware = createOperationsAuthorization({ accessServiceProvider: provider({ customer }) });
+  const { response, nextCalled } = await run(middleware, req({ path: '/api/funding/opportunities/FOR-1/complete-intake', cookie: 'sra_session=customer' }));
   assert.equal(nextCalled, false);
   assert.equal(response.statusCode, 403);
   assert.equal(response.payload.code, 'SRA_SERVER_ROLE_REQUIRED');
@@ -105,14 +123,13 @@ test('on-chain write falls back to active private admin session when standard se
   assert.equal(request.sraOperationsAuth.source, 'PRIVATE_ADMIN_SESSION');
 });
 
-test('private admin session is not accepted for unrelated protected write paths', async () => {
+test('private admin session is accepted for funding operations through the private-admin boundary', async () => {
   const middleware = createOperationsAuthorization({ accessServiceProvider: provider({ admin }) });
-  const { response, nextCalled } = await run(middleware, req({
-    path: '/api/funding/opportunities',
-    cookie: 'sra_admin_session=admin',
-  }));
-  assert.equal(nextCalled, false);
-  assert.equal(response.statusCode, 401);
+  const request = req({ path: '/api/funding/opportunities', cookie: 'sra_admin_session=admin' });
+  const { response, nextCalled } = await run(middleware, request);
+  assert.equal(response.statusCode, 200);
+  assert.equal(nextCalled, true);
+  assert.equal(request.sraOperationsAuth.source, 'PRIVATE_ADMIN_SESSION');
 });
 
 test('expired or signed-out session returns 401', async () => {
