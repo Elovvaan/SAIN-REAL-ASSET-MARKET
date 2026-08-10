@@ -187,8 +187,9 @@
       typeSelect?.addEventListener('change', () => startupIntake?.classList.toggle('open', typeSelect.value === 'STARTUP_BUSINESS'));
       root.querySelector('#funding-opportunity-form')?.addEventListener('submit', async (event) => {
         event.preventDefault();
+        const form = event.currentTarget;
         const result = root.querySelector('#funding-intake-result');
-        const formData = new FormData(event.currentTarget);
+        const formData = new FormData(form);
         const values = Object.fromEntries(formData.entries());
         const payload = { ...values, requestedAmount: Number(values.requestedAmount) };
         if (values.applicantSource === 'MANUAL') {
@@ -206,7 +207,7 @@
         try {
           const record = await request('/api/funding/opportunities', { method: 'POST', body: JSON.stringify(payload) });
           if (result) result.innerHTML = `<strong>Created ${esc(record.opportunityId)}</strong> · ${esc(record.status)} · applicant ${esc(record.applicantParticipantId)}.`;
-          event.currentTarget.reset();
+          form.reset();
           startupIntake?.classList.remove('open');
           syncApplicantMode();
           setTimeout(() => render(root), 900);
