@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import express from 'express';
 import { OnChainTransferService } from '../services/on-chain-transfer-service.js';
-import { SolanaTransferService } from '../services/solana-transfer-service.js';
+import { StellarTransferService } from '../services/stellar-transfer-service.js';
 
 function actorId(req) {
   return req.sraOperationsAuth?.actorId || req.sraIdentity?.actorId || null;
@@ -48,9 +48,9 @@ export function createOnChainProjectionRouter(service) {
   const router = express.Router();
   router.use(normalizeDirectMount);
 
-  const solana = new SolanaTransferService({ domain: service.domain });
-  const adapters = new Map([['SOLANA', solana]]);
-  const transfers = new OnChainTransferService({ domain: service.domain, adapters: { SOLANA: solana } });
+  const stellar = new StellarTransferService({ domain: service.domain });
+  const adapters = new Map([['STELLAR', stellar]]);
+  const transfers = new OnChainTransferService({ domain: service.domain, adapters: { STELLAR: stellar } });
 
   router.get('/status', (_req, res) => {
     return res.json({
@@ -85,7 +85,6 @@ export function createOnChainProjectionRouter(service) {
       const requestedAsset = text(req.body?.asset);
       if (!network) throw new Error('network is required.');
       if (!instrumentId && !requestedAsset) throw new Error('asset or instrumentId is required.');
-      if (req.body?.decimals == null || text(req.body.decimals) === '') throw new Error('decimals is required.');
 
       const adapter = adapters.get(network);
       if (!adapter || typeof adapter.createAsset !== 'function') {
@@ -116,23 +115,21 @@ export function createOnChainProjectionRouter(service) {
         || text(instrument?.symbol)
         || text(instrument?.ticker)
         || instrumentId;
+      const symbol = text(req.body?.symbol) || text(instrument?.symbol) || text(instrument?.ticker) || asset;
       const id = assetIdFor(instrumentId || asset, network);
       const existing = service.getAsset(id) || service.findAsset({ instrumentId, asset, network });
       if (existing) return res.status(200).json({ created: false, asset: existing });
 
-      const created = await adapter.createAsset({
-        decimals: Number(req.body.decimals),
-        tokenProgram: req.body?.tokenProgram,
-      });
+      const created = await adapter.createAsset({ asset: symbol, symbol });
       const record = await service.recordCreated({
         assetId: id,
         network,
-        asset,
+        asset: created.asset || asset,
         instrumentId: instrumentId || null,
-        symbol: text(req.body?.symbol) || text(instrument?.symbol) || text(instrument?.ticker) || asset,
+        symbol: created.symbol || symbol,
         assetAddress: created.assetAddress,
+        sourceAccount: created.distributionAddress || null,
         decimals: created.decimals,
-        tokenProgram: created.tokenProgram,
         transactionId: created.transactionId,
       }, actor);
 
@@ -152,10 +149,7 @@ export function createOnChainProjectionRouter(service) {
         error.code = 'ON_CHAIN_ISSUE_UNSUPPORTED';
         throw error;
       }
-      const issuance = await adapter.issueAsset(asset, {
-        amount: req.body.amount,
-        destinationAddress: req.body?.destinationAddress,
-      });
+      const issuance = await adapter.issueAsset(asset, { amount: req.body.amount });
       const updated = await service.recordIssued(asset.assetId, issuance, actor);
       return res.status(201).json({ asset: updated, issuance });
     } catch (error) { return handle(res, error); }

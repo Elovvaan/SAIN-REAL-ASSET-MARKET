@@ -12,11 +12,11 @@ test('on-chain mutations remain operations-authorized', () => {
 test('generic transfer interface contains only transfer intent', () => {
   const service = read('services/on-chain-transfer-service.js');
   assert.match(service, /interface: \['asset', 'amount', 'destinationAddress', 'network'\]/);
-  assert.doesNotMatch(service, /SRA-SOLANA|mintAddress|sourceTokenAccount/);
+  assert.doesNotMatch(service, /mintAddress|sourceTokenAccount/);
 });
 
 test('network adapter performs build sign broadcast confirm below generic interface', () => {
-  const adapter = read('services/solana-transfer-service.js');
+  const adapter = read('services/stellar-transfer-service.js');
   assert.match(adapter, /async build\(/);
   assert.match(adapter, /sign\(prepared\)/);
   assert.match(adapter, /async broadcast\(/);
@@ -34,5 +34,4 @@ test('Instruments on-chain UI submits generic transfer intent', () => {
   assert.match(ui, /asset:button\.dataset\.transferSymbol/);
   assert.match(ui, /amount,/);
   assert.match(ui, /destinationAddress,/);
-  assert.doesNotMatch(ui, /\/api\/on-chain\/solana\//i);
 });

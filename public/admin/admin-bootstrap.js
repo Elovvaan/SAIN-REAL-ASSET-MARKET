@@ -18,7 +18,7 @@
     ['/admin/admin-marketplace-stage-actions.js', 'data-sra-admin-marketplace-stage-actions'],
     ['/admin/admin-users-permissions-workstation.js', 'data-sra-admin-users-permissions-workstation'],
     ['/admin/admin-agent-operations-workstation.js', 'data-sra-admin-agent-operations-workstation'],
-    ['/admin/admin-solana-transfer.js', 'data-sra-admin-solana-transfer'],
+    ['/admin/admin-stellar-transfer.js', 'data-sra-admin-stellar-transfer'],
     ['/admin/admin-on-chain-issuance-controls.js', 'data-sra-admin-on-chain-issuance-controls'],
     ['/admin/admin-system-health-workstation.js', 'data-sra-admin-system-health-workstation'],
   ];
@@ -55,11 +55,16 @@
       || 'dashboard';
   }
 
-  function removeUnsupportedConnectionTabs(admin) {
+  function configureConnectionTabs(admin) {
     const workspace = admin?.querySelector('[data-workspace="connections"]');
     if (!workspace) return;
     for (const tab of ['Ethereum', 'Bitcoin']) {
       workspace.querySelector(`[data-admin-tab="${tab}"]`)?.remove();
+    }
+    const formerSolana = workspace.querySelector('[data-admin-tab="Solana"]');
+    if (formerSolana) {
+      formerSolana.dataset.adminTab = 'Stellar';
+      formerSolana.textContent = 'Stellar';
     }
   }
 
@@ -121,7 +126,7 @@
       const [shellSource, shellMarker] = FEATURES[0];
       await loadScript(shellSource, shellMarker);
       if (!admin.querySelector('.admin-suite')) throw new Error('Administration shell did not mount.');
-      removeUnsupportedConnectionTabs(admin);
+      configureConnectionTabs(admin);
       retireLegacyPresentation(admin);
       revealAdminSuite(admin);
 
@@ -149,7 +154,7 @@
 
       window.mountAdminUsersPermissionsWorkstation?.(admin.querySelector('[data-workspace="users"]'));
       window.mountAdminAgentOperationsWorkstation?.(admin);
-      window.mountAdminSolanaTransfer?.(admin);
+      window.mountAdminStellarTransfer?.(admin);
       window.mountAdminOnChainIssuanceControls?.(admin.querySelector('[data-workspace="instruments"]'));
       window.mountAdminSystemHealthWorkstation?.(admin.querySelector('[data-workspace="system"]'));
 
