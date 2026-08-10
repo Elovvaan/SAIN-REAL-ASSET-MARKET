@@ -14,7 +14,7 @@ These paths do not share the same economic destination.
 ```text
 Participant outside account
   -> funding instruction
-  -> external ACH, wire, or transfer
+  -> external transfer
   -> segregated participant-funds cash
   -> participant-funds liability
   -> verified funding event
@@ -61,6 +61,6 @@ External funds are confirmed only from the Platform Administration operating cap
 - a payment receipt,
 - and a Verified Market Event.
 
-## Current rails
+## Current paths
 
-The present implementation creates and records funding instructions for ACH, wire, card where applicable, and external transfer. It does not claim that a live processor or bank connector has moved funds. A real provider adapter must later deliver the external confirmation reference.
+The present implementation creates and records funding instructions for external transfer and card where applicable. It does not claim that an external processor has moved funds. An outside confirmation reference is required before non-crypto funds are recorded as confirmed.
