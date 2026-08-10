@@ -186,8 +186,6 @@ export function createOnChainProjectionRouter(service) {
         try {
           issuance = await adapter.submitPreparedIssuance(pending);
         } catch (error) {
-          // The exact signed transaction remains persisted on the projection. A retry
-          // rebroadcasts those same bytes rather than creating a second mint.
           error.code = error.code || 'ON_CHAIN_ISSUANCE_SUBMISSION_UNCERTAIN';
           throw error;
         }
@@ -254,11 +252,6 @@ export function createOnChainProjectionRouter(service) {
       const transfer = transfers.get(req.params.transferId);
       return transfer ? res.json(transfer) : res.status(404).json({ error: 'On-chain transfer not found.' });
     } catch (error) { return handle(res, error); }
-  });
-
-  router.post('/transfers/prepare', async (req, res) => {
-    try { return res.status(201).json(await transfers.prepare(req.body || {}, actorId(req))); }
-    catch (error) { return handle(res, error); }
   });
 
   router.post('/transfers', async (req, res) => {
