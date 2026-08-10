@@ -16,9 +16,10 @@
       .funding-ops-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}.funding-ops-list{display:grid;gap:10px;margin-top:12px}.funding-ops-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;padding:13px;border-radius:12px;background:rgba(255,255,255,.035);cursor:pointer}.funding-ops-row:hover{background:rgba(255,255,255,.06)}.funding-ops-row span{display:block;opacity:.72;font-size:12px;margin-top:4px}.funding-next{font-size:12px;text-align:right}
       .funding-intake-modal,.funding-detail{display:none}.funding-intake-modal.open,.funding-detail.open{display:block}.funding-intake-modal{padding:18px;border:1px solid rgba(215,166,42,.35);border-radius:16px;background:rgba(215,166,42,.06)}
       .funding-intake-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}.funding-intake-grid input,.funding-intake-grid select,.funding-intake-grid textarea{width:100%;box-sizing:border-box;padding:11px;border:1px solid rgba(255,255,255,.15);border-radius:10px;background:#101010;color:#fff}.funding-intake-grid textarea{min-height:86px}.funding-intake-grid>.wide{grid-column:1/-1}
+      .applicant-mode{grid-column:1/-1;display:grid;grid-template-columns:220px 1fr;gap:10px}.applicant-manual{display:none;grid-column:1/-1;grid-template-columns:1fr 1fr;gap:10px}.applicant-manual.open{display:grid}.applicant-manual .wide{grid-column:1/-1}
       .startup-intake{display:none;grid-column:1/-1;border-top:1px solid rgba(255,255,255,.12);padding-top:14px;margin-top:4px}.startup-intake.open{display:grid;gap:14px}.startup-section{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:14px;border:1px solid rgba(255,255,255,.1);border-radius:14px;background:rgba(255,255,255,.025)}.startup-section h4,.startup-section p{grid-column:1/-1;margin:0}.startup-use-row{grid-column:1/-1;display:grid;grid-template-columns:1.1fr .55fr 1fr;gap:8px}.startup-checks{grid-column:1/-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.startup-checks label{display:flex;gap:8px;align-items:flex-start;padding:8px;background:rgba(255,255,255,.03);border-radius:8px;font-size:12px}.startup-checks input{width:auto;margin-top:2px}.startup-cert{grid-column:1/-1;padding:12px;border:1px solid rgba(215,166,42,.25);border-radius:10px}.startup-cert label{display:flex;gap:8px;align-items:flex-start}.startup-cert input{width:auto;margin-top:3px}
       .funding-intake-result{margin-top:10px;font-size:13px}.funding-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:14px}.funding-detail-card{padding:14px;border-radius:13px;background:rgba(255,255,255,.04)}.funding-detail-card span{display:block;font-size:12px;opacity:.7;margin-top:5px}.funding-evidence-list{display:grid;gap:7px;margin-top:10px}.funding-evidence-item{padding:10px;border-radius:10px;background:rgba(255,255,255,.035);font-size:12px}.funding-ops-empty{padding:16px;opacity:.7}
-      @media(max-width:800px){.funding-ops-grid,.funding-metrics,.funding-intake-grid,.funding-detail-grid,.startup-section{grid-template-columns:1fr}.funding-ops-row{grid-template-columns:1fr}.funding-next{text-align:left}.startup-use-row,.startup-checks{grid-template-columns:1fr}}
+      @media(max-width:800px){.funding-ops-grid,.funding-metrics,.funding-intake-grid,.funding-detail-grid,.startup-section,.applicant-mode,.applicant-manual{grid-template-columns:1fr}.funding-ops-row{grid-template-columns:1fr}.funding-next{text-align:left}.startup-use-row,.startup-checks{grid-template-columns:1fr}}
     `;
     document.head.append(node);
   }
@@ -65,7 +66,10 @@
   }
 
   function intakeForm() {
-    return `<section class="funding-intake-modal" id="funding-intake-modal"><div class="funding-panel-head"><div><p class="eyebrow">REAL WORKFLOW</p><h3>Start a funding opportunity</h3><p>Capture the customer request directly into Phase 1.</p></div><button class="secondary-button" type="button" id="funding-intake-close">Close</button></div><form id="funding-opportunity-form" class="funding-intake-grid"><input name="applicantParticipantId" placeholder="Applicant participant ID" required><input name="title" placeholder="Opportunity title" required><select name="opportunityType" id="funding-opportunity-type" required><option value="">Opportunity type</option><option value="STARTUP_BUSINESS">Startup business</option><option value="BUSINESS_ACQUISITION">Business acquisition</option><option value="PLATFORM">Platform</option><option value="PROJECT">Project</option><option value="CONSTRUCTION">Construction</option><option value="EQUIPMENT">Equipment</option><option value="WORKING_CAPITAL">Working capital</option><option value="INVOICE">Invoice</option></select><select name="purpose" required><option value="">Purpose</option><option value="STARTUP_LAUNCH">Startup / launch</option><option value="BUILD">Build</option><option value="DEVELOP">Develop</option><option value="EXPAND">Expand</option><option value="PURCHASE">Purchase</option><option value="WORKING_CAPITAL">Working capital</option><option value="REFINANCE">Refinance</option></select><input name="requestedAmount" type="number" min="1" step="0.01" placeholder="Requested amount" required><select name="currency"><option value="USD">USD</option></select><textarea class="wide" name="description" placeholder="Describe what is being funded and the expected result."></textarea>${startupFields()}<button class="primary-button" type="submit">Create opportunity record</button><div class="funding-intake-result" id="funding-intake-result"></div></form></section>`;
+    return `<section class="funding-intake-modal" id="funding-intake-modal"><div class="funding-panel-head"><div><p class="eyebrow">REAL WORKFLOW</p><h3>Start a funding opportunity</h3><p>Capture the customer request directly into Phase 1.</p></div><button class="secondary-button" type="button" id="funding-intake-close">Close</button></div><form id="funding-opportunity-form" class="funding-intake-grid">
+      <div class="applicant-mode"><select name="applicantSource" id="funding-applicant-source"><option value="EXISTING">Existing participant / account</option><option value="MANUAL">Manual applicant entry</option></select><input name="applicantParticipantId" id="funding-applicant-reference" placeholder="Participant ID, account ID, email, or exact participant name"></div>
+      <div class="applicant-manual" id="funding-manual-applicant"><input name="applicantDisplayName" placeholder="Applicant / entity name"><select name="applicantType"><option value="ORGANIZATION">Organization</option><option value="PERSON">Person</option><option value="TRUST">Trust</option><option value="SPV">SPV / acquisition entity</option></select><input name="applicantEmail" type="email" placeholder="Applicant email (optional)"><input name="applicantPhone" placeholder="Applicant phone (optional)"></div>
+      <input name="title" placeholder="Opportunity title" required><select name="opportunityType" id="funding-opportunity-type" required><option value="">Opportunity type</option><option value="STARTUP_BUSINESS">Startup business</option><option value="BUSINESS_ACQUISITION">Business acquisition</option><option value="PLATFORM">Platform</option><option value="PROJECT">Project</option><option value="CONSTRUCTION">Construction</option><option value="EQUIPMENT">Equipment</option><option value="WORKING_CAPITAL">Working capital</option><option value="INVOICE">Invoice</option></select><select name="purpose" required><option value="">Purpose</option><option value="STARTUP_LAUNCH">Startup / launch</option><option value="BUILD">Build</option><option value="DEVELOP">Develop</option><option value="EXPAND">Expand</option><option value="PURCHASE">Purchase</option><option value="WORKING_CAPITAL">Working capital</option><option value="REFINANCE">Refinance</option></select><input name="requestedAmount" type="number" min="1" step="0.01" placeholder="Requested amount" required><select name="currency"><option value="USD">USD</option></select><textarea class="wide" name="description" placeholder="Describe what is being funded and the expected result."></textarea>${startupFields()}<button class="primary-button" type="submit">Create opportunity record</button><div class="funding-intake-result" id="funding-intake-result"></div></form></section>`;
   }
 
   function startupPayload(formData) {
@@ -165,19 +169,46 @@
       root.querySelectorAll('[data-opportunity-id]').forEach((row) => row.addEventListener('click', () => openDetail(root, row.dataset.opportunityId)));
       const typeSelect = root.querySelector('#funding-opportunity-type');
       const startupIntake = root.querySelector('#startup-business-intake');
+      const applicantSource = root.querySelector('#funding-applicant-source');
+      const applicantReference = root.querySelector('#funding-applicant-reference');
+      const manualApplicant = root.querySelector('#funding-manual-applicant');
+      const syncApplicantMode = () => {
+        const manual = applicantSource?.value === 'MANUAL';
+        manualApplicant?.classList.toggle('open', manual);
+        if (applicantReference) {
+          applicantReference.required = !manual;
+          applicantReference.disabled = manual;
+        }
+        const manualName = manualApplicant?.querySelector('[name="applicantDisplayName"]');
+        if (manualName) manualName.required = manual;
+      };
+      applicantSource?.addEventListener('change', syncApplicantMode);
+      syncApplicantMode();
       typeSelect?.addEventListener('change', () => startupIntake?.classList.toggle('open', typeSelect.value === 'STARTUP_BUSINESS'));
       root.querySelector('#funding-opportunity-form')?.addEventListener('submit', async (event) => {
         event.preventDefault();
         const result = root.querySelector('#funding-intake-result');
         const formData = new FormData(event.currentTarget);
         const values = Object.fromEntries(formData.entries());
-        const payload = { ...values, requestedAmount: Number(values.requestedAmount), relatedParticipantIds: [values.applicantParticipantId] };
+        const payload = { ...values, requestedAmount: Number(values.requestedAmount) };
+        if (values.applicantSource === 'MANUAL') {
+          delete payload.applicantParticipantId;
+          payload.manualApplicant = {
+            displayName: values.applicantDisplayName,
+            type: values.applicantType || 'ORGANIZATION',
+            contactEmail: values.applicantEmail || null,
+            contactPhone: values.applicantPhone || null,
+          };
+        } else {
+          payload.relatedParticipantIds = values.applicantParticipantId ? [values.applicantParticipantId] : [];
+        }
         if (values.opportunityType === 'STARTUP_BUSINESS') payload.startupFundingRequest = startupPayload(formData);
         try {
           const record = await request('/api/funding/opportunities', { method: 'POST', body: JSON.stringify(payload) });
-          if (result) result.innerHTML = `<strong>Created ${esc(record.opportunityId)}</strong> · ${esc(record.status)}.`;
+          if (result) result.innerHTML = `<strong>Created ${esc(record.opportunityId)}</strong> · ${esc(record.status)} · applicant ${esc(record.applicantParticipantId)}.`;
           event.currentTarget.reset();
           startupIntake?.classList.remove('open');
+          syncApplicantMode();
           setTimeout(() => render(root), 900);
         } catch (error) { if (result) result.textContent = error.message; }
       });
