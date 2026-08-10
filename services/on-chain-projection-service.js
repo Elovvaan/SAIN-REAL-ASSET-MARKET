@@ -107,6 +107,40 @@ export class OnChainProjectionService {
     await this.domain.put(TYPE, assetId, updated, { actorId, eventType: 'ON_CHAIN_ASSET_ISSUED' });
     return updated;
   }
+
+  // Compatibility reads for older external connectors. These are aliases over the
+  // direct on-chain asset record; they do not restore projection eligibility or gates.
+  listProjections(filters = {}) {
+    return this.listAssets(filters).map((record) => ({
+      ...record,
+      projectionId: record.assetId,
+      status: record.state === 'ISSUED' ? 'ACTIVE' : record.state,
+      mintAddress: record.assetAddress,
+      chainProgram: record.tokenProgram,
+    }));
+  }
+
+  getProjection(assetId) {
+    const record = this.getAsset(assetId);
+    if (!record) return null;
+    return {
+      ...record,
+      projectionId: record.assetId,
+      status: record.state === 'ISSUED' ? 'ACTIVE' : record.state,
+      mintAddress: record.assetAddress,
+      chainProgram: record.tokenProgram,
+    };
+  }
+
+  async recordChainEvent(input = {}, actorId = null) {
+    return this.domain.lifecycle?.({
+      objectType: TYPE,
+      objectId: text(input.projectionId || input.assetId),
+      eventType: text(input.eventType) || 'ON_CHAIN_EVENT_RECORDED',
+      actorId,
+      payload: { ...input },
+    });
+  }
 }
 
 export { TYPE as ON_CHAIN_ASSET_RECORD_TYPE };
