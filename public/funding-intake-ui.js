@@ -15,7 +15,7 @@
     return `<section class="funding-intake" id="funding-intake">
       <div class="funding-intake-head">
         <div><p class="eyebrow">ACCOUNT FUNDING</p><h2>Bring outside funds into SRA</h2><p>Create a funding instruction. Your Asset Vault is credited only after the selected external rail is confirmed and recorded.</p></div>
-        <div class="funding-intake-actions"><button class="primary-button" data-funding-mode="crypto">Pay with Crypto</button><button class="secondary-button" data-funding-mode="vault">Bank transfer</button><button class="secondary-button" data-funding-mode="fee">Pay Platform Fee</button></div>
+        <div class="funding-intake-actions"><button class="primary-button" data-funding-mode="crypto">Pay with Crypto</button><button class="secondary-button" data-funding-mode="vault">External transfer</button><button class="secondary-button" data-funding-mode="fee">Pay Platform Fee</button></div>
       </div>
       <form class="funding-intake-form" id="crypto-funding-form" hidden>
         <input name="amount" type="number" min="0.01" step="0.01" placeholder="USDC amount" required>
@@ -29,12 +29,12 @@
       </form>
       <form class="funding-intake-form" id="vault-funding-form" hidden>
         <input name="amount" type="number" min="0.01" step="0.01" placeholder="Amount in USD" required>
-        <select name="rail"><option value="ACH">ACH</option><option value="WIRE">Wire</option><option value="EXTERNAL_TRANSFER">External transfer</option></select>
+        <div><strong>External transfer</strong><div class="funding-intake-note">Creates an external transfer funding instruction.</div></div>
         <button class="primary-button" type="submit">Create funding instruction</button>
       </form>
       <form class="funding-intake-form" id="fee-payment-form" hidden>
         <input name="invoiceId" placeholder="Fee invoice ID" required>
-        <select name="rail"><option value="ACH">ACH</option><option value="WIRE">Wire</option><option value="CARD">Card</option><option value="EXTERNAL_TRANSFER">External transfer</option></select>
+        <select name="rail"><option value="CARD">Card</option><option value="EXTERNAL_TRANSFER">External transfer</option></select>
         <button class="primary-button" type="submit">Create payment instruction</button>
       </form>
       <div class="funding-intake-result" id="funding-intake-result"></div>
@@ -102,7 +102,7 @@
     host.querySelector('#vault-funding-form')?.addEventListener('submit', async (event) => {
       event.preventDefault();
       const data = Object.fromEntries(new FormData(event.currentTarget));
-      try { await submitInstruction('/api/access/funding/vault-instructions', { amount: Number(data.amount), rail: data.rail }); event.currentTarget.reset(); }
+      try { await submitInstruction('/api/access/funding/vault-instructions', { amount: Number(data.amount), rail: 'EXTERNAL_TRANSFER' }); event.currentTarget.reset(); }
       catch (error) { showResult(esc(error.message), true); }
     });
     host.querySelector('#fee-payment-form')?.addEventListener('submit', async (event) => {
