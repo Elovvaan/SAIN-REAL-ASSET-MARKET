@@ -65,6 +65,31 @@ export function createFundingMarketplaceAllocationRouter(service) {
     res.json({ records: service.listPositions({ listingId: req.query.listingId, participantId: req.query.participantId, status: req.query.status }) });
   });
 
+  router.get('/participation-agreements', (req, res) => {
+    res.json({ records: service.listAgreements({ positionId: req.query.positionId, financedPositionId: req.query.financedPositionId, participantId: req.query.participantId, status: req.query.status }) });
+  });
+
+  router.get('/participation-agreements/:agreementId', (req, res) => {
+    const record = service.getAgreement(req.params.agreementId);
+    if (!record) return res.status(404).json({ error: 'Secondary participation agreement was not found.' });
+    return res.json(record);
+  });
+
+  router.post('/positions/:positionId/participation-agreements', async (req, res) => {
+    try { return res.status(201).json(await service.createParticipationAgreement(req.params.positionId, req.body, actorId(req))); }
+    catch (error) { return handle(res, error); }
+  });
+
+  router.post('/participation-agreements/:agreementId/participant-acceptance', async (req, res) => {
+    try { return res.json(await service.acceptParticipationAgreement(req.params.agreementId, req.body, actorId(req))); }
+    catch (error) { return handle(res, error); }
+  });
+
+  router.post('/participation-agreements/:agreementId/execute', async (req, res) => {
+    try { return res.json(await service.executeParticipationAgreement(req.params.agreementId, req.body, actorId(req))); }
+    catch (error) { return handle(res, error); }
+  });
+
   router.post('/positions/:positionId/settlement-preparation', async (req, res) => {
     try { return res.status(201).json(await service.prepareSettlement(req.params.positionId, req.body, actorId(req))); }
     catch (error) { return handle(res, error); }
