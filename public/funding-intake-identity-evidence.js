@@ -71,7 +71,11 @@
       [...files].forEach((file) => { body.append('documents', file); body.append('documentTypes', type); });
       if (result) result.textContent = 'Uploading private evidence…';
       try {
-        const response = await fetch(`/api/funding/opportunities/${encodeURIComponent(currentOpportunityId)}/documents`, { method: 'POST', body });
+        const response = await fetch(`/api/funding/opportunities/${encodeURIComponent(currentOpportunityId)}/documents`, {
+          method: 'POST',
+          headers: { 'x-sra-idempotency-key': `funding-evidence-${currentOpportunityId}-${crypto.randomUUID()}` },
+          body,
+        });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(payload.error || `${response.status} ${response.statusText}`);
         if (result) result.textContent = `${payload.records?.length || 0} document(s) retained and linked to ${currentOpportunityId}.`;
