@@ -113,6 +113,8 @@ export class FinancingClosingService {
   async authorize(closingId, input = {}, actorId = null) {
     const current = this.get(closingId); if (!current) throw new Error('Financing closing was not found.');
     if (current.status !== 'READY_TO_FUND') throw new Error('Financing must be READY_TO_FUND before disbursement authorization.');
+    const open = this.conditions(closingId).filter((c) => c.required && !['SATISFIED','WAIVED'].includes(c.status));
+    if (open.length) throw new Error(`Required closing conditions remain open: ${open.map((c) => c.title).join(', ')}`);
     if (String(input.approval || '').toUpperCase() !== 'APPROVE') throw new Error('Explicit administrator funding approval is required.');
     const existing = this.disbursements(closingId).find((d) => !['FAILED','CANCELLED'].includes(d.status));
     if (existing) return { closing: current, disbursement: existing, created: false };
