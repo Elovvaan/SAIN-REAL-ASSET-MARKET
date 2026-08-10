@@ -27,11 +27,12 @@ test('network adapter performs build sign broadcast confirm below generic interf
   assert.match(adapter, /const confirmation = await this\.confirm\(submitted\.transactionId\)/);
 });
 
-test('admin submits generic network asset amount destination transfer', () => {
-  const ui = read('public/admin/admin-solana-transfer.js');
-  for (const field of ['network','asset','amount','destinationAddress']) {
-    assert.match(ui, new RegExp(`name=\\"${field}\\"`));
-  }
+test('Instruments on-chain UI submits generic transfer intent', () => {
+  const ui = read('public/admin/admin-on-chain-issuance-controls.js');
   assert.match(ui, /\/api\/on-chain\/transfers/);
+  assert.match(ui, /network:button\.dataset\.transferNetwork/);
+  assert.match(ui, /asset:button\.dataset\.transferSymbol/);
+  assert.match(ui, /amount,/);
+  assert.match(ui, /destinationAddress,/);
   assert.doesNotMatch(ui, /\/api\/on-chain\/solana\//i);
 });
