@@ -233,6 +233,17 @@ export class FundingOpportunityIntakeService {
       history: [],
     };
 
+    if (opportunityType === STARTUP_TYPE) {
+      const startup = startupCompleteness(record);
+      const missingRequired = Object.entries(startup.required).filter(([, present]) => !present).map(([field]) => `startup.${field}`);
+      if (missingRequired.length) {
+        const error = new Error(`Startup business funding request is incomplete: ${missingRequired.join(', ')}`);
+        error.code = 'INTAKE_INCOMPLETE';
+        error.completeness = { opportunityId: record.opportunityId, intakeComplete: false, missingRequired, startup };
+        throw error;
+      }
+    }
+
     await this.domain.put(RECORD_TYPE, record.opportunityId, record, {
       actorId,
       eventType: opportunityType === STARTUP_TYPE ? 'STARTUP_BUSINESS_FUNDING_REQUEST_CREATED' : 'FUNDING_OPPORTUNITY_CREATED',
@@ -440,6 +451,13 @@ export class FundingOpportunityIntakeService {
     if (!opportunity) throw new Error('Funding opportunity was not found.');
     if (!['INTAKE_COMPLETE', 'PENDING_VERIFICATION'].includes(opportunity.status)) {
       throw new Error(`Verification cannot begin from ${opportunity.status}.`);
+    }
+    const completeness = this.assessCompleteness(opportunityId);
+    if (!completeness.intakeComplete) {
+      const error = new Error(`Funding opportunity intake is incomplete: ${completeness.missingRequired.join(', ')}`);
+      error.code = 'INTAKE_INCOMPLETE';
+      error.completeness = completeness;
+      throw error;
     }
 
     const evidenceIds = unique(input.evidenceIds?.length ? input.evidenceIds : opportunity.evidenceRecordIds || []);
