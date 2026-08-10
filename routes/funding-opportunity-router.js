@@ -3,9 +3,13 @@ import multer from 'multer';
 import { PrivateDocumentService } from '../services/private-document-service.js';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024, files: 10 } });
+const STAFF_ROLES = new Set(['PLATFORM_ADMIN','OPERATIONS_ADMIN','FUNDING_OPERATIONS','FUNDING_ANALYST','VERIFICATION_REVIEWER','INSTRUMENT_REVIEWER','ISSUANCE_REVIEWER','MARKETPLACE_OPERATOR','SETTLEMENT_OPERATOR','AUDITOR']);
 
 function actorId(req) {
   return req.sraIdentity?.actorId || req.get('x-sra-actor-id') || req.body?.actorId || null;
+}
+function isStaffRequest(req) {
+  return (req.sraOperationsAuth?.roles || []).some((role) => STAFF_ROLES.has(String(role).toUpperCase()));
 }
 
 function handle(res, error) {
@@ -41,7 +45,8 @@ export function createFundingOpportunityRouter(service, documentService = null) 
 
   router.post('/opportunities', async (req, res) => {
     try {
-      const authenticatedParticipantId = req.sraIdentity?.actorId || null;
+      const participantSelfService = req.sraOperationsAuth?.source === 'SERVER_SESSION' && !isStaffRequest(req);
+      const authenticatedParticipantId = participantSelfService ? req.sraIdentity?.actorId || null : null;
       const input = authenticatedParticipantId
         ? { ...req.body, applicantParticipantId: authenticatedParticipantId, relatedParticipantIds: [authenticatedParticipantId, ...(req.body?.relatedParticipantIds || [])] }
         : req.body;
@@ -82,7 +87,7 @@ export function createFundingOpportunityRouter(service, documentService = null) 
       const opportunity = service.get(req.params.opportunityId);
       if (!opportunity) return res.status(404).json({ error: 'Funding opportunity was not found.' });
       const identity = req.sraIdentity?.actorId || null;
-      const staff = Array.isArray(req.sraOperationsAuth?.roles) && req.sraOperationsAuth.roles.length > 0;
+      const staff = isStaffRequest(req);
       if (identity && !staff && opportunity.applicantParticipantId !== identity) return res.status(403).json({ error: 'That funding opportunity does not belong to the authenticated participant.' });
       const files = Array.isArray(req.files) ? req.files : [];
       if (!files.length) return res.status(400).json({ error: 'At least one evidence document is required.' });
