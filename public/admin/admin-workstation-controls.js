@@ -29,6 +29,7 @@
     client()?.refresh(source || id);
     document.querySelector(`[data-workspace="${id}"] [data-refresh-workspace="${id}"]`)?.click();
   };
+  const isWorkspaceActive = (id) => document.querySelector(`[data-workspace="${id}"]`)?.classList.contains('active') === true;
 
   async function renderMarketplace() {
     const root = host('marketplace','marketplace-governance');
@@ -108,6 +109,7 @@
   }
 
   async function renderInstruments() {
+    if (!isWorkspaceActive('instruments')) return;
     const root=host('instruments','instrument-approvals');if(!root)return;
     root.innerHTML='<header><strong>Instrument & Representation Approval</strong><em>CHECKING</em></header>';
     try {
