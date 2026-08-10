@@ -23,7 +23,7 @@ export class FundingMarketplacePublicationService {
     const instrument = this.domain.get(TYPES.SRA_INSTRUMENT, listing.instrumentId); if (!instrument) throw new Error('Issued instrument was not found.');
     const position = listing.positionId ? this.domain.get(TYPES.FINANCED_POSITION, listing.positionId) : null;
     const checks = {
-      listingPrepared: listing.state === 'PREPARED', listingNotLive: listing.status === 'NOT_LIVE', notPublished: listing.publicationStatus === 'NOT_PUBLISHED',
+      listingPrepared: listing.state === 'PREPARED', listingNotLive: ['NOT_LIVE','PUBLICATION_REVIEW','PUBLICATION_AUTHORIZED'].includes(listing.status), notPublished: listing.publicationStatus === 'NOT_PUBLISHED',
       fundedPositionLinked: Boolean(position), positionInMarket: position?.distributionStatus === 'IN_MARKET',
       distributionAuthorizationLinked: Boolean(listing.distributionAuthorizationId),
       instrumentIssued: instrument.state === 'ISSUED' && instrument.issuanceStatus === 'ISSUED', priceConfigured: listing.pricing?.state === 'CONFIGURED' && Number(listing.pricing?.askingPrice) > 0,
