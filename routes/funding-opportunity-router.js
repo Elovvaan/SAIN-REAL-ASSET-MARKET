@@ -1,15 +1,62 @@
+import crypto from 'node:crypto';
 import express from 'express';
 import multer from 'multer';
 import { PrivateDocumentService } from '../services/private-document-service.js';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024, files: 10 } });
 const STAFF_ROLES = new Set(['PLATFORM_ADMIN','OPERATIONS_ADMIN','FUNDING_OPERATIONS','FUNDING_ANALYST','VERIFICATION_REVIEWER','INSTRUMENT_REVIEWER','ISSUANCE_REVIEWER','MARKETPLACE_OPERATOR','SETTLEMENT_OPERATOR','AUDITOR']);
+const PARTICIPANT_TYPE = 'PARTICIPANT';
 
 function actorId(req) {
   return req.sraIdentity?.actorId || req.get('x-sra-actor-id') || req.body?.actorId || null;
 }
 function isStaffRequest(req) {
   return (req.sraOperationsAuth?.roles || []).some((role) => STAFF_ROLES.has(String(role).toUpperCase()));
+}
+function createParticipantId() {
+  return `P-${crypto.randomUUID().split('-')[0].toUpperCase()}`;
+}
+async function resolveParticipantForIdentity(service, identity) {
+  if (!identity?.actorId) return null;
+  const participants = service.domain.list(PARTICIPANT_TYPE);
+  const email = String(identity.email || '').trim().toLowerCase();
+  let participant = participants.find((record) =>
+    record?.metadata?.accessAccountId === identity.actorId ||
+    (identity.universalAccountId && record?.metadata?.universalAccountId === identity.universalAccountId)
+  );
+  if (!participant && email) {
+    const emailMatches = participants.filter((record) => String(record?.metadata?.contactEmail || record?.metadata?.email || '').trim().toLowerCase() === email);
+    if (emailMatches.length === 1) participant = emailMatches[0];
+  }
+  if (participant) {
+    const linked = {
+      ...participant,
+      metadata: {
+        ...(participant.metadata || {}),
+        accessAccountId: identity.actorId,
+        universalAccountId: identity.universalAccountId || participant.metadata?.universalAccountId || null,
+        contactEmail: participant.metadata?.contactEmail || identity.email || null,
+      },
+    };
+    await service.domain.put(PARTICIPANT_TYPE, linked.id, linked, { actorId: identity.actorId, eventType: 'ACCESS_ACCOUNT_PARTICIPANT_LINKED' });
+    return linked.id;
+  }
+  const participantId = createParticipantId();
+  const created = {
+    id: participantId,
+    displayName: identity.displayName || identity.email || 'SRA Participant',
+    type: 'PERSON',
+    roles: ['FUNDING_APPLICANT'],
+    metadata: {
+      accessAccountId: identity.actorId,
+      universalAccountId: identity.universalAccountId || null,
+      contactEmail: identity.email || null,
+      linkageSource: 'AUTHENTICATED_FUNDING_INTAKE',
+    },
+    createdAt: new Date().toISOString(),
+  };
+  await service.domain.put(PARTICIPANT_TYPE, participantId, created, { actorId: identity.actorId, eventType: 'AUTHENTICATED_PARTICIPANT_CREATED' });
+  return participantId;
 }
 
 function handle(res, error) {
@@ -46,7 +93,7 @@ export function createFundingOpportunityRouter(service, documentService = null) 
   router.post('/opportunities', async (req, res) => {
     try {
       const participantSelfService = req.sraOperationsAuth?.source === 'SERVER_SESSION' && !isStaffRequest(req);
-      const authenticatedParticipantId = participantSelfService ? req.sraIdentity?.actorId || null : null;
+      const authenticatedParticipantId = participantSelfService ? await resolveParticipantForIdentity(service, req.sraIdentity) : null;
       const input = authenticatedParticipantId
         ? { ...req.body, applicantParticipantId: authenticatedParticipantId, relatedParticipantIds: [authenticatedParticipantId, ...(req.body?.relatedParticipantIds || [])] }
         : req.body;
@@ -86,24 +133,35 @@ export function createFundingOpportunityRouter(service, documentService = null) 
     try {
       const opportunity = service.get(req.params.opportunityId);
       if (!opportunity) return res.status(404).json({ error: 'Funding opportunity was not found.' });
-      const identity = req.sraIdentity?.actorId || null;
+      if (opportunity.status === 'WITHDRAWN') return res.status(409).json({ error: 'Evidence cannot be added to a withdrawn opportunity.' });
       const staff = isStaffRequest(req);
-      if (identity && !staff && opportunity.applicantParticipantId !== identity) return res.status(403).json({ error: 'That funding opportunity does not belong to the authenticated participant.' });
+      if (!staff) {
+        const participantId = await resolveParticipantForIdentity(service, req.sraIdentity);
+        if (!participantId || opportunity.applicantParticipantId !== participantId) return res.status(403).json({ error: 'That funding opportunity does not belong to the authenticated participant.' });
+      }
       const files = Array.isArray(req.files) ? req.files : [];
       if (!files.length) return res.status(400).json({ error: 'At least one evidence document is required.' });
       const documentTypes = Array.isArray(req.body.documentTypes) ? req.body.documentTypes : req.body.documentTypes ? [req.body.documentTypes] : [];
+      const validationErrors = files.map((file, index) => ({ index, error: privateDocuments.validateFile(file) })).filter((item) => item.error);
+      if (validationErrors.length) {
+        return res.status(400).json({
+          error: 'The evidence upload batch contains invalid files. No documents were stored.',
+          invalidFiles: validationErrors.map(({ index, error }) => ({ index, name: files[index]?.originalname || null, error })),
+        });
+      }
       const records = [];
       for (let index = 0; index < files.length; index += 1) {
+        const evidenceType = documentTypes[index] || 'FINANCING_SUPPORT';
         const stored = await privateDocuments.store({
           file: files[index],
-          documentType: documentTypes[index] || 'FINANCING_SUPPORT',
+          documentType: evidenceType,
           uploaderId: actorId(req),
           retentionPolicy: 'FINANCING_APPLICATION_EVIDENCE',
           retentionReferenceId: opportunity.opportunityId,
         });
-        if (!stored.ok) return res.status(400).json({ error: stored.error });
+        if (!stored.ok) throw new Error(stored.error);
         const evidence = await service.registerEvidence(opportunity.opportunityId, {
-          evidenceType: documentTypes[index] || 'FINANCING_SUPPORT',
+          evidenceType,
           title: files[index].originalname,
           sourceReference: stored.document.id,
           documentId: stored.document.id,
