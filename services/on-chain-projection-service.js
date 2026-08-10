@@ -19,18 +19,22 @@ function requireFields(payload, fields) {
   if (missing.length) throw new Error(`Missing required fields: ${missing.join(', ')}`);
 }
 function copy(value) { return value == null ? value : JSON.parse(JSON.stringify(value)); }
-function authorizedSupplySourceOf(instrument = {}) {
+function authorizedSupplySourceOf(instrument = {}, coinPosition = null) {
   return instrument.authorizedSupply
     ?? instrument.authorizedAmount
     ?? instrument.quantity
     ?? instrument.faceAmount
     ?? instrument.faceValue
+    ?? instrument.faceValueUsd
+    ?? instrument.principalQuantity
+    ?? instrument.representedSraQuantity
     ?? instrument.amount
     ?? instrument.amountUsd
+    ?? coinPosition?.quantity
     ?? null;
 }
-function authorizedSupplyOf(instrument = {}) {
-  const source = authorizedSupplySourceOf(instrument);
+function authorizedSupplyOf(instrument = {}, coinPosition = null) {
+  const source = authorizedSupplySourceOf(instrument, coinPosition);
   return source == null ? 0 : Number(source);
 }
 function positiveDecimal(value) {
@@ -45,6 +49,38 @@ function assetCodeOf(instrument = {}, coinPosition = null) {
     || coinPosition?.assetCode
     || coinPosition?.symbol
     || coinPosition?.ticker
+    || null;
+}
+function linkedCoinPositionOf(domain, instrument = {}, representationApproval = null) {
+  const instrumentId = instrument.instrumentId || instrument.id || null;
+  const candidateIds = [instrument.coinPositionId, ...(representationApproval?.linkedCoinPositionIds || [])].filter(Boolean);
+  for (const coinPositionId of candidateIds) {
+    const position = domain.get('COIN_POSITION', coinPositionId);
+    if (position) return position;
+  }
+  return domain.list('COIN_POSITION').find((position) => {
+    if (instrumentId && [position.instrumentId, position.sraInstrumentId, position.linkedInstrumentId].includes(instrumentId)) return true;
+    return Boolean(instrument.financialRecordId && position.financialRecordId === instrument.financialRecordId);
+  }) || null;
+}
+function issuerIdOf(instrument = {}, coinPosition = null) {
+  return instrument.issuerParticipantId
+    || instrument.issuerId
+    || instrument.issuer
+    || coinPosition?.issuerParticipantId
+    || coinPosition?.issuerId
+    || coinPosition?.ownerId
+    || null;
+}
+function verifiedValueReferenceOf(instrument = {}, coinPosition = null) {
+  return instrument.verifiedValuePackageId
+    || instrument.verifiedValuePackageIds?.[0]
+    || instrument.financialRecordId
+    || instrument.recognitionId
+    || coinPosition?.verifiedValuePackageId
+    || coinPosition?.verifiedValuePackageIds?.[0]
+    || coinPosition?.financialRecordId
+    || coinPosition?.recognitionId
     || null;
 }
 
@@ -89,7 +125,10 @@ export class OnChainProjectionService {
 
   authorizedSupplyExactFor(instrumentId) {
     const instrument = this.domain.get('SRA_INSTRUMENT', instrumentId);
-    const source = authorizedSupplySourceOf(instrument || {});
+    if (!instrument) return '';
+    const representationApproval = this.representationApprovals.get(instrumentId);
+    const coinPosition = linkedCoinPositionOf(this.domain, instrument, representationApproval);
+    const source = authorizedSupplySourceOf(instrument, coinPosition);
     return source == null ? '' : text(source);
   }
 
@@ -142,16 +181,35 @@ export class OnChainProjectionService {
     const warnings = [];
     const state = String(instrument.state || instrument.status || '').toUpperCase();
     const representationApproval = this.representationApprovals.get(instrumentId);
+    const coinPosition = linkedCoinPositionOf(this.domain, instrument, representationApproval);
+    const issuerId = issuerIdOf(instrument, coinPosition);
+    const verifiedValueReference = verifiedValueReferenceOf(instrument, coinPosition);
+    const authorizedSupplySource = authorizedSupplySourceOf(instrument, coinPosition);
     if (!ACTIVE_INSTRUMENT_STATES.has(state)) blockers.push('INSTRUMENT_NOT_ISSUED_OR_ACTIVE');
     if (representationApproval?.state !== 'APPROVED') blockers.push('INSTRUMENT_REPRESENTATION_APPROVAL_REQUIRED');
-    if (!instrument.issuerId && !instrument.issuerParticipantId) blockers.push('ISSUER_ID_MISSING');
-    if (!instrument.verifiedValuePackageId && !(instrument.verifiedValuePackageIds || []).length && !instrument.financialRecordId && !instrument.recognitionId) blockers.push('VERIFIED_VALUE_PACKAGE_MISSING');
-    if (!positiveDecimal(authorizedSupplySourceOf(instrument))) blockers.push('AUTHORIZED_SUPPLY_OR_AMOUNT_MISSING');
-    if (!instrument.purpose) warnings.push('INSTRUMENT_PURPOSE_NOT_EXPLICIT');
+    if (!issuerId) blockers.push('ISSUER_ID_MISSING');
+    if (!verifiedValueReference) blockers.push('VERIFIED_VALUE_PACKAGE_MISSING');
+    if (!positiveDecimal(authorizedSupplySource)) blockers.push('AUTHORIZED_SUPPLY_OR_AMOUNT_MISSING');
+    if (!instrument.purpose && !instrument.instrumentPurpose) warnings.push('INSTRUMENT_PURPOSE_NOT_EXPLICIT');
     if (!instrument.transferabilityStatus && !instrument.transferable) warnings.push('TRANSFERABILITY_RULE_NOT_EXPLICIT');
     if (!instrument.unitDefinition && !instrument.denomination) warnings.push('UNIT_DEFINITION_NOT_EXPLICIT');
     if (!instrument.governingRecordDigest && !instrument.governingDocumentId) warnings.push('GOVERNING_RECORD_DIGEST_NOT_SET');
-    return { eligible: blockers.length === 0, instrumentId, state, blockers, warnings, representationApproval: copy(representationApproval), instrument: copy(instrument) };
+    return {
+      eligible: blockers.length === 0,
+      instrumentId,
+      state,
+      blockers,
+      warnings,
+      representationApproval: copy(representationApproval),
+      instrument: copy(instrument),
+      coinPosition: copy(coinPosition),
+      resolvedLineage: {
+        issuerId,
+        verifiedValueReference,
+        authorizedSupplySource: authorizedSupplySource == null ? null : text(authorizedSupplySource),
+        coinPositionId: coinPosition?.coinPositionId || coinPosition?.positionId || coinPosition?.id || null,
+      },
+    };
   }
 
   async createProjection(input, actorId = null) {
@@ -164,9 +222,9 @@ export class OnChainProjectionService {
       throw error;
     }
     const instrument = assessment.instrument;
-    const coinPositionId = input.coinPositionId || instrument.coinPositionId || assessment.representationApproval?.linkedCoinPositionIds?.[0] || null;
-    const coinPosition = coinPositionId ? this.domain.get('COIN_POSITION', coinPositionId) : null;
-    const sourceSupply = input.authorizedSupplyExact ?? input.authorizedSupply ?? authorizedSupplySourceOf(instrument);
+    const coinPositionId = input.coinPositionId || assessment.resolvedLineage?.coinPositionId || instrument.coinPositionId || assessment.representationApproval?.linkedCoinPositionIds?.[0] || null;
+    const coinPosition = assessment.coinPosition || (coinPositionId ? this.domain.get('COIN_POSITION', coinPositionId) : null);
+    const sourceSupply = input.authorizedSupplyExact ?? input.authorizedSupply ?? assessment.resolvedLineage?.authorizedSupplySource ?? authorizedSupplySourceOf(instrument, coinPosition);
     const authorizedSupplyExact = text(sourceSupply);
     if (!positiveDecimal(authorizedSupplyExact)) throw new Error('Authorized supply must be a positive decimal amount.');
     const authorizedSupply = Number(authorizedSupplyExact);
@@ -185,8 +243,8 @@ export class OnChainProjectionService {
       asset,
       symbol: input.symbol || coinPosition?.symbol || instrument.symbol || asset,
       ticker: input.ticker || coinPosition?.ticker || instrument.ticker || null,
-      issuerParticipantId: instrument.issuerParticipantId || instrument.issuerId,
-      verifiedValuePackageId: input.verifiedValuePackageId || instrument.verifiedValuePackageId || instrument.verifiedValuePackageIds?.[0] || instrument.financialRecordId || instrument.recognitionId || null,
+      issuerParticipantId: assessment.resolvedLineage?.issuerId || issuerIdOf(instrument, coinPosition),
+      verifiedValuePackageId: input.verifiedValuePackageId || assessment.resolvedLineage?.verifiedValueReference || verifiedValueReferenceOf(instrument, coinPosition),
       permanentAssetAccountId: input.permanentAssetAccountId || instrument.assetId || coinPosition?.coinPositionId || null,
       participationPositionId: input.participationPositionId || null,
       authorizedSupply,
