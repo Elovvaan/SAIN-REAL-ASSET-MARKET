@@ -88,6 +88,8 @@
       const input = root.querySelector('#funding-opportunity-form [name="applicantParticipantId"]');
       if (input) { input.value = ''; input.readOnly = true; input.placeholder = error.message; }
     }
+    if (root.dataset.fundingIdentityEvidenceBound === 'true') return;
+    root.dataset.fundingIdentityEvidenceBound = 'true';
     root.addEventListener('click', (event) => {
       const row = event.target.closest('[data-opportunity-id]');
       if (row) currentOpportunityId = row.dataset.opportunityId || null;
