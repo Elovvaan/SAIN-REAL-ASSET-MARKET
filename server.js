@@ -17,6 +17,7 @@ import { createFundingMarketplaceCommitmentRouter } from './routes/funding-marke
 import { createFundingMarketplaceAllocationRouter } from './routes/funding-marketplace-allocation-router.js';
 import { createFundingMarketplaceSettlementRouter } from './routes/funding-marketplace-settlement-router.js';
 import { createFundingOperationsRouter } from './routes/funding-operations-router.js';
+import { createFinancingClosingRouter } from './routes/financing-closing-router.js';
 import { createSainOperationsIntelligenceRouter } from './routes/sain-operations-intelligence-router.js';
 import { createProductionReadinessRouter } from './routes/production-readiness-router.js';
 import { authorizeOperationsRequest } from './middleware/operations-authorization.js';
@@ -39,6 +40,8 @@ import { FundingMarketplaceCommitmentService } from './services/funding-marketpl
 import { FundingMarketplaceAllocationService } from './services/funding-marketplace-allocation-service.js';
 import { FundingMarketplaceSettlementService } from './services/funding-marketplace-settlement-service.js';
 import { FundingOperationsService } from './services/funding-operations-service.js';
+import { FinancingClosingService } from './services/financing-closing-service.js';
+import { AssetServicingService } from './services/asset-servicing-service.js';
 import { SainOperationsIntelligenceService } from './services/sain-operations-intelligence-service.js';
 import { ProductionReadinessService } from './services/production-readiness-service.js';
 import { NativePlatformAssetService } from './services/native-platform-asset-service.js';
@@ -69,6 +72,7 @@ let fundingMarketplaceCommitmentExtension = null;
 let fundingMarketplaceAllocationExtension = null;
 let fundingMarketplaceSettlementExtension = null;
 let fundingOperationsExtension = null;
+let financingClosingExtension = null;
 let sainOperationsIntelligenceExtension = null;
 let productionReadinessExtension = null;
 let onChainProjectionService = null;
@@ -85,6 +89,7 @@ let fundingMarketplaceCommitmentService = null;
 let fundingMarketplaceAllocationService = null;
 let fundingMarketplaceSettlementService = null;
 let fundingOperationsService = null;
+let financingClosingService = null;
 let sainOperationsIntelligenceService = null;
 let productionReadinessService = null;
 let nativePlatformAssetService = null;
@@ -119,6 +124,7 @@ bootstrap.use(async (req, res, next) => {
   if (database && req.method === 'POST' && req.path === '/api/access/signin') return rejectPlatformAdminPublicSignin(req, res, next, database);
   if (productionReadinessExtension && req.path.startsWith('/api/production')) return productionReadinessExtension(req, res, next);
   if (sainOperationsIntelligenceExtension && req.path.startsWith('/api/sain/intelligence')) return sainOperationsIntelligenceExtension(req, res, next);
+  if (financingClosingExtension && req.path.startsWith('/api/financing-closing')) return financingClosingExtension(req, res, next);
   if (fundingOperationsExtension && req.path.startsWith('/api/funding-operations')) return fundingOperationsExtension(req, res, next);
   if (fundingMarketplaceSettlementExtension && req.path.startsWith('/api/funding-marketplace-settlement')) return fundingMarketplaceSettlementExtension(req, res, next);
   if (fundingMarketplaceAllocationExtension && req.path.startsWith('/api/funding-marketplace-allocation')) return fundingMarketplaceAllocationExtension(req, res, next);
@@ -165,6 +171,7 @@ try {
   fundingMarketplaceAllocationService = new FundingMarketplaceAllocationService(created.persistentDomain); await fundingMarketplaceAllocationService.initialize(); fundingMarketplaceAllocationExtension = createFundingMarketplaceAllocationRouter(fundingMarketplaceAllocationService);
   fundingMarketplaceSettlementService = new FundingMarketplaceSettlementService(created.persistentDomain); await fundingMarketplaceSettlementService.initialize(); fundingMarketplaceSettlementExtension = createFundingMarketplaceSettlementRouter(fundingMarketplaceSettlementService);
   fundingOperationsService = new FundingOperationsService(created.persistentDomain); await fundingOperationsService.initialize(); fundingOperationsExtension = createFundingOperationsRouter(fundingOperationsService);
+  financingClosingService = new FinancingClosingService(created.persistentDomain, new AssetServicingService(created.persistentDomain)); await financingClosingService.initialize(); financingClosingExtension = createFinancingClosingRouter(financingClosingService);
   sainOperationsIntelligenceService = new SainOperationsIntelligenceService(created.persistentDomain); await sainOperationsIntelligenceService.initialize(); sainOperationsIntelligenceExtension = createSainOperationsIntelligenceRouter(sainOperationsIntelligenceService);
   productionReadinessService = new ProductionReadinessService({ database: created.database, domain: created.persistentDomain, intelligence: sainOperationsIntelligenceService });
   productionReadinessExtension = createProductionReadinessRouter({ readinessService: productionReadinessService, database: created.database });
@@ -182,6 +189,6 @@ try {
   console.log(JSON.stringify({ level: 'info', event: 'PLATFORM_INITIALIZATION_COMPLETED', nativePlatformAsset: nativePlatformAssetService.status(), startedAt }));
 } catch (error) {
   startupState = 'FAILED';
-  startupError = { name: error?.name || 'Error', message: error?.message || 'Unknown startup error' };
+  startupError = { name: error?.name || 'Error', message: error?.message || String(error), stack: process.env.NODE_ENV === 'production' ? undefined : error?.stack };
   console.error(JSON.stringify({ level: 'error', event: 'PLATFORM_INITIALIZATION_FAILED', error: startupError }));
 }
