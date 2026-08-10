@@ -1,5 +1,6 @@
 import express from 'express';
 import multer from 'multer';
+import { PrivateDocumentService } from '../services/private-document-service.js';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024, files: 10 } });
 
@@ -18,6 +19,7 @@ function handle(res, error) {
 
 export function createFundingOpportunityRouter(service, documentService = null) {
   const router = express.Router();
+  const privateDocuments = documentService || new PrivateDocumentService({ database: service?.domain?.database || null });
 
   router.get('/status', (_req, res) => res.json(service.status()));
 
@@ -77,7 +79,6 @@ export function createFundingOpportunityRouter(service, documentService = null) 
 
   router.post('/opportunities/:opportunityId/documents', upload.array('documents', 10), async (req, res) => {
     try {
-      if (!documentService) return res.status(503).json({ error: 'Private funding evidence storage is not available.' });
       const opportunity = service.get(req.params.opportunityId);
       if (!opportunity) return res.status(404).json({ error: 'Funding opportunity was not found.' });
       const identity = req.sraIdentity?.actorId || null;
@@ -88,7 +89,7 @@ export function createFundingOpportunityRouter(service, documentService = null) 
       const documentTypes = Array.isArray(req.body.documentTypes) ? req.body.documentTypes : req.body.documentTypes ? [req.body.documentTypes] : [];
       const records = [];
       for (let index = 0; index < files.length; index += 1) {
-        const stored = await documentService.store({
+        const stored = await privateDocuments.store({
           file: files[index],
           documentType: documentTypes[index] || 'FINANCING_SUPPORT',
           uploaderId: actorId(req),
