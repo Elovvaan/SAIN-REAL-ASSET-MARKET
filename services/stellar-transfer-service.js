@@ -113,13 +113,12 @@ export class StellarTransferService {
       network: NETWORK,
       asset: code,
       symbol: code,
-      assetAddress: `${code}:${issuer.publicKey()}`,
+      assetAddress: `${asset.code}:${asset.issuer}`,
       issuerAddress: issuer.publicKey(),
       distributionAddress: distributor.publicKey(),
       decimals: 7,
       transactionId: null,
       state: 'CREATED',
-      stellarAsset: asset.toString(),
     };
   }
 
@@ -127,8 +126,8 @@ export class StellarTransferService {
     const { server, distributor } = this.ensure();
     const account = await server.loadAccount(distributor.publicKey());
     const exists = account.balances.some((balance) => balance.asset_type !== 'native'
-      && balance.asset_code === asset.getCode()
-      && balance.asset_issuer === asset.getIssuer());
+      && balance.asset_code === asset.code
+      && balance.asset_issuer === asset.issuer);
     if (exists) return null;
 
     const tx = new StellarSdk.TransactionBuilder(account, {
@@ -151,7 +150,7 @@ export class StellarTransferService {
   async issueAsset(record, input = {}) {
     const { server, issuer, distributor } = this.ensure();
     const stellarAsset = this.stellarAsset(record);
-    if (stellarAsset.getIssuer() !== issuer.publicKey()) {
+    if (stellarAsset.issuer !== issuer.publicKey()) {
       const error = new Error('Configured Stellar issuer is not the issuer for this asset.');
       error.code = 'ON_CHAIN_ISSUER_MISMATCH';
       throw error;
@@ -186,8 +185,8 @@ export class StellarTransferService {
     const { server } = this.ensure();
     const account = await server.loadAccount(destination);
     return account.balances.some((balance) => balance.asset_type !== 'native'
-      && balance.asset_code === stellarAsset.getCode()
-      && balance.asset_issuer === stellarAsset.getIssuer());
+      && balance.asset_code === stellarAsset.code
+      && balance.asset_issuer === stellarAsset.issuer);
   }
 
   async build(input = {}) {
