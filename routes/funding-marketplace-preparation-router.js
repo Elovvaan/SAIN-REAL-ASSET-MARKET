@@ -1,7 +1,7 @@
 import express from 'express';
 
 function actorId(req) {
-  return req.get('x-sra-actor-id') || req.body?.actorId || null;
+  return req.sraIdentity?.actorId || req.get('x-sra-actor-id') || req.body?.actorId || null;
 }
 
 function handle(res, error) {
@@ -23,8 +23,13 @@ export function createFundingMarketplacePreparationRouter(service) {
     catch (error) { return handle(res, error); }
   });
 
+  router.get('/positions/:positionId/assessment', (req, res) => {
+    try { return res.json(service.assessPosition(req.params.positionId, req.query.distributionAuthorizationId)); }
+    catch (error) { return handle(res, error); }
+  });
+
   router.get('/preparations', (req, res) => {
-    res.json({ records: service.listPreparations({ instrumentId: req.query.instrumentId, status: req.query.status }) });
+    res.json({ records: service.listPreparations({ instrumentId: req.query.instrumentId, positionId: req.query.positionId, status: req.query.status }) });
   });
 
   router.get('/preparations/:preparationId', (req, res) => {
@@ -33,10 +38,15 @@ export function createFundingMarketplacePreparationRouter(service) {
     return res.json(record);
   });
 
-  router.post('/instruments/:instrumentId/preparations', async (req, res) => {
-    try { return res.status(201).json(await service.createPreparation(req.params.instrumentId, req.body, actorId(req))); }
+  router.post('/positions/:positionId/preparations', async (req, res) => {
+    try { return res.status(201).json(await service.createPreparation(req.params.positionId, req.body, actorId(req))); }
     catch (error) { return handle(res, error); }
   });
+
+  router.post('/instruments/:instrumentId/preparations', (_req, res) => res.status(409).json({
+    error: 'Marketplace preparation must start from a funded position, not directly from instrument issuance.',
+    code: 'FUNDED_POSITION_REQUIRED',
+  }));
 
   router.get('/preparations/:preparationId/assessment', (req, res) => {
     try { return res.json(service.assessPreparation(req.params.preparationId)); }

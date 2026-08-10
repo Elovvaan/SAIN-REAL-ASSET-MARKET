@@ -4,6 +4,7 @@ import { RECORD_TYPES } from './persistent-domain-service.js';
 const CLOSING_TYPE = 'FINANCING_CLOSING';
 const CONDITION_TYPE = 'FINANCING_CLOSING_CONDITION';
 const DISBURSEMENT_TYPE = 'FINANCING_DISBURSEMENT';
+const POSITION_TYPE = 'FINANCED_POSITION';
 const LOAN_FINANCING_TYPE = 'LOAN_FINANCING_AUTHORIZATION';
 const id = (prefix) => `${prefix}-${crypto.randomUUID().split('-')[0].toUpperCase()}`;
 const now = () => new Date().toISOString();
@@ -14,7 +15,7 @@ export class FinancingClosingService {
   constructor(domain, assetServicingService = null) { this.domain = domain; this.assetServicingService = assetServicingService; }
 
   async initialize() {
-    await this.domain.hydrate([CLOSING_TYPE, CONDITION_TYPE, DISBURSEMENT_TYPE, RECORD_TYPES.SRA_TRANSACTION]);
+    await this.domain.hydrate([CLOSING_TYPE, CONDITION_TYPE, DISBURSEMENT_TYPE, POSITION_TYPE, RECORD_TYPES.SRA_TRANSACTION]);
     return this.status();
   }
 
@@ -24,11 +25,12 @@ export class FinancingClosingService {
   get(closingId) { return this.domain.get(CLOSING_TYPE, closingId); }
   conditions(closingId) { return this.domain.list(CONDITION_TYPE).filter((r) => r.closingId === closingId); }
   disbursements(closingId) { return this.domain.list(DISBURSEMENT_TYPE).filter((r) => r.closingId === closingId); }
+  positionForFinancing(financingTransactionId) { return this.domain.list(POSITION_TYPE).find((r) => r.financingTransactionId === financingTransactionId) || null; }
 
   detail(closingId) {
     const closing = this.get(closingId);
     if (!closing) return null;
-    return { closing, conditions: this.conditions(closingId), disbursements: this.disbursements(closingId) };
+    return { closing, conditions: this.conditions(closingId), disbursements: this.disbursements(closingId), financedPosition: this.positionForFinancing(closing.financingTransactionId) };
   }
 
   financing(financingTransactionId) {
@@ -68,6 +70,7 @@ export class FinancingClosingService {
       readyAt: null,
       authorizedAt: null,
       fundedAt: null,
+      financedPositionId: null,
       servicingAccountId: null,
     };
     await this.domain.put(CLOSING_TYPE, closingId, closing, { actorId, eventType: 'FINANCING_CLOSING_OPENED' });
@@ -144,36 +147,70 @@ export class FinancingClosingService {
     if (!['AUTHORIZED','SUBMITTED'].includes(disbursement.status)) throw new Error('Disbursement is not awaiting settlement.');
     const externalReference = required(input.externalReference, 'externalReference');
     const timestamp = now();
-    const settled = { ...disbursement, status: 'SETTLED', externalReference, submittedAt: disbursement.submittedAt || timestamp, settledAt: timestamp, settledBy: actorId, updatedAt: timestamp };
-    const funded = { ...closing, status: 'FUNDED', fundedAt: timestamp, updatedAt: timestamp };
     const financing = this.financing(closing.financingTransactionId);
-    const financingUpdated = { ...financing, status: 'FUNDED', externalDisbursementAuthorized: true, externalSettlementReference: externalReference, fundedAt: timestamp, updatedAt: timestamp };
+    const existingPosition = this.positionForFinancing(financing.transactionId);
+    const positionId = existingPosition?.positionId || id('POS');
+    const principal = Number(closing.finalFundingAmount || financing.amount);
+    const financedPosition = existingPosition || {
+      positionId,
+      opportunityId: closing.opportunityId,
+      financingTransactionId: financing.transactionId,
+      issuanceTransactionId: closing.issuanceTransactionId,
+      instrumentId: closing.instrumentId,
+      borrowerParticipantId: closing.borrowerParticipantId,
+      ownerId: 'SRA',
+      originalPrincipal: principal,
+      currentPrincipal: principal,
+      currency: closing.currency || financing.currency || 'USD',
+      positionStatus: 'ACTIVE',
+      distributionStatus: 'RETAINED',
+      retainedAmount: principal,
+      availableAmount: 0,
+      offeredAmount: 0,
+      transferredAmount: 0,
+      activeDistributionAuthorizationId: null,
+      servicingAccountId: null,
+      externalSettlementReference: externalReference,
+      fundedAt: timestamp,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    const settled = { ...disbursement, status: 'SETTLED', externalReference, submittedAt: disbursement.submittedAt || timestamp, settledAt: timestamp, settledBy: actorId, updatedAt: timestamp };
+    const funded = { ...closing, status: 'FUNDED', financedPositionId: positionId, fundedAt: timestamp, updatedAt: timestamp };
+    const financingUpdated = { ...financing, status: 'FUNDED', financedPositionId: positionId, externalDisbursementAuthorized: true, externalSettlementReference: externalReference, fundedAt: timestamp, updatedAt: timestamp };
     await this.domain.atomicPut([
       { type: DISBURSEMENT_TYPE, id: disbursementId, payload: settled, actorId, eventType: 'FINANCING_DISBURSEMENT_SETTLED' },
       { type: CLOSING_TYPE, id: closingId, payload: funded, actorId, eventType: 'FINANCING_CLOSING_FUNDED' },
       { type: RECORD_TYPES.SRA_TRANSACTION, id: financing.transactionId, payload: financingUpdated, actorId, eventType: 'LOAN_FINANCING_FUNDED' },
+      { type: POSITION_TYPE, id: positionId, payload: financedPosition, actorId, eventType: existingPosition ? 'FINANCED_POSITION_CONFIRMED' : 'FINANCED_POSITION_CREATED' },
     ]);
-    await this.domain.lifecycle({ objectType: CLOSING_TYPE, objectId: closingId, eventType: 'FINANCING_EXTERNAL_SETTLEMENT_RECORDED', actorId, payload: { disbursementId, externalReference, amount: settled.amount, settlementMethod: settled.settlementMethod } });
-    return { closing: funded, disbursement: settled, financing: financingUpdated };
+    await this.domain.lifecycle({ objectType: CLOSING_TYPE, objectId: closingId, eventType: 'FINANCING_EXTERNAL_SETTLEMENT_RECORDED', actorId, payload: { disbursementId, externalReference, amount: settled.amount, settlementMethod: settled.settlementMethod, financedPositionId: positionId } });
+    await this.domain.lifecycle({ objectType: POSITION_TYPE, objectId: positionId, eventType: 'FINANCED_POSITION_CREATED_FROM_FUNDED_FINANCING', actorId, payload: { financingTransactionId: financing.transactionId, opportunityId: closing.opportunityId, instrumentId: closing.instrumentId, principal, ownerId: 'SRA' } });
+    return { closing: funded, disbursement: settled, financing: financingUpdated, financedPosition };
   }
 
   async boardToServicing(closingId, input = {}, actorId = null) {
     const closing = this.get(closingId); if (!closing) throw new Error('Financing closing was not found.');
     if (closing.status !== 'FUNDED') throw new Error('Only funded financing can be boarded to servicing.');
-    if (closing.servicingAccountId) return { closing, servicingAccount: this.assetServicingService?.getAccount(closing.servicingAccountId) || null, created: false };
+    if (closing.servicingAccountId) return { closing, servicingAccount: this.assetServicingService?.getAccount(closing.servicingAccountId) || null, financedPosition: this.positionForFinancing(closing.financingTransactionId), created: false };
     if (!this.assetServicingService) throw new Error('Asset servicing service is unavailable.');
     const assetAccountId = required(input.assetAccountId, 'assetAccountId');
     const ownerId = required(input.ownerId || closing.borrowerParticipantId, 'ownerId');
-    const account = await this.assetServicingService.createAccount({ assetAccountId, ownerId, servicerId: input.servicerId || 'SRA', currency: closing.currency, settlementId: closing.disbursements?.settlementId || null, nextReviewDate: input.nextReviewDate || null, insuranceRequired: input.insuranceRequired, taxMonitoringRequired: input.taxMonitoringRequired, inspectionFrequencyMonths: input.inspectionFrequencyMonths }, actorId);
-    const updated = { ...closing, status: 'SERVICING', servicingAccountId: account.servicingAccountId, boardedAt: now(), updatedAt: now() };
-    await this.domain.put(CLOSING_TYPE, closingId, updated, { actorId, eventType: 'FINANCING_BOARDED_TO_SERVICING' });
-    return { closing: updated, servicingAccount: account, created: true };
+    const account = await this.assetServicingService.createAccount({ assetAccountId, ownerId, servicerId: input.servicerId || 'SRA', currency: closing.currency, settlementId: input.settlementId || null, nextReviewDate: input.nextReviewDate || null, insuranceRequired: input.insuranceRequired, taxMonitoringRequired: input.taxMonitoringRequired, inspectionFrequencyMonths: input.inspectionFrequencyMonths }, actorId);
+    const timestamp = now();
+    const updated = { ...closing, status: 'SERVICING', servicingAccountId: account.servicingAccountId, boardedAt: timestamp, updatedAt: timestamp };
+    const position = this.positionForFinancing(closing.financingTransactionId);
+    const positionUpdated = position ? { ...position, positionStatus: 'SERVICING', servicingAccountId: account.servicingAccountId, updatedAt: timestamp } : null;
+    const changes = [{ type: CLOSING_TYPE, id: closingId, payload: updated, actorId, eventType: 'FINANCING_BOARDED_TO_SERVICING' }];
+    if (positionUpdated) changes.push({ type: POSITION_TYPE, id: position.positionId, payload: positionUpdated, actorId, eventType: 'FINANCED_POSITION_BOARDED_TO_SERVICING' });
+    await this.domain.atomicPut(changes);
+    return { closing: updated, servicingAccount: account, financedPosition: positionUpdated, created: true };
   }
 
   status() {
     const records = this.domain.list(CLOSING_TYPE);
-    return { service: 'SRA_FINANCING_CLOSING', count: records.length, inProgress: records.filter((r) => r.status === 'IN_PROGRESS').length, readyToFund: records.filter((r) => r.status === 'READY_TO_FUND').length, authorized: records.filter((r) => r.status === 'AUTHORIZED').length, funded: records.filter((r) => r.status === 'FUNDED').length, servicing: records.filter((r) => r.status === 'SERVICING').length };
+    return { service: 'SRA_FINANCING_CLOSING', count: records.length, inProgress: records.filter((r) => r.status === 'IN_PROGRESS').length, readyToFund: records.filter((r) => r.status === 'READY_TO_FUND').length, authorized: records.filter((r) => r.status === 'AUTHORIZED').length, funded: records.filter((r) => r.status === 'FUNDED').length, servicing: records.filter((r) => r.status === 'SERVICING').length, financedPositions: this.domain.list(POSITION_TYPE).length };
   }
 }
 
-export { CLOSING_TYPE as FINANCING_CLOSING_RECORD_TYPE, CONDITION_TYPE as FINANCING_CLOSING_CONDITION_RECORD_TYPE, DISBURSEMENT_TYPE as FINANCING_DISBURSEMENT_RECORD_TYPE };
+export { CLOSING_TYPE as FINANCING_CLOSING_RECORD_TYPE, CONDITION_TYPE as FINANCING_CLOSING_CONDITION_RECORD_TYPE, DISBURSEMENT_TYPE as FINANCING_DISBURSEMENT_RECORD_TYPE, POSITION_TYPE as FINANCED_POSITION_RECORD_TYPE };
