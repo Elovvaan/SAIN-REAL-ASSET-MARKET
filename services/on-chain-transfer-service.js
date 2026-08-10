@@ -25,7 +25,7 @@ export class OnChainTransferService {
   status() {
     return {
       service: 'SRA_ON_CHAIN_TRANSFER',
-      interface: ['network', 'asset', 'amount', 'destinationAddress'],
+      interface: ['asset', 'amount', 'destinationAddress', 'network'],
       networks: [...this.adapters.entries()].map(([network, adapter]) => ({ network, ...adapter.status?.() })),
     };
   }
