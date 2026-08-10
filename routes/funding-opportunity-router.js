@@ -1,7 +1,10 @@
 import express from 'express';
+import multer from 'multer';
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024, files: 10 } });
 
 function actorId(req) {
-  return req.get('x-sra-actor-id') || req.body?.actorId || null;
+  return req.sraIdentity?.actorId || req.get('x-sra-actor-id') || req.body?.actorId || null;
 }
 
 function handle(res, error) {
@@ -13,7 +16,7 @@ function handle(res, error) {
   });
 }
 
-export function createFundingOpportunityRouter(service) {
+export function createFundingOpportunityRouter(service, documentService = null) {
   const router = express.Router();
 
   router.get('/status', (_req, res) => res.json(service.status()));
@@ -36,7 +39,11 @@ export function createFundingOpportunityRouter(service) {
 
   router.post('/opportunities', async (req, res) => {
     try {
-      return res.status(201).json(await service.create(req.body, actorId(req)));
+      const authenticatedParticipantId = req.sraIdentity?.actorId || null;
+      const input = authenticatedParticipantId
+        ? { ...req.body, applicantParticipantId: authenticatedParticipantId, relatedParticipantIds: [authenticatedParticipantId, ...(req.body?.relatedParticipantIds || [])] }
+        : req.body;
+      return res.status(201).json(await service.create(input, actorId(req)));
     } catch (error) {
       return handle(res, error);
     }
@@ -63,6 +70,43 @@ export function createFundingOpportunityRouter(service) {
   router.post('/opportunities/:opportunityId/evidence', async (req, res) => {
     try {
       return res.status(201).json(await service.registerEvidence(req.params.opportunityId, req.body, actorId(req)));
+    } catch (error) {
+      return handle(res, error);
+    }
+  });
+
+  router.post('/opportunities/:opportunityId/documents', upload.array('documents', 10), async (req, res) => {
+    try {
+      if (!documentService) return res.status(503).json({ error: 'Private funding evidence storage is not available.' });
+      const opportunity = service.get(req.params.opportunityId);
+      if (!opportunity) return res.status(404).json({ error: 'Funding opportunity was not found.' });
+      const identity = req.sraIdentity?.actorId || null;
+      const staff = Array.isArray(req.sraOperationsAuth?.roles) && req.sraOperationsAuth.roles.length > 0;
+      if (identity && !staff && opportunity.applicantParticipantId !== identity) return res.status(403).json({ error: 'That funding opportunity does not belong to the authenticated participant.' });
+      const files = Array.isArray(req.files) ? req.files : [];
+      if (!files.length) return res.status(400).json({ error: 'At least one evidence document is required.' });
+      const documentTypes = Array.isArray(req.body.documentTypes) ? req.body.documentTypes : req.body.documentTypes ? [req.body.documentTypes] : [];
+      const records = [];
+      for (let index = 0; index < files.length; index += 1) {
+        const stored = await documentService.store({
+          file: files[index],
+          documentType: documentTypes[index] || 'FINANCING_SUPPORT',
+          uploaderId: actorId(req),
+          retentionPolicy: 'FINANCING_APPLICATION_EVIDENCE',
+          retentionReferenceId: opportunity.opportunityId,
+        });
+        if (!stored.ok) return res.status(400).json({ error: stored.error });
+        const evidence = await service.registerEvidence(opportunity.opportunityId, {
+          evidenceType: documentTypes[index] || 'FINANCING_SUPPORT',
+          title: files[index].originalname,
+          sourceReference: stored.document.id,
+          documentId: stored.document.id,
+          participantIds: [opportunity.applicantParticipantId],
+          provenance: { source: 'PARTICIPANT_UPLOAD', sha256: stored.document.sha256, retainedAs: 'PRIVATE_EVIDENCE' },
+        }, actorId(req));
+        records.push({ document: stored.document, evidence });
+      }
+      return res.status(201).json({ records, retentionPolicy: 'FINANCING_APPLICATION_EVIDENCE' });
     } catch (error) {
       return handle(res, error);
     }
