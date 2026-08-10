@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { RECORD_TYPES } from './persistent-domain-service.js';
 
 const ORIGINS = new Set(['NATIVE', 'HISTORICAL', 'IMPORTED']);
-const HISTORY_TYPES = new Set(['RETAIL_RECEIPT', 'BANK_STATEMENT', 'BANK_TRANSACTION', 'INVOICE', 'BILL', 'PAYMENT_CONFIRMATION', 'ACH_CONFIRMATION', 'WIRE_CONFIRMATION', 'DEPOSIT_SLIP', 'PAYROLL_STUB', 'TAX_RECEIPT', 'INSURANCE_STATEMENT', 'OTHER']);
+const HISTORY_TYPES = new Set(['RETAIL_RECEIPT', 'BANK_STATEMENT', 'BANK_TRANSACTION', 'INVOICE', 'BILL', 'PAYMENT_CONFIRMATION', 'DEPOSIT_SLIP', 'PAYROLL_STUB', 'TAX_RECEIPT', 'INSURANCE_STATEMENT', 'OTHER']);
 
 function now() { return new Date().toISOString(); }
 function id(prefix) { return `${prefix}-${crypto.randomUUID().split('-')[0].toUpperCase()}`; }
