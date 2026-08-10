@@ -16,16 +16,59 @@ function isStaffRequest(req) {
 function createParticipantId() {
   return `P-${crypto.randomUUID().split('-')[0].toUpperCase()}`;
 }
+function normalizeEmail(value) {
+  return String(value || '').trim().toLowerCase();
+}
+function findParticipant(service, reference) {
+  if (!reference) return null;
+  const participants = service.domain.list(PARTICIPANT_TYPE);
+  const raw = String(reference).trim();
+  const email = normalizeEmail(raw);
+  return participants.find((record) => record?.id === raw)
+    || participants.find((record) => record?.metadata?.accessAccountId === raw)
+    || participants.find((record) => record?.metadata?.universalAccountId === raw)
+    || participants.find((record) => normalizeEmail(record?.metadata?.contactEmail || record?.metadata?.email) === email)
+    || participants.find((record) => String(record?.displayName || '').trim().toLowerCase() === raw.toLowerCase())
+    || null;
+}
+async function createManualParticipant(service, input, operatorId) {
+  const manual = input?.manualApplicant && typeof input.manualApplicant === 'object' ? input.manualApplicant : {};
+  const displayName = String(manual.displayName || input?.applicantDisplayName || '').trim();
+  if (!displayName) throw new Error('Manual applicant name is required.');
+  const contactEmail = normalizeEmail(manual.contactEmail || input?.applicantEmail) || null;
+  const existing = service.domain.list(PARTICIPANT_TYPE).find((record) => {
+    if (contactEmail && normalizeEmail(record?.metadata?.contactEmail || record?.metadata?.email) === contactEmail) return true;
+    return String(record?.displayName || '').trim().toLowerCase() === displayName.toLowerCase();
+  });
+  if (existing) return existing.id;
+  const participantId = createParticipantId();
+  const created = {
+    id: participantId,
+    displayName,
+    type: String(manual.type || input?.applicantType || 'ORGANIZATION').toUpperCase(),
+    roles: ['FUNDING_APPLICANT'],
+    metadata: {
+      contactEmail,
+      contactPhone: manual.contactPhone || input?.applicantPhone || null,
+      legalName: manual.legalName || displayName,
+      source: 'ADMIN_MANUAL_FUNDING_INTAKE',
+      createdByAccessAccountId: operatorId || null,
+    },
+    createdAt: new Date().toISOString(),
+  };
+  await service.domain.put(PARTICIPANT_TYPE, participantId, created, { actorId: operatorId, eventType: 'ADMIN_MANUAL_PARTICIPANT_CREATED' });
+  return participantId;
+}
 async function resolveParticipantForIdentity(service, identity) {
   if (!identity?.actorId) return null;
   const participants = service.domain.list(PARTICIPANT_TYPE);
-  const email = String(identity.email || '').trim().toLowerCase();
+  const email = normalizeEmail(identity.email);
   let participant = participants.find((record) =>
     record?.metadata?.accessAccountId === identity.actorId ||
     (identity.universalAccountId && record?.metadata?.universalAccountId === identity.universalAccountId)
   );
   if (!participant && email) {
-    const emailMatches = participants.filter((record) => String(record?.metadata?.contactEmail || record?.metadata?.email || '').trim().toLowerCase() === email);
+    const emailMatches = participants.filter((record) => normalizeEmail(record?.metadata?.contactEmail || record?.metadata?.email) === email);
     if (emailMatches.length === 1) participant = emailMatches[0];
   }
   if (participant) {
@@ -57,6 +100,15 @@ async function resolveParticipantForIdentity(service, identity) {
   };
   await service.domain.put(PARTICIPANT_TYPE, participantId, created, { actorId: identity.actorId, eventType: 'AUTHENTICATED_PARTICIPANT_CREATED' });
   return participantId;
+}
+async function resolveAdminApplicant(service, body, operatorId) {
+  const mode = String(body?.applicantSource || '').trim().toUpperCase();
+  if (mode === 'MANUAL' || body?.manualApplicant || body?.applicantDisplayName) {
+    return createManualParticipant(service, body, operatorId);
+  }
+  const reference = body?.applicantParticipantId || body?.applicantReference || null;
+  const participant = findParticipant(service, reference);
+  return participant?.id || null;
 }
 
 function handle(res, error) {
@@ -92,10 +144,13 @@ export function createFundingOpportunityRouter(service, documentService = null) 
 
   router.post('/opportunities', async (req, res) => {
     try {
-      const participantSelfService = req.sraOperationsAuth?.source === 'SERVER_SESSION' && !isStaffRequest(req);
+      const staff = isStaffRequest(req);
+      const participantSelfService = req.sraOperationsAuth?.source === 'SERVER_SESSION' && !staff;
       const authenticatedParticipantId = participantSelfService ? await resolveParticipantForIdentity(service, req.sraIdentity) : null;
-      const input = authenticatedParticipantId
-        ? { ...req.body, applicantParticipantId: authenticatedParticipantId, relatedParticipantIds: [authenticatedParticipantId, ...(req.body?.relatedParticipantIds || [])] }
+      const adminParticipantId = staff ? await resolveAdminApplicant(service, req.body, actorId(req)) : null;
+      const resolvedParticipantId = authenticatedParticipantId || adminParticipantId || req.body?.applicantParticipantId || null;
+      const input = resolvedParticipantId
+        ? { ...req.body, applicantParticipantId: resolvedParticipantId, relatedParticipantIds: [resolvedParticipantId, ...(req.body?.relatedParticipantIds || [])] }
         : req.body;
       return res.status(201).json(await service.create(input, actorId(req)));
     } catch (error) {
