@@ -54,6 +54,12 @@ bootstrap.use(productionRuntime);
 bootstrap.use(authorizeOperationsRequest);
 bootstrap.use(operationsIdempotency);
 
+function mountExtension(prefix, router) {
+  const mounted = express.Router();
+  mounted.use(prefix, router);
+  return mounted;
+}
+
 let platformApp = null;
 let platformExtensions = null;
 let coinbaseExtension = null;
@@ -158,20 +164,20 @@ try {
   const created = await createApp();
   database = created.database;
   platformExtensions = await createUniversalAccountBlockchainRouter(created.persistentDomain, created.database);
-  fundingOpportunityService = new FundingOpportunityIntakeService(created.persistentDomain); await fundingOpportunityService.initialize(); fundingOpportunityExtension = createFundingOpportunityRouter(fundingOpportunityService);
-  fundingVerificationService = new FundingOpportunityVerificationService(created.persistentDomain); await fundingVerificationService.initialize(); fundingVerificationExtension = createFundingOpportunityVerificationRouter(fundingVerificationService);
-  fundingValuePreparationService = new FundingOpportunityValuePreparationService(created.persistentDomain); await fundingValuePreparationService.initialize(); fundingValuePreparationExtension = createFundingOpportunityValuePreparationRouter(fundingValuePreparationService);
-  fundingModelSelectionService = new FundingModelSelectionService(created.persistentDomain); await fundingModelSelectionService.initialize(); fundingModelSelectionExtension = createFundingModelSelectionRouter(fundingModelSelectionService);
-  fundingInstrumentSelectionService = new FundingInstrumentSelectionService(created.persistentDomain); await fundingInstrumentSelectionService.initialize(); fundingInstrumentSelectionExtension = createFundingInstrumentSelectionRouter(fundingInstrumentSelectionService);
-  fundingInstrumentReviewService = new FundingInstrumentReviewService(created.persistentDomain); await fundingInstrumentReviewService.initialize(); fundingInstrumentReviewExtension = createFundingInstrumentReviewRouter(fundingInstrumentReviewService);
-  fundingInstrumentIssuanceService = new FundingInstrumentIssuanceService(created.persistentDomain); await fundingInstrumentIssuanceService.initialize(); fundingInstrumentIssuanceExtension = createFundingInstrumentIssuanceRouter(fundingInstrumentIssuanceService);
-  fundingMarketplacePreparationService = new FundingMarketplacePreparationService(created.persistentDomain); await fundingMarketplacePreparationService.initialize(); fundingMarketplacePreparationExtension = createFundingMarketplacePreparationRouter(fundingMarketplacePreparationService);
-  fundingMarketplacePublicationService = new FundingMarketplacePublicationService(created.persistentDomain); await fundingMarketplacePublicationService.initialize(); fundingMarketplacePublicationExtension = createFundingMarketplacePublicationRouter(fundingMarketplacePublicationService);
-  fundingMarketplaceCommitmentService = new FundingMarketplaceCommitmentService(created.persistentDomain); await fundingMarketplaceCommitmentService.initialize(); fundingMarketplaceCommitmentExtension = createFundingMarketplaceCommitmentRouter(fundingMarketplaceCommitmentService);
-  fundingMarketplaceAllocationService = new FundingMarketplaceAllocationService(created.persistentDomain); await fundingMarketplaceAllocationService.initialize(); fundingMarketplaceAllocationExtension = createFundingMarketplaceAllocationRouter(fundingMarketplaceAllocationService);
-  fundingMarketplaceSettlementService = new FundingMarketplaceSettlementService(created.persistentDomain); await fundingMarketplaceSettlementService.initialize(); fundingMarketplaceSettlementExtension = createFundingMarketplaceSettlementRouter(fundingMarketplaceSettlementService);
-  fundingOperationsService = new FundingOperationsService(created.persistentDomain); await fundingOperationsService.initialize(); fundingOperationsExtension = createFundingOperationsRouter(fundingOperationsService);
-  financingClosingService = new FinancingClosingService(created.persistentDomain, new AssetServicingService(created.persistentDomain)); await financingClosingService.initialize(); financingClosingExtension = createFinancingClosingRouter(financingClosingService);
+  fundingOpportunityService = new FundingOpportunityIntakeService(created.persistentDomain); await fundingOpportunityService.initialize(); fundingOpportunityExtension = mountExtension('/api/funding', createFundingOpportunityRouter(fundingOpportunityService));
+  fundingVerificationService = new FundingOpportunityVerificationService(created.persistentDomain); await fundingVerificationService.initialize(); fundingVerificationExtension = mountExtension('/api/funding-verification', createFundingOpportunityVerificationRouter(fundingVerificationService));
+  fundingValuePreparationService = new FundingOpportunityValuePreparationService(created.persistentDomain); await fundingValuePreparationService.initialize(); fundingValuePreparationExtension = mountExtension('/api/funding-value', createFundingOpportunityValuePreparationRouter(fundingValuePreparationService));
+  fundingModelSelectionService = new FundingModelSelectionService(created.persistentDomain); await fundingModelSelectionService.initialize(); fundingModelSelectionExtension = mountExtension('/api/funding-model', createFundingModelSelectionRouter(fundingModelSelectionService));
+  fundingInstrumentSelectionService = new FundingInstrumentSelectionService(created.persistentDomain); await fundingInstrumentSelectionService.initialize(); fundingInstrumentSelectionExtension = mountExtension('/api/funding-instrument', createFundingInstrumentSelectionRouter(fundingInstrumentSelectionService));
+  fundingInstrumentReviewService = new FundingInstrumentReviewService(created.persistentDomain); await fundingInstrumentReviewService.initialize(); fundingInstrumentReviewExtension = mountExtension('/api/funding-instrument-review', createFundingInstrumentReviewRouter(fundingInstrumentReviewService));
+  fundingInstrumentIssuanceService = new FundingInstrumentIssuanceService(created.persistentDomain); await fundingInstrumentIssuanceService.initialize(); fundingInstrumentIssuanceExtension = mountExtension('/api/funding-instrument-issuance', createFundingInstrumentIssuanceRouter(fundingInstrumentIssuanceService));
+  fundingMarketplacePreparationService = new FundingMarketplacePreparationService(created.persistentDomain); await fundingMarketplacePreparationService.initialize(); fundingMarketplacePreparationExtension = mountExtension('/api/funding-marketplace', createFundingMarketplacePreparationRouter(fundingMarketplacePreparationService));
+  fundingMarketplacePublicationService = new FundingMarketplacePublicationService(created.persistentDomain); await fundingMarketplacePublicationService.initialize(); fundingMarketplacePublicationExtension = mountExtension('/api/funding-marketplace-publication', createFundingMarketplacePublicationRouter(fundingMarketplacePublicationService));
+  fundingMarketplaceCommitmentService = new FundingMarketplaceCommitmentService(created.persistentDomain); await fundingMarketplaceCommitmentService.initialize(); fundingMarketplaceCommitmentExtension = mountExtension('/api/funding-marketplace-commitment', createFundingMarketplaceCommitmentRouter(fundingMarketplaceCommitmentService));
+  fundingMarketplaceAllocationService = new FundingMarketplaceAllocationService(created.persistentDomain); await fundingMarketplaceAllocationService.initialize(); fundingMarketplaceAllocationExtension = mountExtension('/api/funding-marketplace-allocation', createFundingMarketplaceAllocationRouter(fundingMarketplaceAllocationService));
+  fundingMarketplaceSettlementService = new FundingMarketplaceSettlementService(created.persistentDomain); await fundingMarketplaceSettlementService.initialize(); fundingMarketplaceSettlementExtension = mountExtension('/api/funding-marketplace-settlement', createFundingMarketplaceSettlementRouter(fundingMarketplaceSettlementService));
+  fundingOperationsService = new FundingOperationsService(created.persistentDomain); await fundingOperationsService.initialize(); fundingOperationsExtension = mountExtension('/api/funding-operations', createFundingOperationsRouter(fundingOperationsService));
+  financingClosingService = new FinancingClosingService(created.persistentDomain, new AssetServicingService(created.persistentDomain)); await financingClosingService.initialize(); financingClosingExtension = mountExtension('/api/financing-closing', createFinancingClosingRouter(financingClosingService));
   sainOperationsIntelligenceService = new SainOperationsIntelligenceService(created.persistentDomain); await sainOperationsIntelligenceService.initialize(); sainOperationsIntelligenceExtension = createSainOperationsIntelligenceRouter(sainOperationsIntelligenceService);
   productionReadinessService = new ProductionReadinessService({ database: created.database, domain: created.persistentDomain, intelligence: sainOperationsIntelligenceService });
   productionReadinessExtension = createProductionReadinessRouter({ readinessService: productionReadinessService, database: created.database });
