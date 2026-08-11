@@ -18,47 +18,10 @@ const RECORDS = Object.freeze({
   SETTLEMENT_PREPARATION: 'FUNDING_MARKETPLACE_SETTLEMENT_PREPARATION',
 });
 
-const PHASES = Object.freeze([
-  ['OPPORTUNITY_INTAKE', RECORDS.OPPORTUNITY],
-  ['VERIFICATION', RECORDS.VERIFICATION_REQUEST],
-  ['VALUE_PREPARATION', RECORDS.VALUE_PREPARATION],
-  ['MODEL_SELECTION', RECORDS.MODEL_SELECTION],
-  ['INSTRUMENT_SELECTION', RECORDS.INSTRUMENT_SELECTION],
-  ['INSTRUMENT_REVIEW', RECORDS.INSTRUMENT_REVIEW],
-  ['ISSUANCE', RECORDS.ISSUANCE_REQUEST],
-  ['MARKETPLACE', RECORDS.LISTING],
-  ['COMMITMENTS', RECORDS.COMMITMENT],
-  ['POSITIONS', RECORDS.POSITION],
-  ['SETTLEMENT_PREPARATION', RECORDS.SETTLEMENT_PREPARATION],
-]);
-
 function newest(records, limit = 25) {
   return [...records]
     .sort((a, b) => String(b.updatedAt || b.createdAt || b.recordedAt || '').localeCompare(String(a.updatedAt || a.createdAt || a.recordedAt || '')))
     .slice(0, limit);
-}
-
-function actionFor(opportunity) {
-  const map = {
-    INTAKE_IN_PROGRESS: ['Complete intake', 'INTAKE'],
-    INTAKE_COMPLETE: ['Create verification request', 'VERIFICATION'],
-    PENDING_VERIFICATION: ['Create verification request', 'VERIFICATION'],
-    VERIFICATION_IN_PROGRESS: ['Complete verification findings', 'VERIFICATION'],
-    MORE_EVIDENCE_REQUIRED: ['Register additional evidence', 'EVIDENCE_REMEDIATION'],
-    VERIFIED: ['Prepare Verified Value package', 'VALUE_PREPARATION'],
-    VALUE_PREPARED: ['Select funding model', 'MODEL_SELECTION'],
-    FUNDING_MODEL_SELECTED: ['Select instrument family', 'INSTRUMENT_SELECTION'],
-    INSTRUMENT_DRAFTED: ['Review draft instrument', 'INSTRUMENT_REVIEW'],
-    INSTRUMENT_REVIEWED: ['Create issuance request', 'ISSUANCE'],
-    ISSUANCE_REQUESTED: ['Review issuance request', 'ISSUANCE'],
-    INSTRUMENT_ISSUED: ['Prepare marketplace listing', 'MARKETPLACE'],
-    MARKETPLACE_LISTING_PREPARED: ['Review marketplace publication', 'PUBLICATION'],
-    MARKETPLACE_LIVE: ['Open commitments', 'COMMITMENTS'],
-    ALLOCATION_CREATED: ['Prepare settlement', 'SETTLEMENT'],
-    POSITION_SETTLED: ['Lifecycle monitoring', 'LIFECYCLE'],
-  };
-  const [label, queue] = map[opportunity.status] || ['Review opportunity', 'GENERAL_REVIEW'];
-  return { label, queue };
 }
 
 function related(records, opportunityId) {
@@ -82,18 +45,6 @@ export class FundingOperationsService {
     };
   }
 
-  phaseSummary() {
-    return PHASES.map(([phase, recordType], index) => {
-      const records = this.domain.list(recordType);
-      const statusCounts = records.reduce((acc, record) => {
-        const key = record.status || record.state || 'UNKNOWN';
-        acc[key] = (acc[key] || 0) + 1;
-        return acc;
-      }, {});
-      return { phaseNumber: index + 1, phase, recordType, count: records.length, statusCounts };
-    });
-  }
-
   queue(filters = {}) {
     return newest(this.domain.list(RECORDS.OPPORTUNITY), Number(filters.limit) || 100)
       .filter((record) => !filters.status || record.status === filters.status)
@@ -106,7 +57,6 @@ export class FundingOperationsService {
         currency: record.currency,
         status: record.status,
         fundingPhase: record.fundingPhase,
-        nextAction: actionFor(record),
         updatedAt: record.updatedAt || record.createdAt,
       }));
   }
@@ -132,7 +82,6 @@ export class FundingOperationsService {
 
     return {
       opportunity,
-      nextAction: actionFor(opportunity),
       intake: {
         completeness: opportunity.completeness || null,
         evidence,
@@ -175,7 +124,6 @@ export class FundingOperationsService {
         recognizedPositions: this.domain.list(RECORDS.POSITION).filter((record) => record.ownershipStatus === 'RECOGNIZED').length,
       },
       opportunityStatusCounts: statusCounts,
-      phases: this.phaseSummary(),
       queue: queue.slice(0, 30),
       recent: {
         opportunities: newest(opportunities, 10),
