@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import express from 'express';
 import multer from 'multer';
 import { PrivateDocumentService } from '../services/private-document-service.js';
-import { FinancingLifecycleService } from '../services/financing-lifecycle-service.js';
+import { FinancingLifecycleService, normalizeFinancingStage } from '../services/financing-lifecycle-service.js';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024, files: 10 } });
 const STAFF_ROLES = new Set(['PLATFORM_ADMIN','OPERATIONS_ADMIN','FUNDING_OPERATIONS','FUNDING_ANALYST','VERIFICATION_REVIEWER','INSTRUMENT_REVIEWER','ISSUANCE_REVIEWER','MARKETPLACE_OPERATOR','SETTLEMENT_OPERATOR','AUDITOR']);
@@ -138,12 +138,11 @@ export function createFundingOpportunityRouter(service, documentService = null) 
     });
   });
 
-  router.get('/opportunities/:opportunityId', async (req, res) => {
+  router.get('/opportunities/:opportunityId', (req, res) => {
     try {
       const record = service.get(req.params.opportunityId);
       if (!record) return res.status(404).json({ error: 'Funding opportunity was not found.' });
-      const lifecycle = await lifecycleService.ensure(req.params.opportunityId, actorId(req));
-      return res.json({ ...lifecycle, financingStage: lifecycle.financingStage });
+      return res.json({ ...record, financingStage: normalizeFinancingStage(record) });
     } catch (error) {
       return handle(res, error);
     }
@@ -176,6 +175,9 @@ export function createFundingOpportunityRouter(service, documentService = null) 
   router.post('/opportunities/:opportunityId/underwriting', async (req, res) => {
     try {
       if (!isStaffRequest(req)) return res.status(403).json({ error: 'Staff authorization is required.' });
+      const record = service.get(req.params.opportunityId);
+      if (!record) return res.status(404).json({ error: 'Funding opportunity was not found.' });
+      if (String(record.status || '').toUpperCase() === 'WITHDRAWN') return res.status(409).json({ error: 'A withdrawn opportunity cannot be underwritten.' });
       const current = await lifecycleService.ensure(req.params.opportunityId, actorId(req));
       if (current.financingStage !== 'UNDERWRITING') return res.status(409).json({ error: `Underwriting is not available from ${current.financingStage}.` });
       const recommendedAmount = Number(req.body?.recommendedAmount ?? current.requestedAmount);
@@ -204,6 +206,9 @@ export function createFundingOpportunityRouter(service, documentService = null) 
   router.post('/opportunities/:opportunityId/credit-decision', async (req, res) => {
     try {
       if (!isStaffRequest(req)) return res.status(403).json({ error: 'Staff authorization is required.' });
+      const record = service.get(req.params.opportunityId);
+      if (!record) return res.status(404).json({ error: 'Funding opportunity was not found.' });
+      if (String(record.status || '').toUpperCase() === 'WITHDRAWN') return res.status(409).json({ error: 'A withdrawn opportunity cannot receive a credit decision.' });
       const current = await lifecycleService.ensure(req.params.opportunityId, actorId(req));
       if (current.financingStage !== 'DECISION') return res.status(409).json({ error: `Credit decision is not available from ${current.financingStage}.` });
       const decision = String(req.body?.decision || '').trim().toUpperCase();
@@ -339,7 +344,9 @@ export function createFundingOpportunityRouter(service, documentService = null) 
 
   router.post('/opportunities/:opportunityId/withdraw', async (req, res) => {
     try {
-      return res.json(await service.withdraw(req.params.opportunityId, req.body?.reason, actorId(req)));
+      const withdrawn = await service.withdraw(req.params.opportunityId, req.body?.reason, actorId(req));
+      const closed = await lifecycleService.transition(req.params.opportunityId, 'CLOSED', { source: 'WITHDRAWAL' }, actorId(req));
+      return res.json({ ...withdrawn, financingStage: closed.financingStage });
     } catch (error) {
       return handle(res, error);
     }
