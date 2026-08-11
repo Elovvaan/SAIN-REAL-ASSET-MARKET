@@ -86,5 +86,11 @@
     observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
   }
 
+  function init() {
+    bind(document.querySelector('[data-workspace="operations"]'));
+  }
+
+  init();
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
   window.addEventListener('sra:funding-operations-rendered', (event) => bind(event.detail?.root));
 })();
