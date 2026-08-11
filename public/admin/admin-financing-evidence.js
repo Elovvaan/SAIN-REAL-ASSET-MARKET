@@ -8,6 +8,17 @@
 
   let currentOpportunityId = null;
 
+  async function jsonRequest(url, options = {}) {
+    const response = await fetch(url, {
+      credentials: 'same-origin',
+      ...options,
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...(options.headers || {}) },
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || `Request failed with ${response.status}.`);
+    return payload;
+  }
+
   function evidencePanel(root) {
     const detail = root?.querySelector('.funding-detail.open');
     if (!detail || !currentOpportunityId) return;
@@ -64,7 +75,7 @@
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(payload.error || `Request failed with ${response.status}.`);
-        if (result) result.textContent = `${payload.records?.length || 0} supporting document(s) attached.`;
+        if (result) result.textContent = `${payload.records?.length || 0} supporting document(s) attached. Stage: ${payload.financingStage || 'UNDERWRITING'}.`;
         form.reset();
         const row = root.querySelector(`[data-opportunity-id="${CSS.escape(currentOpportunityId)}"]`);
         row?.click();
@@ -74,15 +85,113 @@
     });
   }
 
+  async function workflowPanel(root) {
+    const detail = root?.querySelector('.funding-detail.open');
+    if (!detail || !currentOpportunityId || detail.dataset.financingWorkflowLoading === 'true') return;
+    detail.dataset.financingWorkflowLoading = 'true';
+    try {
+      const opportunity = await jsonRequest(`/api/funding/opportunities/${encodeURIComponent(currentOpportunityId)}`);
+      detail.querySelector('[data-admin-financing-workflow]')?.remove();
+      const panel = document.createElement('section');
+      panel.className = 'funding-ops-panel';
+      panel.dataset.adminFinancingWorkflow = 'true';
+      const stage = String(opportunity.financingStage || 'APPLICATION').toUpperCase();
+
+      if (stage === 'UNDERWRITING') {
+        panel.innerHTML = `
+          <p class="eyebrow">UNDERWRITING</p>
+          <h4>Underwriting review</h4>
+          <form data-underwriting-form style="display:grid;gap:10px">
+            <input name="recommendedAmount" type="number" min="1" max="${Number(opportunity.requestedAmount || 0)}" step="0.01" value="${Number(opportunity.requestedAmount || 0)}" required style="padding:10px;background:#101010;color:#fff;border:1px solid rgba(255,255,255,.15);border-radius:10px">
+            <textarea name="conclusion" placeholder="Underwriting conclusion" style="min-height:90px;padding:10px;background:#101010;color:#fff;border:1px solid rgba(255,255,255,.15);border-radius:10px"></textarea>
+            <button class="primary-button" type="submit">Complete underwriting</button>
+            <div data-underwriting-result style="font-size:12px"></div>
+          </form>`;
+        panel.querySelector('[data-underwriting-form]')?.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          const form = event.currentTarget;
+          const result = panel.querySelector('[data-underwriting-result]');
+          if (result) result.textContent = 'Completing underwriting…';
+          try {
+            await jsonRequest(`/api/funding/opportunities/${encodeURIComponent(currentOpportunityId)}/underwriting`, {
+              method: 'POST',
+              body: JSON.stringify({
+                recommendedAmount: Number(new FormData(form).get('recommendedAmount')),
+                conclusion: new FormData(form).get('conclusion') || null,
+              }),
+            });
+            const row = root.querySelector(`[data-opportunity-id="${CSS.escape(currentOpportunityId)}"]`);
+            row?.click();
+          } catch (error) {
+            if (result) result.textContent = esc(error.message);
+          }
+        });
+      } else if (stage === 'DECISION') {
+        const recommended = Number(opportunity.underwriting?.recommendedAmount || opportunity.requestedAmount || 0);
+        panel.innerHTML = `
+          <p class="eyebrow">CREDIT DECISION</p>
+          <h4>Record credit decision</h4>
+          <form data-credit-decision-form style="display:grid;gap:10px">
+            <select name="decision" style="padding:10px;background:#101010;color:#fff;border:1px solid rgba(255,255,255,.15);border-radius:10px"><option value="APPROVE">Approve</option><option value="DECLINE">Decline</option></select>
+            <input name="approvedAmount" type="number" min="1" max="${Number(opportunity.requestedAmount || 0)}" step="0.01" value="${recommended}" style="padding:10px;background:#101010;color:#fff;border:1px solid rgba(255,255,255,.15);border-radius:10px">
+            <textarea name="rationale" placeholder="Decision rationale" style="min-height:90px;padding:10px;background:#101010;color:#fff;border:1px solid rgba(255,255,255,.15);border-radius:10px"></textarea>
+            <button class="primary-button" type="submit">Record credit decision</button>
+            <div data-credit-decision-result style="font-size:12px"></div>
+          </form>`;
+        panel.querySelector('[data-credit-decision-form]')?.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          const formData = new FormData(event.currentTarget);
+          const result = panel.querySelector('[data-credit-decision-result]');
+          if (result) result.textContent = 'Recording credit decision…';
+          try {
+            await jsonRequest(`/api/funding/opportunities/${encodeURIComponent(currentOpportunityId)}/credit-decision`, {
+              method: 'POST',
+              body: JSON.stringify({
+                decision: formData.get('decision'),
+                approvedAmount: Number(formData.get('approvedAmount')),
+                rationale: formData.get('rationale') || null,
+              }),
+            });
+            const row = root.querySelector(`[data-opportunity-id="${CSS.escape(currentOpportunityId)}"]`);
+            row?.click();
+          } catch (error) {
+            if (result) result.textContent = esc(error.message);
+          }
+        });
+      } else {
+        const nextText = stage === 'CLOSING'
+          ? 'Credit decision recorded. Financing is now in Closing.'
+          : stage === 'CLOSED'
+            ? 'Financing record is closed.'
+            : `Current financing stage: ${stage}.`;
+        panel.innerHTML = `<p class="eyebrow">FINANCING STATUS</p><h4>${esc(stage)}</h4><p>${esc(nextText)}</p>`;
+      }
+
+      const evidence = [...detail.querySelectorAll('.funding-ops-panel')]
+        .find((node) => node.textContent.includes('EVIDENCE & REFERENCES'));
+      if (evidence) evidence.insertAdjacentElement('afterend', panel);
+      else detail.append(panel);
+    } catch (error) {
+      // Keep the base financing workspace usable if the stage lookup fails.
+    } finally {
+      detail.dataset.financingWorkflowLoading = 'false';
+    }
+  }
+
+  function mountPanels(root) {
+    evidencePanel(root);
+    void workflowPanel(root);
+  }
+
   function bind(root) {
     if (!root || root.dataset.adminFinancingEvidenceBound === 'true') return;
     root.dataset.adminFinancingEvidenceBound = 'true';
     root.addEventListener('click', (event) => {
       const row = event.target.closest('[data-opportunity-id]');
       if (row) currentOpportunityId = row.dataset.opportunityId || null;
-      if (currentOpportunityId) setTimeout(() => evidencePanel(root), 0);
+      if (currentOpportunityId) setTimeout(() => mountPanels(root), 0);
     }, true);
-    const observer = new MutationObserver(() => evidencePanel(root));
+    const observer = new MutationObserver(() => mountPanels(root));
     observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
   }
 
