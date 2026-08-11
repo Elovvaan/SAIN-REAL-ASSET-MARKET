@@ -5,6 +5,7 @@
   const FEATURES = [
     ['/admin/admin-suite-shell.js', 'data-sra-admin-suite-shell'],
     ['/admin/admin-unified-financing-workstation.js', 'data-sra-admin-unified-financing-workstation'],
+    ['/admin/admin-financing-evidence.js', 'data-sra-admin-financing-evidence'],
     ['/admin/admin-workstation-controls.js', 'data-sra-admin-workstation-controls'],
     ['/admin/admin-button-diagnostics-core.js', 'data-sra-admin-diagnostics-core'],
     ['/admin/admin-settlement-execution-controls.js', 'data-sra-admin-settlement-execution-controls'],
