@@ -7,6 +7,7 @@
     ['/admin/admin-unified-financing-workstation.js', 'data-sra-admin-unified-financing-workstation'],
     ['/admin/admin-financing-evidence.js', 'data-sra-admin-financing-evidence'],
     ['/admin/admin-financing-awaiting-actions.js', 'data-sra-admin-financing-awaiting-actions'],
+    ['/admin/admin-financing-availability-letter.js', 'data-sra-admin-financing-availability-letter'],
     ['/admin/admin-workstation-controls.js', 'data-sra-admin-workstation-controls'],
     ['/admin/admin-button-diagnostics-core.js', 'data-sra-admin-diagnostics-core'],
     ['/admin/admin-settlement-execution-controls.js', 'data-sra-admin-settlement-execution-controls'],
@@ -140,6 +141,7 @@
       const operations = admin.querySelector('[data-workspace="operations"]');
       window.mountAdminUnifiedFinancingWorkstation?.(operations);
       window.mountAdminFinancingAwaitingActions?.(operations);
+      window.mountAdminFinancingAvailabilityLetter?.(operations);
       window.mountAdminSettlementExecutionControls?.(admin.querySelector('[data-workspace="settlement"]'));
 
       const treasury = admin.querySelector('[data-workspace="treasury"]');
