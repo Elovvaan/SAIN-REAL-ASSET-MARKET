@@ -1,5 +1,6 @@
 import express from 'express';
 import { FinancedPositionDistributionService } from '../services/financed-position-distribution-service.js';
+import { GovernedLoanFinancingService } from '../services/governed-loan-financing-service.js';
 
 function actorId(req) { return req.sraOperationsAuth?.actorId || req.sraIdentity?.actorId || null; }
 function fail(res, error) { const message = error?.message || 'Unexpected financing closing error.'; return res.status(/not found/i.test(message) ? 404 : 422).json({ error: message, code: error?.code || 'FINANCING_CLOSING_ERROR', assessment: error?.assessment || null }); }
@@ -8,12 +9,24 @@ export function createFinancingClosingRouter(service) {
   const router = express.Router();
   const positionDistribution = new FinancedPositionDistributionService(service.domain);
   const distributionReady = positionDistribution.initialize();
+  const loanFinancing = new GovernedLoanFinancingService(service.domain);
+  const loanFinancingReady = loanFinancing.initialize();
 
-  router.get('/status', (_req, res) => res.json({ ...service.status(), positionDistribution: positionDistribution.status() }));
+  router.get('/status', (_req, res) => res.json({ ...service.status(), positionDistribution: positionDistribution.status(), loanFinancing: loanFinancing.status() }));
   router.get('/authorizations', (req, res) => {
     const opportunityId = String(req.query.opportunityId || '').trim();
     if (!opportunityId) return res.status(400).json({ error: 'opportunityId is required.' });
     return res.json({ record: service.financingAuthorizationForOpportunity(opportunityId) });
+  });
+  router.post('/authorizations/opportunities/:opportunityId/approve', async (req, res) => {
+    const administrator = actorId(req);
+    if (!administrator) return res.status(401).json({ error: 'An authenticated administrator identity is required.' });
+    try {
+      await loanFinancingReady;
+      return res.status(201).json(await loanFinancing.approveOpportunity(req.params.opportunityId, req.body || {}, administrator));
+    } catch (error) {
+      return fail(res, error);
+    }
   });
   router.get('/closings', (req, res) => res.json({ records: service.list({ status: req.query.status, opportunityId: req.query.opportunityId }) }));
   router.get('/closings/:closingId', (req, res) => { const detail = service.detail(req.params.closingId); return detail ? res.json(detail) : res.status(404).json({ error: 'Financing closing was not found.' }); });
