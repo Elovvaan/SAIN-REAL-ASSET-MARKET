@@ -10,6 +10,11 @@ export function createFinancingClosingRouter(service) {
   const distributionReady = positionDistribution.initialize();
 
   router.get('/status', (_req, res) => res.json({ ...service.status(), positionDistribution: positionDistribution.status() }));
+  router.get('/authorizations', (req, res) => {
+    const opportunityId = String(req.query.opportunityId || '').trim();
+    if (!opportunityId) return res.status(400).json({ error: 'opportunityId is required.' });
+    return res.json({ record: service.financingAuthorizationForOpportunity(opportunityId) });
+  });
   router.get('/closings', (req, res) => res.json({ records: service.list({ status: req.query.status, opportunityId: req.query.opportunityId }) }));
   router.get('/closings/:closingId', (req, res) => { const detail = service.detail(req.params.closingId); return detail ? res.json(detail) : res.status(404).json({ error: 'Financing closing was not found.' }); });
   router.post('/closings', async (req, res) => { try { return res.status(201).json(await service.open(req.body || {}, actorId(req))); } catch (error) { return fail(res, error); } });
