@@ -24,6 +24,12 @@
     row?.click();
   }
 
+  function detailReady(detail) {
+    if (!detail) return false;
+    return [...detail.querySelectorAll('.funding-ops-panel')]
+      .some((node) => node.textContent.includes('EVIDENCE & REFERENCES'));
+  }
+
   function mountEvidence(root, detail) {
     if (detail.querySelector('[data-admin-financing-evidence]')) return;
     const panel = document.createElement('section');
@@ -128,9 +134,9 @@
     else detail.append(panel);
   }
 
-  function mountSoon(root, attempts = 20) {
+  function mountSoon(root, attempts = 30) {
     const detail = root?.querySelector('.funding-detail.open');
-    if (!detail || !currentOpportunityId) {
+    if (!detail || !currentOpportunityId || !detailReady(detail)) {
       if (attempts > 0) setTimeout(() => mountSoon(root, attempts - 1), 100);
       return;
     }
@@ -147,6 +153,10 @@
       currentOpportunityId = row.dataset.opportunityId || null;
       if (currentOpportunityId) setTimeout(() => mountSoon(root), 0);
     }, true);
+    const observer = new MutationObserver(() => {
+      if (currentOpportunityId) mountSoon(root, 2);
+    });
+    observer.observe(root, { childList: true, subtree: true });
   }
 
   function init() { bind(document.querySelector('[data-workspace="operations"]')); }
