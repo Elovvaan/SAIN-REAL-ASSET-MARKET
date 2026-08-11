@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import express from 'express';
 import multer from 'multer';
 import { PrivateDocumentService } from '../services/private-document-service.js';
+import { FinancingLifecycleService } from '../services/financing-lifecycle-service.js';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024, files: 10 } });
 const STAFF_ROLES = new Set(['PLATFORM_ADMIN','OPERATIONS_ADMIN','FUNDING_OPERATIONS','FUNDING_ANALYST','VERIFICATION_REVIEWER','INSTRUMENT_REVIEWER','ISSUANCE_REVIEWER','MARKETPLACE_OPERATOR','SETTLEMENT_OPERATOR','AUDITOR']);
@@ -123,6 +124,7 @@ function handle(res, error) {
 export function createFundingOpportunityRouter(service, documentService = null) {
   const router = express.Router();
   const privateDocuments = documentService || new PrivateDocumentService({ database: service?.domain?.database || null });
+  const lifecycleService = new FinancingLifecycleService(service.domain);
 
   router.get('/status', (_req, res) => res.json(service.status()));
 
@@ -225,7 +227,11 @@ export function createFundingOpportunityRouter(service, documentService = null) 
         }, actorId(req));
         records.push({ document: stored.document, evidence });
       }
-      return res.status(201).json({ records, retentionPolicy: 'FINANCING_APPLICATION_EVIDENCE' });
+      const lifecycle = await lifecycleService.ensure(opportunity.opportunityId, actorId(req));
+      const advanced = lifecycle.financingStage === 'APPLICATION'
+        ? await lifecycleService.transition(opportunity.opportunityId, 'UNDERWRITING', { source: 'EVIDENCE_INGESTION' }, actorId(req))
+        : lifecycle;
+      return res.status(201).json({ records, retentionPolicy: 'FINANCING_APPLICATION_EVIDENCE', financingStage: advanced.financingStage });
     } catch (error) {
       return handle(res, error);
     }
