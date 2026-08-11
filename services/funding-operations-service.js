@@ -41,8 +41,9 @@ export class FundingOperationsService {
   }
 
   queue(filters = {}) {
+    const requestedStage = filters.status ? String(filters.status).toUpperCase() : null;
     return newest(this.domain.list(RECORDS.OPPORTUNITY), Number(filters.limit) || 100)
-      .filter((record) => !filters.status || record.status === filters.status)
+      .filter((record) => !requestedStage || normalizeFinancingStage(record) === requestedStage)
       .map((record) => {
         const financingStage = normalizeFinancingStage(record);
         return {
