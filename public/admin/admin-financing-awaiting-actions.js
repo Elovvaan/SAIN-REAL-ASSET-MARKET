@@ -4,6 +4,12 @@
 
   const esc = (value) => String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#039;');
   const money = (value) => Number(value || 0).toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
+  const LEGACY_STAGE_MAP = Object.freeze({
+    DRAFT: 'APPLICATION', INTAKE_IN_PROGRESS: 'APPLICATION', INTAKE_COMPLETE: 'UNDERWRITING',
+    PENDING_VERIFICATION: 'UNDERWRITING', VERIFICATION_IN_PROGRESS: 'UNDERWRITING', MORE_EVIDENCE_REQUIRED: 'UNDERWRITING', VERIFIED: 'UNDERWRITING',
+    VALUE_PREPARED: 'UNDERWRITING', FUNDING_MODEL_SELECTED: 'UNDERWRITING', INSTRUMENT_REVIEWED: 'UNDERWRITING', ISSUANCE_REQUESTED: 'DECISION',
+    APPROVED: 'CLOSING', READY_TO_FUND: 'READY_TO_FUND', FUNDED: 'FUNDED', ACTIVE: 'SERVICING', PAID_OFF: 'CLOSED', CLOSED: 'CLOSED', WITHDRAWN: 'CLOSED', VERIFICATION_CLOSED: 'CLOSED', REJECTED: 'CLOSED',
+  });
 
   async function request(url, options = {}) {
     const response = await fetch(url, {
@@ -24,6 +30,15 @@
     return root?.dataset.activeTab === 'Awaiting Actions';
   }
 
+  function financingStage(record = {}) {
+    const status = String(record.status || '').toUpperCase();
+    if (['WITHDRAWN', 'CLOSED', 'PAID_OFF', 'VERIFICATION_CLOSED', 'REJECTED'].includes(status)) return 'CLOSED';
+    const explicit = String(record.financingStage || '').toUpperCase();
+    if (explicit === 'DOCUMENTATION' || explicit === 'VERIFICATION') return 'UNDERWRITING';
+    if (['APPLICATION', 'UNDERWRITING', 'DECISION', 'CLOSING', 'READY_TO_FUND', 'FUNDED', 'SERVICING', 'CLOSED'].includes(explicit)) return explicit;
+    return LEGACY_STAGE_MAP[status] || 'APPLICATION';
+  }
+
   function ensureStyles() {
     if (document.querySelector('#admin-financing-awaiting-actions-style')) return;
     const style = document.createElement('style');
@@ -34,16 +49,12 @@
     document.head.append(style);
   }
 
-  function financingForOpportunity(transactions, opportunityId) {
-    return transactions.find((record) => record.transactionType === 'LOAN_FINANCING_AUTHORIZATION' && record.opportunityId === opportunityId && record.state === 'POSTED') || null;
-  }
-
   function closingForOpportunity(closings, opportunityId) {
     return closings.find((record) => record.opportunityId === opportunityId && record.status !== 'CANCELLED') || null;
   }
 
   function actionCard(opportunity, closing, financing) {
-    const stage = String(opportunity.financingStage || opportunity.status || '').toUpperCase();
+    const stage = financingStage(opportunity);
     const approvedAmount = opportunity.creditDecision?.approvedAmount || opportunity.requestedAmount || closing?.approvedAmount || financing?.amount || 0;
     const id = opportunity.opportunityId;
     let action = '';
@@ -73,6 +84,11 @@
     return `<article class="financing-awaiting-card" data-financing-awaiting="${esc(id)}"><header><strong>${esc(opportunity.title || opportunity.name || 'Financing opportunity')}</strong><em>${esc(closing?.status || stage)}</em></header><div class="financing-awaiting-meta"><div><span>Opportunity</span><b>${esc(id)}</b></div><div><span>Approved financing</span><b>${esc(money(approvedAmount))}</b></div><div><span>Closing</span><b>${esc(closing?.closingId || 'Not opened')}</b></div></div><div class="financing-awaiting-message">${esc(explanation)}</div>${action}<div class="financing-awaiting-message" data-financing-action-result="${esc(id)}"></div></article>`;
   }
 
+  async function authorizationForOpportunity(opportunityId) {
+    const payload = await request(`/api/financing-closing/authorizations?opportunityId=${encodeURIComponent(opportunityId)}`);
+    return payload.record || null;
+  }
+
   async function load() {
     const root = operationsRoot();
     if (!root || !awaitingActive(root)) return;
@@ -81,18 +97,18 @@
     if (!recordsRoot) return;
     recordsRoot.innerHTML = '<div class="financing-awaiting-empty">Loading financing actions…</div>';
     try {
-      const [opportunitiesPayload, closingsPayload, workspacePayload] = await Promise.all([
+      const [opportunitiesPayload, closingsPayload] = await Promise.all([
         request('/api/funding/opportunities'),
         request('/api/financing-closing/closings'),
-        request('/api/admin/workspaces'),
       ]);
-      const opportunities = (opportunitiesPayload.records || []).filter((record) => ['CLOSING', 'READY_TO_FUND'].includes(String(record.financingStage || '').toUpperCase()));
+      const opportunities = (opportunitiesPayload.records || []).filter((record) => ['CLOSING', 'READY_TO_FUND'].includes(financingStage(record)));
       const closings = closingsPayload.records || [];
-      const transactions = workspacePayload.records?.transactions || [];
-      const cards = opportunities.map((opportunity) => actionCard(opportunity, closingForOpportunity(closings, opportunity.opportunityId), financingForOpportunity(transactions, opportunity.opportunityId)));
+      const authorizations = new Map(await Promise.all(opportunities.map(async (opportunity) => [opportunity.opportunityId, await authorizationForOpportunity(opportunity.opportunityId)])));
+      const cards = opportunities.map((opportunity) => actionCard(opportunity, closingForOpportunity(closings, opportunity.opportunityId), authorizations.get(opportunity.opportunityId)));
       const orphanClosings = closings.filter((closing) => ['IN_PROGRESS', 'READY_TO_FUND', 'AUTHORIZED'].includes(closing.status) && !opportunities.some((opportunity) => opportunity.opportunityId === closing.opportunityId));
       for (const closing of orphanClosings) {
-        cards.push(actionCard({ opportunityId: closing.opportunityId || closing.financingTransactionId, title: 'Financing closing', financingStage: closing.status, requestedAmount: closing.approvedAmount }, closing, financingForOpportunity(transactions, closing.opportunityId)));
+        const financing = closing.opportunityId ? await authorizationForOpportunity(closing.opportunityId) : null;
+        cards.push(actionCard({ opportunityId: closing.opportunityId || closing.financingTransactionId, title: 'Financing closing', financingStage: closing.status, requestedAmount: closing.approvedAmount }, closing, financing));
       }
       recordsRoot.innerHTML = cards.length ? `<div class="financing-awaiting">${cards.join('')}</div>` : '<div class="financing-awaiting-empty">No financing closing or funding authorization action is currently waiting.</div>';
     } catch (error) {
@@ -102,7 +118,6 @@
 
   async function act(button) {
     const card = button.closest('[data-financing-awaiting]');
-    const opportunityId = card?.dataset.financingAwaiting;
     const result = card?.querySelector('[data-financing-action-result]');
     button.disabled = true;
     if (result) result.textContent = 'Processing…';
