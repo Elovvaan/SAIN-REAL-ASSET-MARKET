@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import express from 'express';
 import multer from 'multer';
 import { PrivateDocumentService } from '../services/private-document-service.js';
+import { FinancingLifecycleService } from '../services/financing-lifecycle-service.js';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024, files: 10 } });
 const STAFF_ROLES = new Set(['PLATFORM_ADMIN','OPERATIONS_ADMIN','FUNDING_OPERATIONS','FUNDING_ANALYST','VERIFICATION_REVIEWER','INSTRUMENT_REVIEWER','ISSUANCE_REVIEWER','MARKETPLACE_OPERATOR','SETTLEMENT_OPERATOR','AUDITOR']);
@@ -123,6 +124,7 @@ function handle(res, error) {
 export function createFundingOpportunityRouter(service, documentService = null) {
   const router = express.Router();
   const privateDocuments = documentService || new PrivateDocumentService({ database: service?.domain?.database || null });
+  const lifecycleService = new FinancingLifecycleService(service.domain);
 
   router.get('/status', (_req, res) => res.json(service.status()));
 
@@ -161,6 +163,20 @@ export function createFundingOpportunityRouter(service, documentService = null) 
   router.patch('/opportunities/:opportunityId', async (req, res) => {
     try {
       return res.json(await service.update(req.params.opportunityId, req.body, actorId(req)));
+    } catch (error) {
+      return handle(res, error);
+    }
+  });
+
+  router.post('/opportunities/:opportunityId/transition', async (req, res) => {
+    try {
+      const updated = await lifecycleService.transition(
+        req.params.opportunityId,
+        req.body?.toStage,
+        { source: req.body?.source || 'ADMIN_UNIFIED_OPERATIONS' },
+        actorId(req)
+      );
+      return res.json({ opportunity: updated });
     } catch (error) {
       return handle(res, error);
     }
