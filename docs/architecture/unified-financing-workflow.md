@@ -5,15 +5,13 @@ SRA financing has one authoritative lifecycle. Supporting funding, verification,
 ## Authoritative stages
 
 1. APPLICATION
-2. DOCUMENTATION
-3. VERIFICATION
-4. UNDERWRITING
-5. DECISION
-6. CLOSING
-7. READY_TO_FUND
-8. FUNDED
-9. SERVICING
-10. CLOSED
+2. UNDERWRITING
+3. DECISION
+4. CLOSING
+5. READY_TO_FUND
+6. FUNDED
+7. SERVICING
+8. CLOSED
 
 The authoritative field is `FUNDING_OPPORTUNITY.financingStage`.
 
@@ -21,16 +19,14 @@ The authoritative field is `FUNDING_OPPORTUNITY.financingStage`.
 
 Only `FinancingLifecycleService` may advance `financingStage`.
 
-Subordinate services may continue to maintain local record statuses that describe the state of that supporting record, such as a verification request being `IN_REVIEW`, a closing condition being `SATISFIED`, or a settlement instruction being `SUBMITTED`. Those statuses do not define the overall financing lifecycle.
+Subordinate services may continue to maintain local record statuses that describe the state of that supporting record. Those statuses do not define the overall financing lifecycle.
 
 Legacy `status` and `fundingPhase` fields remain readable for compatibility while callers are migrated, but they are not the authoritative answer to “where is this financing right now?”
 
 ## Stage ownership
 
-- APPLICATION: applicant and opportunity intake.
-- DOCUMENTATION: supporting documents, evidence, completeness, remediation.
-- VERIFICATION: factual/evidence verification only.
-- UNDERWRITING: value analysis, model analysis, structure analysis, instrument preparation and review.
+- APPLICATION: applicant and opportunity intake, including supporting documents and evidence.
+- UNDERWRITING: financing analysis and review.
 - DECISION: the credit/financing decision and approved terms.
 - CLOSING: documents, conditions and closing preparation.
 - READY_TO_FUND: closing complete and funding instruction authorized for execution.
