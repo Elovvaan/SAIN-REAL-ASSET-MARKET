@@ -138,10 +138,15 @@ export function createFundingOpportunityRouter(service, documentService = null) 
     });
   });
 
-  router.get('/opportunities/:opportunityId', (req, res) => {
-    const record = service.get(req.params.opportunityId);
-    if (!record) return res.status(404).json({ error: 'Funding opportunity was not found.' });
-    return res.json(record);
+  router.get('/opportunities/:opportunityId', async (req, res) => {
+    try {
+      const record = service.get(req.params.opportunityId);
+      if (!record) return res.status(404).json({ error: 'Funding opportunity was not found.' });
+      const lifecycle = await lifecycleService.ensure(req.params.opportunityId, actorId(req));
+      return res.json({ ...lifecycle, financingStage: lifecycle.financingStage });
+    } catch (error) {
+      return handle(res, error);
+    }
   });
 
   router.post('/opportunities', async (req, res) => {
@@ -163,6 +168,67 @@ export function createFundingOpportunityRouter(service, documentService = null) 
   router.patch('/opportunities/:opportunityId', async (req, res) => {
     try {
       return res.json(await service.update(req.params.opportunityId, req.body, actorId(req)));
+    } catch (error) {
+      return handle(res, error);
+    }
+  });
+
+  router.post('/opportunities/:opportunityId/underwriting', async (req, res) => {
+    try {
+      if (!isStaffRequest(req)) return res.status(403).json({ error: 'Staff authorization is required.' });
+      const current = await lifecycleService.ensure(req.params.opportunityId, actorId(req));
+      if (current.financingStage !== 'UNDERWRITING') return res.status(409).json({ error: `Underwriting is not available from ${current.financingStage}.` });
+      const recommendedAmount = Number(req.body?.recommendedAmount ?? current.requestedAmount);
+      if (!Number.isFinite(recommendedAmount) || recommendedAmount <= 0 || recommendedAmount > Number(current.requestedAmount || 0)) {
+        return res.status(400).json({ error: 'Recommended amount must be greater than zero and cannot exceed the requested amount.' });
+      }
+      const timestamp = new Date().toISOString();
+      const updated = {
+        ...current,
+        underwriting: {
+          recommendedAmount,
+          conclusion: String(req.body?.conclusion || '').trim() || null,
+          completedBy: actorId(req),
+          completedAt: timestamp,
+        },
+        updatedAt: timestamp,
+      };
+      await service.domain.put('FUNDING_OPPORTUNITY', current.opportunityId, updated, { actorId: actorId(req), eventType: 'FINANCING_UNDERWRITING_COMPLETED' });
+      const advanced = await lifecycleService.transition(current.opportunityId, 'DECISION', { source: 'ADMIN_UNIFIED_OPERATIONS' }, actorId(req));
+      return res.json({ opportunity: advanced });
+    } catch (error) {
+      return handle(res, error);
+    }
+  });
+
+  router.post('/opportunities/:opportunityId/credit-decision', async (req, res) => {
+    try {
+      if (!isStaffRequest(req)) return res.status(403).json({ error: 'Staff authorization is required.' });
+      const current = await lifecycleService.ensure(req.params.opportunityId, actorId(req));
+      if (current.financingStage !== 'DECISION') return res.status(409).json({ error: `Credit decision is not available from ${current.financingStage}.` });
+      const decision = String(req.body?.decision || '').trim().toUpperCase();
+      if (!['APPROVE', 'DECLINE'].includes(decision)) return res.status(400).json({ error: 'Decision must be APPROVE or DECLINE.' });
+      const approvedAmount = decision === 'APPROVE'
+        ? Number(req.body?.approvedAmount ?? current.underwriting?.recommendedAmount ?? current.requestedAmount)
+        : 0;
+      if (decision === 'APPROVE' && (!Number.isFinite(approvedAmount) || approvedAmount <= 0 || approvedAmount > Number(current.requestedAmount || 0))) {
+        return res.status(400).json({ error: 'Approved amount must be greater than zero and cannot exceed the requested amount.' });
+      }
+      const timestamp = new Date().toISOString();
+      const updated = {
+        ...current,
+        creditDecision: {
+          decision,
+          approvedAmount,
+          rationale: String(req.body?.rationale || '').trim() || null,
+          decidedBy: actorId(req),
+          decidedAt: timestamp,
+        },
+        updatedAt: timestamp,
+      };
+      await service.domain.put('FUNDING_OPPORTUNITY', current.opportunityId, updated, { actorId: actorId(req), eventType: `FINANCING_CREDIT_DECISION_${decision}` });
+      const advanced = await lifecycleService.transition(current.opportunityId, decision === 'APPROVE' ? 'CLOSING' : 'CLOSED', { source: 'ADMIN_UNIFIED_OPERATIONS' }, actorId(req));
+      return res.json({ opportunity: advanced });
     } catch (error) {
       return handle(res, error);
     }
