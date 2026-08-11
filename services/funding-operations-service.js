@@ -1,21 +1,10 @@
 const RECORDS = Object.freeze({
   OPPORTUNITY: 'FUNDING_OPPORTUNITY',
   EVIDENCE: 'FUNDING_OPPORTUNITY_EVIDENCE',
-  VERIFICATION_REQUEST: 'FUNDING_OPPORTUNITY_VERIFICATION_REQUEST',
-  VERIFICATION_FINDING: 'FUNDING_OPPORTUNITY_VERIFICATION_FINDING',
-  VERIFICATION_DECISION: 'FUNDING_OPPORTUNITY_VERIFICATION_DECISION',
-  VALUE_PREPARATION: 'FUNDING_OPPORTUNITY_VALUE_PREPARATION',
-  MODEL_ASSESSMENT: 'FUNDING_MODEL_ASSESSMENT',
-  MODEL_SELECTION: 'FUNDING_MODEL_SELECTION',
-  INSTRUMENT_REQUEST: 'FUNDING_INSTRUMENT_SELECTION_REQUEST',
-  INSTRUMENT_SELECTION: 'FUNDING_INSTRUMENT_SELECTION',
-  INSTRUMENT: 'SRA_INSTRUMENT',
-  INSTRUMENT_REVIEW: 'FUNDING_INSTRUMENT_DRAFT_REVIEW',
-  ISSUANCE_REQUEST: 'FUNDING_INSTRUMENT_ISSUANCE_REQUEST',
   LISTING: 'MARKETPLACE_LISTING',
   COMMITMENT: 'FUNDING_MARKETPLACE_COMMITMENT',
   POSITION: 'FUNDING_MARKETPLACE_POSITION',
-  SETTLEMENT_PREPARATION: 'FUNDING_MARKETPLACE_SETTLEMENT_PREPARATION',
+  INSTRUMENT: 'SRA_INSTRUMENT',
 });
 
 const FINANCING_STRUCTURE = Object.freeze([
@@ -79,20 +68,6 @@ export class FundingOperationsService {
     const opportunity = this.domain.get(RECORDS.OPPORTUNITY, opportunityId);
     if (!opportunity) return null;
     const evidence = related(this.domain.list(RECORDS.EVIDENCE), opportunityId);
-    const verificationRequests = related(this.domain.list(RECORDS.VERIFICATION_REQUEST), opportunityId);
-    const requestIds = new Set(verificationRequests.map((record) => record.verificationRequestId));
-    const verificationFindings = this.domain.list(RECORDS.VERIFICATION_FINDING).filter((record) => requestIds.has(record.verificationRequestId));
-    const verificationDecisions = related(this.domain.list(RECORDS.VERIFICATION_DECISION), opportunityId);
-    const preparations = related(this.domain.list(RECORDS.VALUE_PREPARATION), opportunityId);
-    const modelAssessments = related(this.domain.list(RECORDS.MODEL_ASSESSMENT), opportunityId);
-    const modelSelections = related(this.domain.list(RECORDS.MODEL_SELECTION), opportunityId);
-    const instrumentRequests = related(this.domain.list(RECORDS.INSTRUMENT_REQUEST), opportunityId);
-    const instrumentSelections = related(this.domain.list(RECORDS.INSTRUMENT_SELECTION), opportunityId);
-    const instruments = related(this.domain.list(RECORDS.INSTRUMENT), opportunityId);
-    const listings = related(this.domain.list(RECORDS.LISTING), opportunityId);
-    const commitments = related(this.domain.list(RECORDS.COMMITMENT), opportunityId);
-    const positions = related(this.domain.list(RECORDS.POSITION), opportunityId);
-    const settlements = related(this.domain.list(RECORDS.SETTLEMENT_PREPARATION), opportunityId);
 
     return {
       opportunity,
@@ -104,17 +79,6 @@ export class FundingOperationsService {
         relatedAgreementIds: opportunity.relatedAgreementIds || [],
         sourceTransactionIds: opportunity.sourceTransactionIds || [],
       },
-      verification: { requests: verificationRequests, findings: verificationFindings, decisions: verificationDecisions },
-      valuePreparation: preparations,
-      modelAssessments,
-      modelSelections,
-      instrumentRequests,
-      instrumentSelections,
-      instruments,
-      listings,
-      commitments,
-      positions,
-      settlements,
       timeline: opportunity.history || [],
     };
   }
@@ -134,7 +98,7 @@ export class FundingOperationsService {
       metrics: {
         opportunities: opportunities.length,
         totalRequested,
-        activeQueueItems: queue.filter((item) => !['POSITION_SETTLED', 'WITHDRAWN', 'VERIFICATION_CLOSED'].includes(item.status)).length,
+        activeQueueItems: queue.filter((item) => !['WITHDRAWN', 'CLOSED'].includes(item.status)).length,
         liveListings: this.domain.list(RECORDS.LISTING).filter((record) => record.state === 'LIVE').length,
         confirmedCommitments: this.domain.list(RECORDS.COMMITMENT).filter((record) => record.status === 'CONFIRMED').length,
         recognizedPositions: this.domain.list(RECORDS.POSITION).filter((record) => record.ownershipStatus === 'RECOGNIZED').length,
