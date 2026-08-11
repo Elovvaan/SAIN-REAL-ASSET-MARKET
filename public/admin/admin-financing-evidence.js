@@ -8,6 +8,63 @@
 
   let currentOpportunityId = null;
 
+  async function progressionPanel(root) {
+    const detail = root?.querySelector('.funding-detail.open');
+    if (!detail || !currentOpportunityId) return;
+    if (detail.querySelector('[data-admin-financing-progression]')) return;
+
+    const record = await fetch(`/api/funding/opportunities/${encodeURIComponent(currentOpportunityId)}`, {
+      credentials: 'same-origin',
+      headers: { accept: 'application/json' },
+    }).then((response) => response.ok ? response.json() : null).catch(() => null);
+
+    if (!record) return;
+    const stage = String(record.financingStage || '').toUpperCase();
+    const status = String(record.status || '').toUpperCase();
+    const isApplication = stage === 'APPLICATION' || (!stage && ['DRAFT', 'INTAKE_IN_PROGRESS'].includes(status));
+    if (!isApplication) return;
+
+    const panel = document.createElement('section');
+    panel.className = 'funding-ops-panel';
+    panel.dataset.adminFinancingProgression = 'true';
+    panel.innerHTML = `
+      <p class="eyebrow">FINANCING PROGRESSION</p>
+      <button class="primary-button" type="button" data-admin-financing-start-underwriting>Start Underwriting</button>
+      <div data-admin-financing-progression-result style="font-size:12px;margin-top:8px"></div>`;
+
+    const evidence = [...detail.querySelectorAll('.funding-ops-panel')]
+      .find((node) => node.textContent.includes('EVIDENCE & REFERENCES'));
+    if (evidence) evidence.insertAdjacentElement('beforebegin', panel);
+    else detail.append(panel);
+
+    panel.querySelector('[data-admin-financing-start-underwriting]')?.addEventListener('click', async () => {
+      const button = panel.querySelector('[data-admin-financing-start-underwriting]');
+      const result = panel.querySelector('[data-admin-financing-progression-result]');
+      if (button) button.disabled = true;
+      if (result) result.textContent = 'Starting underwriting…';
+      try {
+        const response = await fetch(`/api/funding/opportunities/${encodeURIComponent(currentOpportunityId)}/transition`, {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: {
+            accept: 'application/json',
+            'content-type': 'application/json',
+            'x-sra-idempotency-key': `admin-financing-underwriting-${currentOpportunityId}-${crypto.randomUUID()}`,
+          },
+          body: JSON.stringify({ toStage: 'UNDERWRITING', source: 'ADMIN_UNIFIED_OPERATIONS' }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.error || `Request failed with ${response.status}.`);
+        if (result) result.textContent = 'UNDERWRITING';
+        const row = root.querySelector(`[data-opportunity-id="${CSS.escape(currentOpportunityId)}"]`);
+        row?.click();
+      } catch (error) {
+        if (button) button.disabled = false;
+        if (result) result.textContent = esc(error.message);
+      }
+    });
+  }
+
   function evidencePanel(root) {
     const detail = root?.querySelector('.funding-detail.open');
     if (!detail || !currentOpportunityId) return;
@@ -74,15 +131,20 @@
     });
   }
 
+  function mountPanels(root) {
+    evidencePanel(root);
+    void progressionPanel(root);
+  }
+
   function bind(root) {
     if (!root || root.dataset.adminFinancingEvidenceBound === 'true') return;
     root.dataset.adminFinancingEvidenceBound = 'true';
     root.addEventListener('click', (event) => {
       const row = event.target.closest('[data-opportunity-id]');
       if (row) currentOpportunityId = row.dataset.opportunityId || null;
-      if (currentOpportunityId) setTimeout(() => evidencePanel(root), 0);
+      if (currentOpportunityId) setTimeout(() => mountPanels(root), 0);
     }, true);
-    const observer = new MutationObserver(() => evidencePanel(root));
+    const observer = new MutationObserver(() => mountPanels(root));
     observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
   }
 
