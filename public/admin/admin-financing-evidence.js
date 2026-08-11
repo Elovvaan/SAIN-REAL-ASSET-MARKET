@@ -30,6 +30,11 @@
       .some((node) => node.textContent.includes('EVIDENCE & REFERENCES'));
   }
 
+  function removeDuplicateWorkflowPanels(detail) {
+    const panels = [...detail.querySelectorAll('[data-admin-financing-workflow]')];
+    panels.slice(1).forEach((panel) => panel.remove());
+  }
+
   function mountEvidence(root, detail) {
     if (detail.querySelector('[data-admin-financing-evidence]')) return;
     const panel = document.createElement('section');
@@ -85,53 +90,73 @@
   }
 
   async function mountWorkflow(root, detail) {
+    removeDuplicateWorkflowPanels(detail);
     if (detail.querySelector('[data-admin-financing-workflow]')) return;
-    const opportunity = await jsonRequest(`/api/funding/opportunities/${encodeURIComponent(currentOpportunityId)}`);
-    const stage = String(opportunity.financingStage || 'APPLICATION').toUpperCase();
-    const panel = document.createElement('section');
-    panel.className = 'funding-ops-panel';
-    panel.dataset.adminFinancingWorkflow = 'true';
 
-    if (stage === 'UNDERWRITING') {
-      panel.innerHTML = `<p class="eyebrow">UNDERWRITING</p><h4>Underwriting review</h4>
-        <form data-underwriting-form style="display:grid;gap:10px">
-          <input name="recommendedAmount" type="number" min="1" max="${Number(opportunity.requestedAmount || 0)}" step="0.01" value="${Number(opportunity.requestedAmount || 0)}" required>
-          <textarea name="conclusion" placeholder="Underwriting conclusion" style="min-height:90px"></textarea>
-          <button class="primary-button" type="submit">Complete underwriting</button><div data-result style="font-size:12px"></div>
-        </form>`;
-      panel.querySelector('form')?.addEventListener('submit', async (event) => {
-        event.preventDefault(); const data = new FormData(event.currentTarget); const result = panel.querySelector('[data-result]');
-        try {
-          if (result) result.textContent = 'Completing underwriting…';
-          await jsonRequest(`/api/funding/opportunities/${encodeURIComponent(currentOpportunityId)}/underwriting`, { method: 'POST', body: JSON.stringify({ recommendedAmount: Number(data.get('recommendedAmount')), conclusion: data.get('conclusion') || null }) });
-          reopen(root);
-        } catch (error) { if (result) result.textContent = esc(error.message); }
-      });
-    } else if (stage === 'DECISION') {
-      const amount = Number(opportunity.underwriting?.recommendedAmount || opportunity.requestedAmount || 0);
-      panel.innerHTML = `<p class="eyebrow">CREDIT DECISION</p><h4>Record credit decision</h4>
-        <form data-credit-decision-form style="display:grid;gap:10px">
-          <select name="decision"><option value="APPROVE">Approve</option><option value="DECLINE">Decline</option></select>
-          <input name="approvedAmount" type="number" min="1" max="${Number(opportunity.requestedAmount || 0)}" step="0.01" value="${amount}">
-          <textarea name="rationale" placeholder="Decision rationale" style="min-height:90px"></textarea>
-          <button class="primary-button" type="submit">Record credit decision</button><div data-result style="font-size:12px"></div>
-        </form>`;
-      panel.querySelector('form')?.addEventListener('submit', async (event) => {
-        event.preventDefault(); const data = new FormData(event.currentTarget); const result = panel.querySelector('[data-result]');
-        try {
-          if (result) result.textContent = 'Recording credit decision…';
-          await jsonRequest(`/api/funding/opportunities/${encodeURIComponent(currentOpportunityId)}/credit-decision`, { method: 'POST', body: JSON.stringify({ decision: data.get('decision'), approvedAmount: Number(data.get('approvedAmount')), rationale: data.get('rationale') || null }) });
-          reopen(root);
-        } catch (error) { if (result) result.textContent = esc(error.message); }
-      });
-    } else {
-      const message = stage === 'CLOSING' ? 'Credit decision recorded. Financing is now in Closing.' : stage === 'CLOSED' ? 'Financing record is closed.' : `Current financing stage: ${stage}.`;
-      panel.innerHTML = `<p class="eyebrow">FINANCING STATUS</p><h4>${esc(stage)}</h4><p>${esc(message)}</p>`;
+    const opportunityId = currentOpportunityId;
+    if (!opportunityId) return;
+    if (detail.dataset.adminFinancingWorkflowMounting === opportunityId) return;
+    detail.dataset.adminFinancingWorkflowMounting = opportunityId;
+
+    try {
+      const opportunity = await jsonRequest(`/api/funding/opportunities/${encodeURIComponent(opportunityId)}`);
+      if (!detail.isConnected || currentOpportunityId !== opportunityId) return;
+
+      removeDuplicateWorkflowPanels(detail);
+      if (detail.querySelector('[data-admin-financing-workflow]')) return;
+
+      const stage = String(opportunity.financingStage || 'APPLICATION').toUpperCase();
+      const panel = document.createElement('section');
+      panel.className = 'funding-ops-panel';
+      panel.dataset.adminFinancingWorkflow = 'true';
+      panel.dataset.opportunityId = opportunityId;
+
+      if (stage === 'UNDERWRITING') {
+        panel.innerHTML = `<p class="eyebrow">UNDERWRITING</p><h4>Underwriting review</h4>
+          <form data-underwriting-form style="display:grid;gap:10px">
+            <input name="recommendedAmount" type="number" min="1" max="${Number(opportunity.requestedAmount || 0)}" step="0.01" value="${Number(opportunity.requestedAmount || 0)}" required>
+            <textarea name="conclusion" placeholder="Underwriting conclusion" style="min-height:90px"></textarea>
+            <button class="primary-button" type="submit">Complete underwriting</button><div data-result style="font-size:12px"></div>
+          </form>`;
+        panel.querySelector('form')?.addEventListener('submit', async (event) => {
+          event.preventDefault(); const data = new FormData(event.currentTarget); const result = panel.querySelector('[data-result]');
+          try {
+            if (result) result.textContent = 'Completing underwriting…';
+            await jsonRequest(`/api/funding/opportunities/${encodeURIComponent(opportunityId)}/underwriting`, { method: 'POST', body: JSON.stringify({ recommendedAmount: Number(data.get('recommendedAmount')), conclusion: data.get('conclusion') || null }) });
+            reopen(root);
+          } catch (error) { if (result) result.textContent = esc(error.message); }
+        });
+      } else if (stage === 'DECISION') {
+        const amount = Number(opportunity.underwriting?.recommendedAmount || opportunity.requestedAmount || 0);
+        panel.innerHTML = `<p class="eyebrow">CREDIT DECISION</p><h4>Record credit decision</h4>
+          <form data-credit-decision-form style="display:grid;gap:10px">
+            <select name="decision"><option value="APPROVE">Approve</option><option value="DECLINE">Decline</option></select>
+            <input name="approvedAmount" type="number" min="1" max="${Number(opportunity.requestedAmount || 0)}" step="0.01" value="${amount}">
+            <textarea name="rationale" placeholder="Decision rationale" style="min-height:90px"></textarea>
+            <button class="primary-button" type="submit">Record credit decision</button><div data-result style="font-size:12px"></div>
+          </form>`;
+        panel.querySelector('form')?.addEventListener('submit', async (event) => {
+          event.preventDefault(); const data = new FormData(event.currentTarget); const result = panel.querySelector('[data-result]');
+          try {
+            if (result) result.textContent = 'Recording credit decision…';
+            await jsonRequest(`/api/funding/opportunities/${encodeURIComponent(opportunityId)}/credit-decision`, { method: 'POST', body: JSON.stringify({ decision: data.get('decision'), approvedAmount: Number(data.get('approvedAmount')), rationale: data.get('rationale') || null }) });
+            reopen(root);
+          } catch (error) { if (result) result.textContent = esc(error.message); }
+        });
+      } else {
+        const message = stage === 'CLOSING' ? 'Credit decision recorded. Financing is now in Closing.' : stage === 'CLOSED' ? 'Financing record is closed.' : `Current financing stage: ${stage}.`;
+        panel.innerHTML = `<p class="eyebrow">FINANCING STATUS</p><h4>${esc(stage)}</h4><p>${esc(message)}</p>`;
+      }
+
+      const evidence = [...detail.querySelectorAll('.funding-ops-panel')].find((node) => node.textContent.includes('EVIDENCE & REFERENCES'));
+      if (evidence) evidence.insertAdjacentElement('afterend', panel);
+      else detail.append(panel);
+      removeDuplicateWorkflowPanels(detail);
+    } finally {
+      if (detail.dataset.adminFinancingWorkflowMounting === opportunityId) {
+        delete detail.dataset.adminFinancingWorkflowMounting;
+      }
     }
-
-    const evidence = [...detail.querySelectorAll('.funding-ops-panel')].find((node) => node.textContent.includes('EVIDENCE & REFERENCES'));
-    if (evidence) evidence.insertAdjacentElement('afterend', panel);
-    else detail.append(panel);
   }
 
   function mountSoon(root, attempts = 30) {
@@ -140,6 +165,7 @@
       if (attempts > 0) setTimeout(() => mountSoon(root, attempts - 1), 100);
       return;
     }
+    removeDuplicateWorkflowPanels(detail);
     mountEvidence(root, detail);
     void mountWorkflow(root, detail).catch(() => {});
   }
