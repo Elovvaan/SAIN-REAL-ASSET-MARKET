@@ -43,17 +43,21 @@ export class FundingOperationsService {
   queue(filters = {}) {
     return newest(this.domain.list(RECORDS.OPPORTUNITY), Number(filters.limit) || 100)
       .filter((record) => !filters.status || record.status === filters.status)
-      .map((record) => ({
-        opportunityId: record.opportunityId,
-        title: record.title,
-        applicantParticipantId: record.applicantParticipantId,
-        opportunityType: record.opportunityType,
-        requestedAmount: record.requestedAmount,
-        currency: record.currency,
-        status: record.status,
-        financingStage: normalizeFinancingStage(record),
-        updatedAt: record.updatedAt || record.createdAt,
-      }));
+      .map((record) => {
+        const financingStage = normalizeFinancingStage(record);
+        return {
+          opportunityId: record.opportunityId,
+          title: record.title,
+          applicantParticipantId: record.applicantParticipantId,
+          opportunityType: record.opportunityType,
+          requestedAmount: record.requestedAmount,
+          currency: record.currency,
+          status: financingStage,
+          financingStage,
+          legacyStatus: record.status,
+          updatedAt: record.updatedAt || record.createdAt,
+        };
+      });
   }
 
   opportunityDetail(opportunityId) {
@@ -63,7 +67,7 @@ export class FundingOperationsService {
     const financingStage = normalizeFinancingStage(opportunity);
 
     return {
-      opportunity: { ...opportunity, financingStage },
+      opportunity: { ...opportunity, legacyStatus: opportunity.status, status: financingStage, financingStage },
       structure: this.structure(),
       intake: {
         completeness: opportunity.completeness || null,
