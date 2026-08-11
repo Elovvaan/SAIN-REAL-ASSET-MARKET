@@ -62,6 +62,40 @@ export function normalizeFinancingStage(record = {}) {
   return LEGACY_STAGE_MAP[legacyStatus] || 'APPLICATION';
 }
 
+export function prepareFinancingTransition(record, toStage, input = {}, actorId = null, occurredAt = now()) {
+  if (!record) throw new Error('Funding opportunity was not found.');
+  const target = String(toStage || '').toUpperCase();
+  if (!FINANCING_STAGES.includes(target)) throw new Error(`Unsupported financing stage: ${target}`);
+  const from = normalizeFinancingStage(record);
+  if (from === target) return { opportunity: record, from, to: target, changed: false };
+  if (!TRANSITIONS[from]?.has(target)) throw new Error(`Financing lifecycle cannot advance from ${from} to ${target}.`);
+
+  return {
+    from,
+    to: target,
+    changed: true,
+    opportunity: {
+      ...record,
+      financingStage: target,
+      updatedAt: occurredAt,
+      financingStageUpdatedAt: occurredAt,
+      financingStageUpdatedBy: actorId,
+      financingHistory: [
+        ...(record.financingHistory || []),
+        {
+          from,
+          to: target,
+          at: occurredAt,
+          actorId,
+          reason: input.reason || null,
+          source: input.source || null,
+          referenceId: input.referenceId || null,
+        },
+      ],
+    },
+  };
+}
+
 export class FinancingLifecycleService {
   constructor(domain) {
     this.domain = domain;
@@ -106,49 +140,17 @@ export class FinancingLifecycleService {
     input = {},
     actorId = null
   ) {
-    const target = String(toStage || '').toUpperCase();
-
-    if (!FINANCING_STAGES.includes(target)) {
-      throw new Error(`Unsupported financing stage: ${target}`);
-    }
-
     const current = await this.ensure(opportunityId, actorId);
-    const from = normalizeFinancingStage(current);
-
-    if (from === target) return current;
-
-    if (!TRANSITIONS[from]?.has(target)) {
-      throw new Error(`Financing lifecycle cannot advance from ${from} to ${target}.`);
-    }
-
-    const occurredAt = now();
-    const updated = {
-      ...current,
-      financingStage: target,
-      updatedAt: occurredAt,
-      financingStageUpdatedAt: occurredAt,
-      financingStageUpdatedBy: actorId,
-      financingHistory: [
-        ...(current.financingHistory || []),
-        {
-          from,
-          to: target,
-          at: occurredAt,
-          actorId,
-          reason: input.reason || null,
-          source: input.source || null,
-          referenceId: input.referenceId || null,
-        },
-      ],
-    };
+    const prepared = prepareFinancingTransition(current, toStage, input, actorId);
+    if (!prepared.changed) return current;
 
     await this.domain.put(
       OPPORTUNITY_TYPE,
       opportunityId,
-      updated,
+      prepared.opportunity,
       {
         actorId,
-        eventType: `FINANCING_STAGE_${target}`,
+        eventType: `FINANCING_STAGE_${prepared.to}`,
       }
     );
 
@@ -158,14 +160,14 @@ export class FinancingLifecycleService {
       eventType: 'FINANCING_STAGE_CHANGED',
       actorId,
       payload: {
-        from,
-        to: target,
+        from: prepared.from,
+        to: prepared.to,
         reason: input.reason || null,
         source: input.source || null,
         referenceId: input.referenceId || null,
       },
     });
 
-    return updated;
+    return prepared.opportunity;
   }
 }
