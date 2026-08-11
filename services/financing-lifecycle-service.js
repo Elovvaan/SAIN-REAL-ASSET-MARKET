@@ -45,25 +45,21 @@ const LEGACY_STAGE_MAP = Object.freeze({
   REJECTED: 'CLOSED',
 });
 
+const TERMINAL_LEGACY_STATUSES = new Set(['WITHDRAWN', 'CLOSED', 'PAID_OFF', 'VERIFICATION_CLOSED', 'REJECTED']);
+
 function now() {
   return new Date().toISOString();
 }
 
 export function normalizeFinancingStage(record = {}) {
+  const legacyStatus = String(record.status || '').toUpperCase();
+  if (TERMINAL_LEGACY_STATUSES.has(legacyStatus)) return 'CLOSED';
+
   const explicit = String(record.financingStage || '').toUpperCase();
-
-  // Migrate removed authoritative stages forward
-  if (explicit === 'DOCUMENTATION' || explicit === 'VERIFICATION') {
-    return 'UNDERWRITING';
-  }
-
-  // If it's a current valid stage, return it
+  if (explicit === 'DOCUMENTATION' || explicit === 'VERIFICATION') return 'UNDERWRITING';
   if (FINANCING_STAGES.includes(explicit)) return explicit;
 
-  // Fall back to legacy status field
-  return LEGACY_STAGE_MAP[
-    String(record.status || '').toUpperCase()
-  ] || 'APPLICATION';
+  return LEGACY_STAGE_MAP[legacyStatus] || 'APPLICATION';
 }
 
 export class FinancingLifecycleService {
@@ -82,11 +78,8 @@ export class FinancingLifecycleService {
       throw new Error('Funding opportunity was not found.');
     }
 
-    if (FINANCING_STAGES.includes(current.financingStage)) {
-      return current;
-    }
-
     const financingStage = normalizeFinancingStage(current);
+    if (current.financingStage === financingStage) return current;
 
     const updated = {
       ...current,
@@ -116,30 +109,19 @@ export class FinancingLifecycleService {
     const target = String(toStage || '').toUpperCase();
 
     if (!FINANCING_STAGES.includes(target)) {
-      throw new Error(
-        `Unsupported financing stage: ${target}`
-      );
+      throw new Error(`Unsupported financing stage: ${target}`);
     }
 
-    const current = await this.ensure(
-      opportunityId,
-      actorId
-    );
-
+    const current = await this.ensure(opportunityId, actorId);
     const from = normalizeFinancingStage(current);
 
-    if (from === target) {
-      return current;
-    }
+    if (from === target) return current;
 
     if (!TRANSITIONS[from]?.has(target)) {
-      throw new Error(
-        `Financing lifecycle cannot advance from ${from} to ${target}.`
-      );
+      throw new Error(`Financing lifecycle cannot advance from ${from} to ${target}.`);
     }
 
     const occurredAt = now();
-
     const updated = {
       ...current,
       financingStage: target,
