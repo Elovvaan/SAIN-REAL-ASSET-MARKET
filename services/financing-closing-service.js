@@ -1,11 +1,13 @@
 import crypto from 'node:crypto';
 import { RECORD_TYPES } from './persistent-domain-service.js';
+import { prepareFinancingTransition } from './financing-lifecycle-service.js';
 
 const CLOSING_TYPE = 'FINANCING_CLOSING';
 const CONDITION_TYPE = 'FINANCING_CLOSING_CONDITION';
 const DISBURSEMENT_TYPE = 'FINANCING_DISBURSEMENT';
 const POSITION_TYPE = 'FINANCED_POSITION';
 const EXPORT_PACKAGE_TYPE = 'EXPORT_PACKAGE';
+const OPPORTUNITY_TYPE = 'FUNDING_OPPORTUNITY';
 const LOAN_FINANCING_TYPE = 'LOAN_FINANCING_AUTHORIZATION';
 const id = (prefix) => `${prefix}-${crypto.randomUUID().split('-')[0].toUpperCase()}`;
 const now = () => new Date().toISOString();
@@ -17,7 +19,7 @@ export class FinancingClosingService {
   constructor(domain, assetServicingService = null) { this.domain = domain; this.assetServicingService = assetServicingService; }
 
   async initialize() {
-    await this.domain.hydrate([CLOSING_TYPE, CONDITION_TYPE, DISBURSEMENT_TYPE, POSITION_TYPE, EXPORT_PACKAGE_TYPE, RECORD_TYPES.SRA_TRANSACTION]);
+    await this.domain.hydrate([CLOSING_TYPE, CONDITION_TYPE, DISBURSEMENT_TYPE, POSITION_TYPE, EXPORT_PACKAGE_TYPE, RECORD_TYPES.SRA_TRANSACTION, OPPORTUNITY_TYPE]);
     return this.status();
   }
 
@@ -29,6 +31,9 @@ export class FinancingClosingService {
   disbursements(closingId) { return this.domain.list(DISBURSEMENT_TYPE).filter((r) => r.closingId === closingId); }
   positionForFinancing(financingTransactionId) { return this.domain.list(POSITION_TYPE).find((r) => r.financingTransactionId === financingTransactionId) || null; }
   exportPackageForDisbursement(disbursementId) { return this.domain.get(EXPORT_PACKAGE_TYPE, financingExportId(disbursementId)); }
+  financingAuthorizationForOpportunity(opportunityId) {
+    return this.domain.list(RECORD_TYPES.SRA_TRANSACTION).find((record) => record.transactionType === LOAN_FINANCING_TYPE && record.opportunityId === opportunityId && record.state === 'POSTED') || null;
+  }
 
   detail(closingId) {
     const closing = this.get(closingId);
@@ -51,6 +56,23 @@ export class FinancingClosingService {
 
   existingForFinancing(financingTransactionId) {
     return this.domain.list(CLOSING_TYPE).find((r) => r.financingTransactionId === financingTransactionId && r.status !== 'CANCELLED') || null;
+  }
+
+  opportunityTransition(opportunityId, toStage, actorId, timestamp, referenceId) {
+    if (!opportunityId) return null;
+    const opportunity = this.domain.get(OPPORTUNITY_TYPE, opportunityId);
+    return prepareFinancingTransition(opportunity, toStage, { source: 'FINANCING_CLOSING', referenceId }, actorId, timestamp);
+  }
+
+  async recordOpportunityLifecycle(prepared, actorId, referenceId) {
+    if (!prepared?.changed) return;
+    await this.domain.lifecycle({
+      objectType: OPPORTUNITY_TYPE,
+      objectId: prepared.opportunity.opportunityId,
+      eventType: 'FINANCING_STAGE_CHANGED',
+      actorId,
+      payload: { from: prepared.from, to: prepared.to, source: 'FINANCING_CLOSING', referenceId: referenceId || null },
+    });
   }
 
   async open(input = {}, actorId = null) {
@@ -119,7 +141,11 @@ export class FinancingClosingService {
     const settlementMethod = String(input.settlementMethod || current.settlementMethod || '').trim().toUpperCase() || null;
     const timestamp = now();
     const updated = { ...current, finalFundingAmount, beneficiaryName, settlementMethod, settlementInstructions: input.settlementInstructions || current.settlementInstructions || {}, status: 'READY_TO_FUND', readyAt: timestamp, updatedAt: timestamp };
-    await this.domain.put(CLOSING_TYPE, closingId, updated, { actorId, eventType: 'FINANCING_CLOSING_READY_TO_FUND' });
+    const lifecycle = this.opportunityTransition(current.opportunityId, 'READY_TO_FUND', actorId, timestamp, closingId);
+    const changes = [{ type: CLOSING_TYPE, id: closingId, payload: updated, actorId, eventType: 'FINANCING_CLOSING_READY_TO_FUND' }];
+    if (lifecycle?.changed) changes.push({ type: OPPORTUNITY_TYPE, id: current.opportunityId, payload: lifecycle.opportunity, actorId, eventType: 'FINANCING_STAGE_READY_TO_FUND' });
+    await this.domain.atomicPut(changes);
+    await this.recordOpportunityLifecycle(lifecycle, actorId, closingId);
     return updated;
   }
 
@@ -222,14 +248,17 @@ export class FinancingClosingService {
     const funded = { ...closing, status: 'FUNDED', financedPositionId: positionId, fundedAt: timestamp, updatedAt: timestamp };
     const financingUpdated = { ...financing, status: 'FUNDED', financedPositionId: positionId, externalDisbursementAuthorized: true, externalSettlementReference: externalReference, fundedAt: timestamp, updatedAt: timestamp };
     const exportPackage = this.exportPackageForDisbursement(disbursementId);
+    const lifecycle = this.opportunityTransition(closing.opportunityId, 'FUNDED', actorId, timestamp, closingId);
     const changes = [
       { type: DISBURSEMENT_TYPE, id: disbursementId, payload: settled, actorId, eventType: 'FINANCING_DISBURSEMENT_SETTLED' },
       { type: CLOSING_TYPE, id: closingId, payload: funded, actorId, eventType: 'FINANCING_CLOSING_FUNDED' },
       { type: RECORD_TYPES.SRA_TRANSACTION, id: financing.transactionId, payload: financingUpdated, actorId, eventType: 'LOAN_FINANCING_FUNDED' },
       { type: POSITION_TYPE, id: positionId, payload: financedPosition, actorId, eventType: existingPosition ? 'FINANCED_POSITION_CONFIRMED' : 'FINANCED_POSITION_CREATED' },
     ];
+    if (lifecycle?.changed) changes.push({ type: OPPORTUNITY_TYPE, id: closing.opportunityId, payload: lifecycle.opportunity, actorId, eventType: 'FINANCING_STAGE_FUNDED' });
     if (exportPackage) changes.push({ type: EXPORT_PACKAGE_TYPE, id: exportPackage.exportPackageId, payload: { ...exportPackage, state: 'SETTLED', exportExecutionState: 'COMPLETED', externalSettlementReference: externalReference, settledAt: timestamp, updatedAt: timestamp, statusHistory: [...(exportPackage.statusHistory || []), { state: 'SETTLED', actorId, occurredAt: timestamp }] }, actorId, eventType: 'FINANCING_EXPORT_PACKAGE_SETTLED' });
     await this.domain.atomicPut(changes);
+    await this.recordOpportunityLifecycle(lifecycle, actorId, closingId);
     await this.domain.lifecycle({ objectType: CLOSING_TYPE, objectId: closingId, eventType: 'FINANCING_EXTERNAL_SETTLEMENT_RECORDED', actorId, payload: { disbursementId, externalReference, amount: settled.amount, settlementMethod: settled.settlementMethod, financedPositionId: positionId } });
     await this.domain.lifecycle({ objectType: POSITION_TYPE, objectId: positionId, eventType: 'FINANCED_POSITION_CREATED_FROM_FUNDED_FINANCING', actorId, payload: { financingTransactionId: financing.transactionId, opportunityId: closing.opportunityId, instrumentId: closing.instrumentId, principal, ownerId: 'SRA' } });
     return { closing: funded, disbursement: settled, financing: financingUpdated, financedPosition, exportPackage: exportPackage ? this.domain.get(EXPORT_PACKAGE_TYPE, exportPackage.exportPackageId) : null };
