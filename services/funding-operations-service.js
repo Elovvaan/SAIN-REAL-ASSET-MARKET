@@ -1,3 +1,5 @@
+import { FINANCING_STAGES, normalizeFinancingStage } from './financing-lifecycle-service.js';
+
 const RECORDS = Object.freeze({
   OPPORTUNITY: 'FUNDING_OPPORTUNITY',
   EVIDENCE: 'FUNDING_OPPORTUNITY_EVIDENCE',
@@ -6,16 +8,6 @@ const RECORDS = Object.freeze({
   POSITION: 'FUNDING_MARKETPLACE_POSITION',
   INSTRUMENT: 'SRA_INSTRUMENT',
 });
-
-const FINANCING_STRUCTURE = Object.freeze([
-  'APPLICATION_OPPORTUNITY',
-  'UNDERWRITING',
-  'CREDIT_DECISION',
-  'DOCUMENTATION',
-  'CLOSING',
-  'FUNDING_DISBURSEMENT',
-  'SERVICING',
-]);
 
 function newest(records, limit = 25) {
   return [...records]
@@ -45,32 +37,38 @@ export class FundingOperationsService {
   }
 
   structure() {
-    return [...FINANCING_STRUCTURE];
+    return [...FINANCING_STAGES];
   }
 
   queue(filters = {}) {
+    const requestedStage = filters.status ? String(filters.status).toUpperCase() : null;
     return newest(this.domain.list(RECORDS.OPPORTUNITY), Number(filters.limit) || 100)
-      .filter((record) => !filters.status || record.status === filters.status)
-      .map((record) => ({
-        opportunityId: record.opportunityId,
-        title: record.title,
-        applicantParticipantId: record.applicantParticipantId,
-        opportunityType: record.opportunityType,
-        requestedAmount: record.requestedAmount,
-        currency: record.currency,
-        status: record.status,
-        fundingPhase: record.fundingPhase,
-        updatedAt: record.updatedAt || record.createdAt,
-      }));
+      .filter((record) => !requestedStage || normalizeFinancingStage(record) === requestedStage)
+      .map((record) => {
+        const financingStage = normalizeFinancingStage(record);
+        return {
+          opportunityId: record.opportunityId,
+          title: record.title,
+          applicantParticipantId: record.applicantParticipantId,
+          opportunityType: record.opportunityType,
+          requestedAmount: record.requestedAmount,
+          currency: record.currency,
+          status: financingStage,
+          financingStage,
+          legacyStatus: record.status,
+          updatedAt: record.updatedAt || record.createdAt,
+        };
+      });
   }
 
   opportunityDetail(opportunityId) {
     const opportunity = this.domain.get(RECORDS.OPPORTUNITY, opportunityId);
     if (!opportunity) return null;
     const evidence = related(this.domain.list(RECORDS.EVIDENCE), opportunityId);
+    const financingStage = normalizeFinancingStage(opportunity);
 
     return {
-      opportunity,
+      opportunity: { ...opportunity, legacyStatus: opportunity.status, status: financingStage, financingStage },
       structure: this.structure(),
       intake: {
         completeness: opportunity.completeness || null,
@@ -79,7 +77,7 @@ export class FundingOperationsService {
         relatedAgreementIds: opportunity.relatedAgreementIds || [],
         sourceTransactionIds: opportunity.sourceTransactionIds || [],
       },
-      timeline: opportunity.history || [],
+      timeline: opportunity.financingHistory || opportunity.history || [],
     };
   }
 
@@ -87,8 +85,8 @@ export class FundingOperationsService {
     const opportunities = this.domain.list(RECORDS.OPPORTUNITY);
     const queue = this.queue();
     const totalRequested = opportunities.reduce((sum, record) => sum + Number(record.requestedAmount || 0), 0);
-    const statusCounts = opportunities.reduce((acc, record) => {
-      const key = record.status || 'UNKNOWN';
+    const stageCounts = opportunities.reduce((acc, record) => {
+      const key = normalizeFinancingStage(record);
       acc[key] = (acc[key] || 0) + 1;
       return acc;
     }, {});
@@ -98,12 +96,12 @@ export class FundingOperationsService {
       metrics: {
         opportunities: opportunities.length,
         totalRequested,
-        activeQueueItems: queue.filter((item) => !['WITHDRAWN', 'CLOSED'].includes(item.status)).length,
+        activeQueueItems: queue.filter((item) => item.financingStage !== 'CLOSED').length,
         liveListings: this.domain.list(RECORDS.LISTING).filter((record) => record.state === 'LIVE').length,
         confirmedCommitments: this.domain.list(RECORDS.COMMITMENT).filter((record) => record.status === 'CONFIRMED').length,
         recognizedPositions: this.domain.list(RECORDS.POSITION).filter((record) => record.ownershipStatus === 'RECOGNIZED').length,
       },
-      opportunityStatusCounts: statusCounts,
+      financingStageCounts: stageCounts,
       queue: queue.slice(0, 30),
       recent: {
         opportunities: newest(opportunities, 10),
@@ -115,4 +113,4 @@ export class FundingOperationsService {
   }
 }
 
-export { RECORDS as FUNDING_OPERATIONS_RECORD_TYPES, FINANCING_STRUCTURE };
+export { RECORDS as FUNDING_OPERATIONS_RECORD_TYPES, FINANCING_STAGES as FINANCING_STRUCTURE };
