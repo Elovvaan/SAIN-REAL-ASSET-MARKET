@@ -18,6 +18,16 @@ const RECORDS = Object.freeze({
   SETTLEMENT_PREPARATION: 'FUNDING_MARKETPLACE_SETTLEMENT_PREPARATION',
 });
 
+const FINANCING_STRUCTURE = Object.freeze([
+  'APPLICATION_OPPORTUNITY',
+  'UNDERWRITING',
+  'CREDIT_DECISION',
+  'DOCUMENTATION',
+  'CLOSING',
+  'FUNDING_DISBURSEMENT',
+  'SERVICING',
+]);
+
 function newest(records, limit = 25) {
   return [...records]
     .sort((a, b) => String(b.updatedAt || b.createdAt || b.recordedAt || '').localeCompare(String(a.updatedAt || a.createdAt || a.recordedAt || '')))
@@ -43,6 +53,10 @@ export class FundingOperationsService {
       opportunities: this.domain.list(RECORDS.OPPORTUNITY).length,
       activeQueueItems: this.queue().length,
     };
+  }
+
+  structure() {
+    return [...FINANCING_STRUCTURE];
   }
 
   queue(filters = {}) {
@@ -82,6 +96,7 @@ export class FundingOperationsService {
 
     return {
       opportunity,
+      structure: this.structure(),
       intake: {
         completeness: opportunity.completeness || null,
         evidence,
@@ -115,6 +130,7 @@ export class FundingOperationsService {
     }, {});
     return {
       generatedAt: new Date().toISOString(),
+      structure: this.structure(),
       metrics: {
         opportunities: opportunities.length,
         totalRequested,
@@ -135,4 +151,4 @@ export class FundingOperationsService {
   }
 }
 
-export { RECORDS as FUNDING_OPERATIONS_RECORD_TYPES };
+export { RECORDS as FUNDING_OPERATIONS_RECORD_TYPES, FINANCING_STRUCTURE };
