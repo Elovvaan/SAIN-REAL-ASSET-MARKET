@@ -51,8 +51,16 @@ function now() {
 
 export function normalizeFinancingStage(record = {}) {
   const explicit = String(record.financingStage || '').toUpperCase();
+
+  // Migrate removed authoritative stages forward
+  if (explicit === 'DOCUMENTATION' || explicit === 'VERIFICATION') {
+    return 'UNDERWRITING';
+  }
+
+  // If it's a current valid stage, return it
   if (FINANCING_STAGES.includes(explicit)) return explicit;
 
+  // Fall back to legacy status field
   return LEGACY_STAGE_MAP[
     String(record.status || '').toUpperCase()
   ] || 'APPLICATION';
