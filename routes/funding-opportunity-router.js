@@ -168,20 +168,6 @@ export function createFundingOpportunityRouter(service, documentService = null) 
     }
   });
 
-  router.post('/opportunities/:opportunityId/transition', async (req, res) => {
-    try {
-      const updated = await lifecycleService.transition(
-        req.params.opportunityId,
-        req.body?.toStage,
-        { source: req.body?.source || 'ADMIN_UNIFIED_OPERATIONS' },
-        actorId(req)
-      );
-      return res.json({ opportunity: updated });
-    } catch (error) {
-      return handle(res, error);
-    }
-  });
-
   router.get('/opportunities/:opportunityId/evidence', (req, res) => {
     try {
       const opportunity = service.get(req.params.opportunityId);
@@ -241,7 +227,11 @@ export function createFundingOpportunityRouter(service, documentService = null) 
         }, actorId(req));
         records.push({ document: stored.document, evidence });
       }
-      return res.status(201).json({ records, retentionPolicy: 'FINANCING_APPLICATION_EVIDENCE' });
+      const lifecycle = await lifecycleService.ensure(opportunity.opportunityId, actorId(req));
+      const advanced = lifecycle.financingStage === 'APPLICATION'
+        ? await lifecycleService.transition(opportunity.opportunityId, 'UNDERWRITING', { source: 'EVIDENCE_INGESTION' }, actorId(req))
+        : lifecycle;
+      return res.status(201).json({ records, retentionPolicy: 'FINANCING_APPLICATION_EVIDENCE', financingStage: advanced.financingStage });
     } catch (error) {
       return handle(res, error);
     }
