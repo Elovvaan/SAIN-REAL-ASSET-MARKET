@@ -25,6 +25,7 @@
     if (url.pathname !== '/api/admin/workspaces') return url;
     const requested = Number(url.searchParams.get('limit') || 0);
     if (!requested || requested > WORKSPACE_RECORD_LIMIT) url.searchParams.set('limit', String(WORKSPACE_RECORD_LIMIT));
+    url.searchParams.delete('_');
     return url;
   };
 
