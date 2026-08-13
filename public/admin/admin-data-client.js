@@ -141,7 +141,8 @@
     const timer = timeoutMs
       ? window.setTimeout(() => controller.abort(new DOMException('Administration request timed out.', 'TimeoutError')), timeoutMs)
       : null;
-    if (controller && externalSignal) {
+    const honorExternalSignal = !(isAdminRequest && SAFE_METHODS.has(method));
+    if (controller && externalSignal && honorExternalSignal) {
       if (externalSignal.aborted) controller.abort(externalSignal.reason);
       else externalSignal.addEventListener('abort', () => controller.abort(externalSignal.reason), { once: true });
     }
@@ -150,7 +151,7 @@
         ...options,
         credentials: isAdminRequest ? 'include' : (options.credentials || 'same-origin'),
         cache: isAdminRequest ? 'no-store' : (options.cache || 'default'),
-        signal: controller?.signal || externalSignal,
+        signal: controller?.signal || (honorExternalSignal ? externalSignal : undefined),
       });
       if (isAdminRequest && !isSessionProbe && response.status === 401) markSessionExpired();
       if (isAdminRequest && response.ok && sessionExpired && !SAFE_METHODS.has(method)) markSessionRestored();
@@ -169,7 +170,7 @@
         headers: { 'Content-Type': 'application/json' },
       });
     } catch (error) {
-      const timedOut = controller?.signal.aborted && !externalSignal?.aborted;
+      const timedOut = controller?.signal.aborted && !(externalSignal?.aborted && honorExternalSignal);
       if (timedOut && governed === 'NATIVE_PLATFORM_ASSET_BOOTSTRAP') {
         const reconciled = await reconcileNativePlatformAsset();
         if (reconciled) return reconciled;
