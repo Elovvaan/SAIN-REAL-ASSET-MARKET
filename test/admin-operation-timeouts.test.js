@@ -14,7 +14,12 @@ test('Administration requests use operation-aware timeout boundaries', () => {
 
 test('non-Administration fetches are not assigned the Administration timeout', () => {
   assert.match(source, /if \(!isAdminRequest\) return 0/);
-  assert.match(source, /controller\?\.signal \|\| externalSignal/);
+});
+
+test('Administration reads keep the centralized timeout when a caller supplies a shorter abort signal', () => {
+  assert.match(source, /const honorExternalSignal = !\(isAdminRequest && SAFE_METHODS\.has\(method\)\)/);
+  assert.match(source, /externalSignal && honorExternalSignal/);
+  assert.match(source, /signal: controller\?\.signal \|\| \(honorExternalSignal \? externalSignal : undefined\)/);
 });
 
 test('timeout errors distinguish reads from governed actions', () => {
