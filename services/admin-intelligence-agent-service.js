@@ -1,338 +1,58 @@
 import { scanProductLifecycleProgress } from './product-lifecycle-progress-service.js';
 import { explainAdminState } from './admin-state-explanation-service.js';
+import { SraNeuralCoreService } from './sra-neural-core-service.js';
 
 const PRODUCT_DEFINITION = 'SRA_PRODUCT_DEFINITION';
-
 const PRODUCT_ALIASES = Object.freeze({
-  'TRUE BILL': 'TRUE_BILL',
-  'TRUE_BILL': 'TRUE_BILL',
-  'COMMERCIAL PAPER': 'COMMERCIAL_PAPER',
-  'ASSET BACKED NOTE': 'ASSET_BACKED_NOTE',
-  'ASSET-BACKED NOTE': 'ASSET_BACKED_NOTE',
-  'INVOICE FINANCE': 'INVOICE_FINANCE_INSTRUMENT',
-  'PURCHASE ORDER': 'PURCHASE_ORDER_INSTRUMENT',
-  'WORKING CAPITAL': 'WORKING_CAPITAL_NOTE',
-  'EQUIPMENT FINANCE': 'EQUIPMENT_FINANCE_INSTRUMENT',
-  'CONSTRUCTION FUNDING': 'CONSTRUCTION_FUNDING_NOTE',
-  'REVENUE PARTICIPATION': 'REVENUE_PARTICIPATION_INSTRUMENT',
-  'PARTICIPATION POSITION': 'PARTICIPATION_POSITION',
+  'TRUE BILL':'TRUE_BILL','TRUE_BILL':'TRUE_BILL','COMMERCIAL PAPER':'COMMERCIAL_PAPER','ASSET BACKED NOTE':'ASSET_BACKED_NOTE','ASSET-BACKED NOTE':'ASSET_BACKED_NOTE','INVOICE FINANCE':'INVOICE_FINANCE_INSTRUMENT','PURCHASE ORDER':'PURCHASE_ORDER_INSTRUMENT','WORKING CAPITAL':'WORKING_CAPITAL_NOTE','EQUIPMENT FINANCE':'EQUIPMENT_FINANCE_INSTRUMENT','CONSTRUCTION FUNDING':'CONSTRUCTION_FUNDING_NOTE','REVENUE PARTICIPATION':'REVENUE_PARTICIPATION_INSTRUMENT','PARTICIPATION POSITION':'PARTICIPATION_POSITION',
 });
+const STAGE_LABELS = Object.freeze({ instrument:'instrument issuance', listing:'marketplace listing', participation:'participation', commitment:'commitment', allocation:'allocation', settlement:'settlement', ownershipRecognition:'ownership recognition', exportPackage:'ready-for-export packaging' });
+const PROTECTED_STAGES = new Set(['instrument','listing','allocation','settlement','ownershipRecognition','exportPackage']);
 
-const STAGE_LABELS = Object.freeze({
-  instrument: 'instrument issuance',
-  listing: 'marketplace listing',
-  participation: 'participation',
-  commitment: 'commitment',
-  allocation: 'allocation',
-  settlement: 'settlement',
-  ownershipRecognition: 'ownership recognition',
-  exportPackage: 'ready-for-export packaging',
-});
-
-const PROTECTED_STAGES = new Set([
-  'instrument', 'listing', 'allocation', 'settlement', 'ownershipRecognition', 'exportPackage',
-]);
-
-function cleanQuestion(value) {
-  const question = String(value || '').trim();
-  if (!question) throw new Error('question is required.');
-  if (question.length > 2000) throw new Error('question exceeds the 2000 character limit.');
-  return question;
-}
-
-function normalizedLabel(value) {
-  return String(value || '').toUpperCase().replace(/[_-]+/g, ' ').replace(/[^A-Z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
-}
-
-function activeProductDefinitions(domain) {
-  return domain.list(PRODUCT_DEFINITION)
-    .filter((record) => String(record?.state || '').toUpperCase() === 'ACTIVE')
-    .filter((record) => String(record?.productCode || '').trim());
-}
-
-function productIndex(domain) {
-  const index = new Map();
-  for (const [label, code] of Object.entries(PRODUCT_ALIASES)) index.set(normalizedLabel(label), String(code).toUpperCase());
-  for (const definition of activeProductDefinitions(domain)) {
-    const code = String(definition.productCode).toUpperCase();
-    index.set(normalizedLabel(code), code);
-    if (definition.name) index.set(normalizedLabel(definition.name), code);
-  }
-  return index;
-}
-
-function detectProduct(domain, question) {
-  const normalizedQuestion = normalizedLabel(question);
-  const matches = [...productIndex(domain).entries()]
-    .filter(([label]) => label && normalizedQuestion.includes(label))
-    .sort((left, right) => right[0].length - left[0].length);
-  return matches[0]?.[1] || null;
-}
-
-function allProductCodes(domain) {
-  return [...new Set([
-    ...Object.values(PRODUCT_ALIASES).map((value) => String(value).toUpperCase()),
-    ...activeProductDefinitions(domain).map((record) => String(record.productCode).toUpperCase()),
-  ])];
-}
-
-function intent(question, productCode) {
-  const normalized = question.toLowerCase();
-  if (/(operational brief|operations brief|what needs attention|incomplete workflows|next actions|what should i do next|work queue)/.test(normalized)) return 'OPERATIONAL_BRIEF';
-  if (productCode && /(where|status|stage|progress|far|ready|block|missing|next|why)/.test(normalized)) return 'PRODUCT_LIFECYCLE';
-  if (/(what.*need.*approval|approval|approve|human.*loop|my action)/.test(normalized)) return 'APPROVALS';
-  if (/(platform|system).*(status|health|doing|summary)|how.*platform/.test(normalized)) return 'PLATFORM_SUMMARY';
-  if (/(what can you|help|capabilit|who are you)/.test(normalized)) return 'CAPABILITIES';
-  return productCode ? 'PRODUCT_LIFECYCLE' : 'UNKNOWN';
-}
-
-function nextActionFor(chain) {
-  if (!chain) return null;
-  if (!chain.firstMissing) return { stage: null, label: 'No internal lifecycle stage is missing.', authority: 'NONE', autonomous: true };
-  const protectedAction = PROTECTED_STAGES.has(chain.firstMissing);
-  return {
-    stage: chain.firstMissing,
-    label: `Advance the product to ${STAGE_LABELS[chain.firstMissing] || chain.firstMissing}.`,
-    authority: protectedAction ? 'ADMIN_APPROVAL_REQUIRED' : 'SRA_AGENT_AUTONOMOUS',
-    autonomous: !protectedAction,
-  };
-}
-
-function productAnswer(progress) {
-  if (!progress.instrumentCount) {
-    return {
-      answer: `SRA does not currently contain an instrument for ${progress.productCode}. The lifecycle has not started for this product.`,
-      status: 'NOT_STARTED',
-      blockers: ['NO_INSTRUMENT'],
-      nextAction: { stage: 'instrument', label: `Create and approve the first ${progress.productCode} instrument from a recognized financial record.`, authority: 'ADMIN_APPROVAL_REQUIRED', autonomous: false },
-      references: [],
-    };
-  }
-  const lead = progress.chains[0];
-  const completed = lead.completedStages.map((stage) => STAGE_LABELS[stage] || stage);
-  const missing = lead.firstMissing;
-  const stageText = missing
-    ? `It has completed ${completed.join(', ')}. The first missing stage is ${STAGE_LABELS[missing] || missing}.`
-    : 'It has completed every internal lifecycle stage and is ready for export.';
-  return {
-    answer: `SRA found ${progress.instrumentCount} instrument${progress.instrumentCount === 1 ? '' : 's'} for ${progress.productCode} across ${progress.instrumentFamilies.join(', ')}. The furthest chain is ${lead.instrumentId}. ${stageText}`,
-    status: lead.readyForExport ? 'READY_FOR_EXPORT' : 'IN_PROGRESS',
-    blockers: missing ? [`MISSING_${String(missing).replace(/([A-Z])/g, '_$1').toUpperCase()}`] : [],
-    nextAction: nextActionFor(lead),
-    references: Object.entries(lead.stages).filter(([, stage]) => stage?.id).map(([stage, record]) => ({ stage, recordId: record.id, state: record.state })),
-  };
-}
+function cleanQuestion(value){const question=String(value||'').trim();if(!question)throw new Error('question is required.');if(question.length>2000)throw new Error('question exceeds the 2000 character limit.');return question;}
+function normalizedLabel(value){return String(value||'').toUpperCase().replace(/[_-]+/g,' ').replace(/[^A-Z0-9 ]+/g,' ').replace(/\s+/g,' ').trim();}
+function activeProductDefinitions(domain){return domain.list(PRODUCT_DEFINITION).filter(r=>String(r?.state||'').toUpperCase()==='ACTIVE').filter(r=>String(r?.productCode||'').trim());}
+function productIndex(domain){const index=new Map();for(const[label,code]of Object.entries(PRODUCT_ALIASES))index.set(normalizedLabel(label),String(code).toUpperCase());for(const definition of activeProductDefinitions(domain)){const code=String(definition.productCode).toUpperCase();index.set(normalizedLabel(code),code);if(definition.name)index.set(normalizedLabel(definition.name),code);}return index;}
+function detectProduct(domain,question){const normalizedQuestion=normalizedLabel(question);return[...productIndex(domain).entries()].filter(([label])=>label&&normalizedQuestion.includes(label)).sort((a,b)=>b[0].length-a[0].length)[0]?.[1]||null;}
+function allProductCodes(domain){return[...new Set([...Object.values(PRODUCT_ALIASES).map(v=>String(v).toUpperCase()),...activeProductDefinitions(domain).map(r=>String(r.productCode).toUpperCase())])];}
+function intent(question,productCode){const n=question.toLowerCase();if(/(operational brief|operations brief|what needs attention|incomplete workflows|next actions|what should i do next|work queue)/.test(n))return'OPERATIONAL_BRIEF';if(productCode&&/(where|status|stage|progress|far|ready|block|missing|next|why)/.test(n))return'PRODUCT_LIFECYCLE';if(/(what.*need.*approval|approval|approve|human.*loop|my action)/.test(n))return'APPROVALS';if(/(platform|system).*(status|health|doing|summary)|how.*platform/.test(n))return'PLATFORM_SUMMARY';if(/(what can you|help|capabilit|who are you)/.test(n))return'CAPABILITIES';return productCode?'PRODUCT_LIFECYCLE':'UNKNOWN';}
+function nextActionFor(chain){if(!chain)return null;if(!chain.firstMissing)return{stage:null,label:'No internal lifecycle stage is missing.',authority:'NONE',autonomous:true};const protectedAction=PROTECTED_STAGES.has(chain.firstMissing);return{stage:chain.firstMissing,label:`Advance the product to ${STAGE_LABELS[chain.firstMissing]||chain.firstMissing}.`,authority:protectedAction?'ADMIN_APPROVAL_REQUIRED':'SRA_AGENT_AUTONOMOUS',autonomous:!protectedAction};}
+function productAnswer(progress){if(!progress.instrumentCount)return{answer:`SRA does not currently contain an instrument for ${progress.productCode}. The lifecycle has not started for this product.`,status:'NOT_STARTED',blockers:['NO_INSTRUMENT'],nextAction:{stage:'instrument',label:`Create and approve the first ${progress.productCode} instrument from a recognized financial record.`,authority:'ADMIN_APPROVAL_REQUIRED',autonomous:false},references:[]};const lead=progress.chains[0],completed=lead.completedStages.map(stage=>STAGE_LABELS[stage]||stage),missing=lead.firstMissing,stageText=missing?`It has completed ${completed.join(', ')}. The first missing stage is ${STAGE_LABELS[missing]||missing}.`:'It has completed every internal lifecycle stage and is ready for export.';return{answer:`SRA found ${progress.instrumentCount} instrument${progress.instrumentCount===1?'':'s'} for ${progress.productCode} across ${progress.instrumentFamilies.join(', ')}. The furthest chain is ${lead.instrumentId}. ${stageText}`,status:lead.readyForExport?'READY_FOR_EXPORT':'IN_PROGRESS',blockers:missing?[`MISSING_${String(missing).replace(/([A-Z])/g,'_$1').toUpperCase()}`]:[],nextAction:nextActionFor(lead),references:Object.entries(lead.stages).filter(([,stage])=>stage?.id).map(([stage,record])=>({stage,recordId:record.id,state:record.state}))};}
 
 export class AdminIntelligenceAgentService {
-  constructor({ domain, database = null, productQualification = null }) {
-    this.domain = domain;
-    this.database = database;
-    this.productQualification = productQualification;
+  constructor({domain,database=null,productQualification=null}){this.domain=domain;this.database=database;this.productQualification=productQualification;this.neuralCore=new SraNeuralCoreService({domain,database});this.neuralReady=null;}
+  async ensureNeural(){if(!this.neuralReady)this.neuralReady=this.neuralCore.initialize();await this.neuralReady;return this.neuralCore;}
+  capabilities(){return{agent:'SRA_ADMIN_INTELLIGENCE_AGENT',mode:'THREE_LEVEL_NEURAL_CONTROL',writeAuthority:'HUMAN_IN_THE_LOOP',neuralLevels:{copilot:'READ_AND_RECOMMEND',orchestrator:'PLAN_PREPARE_AND_HANDOFF_WITH_GATES',adaptiveInstitutionalIntelligence:'LEARN_AND_ADVISE_ONLY'},can:['ANSWER_PLATFORM_STATUS','GENERATE_OPERATIONAL_BRIEF','DISCOVER_REGISTERED_PRODUCTS','TRACE_PRODUCT_LIFECYCLES','IDENTIFY_BLOCKERS','RECOMMEND_NEXT_ACTION','IDENTIFY_APPROVAL_BOUNDARIES','CITE_INTERNAL_RECORDS','EXPLAIN_ASSET_EXPORTABILITY','TRACE_ASSET_RELATIONSHIPS','SIMULATE_APPROVAL_IMPACT','CREATE_ORCHESTRATION_PLAN','APPROVE_ORCHESTRATION_PLAN','DISPATCH_GOVERNED_HANDOFFS','CAPTURE_INSTITUTIONAL_OUTCOMES','TRAIN_ADAPTIVE_NEURAL_MODEL','FORECAST_WORKFLOW_COMPLETION','GENERATE_INSTITUTIONAL_INSIGHTS'],cannotWithoutApproval:['ISSUE_INSTRUMENT','PUBLISH_LISTING','ALLOCATE_POSITION','CONFIRM_SETTLEMENT','RECOGNIZE_OWNERSHIP','CREATE_EXPORT_PACKAGE','APPROVE_FINANCING','AUTHORIZE_FUNDING','EXECUTE_SETTLEMENT']};}
+
+  async neuralAction(input={},actor={}){
+    const core=await this.ensureNeural(),action=String(input.action||'').toUpperCase();
+    if(action==='NEURAL_STATUS')return core.capabilities();
+    if(action==='CREATE_ORCHESTRATION_PLAN')return core.createPlan(input,actor);
+    if(action==='APPROVE_ORCHESTRATION_PLAN')return core.approvePlan(String(input.planId||''),input,actor);
+    if(action==='DISPATCH_ORCHESTRATION_PLAN')return core.dispatchPlan(String(input.planId||''),actor);
+    if(action==='CAPTURE_NEURAL_OUTCOME')return core.captureOutcome(input,actor);
+    if(action==='TRAIN_ADAPTIVE_MODEL')return core.trainAdaptiveModel(input,actor);
+    if(action==='FORECAST_OPPORTUNITY')return core.forecastOpportunity(String(input.opportunityId||''));
+    if(action==='INSTITUTIONAL_INSIGHTS')return core.institutionalInsights();
+    if(action==='LIST_ORCHESTRATION_PLANS')return{records:core.listPlans({status:input.status,opportunityId:input.opportunityId})};
+    throw new Error(`Unsupported neural action: ${action}`);
   }
 
-  capabilities() {
-    return {
-      agent: 'SRA_ADMIN_INTELLIGENCE_AGENT',
-      mode: 'AUTONOMOUS_READ_AND_REASON',
-      writeAuthority: 'HUMAN_IN_THE_LOOP',
-      can: [
-        'ANSWER_PLATFORM_STATUS',
-        'GENERATE_OPERATIONAL_BRIEF',
-        'DISCOVER_REGISTERED_PRODUCTS',
-        'TRACE_PRODUCT_LIFECYCLES',
-        'IDENTIFY_BLOCKERS',
-        'RECOMMEND_NEXT_ACTION',
-        'IDENTIFY_APPROVAL_BOUNDARIES',
-        'CITE_INTERNAL_RECORDS',
-        'EXPLAIN_ASSET_EXPORTABILITY',
-        'TRACE_ASSET_RELATIONSHIPS',
-        'SIMULATE_APPROVAL_IMPACT',
-      ],
-      delegatedAgents: [],
-      cannotWithoutApproval: [
-        'ISSUE_INSTRUMENT',
-        'PUBLISH_LISTING',
-        'ALLOCATE_POSITION',
-        'CONFIRM_SETTLEMENT',
-        'RECOGNIZE_OWNERSHIP',
-        'CREATE_EXPORT_PACKAGE',
-      ],
-    };
-  }
+  platformSummary(){const snapshotAt=new Date().toISOString(),selected={MARKET_OBSERVATION:this.domain.list('MARKET_OBSERVATION').length,RECOGNITION_ASSESSMENT:this.domain.list('RECOGNITION_ASSESSMENT').length,FINANCIAL_RECORD:this.domain.list('FINANCIAL_RECORD').length,COIN_POSITION:this.domain.list('COIN_POSITION').length,SRA_INSTRUMENT:this.domain.list('SRA_INSTRUMENT').length,MARKETPLACE_LISTING:this.domain.list('MARKETPLACE_LISTING').length,PARTICIPATION_POSITION:this.domain.list('PARTICIPATION_POSITION').length,FUNDING_MARKETPLACE_COMMITMENT:this.domain.list('FUNDING_MARKETPLACE_COMMITMENT').length,FUNDING_MARKETPLACE_POSITION:this.domain.list('FUNDING_MARKETPLACE_POSITION').length,SRA_SETTLEMENT_RECORD:this.domain.list('SRA_SETTLEMENT_RECORD').length,OWNERSHIP_RECOGNITION:this.domain.list('OWNERSHIP_RECOGNITION').length,EXPORT_PACKAGE:this.domain.list('EXPORT_PACKAGE').length},lifecycleTotal=Object.values(selected).reduce((sum,v)=>sum+Number(v||0),0);return{answer:`Live SRA snapshot as of ${snapshotAt}: ${selected.MARKET_OBSERVATION} observations, ${selected.RECOGNITION_ASSESSMENT} recognitions, ${selected.FINANCIAL_RECORD} financial records, ${selected.COIN_POSITION} Coin Positions, ${selected.SRA_INSTRUMENT} instruments, ${selected.MARKETPLACE_LISTING} marketplace listings, ${selected.SRA_SETTLEMENT_RECORD} settlement records, ${selected.OWNERSHIP_RECOGNITION} ownership recognitions, and ${selected.EXPORT_PACKAGE} export-ready packages. This snapshot contains ${lifecycleTotal} stage records in total; that total is a sum across lifecycle stages, not a count of unique assets.`,status:'AVAILABLE',snapshotAt,counts:selected,lifecycleTotal,countMeaning:'SUM_OF_STAGE_RECORDS_NOT_UNIQUE_ASSETS',nextAction:null,blockers:[],references:[]};}
+  approvalSummary(){const pending=[];for(const productCode of allProductCodes(this.domain)){const progress=scanProductLifecycleProgress(this.domain,productCode);for(const chain of progress.chains||[]){const action=nextActionFor(chain);if(action?.authority==='ADMIN_APPROVAL_REQUIRED')pending.push({productCode,instrumentId:chain.instrumentId,...action});}}return{answer:pending.length?`SRA identified ${pending.length} action${pending.length===1?'':'s'} at a human approval or review boundary.`:'SRA did not identify a currently reachable action requiring administrator approval.',status:pending.length?'APPROVAL_REQUIRED':'NO_PENDING_APPROVAL',pendingActions:pending,blockers:[],references:pending.filter(i=>i.instrumentId).map(i=>({stage:i.stage,recordId:i.instrumentId,state:i.authority||null})),nextAction:pending[0]||null};}
+  operationalBrief(){const snapshot=this.platformSummary(),approvals=this.approvalSummary(),workflows=[];for(const productCode of allProductCodes(this.domain)){const progress=scanProductLifecycleProgress(this.domain,productCode);for(const chain of progress.chains||[]){if(!chain.firstMissing)continue;const action=nextActionFor(chain);workflows.push({productCode,instrumentId:chain.instrumentId,completedStages:chain.completedStages,firstMissing:chain.firstMissing,blocker:`MISSING_${String(chain.firstMissing).replace(/([A-Z])/g,'_$1').toUpperCase()}`,nextAction:action});}}workflows.sort((a,b)=>Number(Boolean(String(b.nextAction?.authority||'').startsWith('ADMIN_')))-Number(Boolean(String(a.nextAction?.authority||'').startsWith('ADMIN_')))||String(a.productCode).localeCompare(String(b.productCode)));const autonomous=workflows.filter(i=>i.nextAction?.authority==='SRA_AGENT_AUTONOMOUS'),protectedQueue=workflows.filter(i=>String(i.nextAction?.authority||'').startsWith('ADMIN_')),readyForExport=snapshot.counts.EXPORT_PACKAGE,attention=protectedQueue.length+autonomous.length,answer=attention?`Operational brief as of ${snapshot.snapshotAt}: ${readyForExport} export-ready package${readyForExport===1?'':'s'}, ${protectedQueue.length} action${protectedQueue.length===1?'':'s'} waiting at an administrator boundary, and ${autonomous.length} reachable internal action${autonomous.length===1?'':'s'}. The highest-priority next action is ${workflows[0]?.nextAction?.label||'not available'}`:`Operational brief as of ${snapshot.snapshotAt}: ${readyForExport} export-ready package${readyForExport===1?'':'s'} and no currently reachable incomplete workflow requires attention.`;return{answer,status:attention?'ATTENTION_REQUIRED':'CLEAR',snapshotAt:snapshot.snapshotAt,counts:snapshot.counts,pendingActions:approvals.pendingActions,incompleteWorkflows:workflows,administratorQueue:protectedQueue,autonomousQueue:autonomous,delegatedAgents:{neuralCore:this.neuralCore.status()},nextAction:workflows[0]?.nextAction||null,blockers:workflows.map(i=>i.blocker),references:workflows.filter(i=>i.instrumentId).map(i=>({stage:i.firstMissing,recordId:i.instrumentId,state:'INCOMPLETE'}))};}
 
-  platformSummary() {
-    const snapshotAt = new Date().toISOString();
-    const selected = {
-      MARKET_OBSERVATION: this.domain.list('MARKET_OBSERVATION').length,
-      RECOGNITION_ASSESSMENT: this.domain.list('RECOGNITION_ASSESSMENT').length,
-      FINANCIAL_RECORD: this.domain.list('FINANCIAL_RECORD').length,
-      COIN_POSITION: this.domain.list('COIN_POSITION').length,
-      SRA_INSTRUMENT: this.domain.list('SRA_INSTRUMENT').length,
-      MARKETPLACE_LISTING: this.domain.list('MARKETPLACE_LISTING').length,
-      PARTICIPATION_POSITION: this.domain.list('PARTICIPATION_POSITION').length,
-      FUNDING_MARKETPLACE_COMMITMENT: this.domain.list('FUNDING_MARKETPLACE_COMMITMENT').length,
-      FUNDING_MARKETPLACE_POSITION: this.domain.list('FUNDING_MARKETPLACE_POSITION').length,
-      SRA_SETTLEMENT_RECORD: this.domain.list('SRA_SETTLEMENT_RECORD').length,
-      OWNERSHIP_RECOGNITION: this.domain.list('OWNERSHIP_RECOGNITION').length,
-      EXPORT_PACKAGE: this.domain.list('EXPORT_PACKAGE').length,
-    };
-    const lifecycleTotal = Object.values(selected).reduce((sum, value) => sum + Number(value || 0), 0);
-    return {
-      answer: `Live SRA snapshot as of ${snapshotAt}: ${selected.MARKET_OBSERVATION} observations, ${selected.RECOGNITION_ASSESSMENT} recognitions, ${selected.FINANCIAL_RECORD} financial records, ${selected.COIN_POSITION} Coin Positions, ${selected.SRA_INSTRUMENT} instruments, ${selected.MARKETPLACE_LISTING} marketplace listings, ${selected.SRA_SETTLEMENT_RECORD} settlement records, ${selected.OWNERSHIP_RECOGNITION} ownership recognitions, and ${selected.EXPORT_PACKAGE} export-ready packages. This snapshot contains ${lifecycleTotal} stage records in total; that total is a sum across lifecycle stages, not a count of unique assets.`,
-      status: 'AVAILABLE',
-      snapshotAt,
-      counts: selected,
-      lifecycleTotal,
-      countMeaning: 'SUM_OF_STAGE_RECORDS_NOT_UNIQUE_ASSETS',
-      nextAction: null,
-      blockers: [],
-      references: [],
-    };
-  }
-
-  approvalSummary() {
-    const pending = [];
-    for (const productCode of allProductCodes(this.domain)) {
-      const progress = scanProductLifecycleProgress(this.domain, productCode);
-      for (const chain of progress.chains || []) {
-        const action = nextActionFor(chain);
-        if (action?.authority === 'ADMIN_APPROVAL_REQUIRED') pending.push({ productCode, instrumentId: chain.instrumentId, ...action });
-      }
-    }
-    return {
-      answer: pending.length
-        ? `SRA identified ${pending.length} action${pending.length === 1 ? '' : 's'} at a human approval or review boundary.`
-        : 'SRA did not identify a currently reachable action requiring administrator approval.',
-      status: pending.length ? 'APPROVAL_REQUIRED' : 'NO_PENDING_APPROVAL',
-      pendingActions: pending,
-      blockers: [],
-      references: pending.filter((item) => item.instrumentId).map((item) => ({ stage: item.stage, recordId: item.instrumentId, state: item.authority || null })),
-      nextAction: pending[0] || null,
-    };
-  }
-
-  operationalBrief() {
-    const snapshot = this.platformSummary();
-    const approvals = this.approvalSummary();
-    const workflows = [];
-    for (const productCode of allProductCodes(this.domain)) {
-      const progress = scanProductLifecycleProgress(this.domain, productCode);
-      for (const chain of progress.chains || []) {
-        if (!chain.firstMissing) continue;
-        const action = nextActionFor(chain);
-        workflows.push({
-          productCode,
-          instrumentId: chain.instrumentId,
-          completedStages: chain.completedStages,
-          firstMissing: chain.firstMissing,
-          blocker: `MISSING_${String(chain.firstMissing).replace(/([A-Z])/g, '_$1').toUpperCase()}`,
-          nextAction: action,
-        });
-      }
-    }
-    workflows.sort((a, b) => Number(Boolean(String(b.nextAction?.authority || '').startsWith('ADMIN_'))) - Number(Boolean(String(a.nextAction?.authority || '').startsWith('ADMIN_'))) || String(a.productCode).localeCompare(String(b.productCode)));
-    const autonomous = workflows.filter((item) => item.nextAction?.authority === 'SRA_AGENT_AUTONOMOUS');
-    const protectedQueue = workflows.filter((item) => String(item.nextAction?.authority || '').startsWith('ADMIN_'));
-    const readyForExport = snapshot.counts.EXPORT_PACKAGE;
-    const attention = protectedQueue.length + autonomous.length;
-    const answer = attention
-      ? `Operational brief as of ${snapshot.snapshotAt}: ${readyForExport} export-ready package${readyForExport === 1 ? '' : 's'}, ${protectedQueue.length} action${protectedQueue.length === 1 ? '' : 's'} waiting at an administrator boundary, and ${autonomous.length} reachable internal action${autonomous.length === 1 ? '' : 's'}. The highest-priority next action is ${workflows[0]?.nextAction?.label || 'not available'}`
-      : `Operational brief as of ${snapshot.snapshotAt}: ${readyForExport} export-ready package${readyForExport === 1 ? '' : 's'} and no currently reachable incomplete workflow requires attention.`;
-    return {
-      answer,
-      status: attention ? 'ATTENTION_REQUIRED' : 'CLEAR',
-      snapshotAt: snapshot.snapshotAt,
-      counts: snapshot.counts,
-      pendingActions: approvals.pendingActions,
-      incompleteWorkflows: workflows,
-      administratorQueue: protectedQueue,
-      autonomousQueue: autonomous,
-      delegatedAgents: {},
-      nextAction: workflows[0]?.nextAction || null,
-      blockers: workflows.map((item) => item.blocker),
-      references: workflows.filter((item) => item.instrumentId).map((item) => ({ stage: item.firstMissing, recordId: item.instrumentId, state: 'INCOMPLETE' })),
-    };
-  }
-
-  async ask(input = {}, actor = {}) {
-    const question = cleanQuestion(input.question);
-    const stateExplanation = explainAdminState(this.domain, question);
-    if (stateExplanation) {
-      const response = {
-        agent: 'SRA_ADMIN_INTELLIGENCE_AGENT',
-        question,
-        intent: stateExplanation.intent,
-        productCode: null,
-        authorityMode: 'HUMAN_IN_THE_LOOP',
-        actor: { id: actor.id || null, displayName: actor.displayName || null },
-        answeredAt: new Date().toISOString(),
-        ...stateExplanation,
-      };
-      if (this.database?.audit) {
-        await this.database.audit({
-          actorId: actor.id || 'SRA_PLATFORM_ADMIN',
-          eventType: 'ADMIN_AGENT_QUESTION_ANSWERED',
-          objectType: 'SRA_ADMIN_INTELLIGENCE_AGENT',
-          objectId: stateExplanation.subject?.reference || stateExplanation.intent,
-          payload: {
-            intent: stateExplanation.intent,
-            status: response.status,
-            referenceCount: response.references?.length || 0,
-            readOnlySimulation: Boolean(response.simulation?.readOnly),
-          },
-        });
-      }
-      return response;
-    }
-
-    const requestedCode = input.productCode ? String(input.productCode).toUpperCase() : null;
-    const productCode = requestedCode || detectProduct(this.domain, question);
-    const detectedIntent = intent(question, productCode);
-    let result;
-    if (detectedIntent === 'PRODUCT_LIFECYCLE') {
-      const progress = scanProductLifecycleProgress(this.domain, productCode);
-      result = { ...productAnswer(progress), data: progress };
-    } else if (detectedIntent === 'OPERATIONAL_BRIEF') result = this.operationalBrief();
-    else if (detectedIntent === 'PLATFORM_SUMMARY') result = this.platformSummary();
-    else if (detectedIntent === 'APPROVALS') result = this.approvalSummary();
-    else if (detectedIntent === 'CAPABILITIES') {
-      result = {
-        answer: 'I can generate an operational brief, discover registered SRA products, read operational records, trace product lifecycles, identify blockers, explain asset exportability and relationships, simulate approval impact, and tell you when administrator approval is required.',
-        status: 'AVAILABLE',
-        capabilities: this.capabilities(),
-        blockers: [],
-        references: [],
-        nextAction: null,
-      };
-    } else {
-      result = {
-        answer: 'I could not identify the product or operational subject in that question. Name the product or instrument, or ask for an operational brief, platform status, blockers, relationships, next actions, or pending approvals.',
-        status: 'NEEDS_CONTEXT',
-        blockers: ['QUESTION_NOT_RESOLVED'],
-        references: [],
-        nextAction: null,
-      };
-    }
-
-    const response = {
-      agent: 'SRA_ADMIN_INTELLIGENCE_AGENT',
-      question,
-      intent: detectedIntent,
-      productCode,
-      authorityMode: 'HUMAN_IN_THE_LOOP',
-      actor: { id: actor.id || null, displayName: actor.displayName || null },
-      answeredAt: new Date().toISOString(),
-      ...result,
-    };
-    if (this.database?.audit) {
-      await this.database.audit({
-        actorId: actor.id || 'SRA_PLATFORM_ADMIN',
-        eventType: 'ADMIN_AGENT_QUESTION_ANSWERED',
-        objectType: 'SRA_ADMIN_INTELLIGENCE_AGENT',
-        objectId: productCode || detectedIntent,
-        payload: { intent: detectedIntent, productCode, status: response.status, referenceCount: response.references?.length || 0 },
-      });
-    }
-    return response;
+  async ask(input={},actor={}){
+    if(input.action)return{agent:'SRA_ADMIN_INTELLIGENCE_AGENT',neuralMode:true,authorityMode:'HUMAN_IN_THE_LOOP',actor:{id:actor.id||null,displayName:actor.displayName||null},answeredAt:new Date().toISOString(),...(await this.neuralAction(input,actor))};
+    const question=cleanQuestion(input.question),stateExplanation=explainAdminState(this.domain,question);
+    if(stateExplanation){const response={agent:'SRA_ADMIN_INTELLIGENCE_AGENT',question,intent:stateExplanation.intent,productCode:null,authorityMode:'HUMAN_IN_THE_LOOP',actor:{id:actor.id||null,displayName:actor.displayName||null},answeredAt:new Date().toISOString(),...stateExplanation};if(this.database?.audit)await this.database.audit({actorId:actor.id||'SRA_PLATFORM_ADMIN',eventType:'ADMIN_AGENT_QUESTION_ANSWERED',objectType:'SRA_ADMIN_INTELLIGENCE_AGENT',objectId:stateExplanation.subject?.reference||stateExplanation.intent,payload:{intent:stateExplanation.intent,status:response.status,referenceCount:response.references?.length||0,readOnlySimulation:Boolean(response.simulation?.readOnly)}});return response;}
+    const requestedCode=input.productCode?String(input.productCode).toUpperCase():null,productCode=requestedCode||detectProduct(this.domain,question),detectedIntent=intent(question,productCode);let result;
+    if(detectedIntent==='PRODUCT_LIFECYCLE'){const progress=scanProductLifecycleProgress(this.domain,productCode);result={...productAnswer(progress),data:progress};}
+    else if(detectedIntent==='OPERATIONAL_BRIEF')result=this.operationalBrief();
+    else if(detectedIntent==='PLATFORM_SUMMARY')result=this.platformSummary();
+    else if(detectedIntent==='APPROVALS')result=this.approvalSummary();
+    else if(detectedIntent==='CAPABILITIES')result={answer:'I operate as a three-level SRA neural core: Copilot for read/recommend, Orchestrator for governed planning and handoff, and Adaptive Institutional Intelligence for outcome learning and advisory neural forecasts. Governed SRA services remain authoritative for financial decisions and settlement.',status:'AVAILABLE',capabilities:{...this.capabilities(),neuralCore:(await this.ensureNeural()).capabilities()},blockers:[],references:[],nextAction:null};
+    else result={answer:'I could not identify the product or operational subject in that question. Name the product or instrument, or ask for an operational brief, platform status, blockers, relationships, next actions, pending approvals, orchestration, or institutional intelligence.',status:'NEEDS_CONTEXT',blockers:['QUESTION_NOT_RESOLVED'],references:[],nextAction:null};
+    const response={agent:'SRA_ADMIN_INTELLIGENCE_AGENT',question,intent:detectedIntent,productCode,authorityMode:'HUMAN_IN_THE_LOOP',actor:{id:actor.id||null,displayName:actor.displayName||null},answeredAt:new Date().toISOString(),...result};if(this.database?.audit)await this.database.audit({actorId:actor.id||'SRA_PLATFORM_ADMIN',eventType:'ADMIN_AGENT_QUESTION_ANSWERED',objectType:'SRA_ADMIN_INTELLIGENCE_AGENT',objectId:productCode||detectedIntent,payload:{intent:detectedIntent,productCode,status:response.status,referenceCount:response.references?.length||0}});return response;
   }
 }

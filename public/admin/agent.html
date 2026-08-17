@@ -3,128 +3,41 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>SRA Admin Intelligence Agent</title>
+  <title>SRA Neural Core</title>
   <style>
-    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
-    * { box-sizing: border-box; }
-    body { margin: 0; min-height: 100vh; background: #07111f; color: #e8eef7; }
-    main { width: min(980px, 94vw); margin: 0 auto; padding: 28px 0 48px; }
-    header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
-    h1 { margin: 0; font-size: clamp(1.35rem, 3vw, 2rem); }
-    .sub { color: #9fb0c5; margin-top: 6px; }
-    a { color: #90c7ff; text-decoration: none; }
-    .panel { border: 1px solid #24354c; border-radius: 18px; background: #0d1929; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,.25); }
-    #messages { min-height: 460px; max-height: 65vh; overflow-y: auto; padding: 22px; display: flex; flex-direction: column; gap: 14px; }
-    .message { max-width: 86%; padding: 13px 15px; border-radius: 16px; line-height: 1.45; white-space: pre-wrap; }
-    .user { align-self: flex-end; background: #1f5f99; }
-    .agent { align-self: flex-start; background: #17263a; border: 1px solid #2b425e; }
-    .meta { display: block; margin-top: 10px; color: #9fb0c5; font-size: .78rem; }
-    .action { margin-top: 10px; padding: 10px; border-radius: 10px; background: #0c1522; border: 1px solid #344b68; }
-    form { display: grid; grid-template-columns: 1fr auto; gap: 12px; padding: 16px; border-top: 1px solid #24354c; }
-    textarea { width: 100%; min-height: 54px; max-height: 160px; resize: vertical; border: 1px solid #344b68; border-radius: 12px; background: #081321; color: inherit; padding: 13px; font: inherit; }
-    button { border: 0; border-radius: 12px; padding: 0 20px; font-weight: 700; background: #e1aa3b; color: #111820; cursor: pointer; }
-    button:disabled { opacity: .55; cursor: wait; }
-    .prompts { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
-    .prompt { border: 1px solid #344b68; background: #101e30; color: #cbd8e8; border-radius: 999px; padding: 8px 12px; cursor: pointer; }
-    .status { padding: 10px 14px; border-radius: 999px; background: #102237; color: #9fd0ff; font-size: .82rem; }
+    :root{color-scheme:dark;font-family:Inter,ui-sans-serif,system-ui,sans-serif}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:#07111f;color:#e8eef7}main{width:min(1120px,94vw);margin:0 auto;padding:28px 0 48px}header{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:20px}h1,h2,h3{margin:0}.sub{color:#9fb0c5;margin-top:6px}a{color:#90c7ff;text-decoration:none}.status{padding:10px 14px;border-radius:999px;background:#102237;color:#9fd0ff;font-size:.82rem}.levels{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:16px}.level{border:1px solid #24354c;border-radius:16px;background:#0d1929;padding:16px}.level strong{display:block;margin-bottom:6px}.level span{color:#9fb0c5;font-size:.82rem}.panel{border:1px solid #24354c;border-radius:18px;background:#0d1929;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.25);margin-top:14px}.panel-head{padding:16px 18px;border-bottom:1px solid #24354c}.panel-body{padding:16px 18px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}input,textarea{width:100%;border:1px solid #344b68;border-radius:12px;background:#081321;color:inherit;padding:11px;font:inherit}textarea{min-height:76px;resize:vertical}button{border:0;border-radius:12px;padding:10px 15px;font-weight:700;background:#e1aa3b;color:#111820;cursor:pointer}button.secondary{background:#17263a;color:#dce8f6;border:1px solid #344b68}button:disabled{opacity:.55;cursor:wait}.result{margin-top:12px;padding:12px;border:1px solid #2b425e;border-radius:12px;background:#0a1523;white-space:pre-wrap;color:#cbd8e8}.prompts{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 14px}.prompt{border:1px solid #344b68;background:#101e30;color:#cbd8e8;border-radius:999px;padding:8px 12px}.chat{display:grid;grid-template-columns:1fr auto;gap:12px;padding:16px;border-top:1px solid #24354c}.chat textarea{min-height:54px}.messages{min-height:300px;max-height:55vh;overflow:auto;padding:18px;display:flex;flex-direction:column;gap:12px}.message{max-width:86%;padding:12px 14px;border-radius:14px;white-space:pre-wrap;line-height:1.45}.user{align-self:flex-end;background:#1f5f99}.agent{align-self:flex-start;background:#17263a;border:1px solid #2b425e}.meta{display:block;margin-top:8px;color:#9fb0c5;font-size:.76rem}.plan-list{display:grid;gap:8px;margin-top:12px}.step{padding:9px;border:1px solid #263b54;border-radius:10px;background:#0b1726}.guard{color:#f0c96b}.ok{color:#83d59a}@media(max-width:800px){.levels,.grid{grid-template-columns:1fr}header{align-items:flex-start;flex-direction:column}.chat{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
 <main>
-  <header>
-    <div>
-      <h1>SRA Admin Intelligence Agent</h1>
-      <div class="sub">Autonomous operational reading and reasoning. Protected state changes remain human-approved.</div>
-    </div>
-    <div><span id="status" class="status">Checking session…</span> · <a href="/admin/">Dashboard</a></div>
-  </header>
-
-  <div class="prompts">
-    <button class="prompt" type="button">Where is my first True Bill?</button>
-    <button class="prompt" type="button">What is blocking the True Bill?</button>
-    <button class="prompt" type="button">What needs my approval?</button>
-    <button class="prompt" type="button">How is the platform doing?</button>
-  </div>
-
-  <section class="panel">
-    <div id="messages">
-      <div class="message agent">Ask me about SRA’s internal product lifecycles, blockers, next actions, approval boundaries, or platform status.</div>
-    </div>
-    <form id="query-form">
-      <textarea id="question" aria-label="Question" placeholder="Ask SRA what is happening internally…" required></textarea>
-      <button id="send" type="submit">Ask SRA</button>
-    </form>
+  <header><div><h1>SRA Neural Core</h1><div class="sub">Three-level institutional intelligence above governed SRA financial services.</div></div><div><span id="status" class="status">Checking session…</span> · <a href="/admin/">Dashboard</a></div></header>
+  <section class="levels">
+    <article class="level"><strong>Level 1 · Copilot</strong><span>Reads SRA, explains records, identifies blockers, summarizes evidence, and recommends next actions.</span></article>
+    <article class="level"><strong>Level 2 · Orchestrator</strong><span>Turns an institutional objective into a governed plan with explicit approval and settlement handoffs.</span></article>
+    <article class="level"><strong>Level 3 · Adaptive Intelligence</strong><span>Learns from SRA outcomes, trains audited neural snapshots, and produces advisory institutional forecasts.</span></article>
   </section>
+
+  <section class="panel"><div class="panel-head"><h2>Level 1 · Copilot</h2><div class="sub">Conversation remains read-and-recommend.</div></div><div class="prompts panel-body"><button class="prompt">What needs my approval?</button><button class="prompt">How is the platform doing?</button><button class="prompt">Generate an operational brief showing all incomplete workflows and the next action for each.</button><button class="prompt">What can you do?</button></div><div id="messages" class="messages"><div class="message agent">Copilot is ready. Ask about SRA state, financing, positions, blockers, or next actions.</div></div><form id="query-form" class="chat"><textarea id="question" placeholder="Ask SRA what is happening internally…" required></textarea><button id="send" type="submit">Ask SRA</button></form></section>
+
+  <section class="panel"><div class="panel-head"><h2>Level 2 · Orchestrator</h2><div class="sub">Creates plans; financial authorization and external settlement remain governed handoffs.</div></div><div class="panel-body"><div class="grid"><input id="plan-opportunity" placeholder="Opportunity ID (optional)"><textarea id="plan-objective" placeholder="Objective, e.g. Finance this startup and prepare it through closing."></textarea></div><div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><button id="create-plan">Create Plan</button><button id="list-plans" class="secondary">List Plans</button></div><div id="plan-result" class="result">No orchestration plan selected.</div></div></section>
+
+  <section class="panel"><div class="panel-head"><h2>Level 3 · Adaptive Institutional Intelligence</h2><div class="sub">Neural output is advisory only and cannot approve credit, authorize funding, or confirm settlement.</div></div><div class="panel-body"><div class="grid"><input id="forecast-opportunity" placeholder="Opportunity ID for advisory forecast"><div><button id="forecast">Forecast Opportunity</button> <button id="insights" class="secondary">Institutional Insights</button></div></div><div style="margin-top:10px"><button id="train" class="secondary">Train / Promote Adaptive Model</button></div><div id="adaptive-result" class="result">Adaptive intelligence has not been queried yet.</div></div></section>
 </main>
 <script>
-  const messages = document.getElementById('messages');
-  const question = document.getElementById('question');
-  const send = document.getElementById('send');
-  const status = document.getElementById('status');
-
-  function addMessage(text, type, response) {
-    const node = document.createElement('div');
-    node.className = `message ${type}`;
-    node.textContent = text;
-    if (response?.nextAction) {
-      const action = document.createElement('div');
-      action.className = 'action';
-      action.textContent = `Next: ${response.nextAction.label} Authority: ${response.nextAction.authority}.`;
-      node.appendChild(action);
-    }
-    if (response) {
-      const meta = document.createElement('span');
-      meta.className = 'meta';
-      const refs = Array.isArray(response.references) ? response.references.length : 0;
-      meta.textContent = `${response.status} · ${response.intent} · ${refs} internal record reference${refs === 1 ? '' : 's'}`;
-      node.appendChild(meta);
-    }
-    messages.appendChild(node);
-    messages.scrollTop = messages.scrollHeight;
-  }
-
-  async function checkSession() {
-    const response = await fetch('/api/admin/session', { credentials: 'same-origin' });
-    const body = await response.json();
-    if (!body.authenticated) {
-      status.textContent = 'Authentication required';
-      addMessage('Sign in through the private administration portal before using the agent.', 'agent');
-      send.disabled = true;
-      return;
-    }
-    status.textContent = `Authenticated: ${body.session.displayName || body.session.email}`;
-  }
-
-  async function ask(text) {
-    addMessage(text, 'user');
-    send.disabled = true;
-    try {
-      const response = await fetch('/api/admin/agent/query', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ question: text })
-      });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error || 'The agent could not answer.');
-      addMessage(body.answer, 'agent', body);
-    } catch (error) {
-      addMessage(error.message, 'agent');
-    } finally {
-      send.disabled = false;
-      question.focus();
-    }
-  }
-
-  document.getElementById('query-form').addEventListener('submit', (event) => {
-    event.preventDefault();
-    const text = question.value.trim();
-    if (!text) return;
-    question.value = '';
-    void ask(text);
-  });
-  document.querySelectorAll('.prompt').forEach((button) => button.addEventListener('click', () => void ask(button.textContent)));
-  void checkSession();
+const messages=document.getElementById('messages'),question=document.getElementById('question'),send=document.getElementById('send'),status=document.getElementById('status');let selectedPlan=null;
+function addMessage(text,type,response){const node=document.createElement('div');node.className=`message ${type}`;node.textContent=text;if(response){const meta=document.createElement('span');meta.className='meta';meta.textContent=`${response.status||response.intent||response.mode||'AVAILABLE'} · authority ${response.authorityMode||response.neuralAuthority||'READ_ONLY'}`;node.appendChild(meta)}messages.appendChild(node);messages.scrollTop=messages.scrollHeight}
+async function post(payload){const response=await fetch('/api/admin/agent/query',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body.error||'SRA neural request failed.');return body}
+async function checkSession(){const response=await fetch('/api/admin/session',{credentials:'same-origin'}),body=await response.json();if(!body.authenticated){status.textContent='Authentication required';send.disabled=true;return}status.textContent=`Authenticated: ${body.session.displayName||body.session.email}`;try{const neural=await post({action:'NEURAL_STATUS'});status.textContent=`Neural Core · ${neural.architecture||'ACTIVE'}`}catch{}}
+async function ask(text){addMessage(text,'user');send.disabled=true;try{const body=await post({question:text});addMessage(body.answer||JSON.stringify(body,null,2),'agent',body)}catch(error){addMessage(error.message,'agent')}finally{send.disabled=false;question.focus()}}
+function renderPlan(body){selectedPlan=body.planId?body:body.plan||selectedPlan;const plan=body.plan||body;const steps=plan.steps||plan.handoffs||[];document.getElementById('plan-result').innerHTML=`<strong>${plan.planId||'Plan'}</strong> · ${plan.status||''} · ${plan.objectiveType||''}<div class="plan-list">${steps.map(step=>`<div class="step"><strong>${step.sequence}. ${step.action}</strong><br><span class="${step.requiresApproval||step.state==='GOVERNED_HANDOFF_REQUIRED'?'guard':'ok'}">${step.executionClass||step.state||''}${step.requiresApproval?' · APPROVAL REQUIRED':''}</span></div>`).join('')}</div>${plan.status==='PROPOSED'?'<div style="margin-top:10px"><button id="approve-plan">Approve Plan</button></div>':''}${plan.status==='APPROVED'?'<div style="margin-top:10px"><button id="dispatch-plan">Dispatch Governed Handoffs</button></div>':''}`;document.getElementById('approve-plan')?.addEventListener('click',approvePlan);document.getElementById('dispatch-plan')?.addEventListener('click',dispatchPlan)}
+async function createPlan(){const objective=document.getElementById('plan-objective').value.trim();if(!objective)return;const opportunityId=document.getElementById('plan-opportunity').value.trim()||undefined;try{renderPlan(await post({action:'CREATE_ORCHESTRATION_PLAN',objective,opportunityId}))}catch(error){document.getElementById('plan-result').textContent=error.message}}
+async function approvePlan(){if(!selectedPlan||!confirm('Approve this orchestration plan? Financial actions will still remain governed handoffs.'))return;try{renderPlan(await post({action:'APPROVE_ORCHESTRATION_PLAN',planId:selectedPlan.planId,approval:'APPROVE'}))}catch(error){document.getElementById('plan-result').textContent=error.message}}
+async function dispatchPlan(){if(!selectedPlan)return;try{renderPlan(await post({action:'DISPATCH_ORCHESTRATION_PLAN',planId:selectedPlan.planId}))}catch(error){document.getElementById('plan-result').textContent=error.message}}
+async function listPlans(){try{const body=await post({action:'LIST_ORCHESTRATION_PLANS'});document.getElementById('plan-result').textContent=(body.records||[]).map(p=>`${p.planId} · ${p.status} · ${p.objective}`).join('\n')||'No plans recorded.'}catch(error){document.getElementById('plan-result').textContent=error.message}}
+async function forecast(){const opportunityId=document.getElementById('forecast-opportunity').value.trim();if(!opportunityId)return;try{const body=await post({action:'FORECAST_OPPORTUNITY',opportunityId});document.getElementById('adaptive-result').textContent=JSON.stringify(body,null,2)}catch(error){document.getElementById('adaptive-result').textContent=error.message}}
+async function insights(){try{document.getElementById('adaptive-result').textContent=JSON.stringify(await post({action:'INSTITUTIONAL_INSIGHTS'}),null,2)}catch(error){document.getElementById('adaptive-result').textContent=error.message}}
+async function train(){if(!confirm('Train and promote a new advisory neural model snapshot from available SRA historical outcomes?'))return;try{document.getElementById('adaptive-result').textContent=JSON.stringify(await post({action:'TRAIN_ADAPTIVE_MODEL',approval:'APPROVE'}),null,2)}catch(error){document.getElementById('adaptive-result').textContent=error.message}}
+document.getElementById('query-form').addEventListener('submit',event=>{event.preventDefault();const text=question.value.trim();if(!text)return;question.value='';void ask(text)});document.querySelectorAll('.prompt').forEach(button=>button.addEventListener('click',()=>void ask(button.textContent)));document.getElementById('create-plan').addEventListener('click',()=>void createPlan());document.getElementById('list-plans').addEventListener('click',()=>void listPlans());document.getElementById('forecast').addEventListener('click',()=>void forecast());document.getElementById('insights').addEventListener('click',()=>void insights());document.getElementById('train').addEventListener('click',()=>void train());void checkSession();
 </script>
 </body>
 </html>
