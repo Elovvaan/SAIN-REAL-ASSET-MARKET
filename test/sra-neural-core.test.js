@@ -44,16 +44,15 @@ test('adaptive feature schema excludes protected personal characteristics',async
   assert.equal(features.length,8);
   assert.ok(features.every(Number.isFinite));
   const domain=new Domain();const service=new SraNeuralCoreService({domain});await service.initialize();
-  const schema=service.capabilities().invariants;
-  assert.ok(schema.includes('PROTECTED_PERSONAL_CHARACTERISTICS_ARE_NOT_MODEL_FEATURES'));
+  assert.ok(service.capabilities().invariants.includes('PROTECTED_PERSONAL_CHARACTERISTICS_ARE_NOT_MODEL_FEATURES'));
 });
 
 test('tiny neural network trains and returns bounded advisory inference',()=>{
   const samples=[];
-  for(let i=0;i<16;i++){const high=i>=8;const features=[high?.8:.2,.5,.5,.3,high?0:1,high?1:0,0,1];samples.push({features,target:high?1:0});}
+  for(let i=0;i<16;i++){const high=i>=8;const features=[high?0.8:0.2,0.5,0.5,0.3,high?0:1,high?1:0,0,1];samples.push({features,target:high?1:0});}
   const network=new SraTinyNeuralNetwork(null,'TEST');
   const before=network.forward(samples[0].features).output;
-  const result=network.train(samples,{epochs:300,learningRate:.04});
+  const result=network.train(samples,{epochs:300,learningRate:0.04});
   const after=network.forward(samples[0].features).output;
   assert.ok(result.loss>=0&&Number.isFinite(result.loss));
   assert.ok(after>=0&&after<=1);
