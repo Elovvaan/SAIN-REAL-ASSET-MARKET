@@ -108,7 +108,7 @@
       const form = new FormData(event.currentTarget);
       try {
         const customerId = window.accessState?.session?.userId || window.accessState?.session?.email || 'CUSTOMER-WEB';
-        const project = await api('/api/financing/home-projects', {
+        const project = await api('/api/home-financing/home-projects', {
           method: 'POST',
           body: JSON.stringify({
             customerId,
@@ -212,19 +212,19 @@
       root().querySelectorAll('[data-tab-panel]').forEach(panel => { panel.hidden = panel.dataset.tabPanel !== state.activeTab; });
     }));
     root().querySelector('[data-project-action="begin-data"]')?.addEventListener('click', async () => {
-      await api(`/api/financing/home-projects/${project.homeProjectId}/transition`, { method: 'POST', body: JSON.stringify({ state: 'DATA_COLLECTION' }) });
+      await api(`/api/home-financing/home-projects/${project.homeProjectId}/transition`, { method: 'POST', body: JSON.stringify({ state: 'DATA_COLLECTION' }) });
       await openWorkspace(project.homeProjectId);
     });
   }
 
   async function loadProjects() {
-    const payload = await api('/api/financing/home-projects');
+    const payload = await api('/api/home-financing/home-projects');
     state.projects = payload.homeProjects || [];
   }
 
   async function openWorkspace(homeProjectId) {
     state.activeProjectId = homeProjectId;
-    state.workspace = await api(`/api/financing/home-projects/${homeProjectId}/workspace`);
+    state.workspace = await api(`/api/home-financing/home-projects/${homeProjectId}/workspace`);
     state.activeTab = 'overview';
     renderWorkspace();
   }
