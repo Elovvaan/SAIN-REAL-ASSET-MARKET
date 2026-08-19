@@ -11,7 +11,7 @@ function id(prefix){return `${prefix}-${crypto.randomUUID().split('-')[0].toUppe
 function requiredString(value,field){if(typeof value!=='string'||!value.trim())throw new Error(`${field} is required.`);return value.trim();}
 function positiveMoney(value,field){const number=Number(value);if(!Number.isFinite(number)||number<=0)throw new Error(`${field} must be greater than zero.`);return Number(number.toFixed(2));}
 function hash(value){return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');}
-function defaultStandard(rail){if(rail==='ACH')return 'NACHA_OPERATING_RULES';if(rail==='FEDWIRE')return 'FEDWIRE_FUNDS_SERVICE_ISO_20022';return 'INSTITUTION_DEFINED';}
+function defaultStandard(rail){if(rail==='ACH')return 'NACHA';if(rail==='FEDWIRE')return 'ISO_20022';return 'INSTITUTION_DEFINED';}
 function defaultExecutionMode(rail){if(rail==='INTERNAL_TRANSFER')return 'INTERNAL';return 'BANK_PARTNER';}
 function normalizedRoutingNumber(value){
   const routing=String(value||'').replace(/\D/g,'');
