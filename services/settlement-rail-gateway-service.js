@@ -18,6 +18,17 @@ function normalizedRoutingNumber(value){
   if(!/^\d{9}$/.test(routing))throw new Error('ABA routing number must contain exactly 9 digits.');
   return routing;
 }
+function optionalRoutingNumber(value){
+  if(value===null||value===undefined||String(value).trim()==='')return null;
+  return normalizedRoutingNumber(value);
+}
+function fedwireMessageDescription(messageType){
+  if(messageType==='pacs.008')return 'Customer Credit Transfer';
+  if(messageType==='pacs.009')return 'Financial Institution Credit Transfer';
+  if(messageType==='pacs.004')return 'Payment Return';
+  if(messageType==='pacs.002')return 'Fedwire Funds Payment Status';
+  return null;
+}
 function achStandardDetails({routingNumber,accountNumber,beneficiaryName,amount,requestedExecutionDate,remittanceReference,adapter,input}){
   const routing=normalizedRoutingNumber(routingNumber);
   const standardEntryClassCode=String(input.standardEntryClassCode||adapter.standardEntryClassCode||'').trim().toUpperCase()||null;
@@ -38,13 +49,14 @@ function achStandardDetails({routingNumber,accountNumber,beneficiaryName,amount,
   };
 }
 function fedwireStandardDetails({accountNumber,beneficiaryName,amount,routingNumber,remittanceReference,sourceType,adapter,input}){
-  const creditorAgentRoutingNumber=normalizedRoutingNumber(routingNumber);
+  const creditorAgentRoutingNumber=optionalRoutingNumber(routingNumber);
+  const messageType=String(input.iso20022MessageType||adapter.iso20022MessageType||(sourceType==='FINANCING_DISBURSEMENT'?'pacs.008':'')).trim()||null;
   return {
     service:'FEDWIRE_FUNDS_SERVICE',
     messageStandard:'ISO_20022',
     businessApplicationHeader:'head.001',
-    messageType:String(input.iso20022MessageType||adapter.iso20022MessageType||(sourceType==='FINANCING_DISBURSEMENT'?'pacs.008':'')).trim()||null,
-    messageTypeDescription:sourceType==='FINANCING_DISBURSEMENT'?'Customer Credit Transfer':null,
+    messageType,
+    messageTypeDescription:fedwireMessageDescription(messageType),
     debtor:input.debtorName||adapter.senderName||null,
     debtorAccount:input.senderAccountReference||adapter.senderAccountReference||null,
     creditor:beneficiaryName||null,
@@ -195,7 +207,7 @@ export class SettlementRailGatewayService{
     const beneficiaryName=pkg?.beneficiaryName||input.beneficiaryName||null;
     const requestedExecutionDate=input.requestedExecutionDate||null;
     const remittanceReference=input.remittanceReference||pkg?.exportPackageId||settlement?.homeProjectId||null;
-    const routingNumber=['ACH','FEDWIRE'].includes(adapter.rail)?normalizedRoutingNumber(input.routingNumber):input.routingNumber||null;
+    const routingNumber=adapter.rail==='ACH'?normalizedRoutingNumber(input.routingNumber):adapter.rail==='FEDWIRE'?optionalRoutingNumber(input.routingNumber):input.routingNumber||null;
     const standardDetails=railStandardDetails({
       rail:adapter.rail,
       routingNumber,
