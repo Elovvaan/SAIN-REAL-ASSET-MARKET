@@ -11,13 +11,67 @@ function id(prefix){return `${prefix}-${crypto.randomUUID().split('-')[0].toUppe
 function requiredString(value,field){if(typeof value!=='string'||!value.trim())throw new Error(`${field} is required.`);return value.trim();}
 function positiveMoney(value,field){const number=Number(value);if(!Number.isFinite(number)||number<=0)throw new Error(`${field} must be greater than zero.`);return Number(number.toFixed(2));}
 function hash(value){return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');}
-function defaultStandard(rail){if(rail==='ACH')return 'NACHA';if(rail==='FEDWIRE')return 'ISO_20022';return 'INSTITUTION_DEFINED';}
+function defaultStandard(rail){if(rail==='ACH')return 'NACHA_OPERATING_RULES';if(rail==='FEDWIRE')return 'FEDWIRE_FUNDS_SERVICE_ISO_20022';return 'INSTITUTION_DEFINED';}
 function defaultExecutionMode(rail){if(rail==='INTERNAL_TRANSFER')return 'INTERNAL';return 'BANK_PARTNER';}
+function normalizedRoutingNumber(value){
+  const routing=String(value||'').replace(/\D/g,'');
+  if(!/^\d{9}$/.test(routing))throw new Error('ABA routing number must contain exactly 9 digits.');
+  return routing;
+}
+function achStandardDetails({routingNumber,accountNumber,beneficiaryName,amount,requestedExecutionDate,remittanceReference,adapter,input}){
+  const routing=normalizedRoutingNumber(routingNumber);
+  const standardEntryClassCode=String(input.standardEntryClassCode||adapter.standardEntryClassCode||'').trim().toUpperCase()||null;
+  return {
+    network:'ACH_NETWORK',
+    rules:'NACHA_OPERATING_RULES',
+    standardEntryClassCode,
+    companyEntryDescription:String(input.companyEntryDescription||adapter.companyEntryDescription||'SRA FUNDING').trim().slice(0,10),
+    effectiveEntryDate:requestedExecutionDate||now().slice(0,10),
+    receivingDfiIdentification:routing.slice(0,8),
+    checkDigit:routing.slice(8),
+    dfiAccountNumber:accountNumber,
+    amount,
+    receivingIndividualOrCompanyName:beneficiaryName||null,
+    addendaRecordIndicator:remittanceReference?1:0,
+    traceNumber:null,
+    originatingDfiIdentification:adapter.originatingDfiIdentification||null,
+  };
+}
+function fedwireStandardDetails({accountNumber,beneficiaryName,amount,routingNumber,remittanceReference,sourceType,adapter,input}){
+  const creditorAgentRoutingNumber=normalizedRoutingNumber(routingNumber);
+  return {
+    service:'FEDWIRE_FUNDS_SERVICE',
+    messageStandard:'ISO_20022',
+    businessApplicationHeader:'head.001',
+    messageType:String(input.iso20022MessageType||adapter.iso20022MessageType||(sourceType==='FINANCING_DISBURSEMENT'?'pacs.008':'')).trim()||null,
+    messageTypeDescription:sourceType==='FINANCING_DISBURSEMENT'?'Customer Credit Transfer':null,
+    debtor:input.debtorName||adapter.senderName||null,
+    debtorAccount:input.senderAccountReference||adapter.senderAccountReference||null,
+    creditor:beneficiaryName||null,
+    creditorAccount:accountNumber,
+    creditorAgentRoutingNumber,
+    amount,
+    remittanceInformation:remittanceReference||null,
+    imad:null,
+  };
+}
+function railStandardDetails({rail,routingNumber,accountNumber,beneficiaryName,amount,requestedExecutionDate,remittanceReference,sourceType,adapter,input}){
+  if(rail==='ACH')return achStandardDetails({routingNumber,accountNumber,beneficiaryName,amount,requestedExecutionDate,remittanceReference,adapter,input});
+  if(rail==='FEDWIRE')return fedwireStandardDetails({accountNumber,beneficiaryName,amount,routingNumber,remittanceReference,sourceType,adapter,input});
+  return null;
+}
 
 export class SettlementRailGatewayService{
   constructor(domain,settlementService,participationService){this.domain=domain;this.settlementService=settlementService;this.participationService=participationService;}
 
-  supportedRails(){return [...SUPPORTED_RAILS].map((rail)=>({rail,messageStandard:defaultStandard(rail),executionMode:defaultExecutionMode(rail)}));}
+  supportedRails(){
+    return [...SUPPORTED_RAILS].map((rail)=>({
+      rail,
+      displayName:rail==='ACH'?'ACH Network':rail==='FEDWIRE'?'Fedwire Funds Service':rail==='WIRE'?'Bank Wire':rail,
+      messageStandard:defaultStandard(rail),
+      executionMode:defaultExecutionMode(rail),
+    }));
+  }
 
   listAdapters(filters={}){
     return this.domain.list(RECORD_TYPES.SETTLEMENT_RAIL_ADAPTER).filter((record)=>{
@@ -45,6 +99,11 @@ export class SettlementRailGatewayService{
       messageStandard:input.messageStandard||defaultStandard(rail),currency:input.currency||'USD',
       senderAccountReference:input.senderAccountReference||null,federalReserveAccountReference:input.federalReserveAccountReference||null,
       providerReference:input.providerReference||null,
+      originatingDfiIdentification:input.originatingDfiIdentification||null,
+      standardEntryClassCode:input.standardEntryClassCode||null,
+      companyEntryDescription:input.companyEntryDescription||null,
+      iso20022MessageType:input.iso20022MessageType||null,
+      senderName:input.senderName||null,
       permittedReceivingAccountReferences:Array.isArray(input.permittedReceivingAccountReferences)?[...new Set(input.permittedReceivingAccountReferences)]:[],
       state:'ACTIVE',createdBy:actorId,createdAt:timestamp,updatedAt:timestamp,
     };
@@ -133,6 +192,22 @@ export class SettlementRailGatewayService{
     const timestamp=now();
     const settlement=source.settlement||null;
     const pkg=source.exportPackage||null;
+    const beneficiaryName=pkg?.beneficiaryName||input.beneficiaryName||null;
+    const requestedExecutionDate=input.requestedExecutionDate||null;
+    const remittanceReference=input.remittanceReference||pkg?.exportPackageId||settlement?.homeProjectId||null;
+    const routingNumber=['ACH','FEDWIRE'].includes(adapter.rail)?normalizedRoutingNumber(input.routingNumber):input.routingNumber||null;
+    const standardDetails=railStandardDetails({
+      rail:adapter.rail,
+      routingNumber,
+      accountNumber:receivingAccountReference,
+      beneficiaryName,
+      amount:instructionAmount,
+      requestedExecutionDate,
+      remittanceReference,
+      sourceType:source.sourceType,
+      adapter,
+      input,
+    });
     const message={
       instructionId,
       sourceType:source.sourceType,
@@ -144,26 +219,28 @@ export class SettlementRailGatewayService{
       disbursementId:pkg?.disbursementId||null,
       opportunityId:pkg?.opportunityId||null,
       instrumentId:pkg?.instrumentId||null,
-      beneficiaryName:pkg?.beneficiaryName||input.beneficiaryName||null,
+      beneficiaryName,
       settlementInstrumentReference:input.settlementInstrumentReference||settlement?.executionReference||pkg?.financingTransactionId||null,
       homeProjectId:settlement?.homeProjectId||null,
       commitmentId,
       institutionId:adapter.institutionId,
       adapterId:adapter.adapterId,
       rail:adapter.rail,
+      railDisplayName:adapter.rail==='ACH'?'ACH Network':adapter.rail==='FEDWIRE'?'Fedwire Funds Service':adapter.rail,
       executionMode:adapter.executionMode||defaultExecutionMode(adapter.rail),
       amount:instructionAmount,
       currency:input.currency||source.currency||adapter.currency||'USD',
       senderAccountReference:input.senderAccountReference||adapter.senderAccountReference,
       receivingInstitutionReference:requiredString(input.receivingInstitutionReference,'receivingInstitutionReference'),
       receivingAccountReference,
-      routingNumber:input.routingNumber||null,
+      routingNumber,
       accountType:input.accountType||null,
       purpose:input.purpose||(pkg?'SRA_FINANCING_DISBURSEMENT':'SRA_SETTLEMENT'),
-      requestedExecutionDate:input.requestedExecutionDate||null,
-      remittanceReference:input.remittanceReference||pkg?.exportPackageId||settlement?.homeProjectId||null,
+      requestedExecutionDate,
+      remittanceReference,
       packageHash:settlement?.settlementPackage?.packageHash||null,
       messageStandard:adapter.messageStandard||defaultStandard(adapter.rail),
+      standardDetails,
     };
     const record={...message,messageHash:hash(message),state:'READY',createdBy:actorId,createdAt:timestamp,updatedAt:timestamp,history:[{state:'READY',at:timestamp,actorId}]};
     const changes=[{type:RECORD_TYPES.SETTLEMENT_RAIL_INSTRUCTION,id:instructionId,payload:record,actorId,eventType:'SETTLEMENT_RAIL_INSTRUCTION_CREATED'}];
@@ -200,7 +277,12 @@ export class SettlementRailGatewayService{
     }
     if(['REJECTED','RETURNED','EXCEPTION'].includes(state)&&!input.exceptionCode)throw new Error('exceptionCode is required.');
     const timestamp=now();
-    const updated={...current,state,institutionTransactionReference:input.institutionTransactionReference||current.institutionTransactionReference||null,networkReference:input.networkReference||current.networkReference||null,receivingConfirmationReference:input.receivingConfirmationReference||current.receivingConfirmationReference||null,confirmedAmount:state==='RECONCILED'?Number(input.confirmedAmount??current.amount):current.confirmedAmount||null,exceptionCode:input.exceptionCode||null,exceptionDetail:input.exceptionDetail||null,dispatchedAt:state==='DISPATCHED'?timestamp:current.dispatchedAt||null,acceptedAt:state==='ACCEPTED'?timestamp:current.acceptedAt||null,executedAt:state==='EXECUTED'?timestamp:current.executedAt||null,reconciledAt:state==='RECONCILED'?timestamp:current.reconciledAt||null,updatedAt:timestamp,history:[...(current.history||[]),{state,at:timestamp,actorId,note:input.note||null}]};
+    let standardDetails=current.standardDetails||null;
+    if(standardDetails&&input.networkReference){
+      if(current.rail==='ACH')standardDetails={...standardDetails,traceNumber:input.networkReference};
+      if(current.rail==='FEDWIRE')standardDetails={...standardDetails,imad:input.networkReference};
+    }
+    const updated={...current,state,institutionTransactionReference:input.institutionTransactionReference||current.institutionTransactionReference||null,networkReference:input.networkReference||current.networkReference||null,receivingConfirmationReference:input.receivingConfirmationReference||current.receivingConfirmationReference||null,confirmedAmount:state==='RECONCILED'?Number(input.confirmedAmount??current.amount):current.confirmedAmount||null,exceptionCode:input.exceptionCode||null,exceptionDetail:input.exceptionDetail||null,standardDetails,dispatchedAt:state==='DISPATCHED'?timestamp:current.dispatchedAt||null,acceptedAt:state==='ACCEPTED'?timestamp:current.acceptedAt||null,executedAt:state==='EXECUTED'?timestamp:current.executedAt||null,reconciledAt:state==='RECONCILED'?timestamp:current.reconciledAt||null,updatedAt:timestamp,history:[...(current.history||[]),{state,at:timestamp,actorId,note:input.note||null}]};
     await this.domain.put(RECORD_TYPES.SETTLEMENT_RAIL_INSTRUCTION,instructionId,updated,{actorId,eventType:`SETTLEMENT_RAIL_${state}`});
     await this.domain.lifecycle({objectType:RECORD_TYPES.SETTLEMENT_RAIL_INSTRUCTION,objectId:instructionId,eventType:`SETTLEMENT_RAIL_${state}`,actorId,payload:{settlementId:current.settlementId,exportPackageId:current.exportPackageId,institutionId:current.institutionId,amount:current.amount,rail:current.rail,networkReference:updated.networkReference,exceptionCode:updated.exceptionCode}});
     if(state==='RECONCILED'&&current.commitmentId){
