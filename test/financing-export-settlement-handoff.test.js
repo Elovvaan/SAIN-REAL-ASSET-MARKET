@@ -52,7 +52,44 @@ test('authorized financing becomes an export package before a bank rail is selec
   assert.equal(authorized.exportPackage.selectedRail, null);
 });
 
-test('settlement instruction references the financing export package and supplies the rail', async () => {
+test('settlement instruction can be prepared from the financing export package before any execution adapter is selected', async () => {
+  const domain = new Domain();
+  seedFinancing(domain);
+  const closingService = new FinancingClosingService(domain);
+  await closingService.initialize();
+  const { closing } = await closingService.open({ financingTransactionId: 'LFA-EXPORT-1' }, 'ADMIN');
+  await closingService.markReady(closing.closingId, { beneficiaryName: 'Closing Escrow' }, 'ADMIN');
+  const authorized = await closingService.authorize(closing.closingId, { approval: 'APPROVE' }, 'ADMIN');
+
+  const gateway = new SettlementRailGatewayService(domain, null, null);
+  const instruction = await gateway.createInstruction({
+    exportPackageId: authorized.exportPackage.exportPackageId,
+    rail: 'ACH',
+    receivingInstitutionReference: 'Receiving Bank',
+    receivingAccountReference: '1234567890',
+    routingNumber: '123456789',
+    accountType: 'CHECKING',
+  }, 'ADMIN');
+
+  assert.equal(instruction.sourceType, 'FINANCING_DISBURSEMENT');
+  assert.equal(instruction.financingTransactionId, 'LFA-EXPORT-1');
+  assert.equal(instruction.exportPackageId, authorized.exportPackage.exportPackageId);
+  assert.equal(instruction.amount, 250000);
+  assert.equal(instruction.rail, 'ACH');
+  assert.equal(instruction.adapterId, null);
+  assert.equal(instruction.executionMode, null);
+  assert.equal(instruction.messageStandard, 'NACHA');
+  assert.equal(instruction.standardDetails.receivingDfiIdentification, '12345678');
+  assert.equal(instruction.standardDetails.checkDigit, '9');
+  assert.equal(instruction.state, 'READY');
+
+  const updatedPackage = domain.get('EXPORT_PACKAGE', authorized.exportPackage.exportPackageId);
+  assert.equal(updatedPackage.state, 'SETTLEMENT_INSTRUCTION_READY');
+  assert.equal(updatedPackage.selectedRail, 'ACH');
+  assert.equal(updatedPackage.settlementInstructionId, instruction.instructionId);
+});
+
+test('an active execution adapter can still be attached when one is actually available', async () => {
   const domain = new Domain();
   seedFinancing(domain);
   const closingService = new FinancingClosingService(domain);
@@ -69,7 +106,6 @@ test('settlement instruction references the financing export package and supplie
     endpointReference: 'provider://ach',
     senderAccountReference: 'SRA-OPERATING-1',
   }, 'ADMIN');
-
   const instruction = await gateway.createInstruction({
     exportPackageId: authorized.exportPackage.exportPackageId,
     adapterId: adapter.adapterId,
@@ -80,15 +116,7 @@ test('settlement instruction references the financing export package and supplie
     accountType: 'CHECKING',
   }, 'ADMIN');
 
-  assert.equal(instruction.sourceType, 'FINANCING_DISBURSEMENT');
-  assert.equal(instruction.financingTransactionId, 'LFA-EXPORT-1');
-  assert.equal(instruction.exportPackageId, authorized.exportPackage.exportPackageId);
-  assert.equal(instruction.amount, 250000);
-  assert.equal(instruction.rail, 'ACH');
-  assert.equal(instruction.state, 'READY');
-
-  const updatedPackage = domain.get('EXPORT_PACKAGE', authorized.exportPackage.exportPackageId);
-  assert.equal(updatedPackage.state, 'SETTLEMENT_INSTRUCTION_READY');
-  assert.equal(updatedPackage.selectedRail, 'ACH');
-  assert.equal(updatedPackage.settlementInstructionId, instruction.instructionId);
+  assert.equal(instruction.adapterId, adapter.adapterId);
+  assert.equal(instruction.institutionId, 'BANK-1');
+  assert.equal(instruction.executionMode, 'BANK_PARTNER');
 });
