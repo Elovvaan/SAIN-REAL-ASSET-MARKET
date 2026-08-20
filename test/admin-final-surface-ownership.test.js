@@ -4,18 +4,26 @@ import fs from 'node:fs';
 
 const read = path => fs.readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 
-test('final Administration shell physically retires the legacy DOM before reveal', () => {
+test('Administration boots the final shell directly without a legacy presentation pass', () => {
+  const page = read('public/admin/index.html');
   const bootstrap = read('public/admin/admin-bootstrap.js');
-  assert.match(bootstrap, /function retireLegacyPresentation\(admin\)/);
-  assert.match(bootstrap, /for \(const child of \[\.\.\.admin\.children\]\)/);
-  assert.match(bootstrap, /if \(child !== suite\) child\.remove\(\)/);
-  const shellLoaded = bootstrap.indexOf('await loadScript(shellSource, shellMarker)');
-  const retire = bootstrap.indexOf('retireLegacyPresentation(admin)');
-  const reveal = bootstrap.indexOf('revealAdminSuite(admin)');
-  const remainingFeatures = bootstrap.indexOf('FEATURES.slice(1)');
-  assert.ok(shellLoaded >= 0 && retire > shellLoaded, 'legacy presentation retires only after the final shell mounts');
-  assert.ok(reveal > retire, 'legacy presentation is gone before Administration is revealed');
-  assert.ok(remainingFeatures > reveal, 'feature workstations load into the final shell after reveal');
+  assert.match(page, /data-admin-boot-placeholder/);
+  assert.doesNotMatch(page, /id="metrics"/);
+  assert.doesNotMatch(page, /id="asset-details"/);
+  assert.doesNotMatch(page, /id="chat-log"/);
+  assert.doesNotMatch(bootstrap, /retireLegacyPresentation/);
+  assert.doesNotMatch(bootstrap, /concealLegacyFirstPaint/);
+  assert.match(bootstrap, /single-shell-lazy-workspaces/);
+  assert.match(bootstrap, /removeBootPlaceholder/);
+});
+
+test('Administration feature workstations are loaded by workspace instead of serially at boot', () => {
+  const bootstrap = read('public/admin/admin-bootstrap.js');
+  assert.match(bootstrap, /const WORKSPACE_FEATURES = \{/);
+  assert.match(bootstrap, /async function loadWorkspaceFeatures/);
+  assert.doesNotMatch(bootstrap, /FEATURES\.slice\(1\)/);
+  assert.match(bootstrap, /workspaceLoads = new Map\(\)/);
+  assert.match(bootstrap, /data-admin-workspace.*data-open-workspace/);
 });
 
 test('Administrative Agent conversation is owned by the final workstation', () => {
