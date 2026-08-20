@@ -56,23 +56,14 @@
       : '<option value="">No bank settlement rails available</option>';
   }
 
-  function adapterOptions(adapters, rail) {
-    const matching = (adapters || []).filter((item) => item.state === 'ACTIVE' && item.rail === rail);
-    return matching.length
-      ? matching.map((item) => `<option value="${esc(item.adapterId)}">${esc(item.institutionName || item.institutionId)} · ${esc(item.executionMode || 'BANK_PARTNER')}</option>`).join('')
-      : '<option value="">No active adapter for this rail</option>';
-  }
-
-  function preparationMarkup({ packages, rails, adapters }) {
-    const initialRail = (rails || []).map((item) => String(item.rail || '').toUpperCase()).find((rail) => bankRails.has(rail)) || '';
+  function preparationMarkup({ packages, rails }) {
     return `<section class="admin-record-card" data-settlement-instruction-preparation>
       <header><strong>New Bank Settlement Instruction</strong><em>PUBLIC STANDARD</em></header>
-      <p style="color:#9a9a9a;margin:0 0 14px;line-height:1.5">Select the authorized financing export package. SRA supplies the financing reference, beneficiary, amount and currency. Enter only the receiving institution instructions and select the settlement rail.</p>
+      <p style="color:#9a9a9a;margin:0 0 14px;line-height:1.5">Select the authorized financing export package. SRA supplies the financing reference, beneficiary, amount and currency. Enter the receiving institution instructions and select the settlement rail.</p>
       <form data-settlement-instruction-form autocomplete="off">
         <div class="admin-record-grid">
           <label><span>Export package / financing</span><select name="exportPackageId" required style="width:100%;background:#050505;border:1px solid #292929;border-radius:10px;color:#f5f5f5;padding:12px">${packageOptions(packages)}</select></label>
           <label><span>Settlement rail</span><select name="rail" required style="width:100%;background:#050505;border:1px solid #292929;border-radius:10px;color:#f5f5f5;padding:12px">${railOptions(rails)}</select></label>
-          <label><span>Execution connection</span><select name="adapterId" required style="width:100%;background:#050505;border:1px solid #292929;border-radius:10px;color:#f5f5f5;padding:12px">${adapterOptions(adapters, initialRail)}</select></label>
           <label><span data-receiving-institution-label>Receiving institution</span><input name="bankName" type="text" placeholder="Receiving institution" required></label>
           <label><span>ABA routing number</span><input name="routingNumber" type="text" inputmode="numeric" pattern="[0-9]{9}" maxlength="9" placeholder="9 digits" required></label>
           <label><span data-account-label>Receiving account number</span><input name="accountNumber" type="password" inputmode="numeric" pattern="[0-9]{4,17}" maxlength="17" placeholder="4–17 digits" required></label>
@@ -80,7 +71,7 @@
         </div>
         <div data-export-package-summary class="admin-record-grid" style="margin-top:14px"></div>
         <div data-standard-summary class="admin-record-grid" style="margin-top:14px"></div>
-        <p style="color:#9a9a9a;font-size:12px;line-height:1.45;margin:12px 0">You do not re-enter the authorized amount. For ACH, SRA derives the Receiving DFI Identification and Check Digit from the 9-digit ABA routing number and records the Nacha fields under the instruction. For Fedwire, SRA records the Fedwire Funds Service ISO 20022 vocabulary, including head.001 and the applicable credit-transfer message. Network-assigned Trace Number or IMAD is recorded when returned by the executing institution/network.</p>
+        <p style="color:#9a9a9a;font-size:12px;line-height:1.45;margin:12px 0">You do not re-enter the authorized amount. Preparing the instruction records the selected rail and receiving instructions; an execution connection is not required at this stage. For ACH, SRA derives the Receiving DFI Identification and Check Digit from the 9-digit ABA routing number and records the Nacha fields under the instruction. For Fedwire, SRA records the Fedwire Funds Service ISO 20022 vocabulary, including head.001 and the applicable credit-transfer message. Network-assigned Trace Number or IMAD is recorded when returned by the executing institution/network.</p>
         <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><button type="submit">Prepare Settlement Instruction</button><span data-settlement-instruction-result style="color:#d6a92f;font-size:12px"></span></div>
       </form>
     </section>`;
@@ -116,14 +107,13 @@
     root.innerHTML = '<div><span>Settlement standard</span><strong>Institution-defined bank wire instructions</strong></div>';
   }
 
-  function refreshRailFields(form, adapters) {
+  function refreshRailFields(form) {
     const rail = String(form.elements.rail.value || '').toUpperCase();
-    form.elements.adapterId.innerHTML = adapterOptions(adapters, rail);
     const ach = form.querySelector('[data-ach-account-type]');
     if (ach) ach.style.display = rail === 'ACH' ? '' : 'none';
     form.elements.accountType.required = rail === 'ACH';
     const accountLabel = form.querySelector('[data-account-label]');
-    if (accountLabel) accountLabel.textContent = rail === 'ACH' ? 'DFI account number' : rail === 'FEDWIRE' ? 'Creditor account' : 'Receiving account number';
+    if (accountLabel) accountLabel.textContent = rail === 'ACH' ? 'Account number' : rail === 'FEDWIRE' ? 'Creditor account' : 'Receiving account number';
     const institutionLabel = form.querySelector('[data-receiving-institution-label]');
     if (institutionLabel) institutionLabel.textContent = rail === 'FEDWIRE' ? 'Creditor Agent / receiving institution' : 'Receiving institution';
     refreshStandardSummary(form);
@@ -153,7 +143,6 @@
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({
           exportPackageId: pkg.exportPackageId,
-          adapterId: values.adapterId,
           rail: values.rail,
           amount: Number(pkg.amount),
           currency: pkg.currency || 'USD',
@@ -202,7 +191,7 @@
           <label><span>Amount</span><input name="amount" type="text" inputmode="decimal" placeholder="Amount"></label>
           <label><span>Destination address</span><input name="destinationAddress" type="text" placeholder="Destination address"></label>
         </div>
-        <p data-bank-execution-status style="color:#9a9a9a;font-size:12px;line-height:1.45;margin:12px 0">Bank settlement instructions are prepared using the selected rail's standard terminology and remain in their recorded lifecycle until the configured execution connection returns the institution/network reference.</p>
+        <p data-bank-execution-status style="color:#9a9a9a;font-size:12px;line-height:1.45;margin:12px 0">The bank settlement instruction is prepared independently from execution. Sending through a bank rail requires the applicable execution connection or institution process at the execution stage.</p>
         <p data-onchain-execution-status style="display:none;color:#9a9a9a;font-size:12px;line-height:1.45;margin:12px 0">On-chain adapter: ${chainReady ? 'READY' : 'NOT READY'}. Enter the standard transfer inputs and send directly.</p>
         <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><button type="submit" data-execute-button disabled>Bank Execution Connection</button><span data-settlement-execution-result style="color:#d6a92f;font-size:12px"></span></div>
       </form>
@@ -263,29 +252,27 @@
   }
 
   async function renderPreparation(workspace, controls) {
-    const [workspaces, railCatalog, adapterCatalog] = await Promise.all([
+    const [workspaces, railCatalog] = await Promise.all([
       request('/api/admin/workspaces?limit=100').catch(() => ({ records:{} })),
       request('/api/settlement-rails/rails').catch(() => ({ rails:[] })),
-      request('/api/settlement-rails/adapters?state=ACTIVE').catch(() => ({ adapters:[] })),
     ]);
     if (!controls.isConnected || workspace.dataset.activeTab !== 'Settlement Instructions') return;
     const packages = financingPackages(workspaces);
     const rails = railCatalog.rails || [];
-    const adapters = adapterCatalog.adapters || [];
-    controls.insertAdjacentHTML('afterbegin', preparationMarkup({ packages, rails, adapters }));
+    controls.insertAdjacentHTML('afterbegin', preparationMarkup({ packages, rails }));
     const form = controls.querySelector('[data-settlement-instruction-form]');
     if (!form) return;
     refreshPackageSummary(form, packages);
-    refreshRailFields(form, adapters);
+    refreshRailFields(form);
     form.elements.exportPackageId.addEventListener('change', () => {
       const pkg = selectedPackage(form, packages);
       refreshPackageSummary(form, packages);
       if (pkg?.preferredRail && bankRails.has(String(pkg.preferredRail).toUpperCase())) {
         form.elements.rail.value = String(pkg.preferredRail).toUpperCase();
-        refreshRailFields(form, adapters);
+        refreshRailFields(form);
       }
     });
-    form.elements.rail.addEventListener('change', () => refreshRailFields(form, adapters));
+    form.elements.rail.addEventListener('change', () => refreshRailFields(form));
     form.addEventListener('submit', (event) => {
       event.preventDefault();
       void prepareInstruction(form, packages);
