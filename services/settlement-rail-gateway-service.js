@@ -29,7 +29,7 @@ function fedwireMessageDescription(messageType){
   if(messageType==='pacs.002')return 'Fedwire Funds Payment Status';
   return null;
 }
-function achStandardDetails({routingNumber,accountNumber,beneficiaryName,amount,requestedExecutionDate,remittanceReference,adapter,input}){
+function achStandardDetails({routingNumber,accountNumber,beneficiaryName,amount,requestedExecutionDate,remittanceReference,adapter={},input}){
   const routing=normalizedRoutingNumber(routingNumber);
   const standardEntryClassCode=String(input.standardEntryClassCode||adapter.standardEntryClassCode||'').trim().toUpperCase()||null;
   return {
@@ -48,7 +48,7 @@ function achStandardDetails({routingNumber,accountNumber,beneficiaryName,amount,
     originatingDfiIdentification:adapter.originatingDfiIdentification||null,
   };
 }
-function fedwireStandardDetails({accountNumber,beneficiaryName,amount,routingNumber,remittanceReference,sourceType,adapter,input}){
+function fedwireStandardDetails({accountNumber,beneficiaryName,amount,routingNumber,remittanceReference,sourceType,adapter={},input}){
   const creditorAgentRoutingNumber=optionalRoutingNumber(routingNumber);
   const messageType=String(input.iso20022MessageType||adapter.iso20022MessageType||(sourceType==='FINANCING_DISBURSEMENT'?'pacs.008':'')).trim()||null;
   return {
@@ -67,7 +67,7 @@ function fedwireStandardDetails({accountNumber,beneficiaryName,amount,routingNum
     imad:null,
   };
 }
-function railStandardDetails({rail,routingNumber,accountNumber,beneficiaryName,amount,requestedExecutionDate,remittanceReference,sourceType,adapter,input}){
+function railStandardDetails({rail,routingNumber,accountNumber,beneficiaryName,amount,requestedExecutionDate,remittanceReference,sourceType,adapter={},input}){
   if(rail==='ACH')return achStandardDetails({routingNumber,accountNumber,beneficiaryName,amount,requestedExecutionDate,remittanceReference,adapter,input});
   if(rail==='FEDWIRE')return fedwireStandardDetails({accountNumber,beneficiaryName,amount,routingNumber,remittanceReference,sourceType,adapter,input});
   return null;
@@ -171,10 +171,13 @@ export class SettlementRailGatewayService{
 
   async createInstruction(input,actorId=null){
     const source=this.resolveSource(input);
-    const adapter=this.getAdapter(requiredString(input.adapterId,'adapterId'));
-    if(!adapter||adapter.state!=='ACTIVE')throw new Error('Active settlement rail adapter not found.');
-    const requestedRail=String(input.rail||adapter.rail).toUpperCase();
-    if(requestedRail!==adapter.rail)throw new Error('Requested rail does not match the selected adapter.');
+    const requestedRail=requiredString(input.rail,'rail').toUpperCase();
+    if(!SUPPORTED_RAILS.has(requestedRail))throw new Error(`Unsupported settlement rail: ${requestedRail}.`);
+
+    const requestedAdapterId=String(input.adapterId||'').trim();
+    const adapter=requestedAdapterId?this.getAdapter(requestedAdapterId):null;
+    if(requestedAdapterId&&(!adapter||adapter.state!=='ACTIVE'))throw new Error('Active settlement rail adapter not found.');
+    if(adapter&&requestedRail!==adapter.rail)throw new Error('Requested rail does not match the selected adapter.');
 
     let commitmentId=null;
     let commitment=null;
@@ -183,7 +186,7 @@ export class SettlementRailGatewayService{
       commitment=commitmentId?this.participationService?.getCommitment?.(commitmentId):null;
       if(commitmentId&&!commitment)throw new Error('Participation Commitment not found.');
       if(commitment&&commitment.state!=='COMMITTED')throw new Error('Participation Commitment must be committed before rail instruction creation.');
-      if(commitment&&commitment.institutionId!==adapter.institutionId)throw new Error('Commitment institution does not match rail adapter institution.');
+      if(commitment&&adapter&&commitment.institutionId!==adapter.institutionId)throw new Error('Commitment institution does not match rail adapter institution.');
     }
 
     const instructionAmount=positiveMoney(input.amount??commitment?.amount??source.requiredAmount,'amount');
@@ -199,7 +202,7 @@ export class SettlementRailGatewayService{
     }
 
     const receivingAccountReference=requiredString(input.receivingAccountReference,'receivingAccountReference');
-    if(adapter.permittedReceivingAccountReferences.length&&!adapter.permittedReceivingAccountReferences.includes(receivingAccountReference))throw new Error('Receiving account is not permitted for this adapter.');
+    if(adapter?.permittedReceivingAccountReferences?.length&&!adapter.permittedReceivingAccountReferences.includes(receivingAccountReference))throw new Error('Receiving account is not permitted for this adapter.');
     const instructionId=input.instructionId||id('SRA-RAIL');
     const timestamp=now();
     const settlement=source.settlement||null;
@@ -207,9 +210,9 @@ export class SettlementRailGatewayService{
     const beneficiaryName=pkg?.beneficiaryName||input.beneficiaryName||null;
     const requestedExecutionDate=input.requestedExecutionDate||null;
     const remittanceReference=input.remittanceReference||pkg?.exportPackageId||settlement?.homeProjectId||null;
-    const routingNumber=adapter.rail==='ACH'?normalizedRoutingNumber(input.routingNumber):adapter.rail==='FEDWIRE'?optionalRoutingNumber(input.routingNumber):input.routingNumber||null;
+    const routingNumber=requestedRail==='ACH'?normalizedRoutingNumber(input.routingNumber):requestedRail==='FEDWIRE'?optionalRoutingNumber(input.routingNumber):input.routingNumber||null;
     const standardDetails=railStandardDetails({
-      rail:adapter.rail,
+      rail:requestedRail,
       routingNumber,
       accountNumber:receivingAccountReference,
       beneficiaryName,
@@ -217,7 +220,7 @@ export class SettlementRailGatewayService{
       requestedExecutionDate,
       remittanceReference,
       sourceType:source.sourceType,
-      adapter,
+      adapter:adapter||{},
       input,
     });
     const message={
@@ -235,14 +238,14 @@ export class SettlementRailGatewayService{
       settlementInstrumentReference:input.settlementInstrumentReference||settlement?.executionReference||pkg?.financingTransactionId||null,
       homeProjectId:settlement?.homeProjectId||null,
       commitmentId,
-      institutionId:adapter.institutionId,
-      adapterId:adapter.adapterId,
-      rail:adapter.rail,
-      railDisplayName:adapter.rail==='ACH'?'ACH Network':adapter.rail==='FEDWIRE'?'Fedwire Funds Service':adapter.rail,
-      executionMode:adapter.executionMode||defaultExecutionMode(adapter.rail),
+      institutionId:adapter?.institutionId||null,
+      adapterId:adapter?.adapterId||null,
+      rail:requestedRail,
+      railDisplayName:requestedRail==='ACH'?'ACH Network':requestedRail==='FEDWIRE'?'Fedwire Funds Service':requestedRail,
+      executionMode:adapter?.executionMode||null,
       amount:instructionAmount,
-      currency:input.currency||source.currency||adapter.currency||'USD',
-      senderAccountReference:input.senderAccountReference||adapter.senderAccountReference,
+      currency:input.currency||source.currency||adapter?.currency||'USD',
+      senderAccountReference:input.senderAccountReference||adapter?.senderAccountReference||null,
       receivingInstitutionReference:requiredString(input.receivingInstitutionReference,'receivingInstitutionReference'),
       receivingAccountReference,
       routingNumber,
@@ -251,7 +254,7 @@ export class SettlementRailGatewayService{
       requestedExecutionDate,
       remittanceReference,
       packageHash:settlement?.settlementPackage?.packageHash||null,
-      messageStandard:adapter.messageStandard||defaultStandard(adapter.rail),
+      messageStandard:adapter?.messageStandard||defaultStandard(requestedRail),
       standardDetails,
     };
     const record={...message,messageHash:hash(message),state:'READY',createdBy:actorId,createdAt:timestamp,updatedAt:timestamp,history:[{state:'READY',at:timestamp,actorId}]};
@@ -269,7 +272,7 @@ export class SettlementRailGatewayService{
     else {
       for(const change of changes)await this.domain.put(change.type,change.id,change.payload,{actorId,eventType:change.eventType});
     }
-    await this.domain.lifecycle({objectType:RECORD_TYPES.SETTLEMENT_RAIL_INSTRUCTION,objectId:instructionId,eventType:'SETTLEMENT_RAIL_INSTRUCTION_CREATED',actorId,payload:{settlementId:record.settlementId,exportPackageId:record.exportPackageId,institutionId:adapter.institutionId,amount:instructionAmount,rail:adapter.rail,executionMode:record.executionMode,messageStandard:record.messageStandard}});
+    await this.domain.lifecycle({objectType:RECORD_TYPES.SETTLEMENT_RAIL_INSTRUCTION,objectId:instructionId,eventType:'SETTLEMENT_RAIL_INSTRUCTION_CREATED',actorId,payload:{settlementId:record.settlementId,exportPackageId:record.exportPackageId,institutionId:record.institutionId,amount:instructionAmount,rail:record.rail,executionMode:record.executionMode,messageStandard:record.messageStandard}});
     return record;
   }
 
