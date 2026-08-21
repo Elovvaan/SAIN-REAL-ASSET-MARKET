@@ -14,6 +14,7 @@
   };
 
   const bankRails = new Set(['ACH','FEDWIRE','WIRE']);
+  let lastBankLifecycleSuccess = null;
 
   function railDisplayName(rail) {
     if (rail === 'ACH') return 'ACH Network · Nacha';
@@ -30,7 +31,8 @@
   }
 
   function preparedBankInstructions(payload) {
-    return (payload?.records?.settlementInstructions || []).filter((record) => {
+    const records = payload?.instructions || payload?.records?.settlementInstructions || [];
+    return records.filter((record) => {
       if (!bankRails.has(String(record?.rail || '').toUpperCase())) return false;
       if (String(record?.sourceType || '').toUpperCase() !== 'FINANCING_DISBURSEMENT') return false;
       return ['READY','DISPATCHED','ACCEPTED','EXECUTED','EXCEPTION'].includes(String(record?.state || '').toUpperCase());
@@ -211,7 +213,8 @@
     const action = root?.querySelector('[data-bank-lifecycle-action]');
     const result = root?.querySelector('[data-bank-lifecycle-result]');
     if (!root || !summary || !fields || !action || !result) return;
-    result.textContent = '';
+    const successForSelection = lastBankLifecycleSuccess && (!instruction || lastBankLifecycleSuccess.instructionId === instruction.instructionId);
+    result.textContent = successForSelection ? `${lastBankLifecycleSuccess.instructionId} · ${lastBankLifecycleSuccess.state}` : '';
     if (!instruction) {
       summary.innerHTML = '<div><span>Status</span><strong>Select a settlement instruction</strong></div>';
       fields.innerHTML = '';
@@ -248,6 +251,7 @@
     const result = root?.querySelector('[data-bank-lifecycle-result]');
     const action = root?.querySelector('[data-bank-lifecycle-action]');
     if (!instruction || !result || !action) return;
+    if (!form.reportValidity()) return;
     const values = Object.fromEntries(new FormData(form).entries());
     const state = String(instruction.state || '').toUpperCase();
     let targetState = null;
@@ -275,8 +279,9 @@
       const updated = await request(`/api/settlement-rails/instructions/${encodeURIComponent(instruction.instructionId)}/transition`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ state:targetState, ...body }) });
       const index = instructions.findIndex((item) => item.instructionId === updated.instructionId);
       if (index >= 0) instructions[index] = updated;
-      result.textContent = `${updated.instructionId} · ${updated.state}`;
+      lastBankLifecycleSuccess = { instructionId: updated.instructionId, state: updated.state };
       renderBankLifecycle(form, instructions);
+      result.textContent = `${updated.instructionId} · ${updated.state}`;
       client()?.refresh(`settlement-${String(updated.state || '').toLowerCase()}`);
       window.dispatchEvent(new CustomEvent('sra:admin-refresh',{ detail:{ source:`settlement-${String(updated.state || '').toLowerCase()}` } }));
     } catch (error) { result.textContent = error.message; }
@@ -344,9 +349,9 @@
 
   async function renderExecution(workspace, controls) {
     controls.querySelector('[data-native-ach-destination-control]')?.remove();
-    const [workspaces, onChainStatus] = await Promise.all([ request('/api/admin/workspaces?limit=100').catch(() => ({ records:{} })), request('/api/on-chain/status').catch(() => ({ networks:[] })) ]);
+    const [instructionPayload, onChainStatus] = await Promise.all([ request('/api/settlement-rails/instructions').catch(() => ({ instructions:[] })), request('/api/on-chain/status').catch(() => ({ networks:[] })) ]);
     if (!controls.isConnected || workspace.dataset.activeTab !== 'Destination Verification') return;
-    const instructions = preparedBankInstructions(workspaces);
+    const instructions = preparedBankInstructions(instructionPayload);
     controls.insertAdjacentHTML('afterbegin', executionMarkup({ bankInstructions: instructions, onChainStatus }));
     const form = controls.querySelector('[data-settlement-execution-form]');
     if (!form) return;
