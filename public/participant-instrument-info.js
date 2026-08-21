@@ -67,7 +67,15 @@
     form.querySelectorAll('[data-entity-only]').forEach((field) => { field.hidden = !type || person; field.required = Boolean(type) && !person; });
   }
 
-  function bindAction(root, record) {
+  function stillFinancingRender(root, renderToken) {
+    return Boolean(
+      root?.isConnected
+      && root.dataset.sraParticipantInstrumentRenderToken === renderToken
+      && root.querySelector('.participant-financing')
+    );
+  }
+
+  function bindAction(root, record, renderToken) {
     const card = root.querySelector(`[data-participant-action="${CSS.escape(record.opportunityId)}"]`);
     const form = card?.querySelector('[data-applicant-info-form]');
     if (!form) return;
@@ -85,7 +93,7 @@
       message.textContent = 'Submitting applicant information…';
       try {
         await request(`/api/funding-verification/opportunities/${encodeURIComponent(record.opportunityId)}/applicant-information`, { method: 'POST', body: JSON.stringify(values) });
-        await mount(root);
+        await mount(root, renderToken);
       } catch (error) {
         button.disabled = false;
         message.className = 'participant-action-message error';
@@ -94,20 +102,22 @@
     });
   }
 
-  async function mount(root) {
-    if (!root || !window.accessState?.session) return;
+  async function mount(root, renderToken) {
+    if (!root || !window.accessState?.session || !stillFinancingRender(root, renderToken)) return;
     ensureStyle();
     root.querySelectorAll('[data-participant-action]').forEach((node) => node.remove());
     try {
       const payload = await request('/api/funding-verification/participant-actions');
+      if (!stillFinancingRender(root, renderToken)) return;
       const records = payload.records || [];
       if (!records.length) return;
       const holder = document.createElement('div');
       holder.innerHTML = records.map(actionMarkup).join('');
+      if (!stillFinancingRender(root, renderToken)) return;
       root.prepend(...holder.children);
-      records.forEach((record) => bindAction(root, record));
+      records.forEach((record) => bindAction(root, record, renderToken));
     } catch (error) {
-      console.warn('Participant financing actions could not load.', error);
+      if (stillFinancingRender(root, renderToken)) console.warn('Participant financing actions could not load.', error);
     }
   }
 
@@ -117,8 +127,10 @@
     if (typeof originalRender !== 'function') return false;
     window.__sraParticipantInstrumentInfoInstalled = true;
     window.renderParticipantFundingOperations = function renderParticipantFundingOperations(root) {
+      const renderToken = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      root.dataset.sraParticipantInstrumentRenderToken = renderToken;
       originalRender(root);
-      void mount(root);
+      void mount(root, renderToken);
     };
     return true;
   }
