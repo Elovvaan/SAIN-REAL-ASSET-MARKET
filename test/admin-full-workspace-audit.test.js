@@ -80,7 +80,7 @@ test('administration loads the single suite shell before lazy workspace controls
   assert.match(bootstrap, /const WORKSPACE_FEATURES = \{/);
   assert.match(bootstrap, /await ensureShell\(\)/);
   assert.match(bootstrap, /await loadWorkspaceFeatures\(activeWorkspaceId\(\)\)/);
-  assert.match(bootstrap, /admin\.querySelector\('\.admin-suite'\)/);
+  assert.match(bootstrap, /admin\?\.querySelector\('\.admin-suite'\)/);
   assert.match(bootstrap, /removeBootPlaceholder\(admin\)/);
   assert.match(bootstrap, /admin\.dataset\.presentationOwner = 'admin-suite'/);
   assert.doesNotMatch(bootstrap, /concealLegacyFirstPaint/);
