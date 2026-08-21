@@ -10,7 +10,7 @@
     return payload;
   };
 
-  function mount(workspace) {
+  function mount(workspace = document.querySelector('[data-workspace="settlement"]')) {
     if (!workspace || workspace.querySelector('[data-treasury-prime-connection-test]')) return;
     const card = document.createElement('section');
     card.className = 'admin-record-card';
@@ -40,4 +40,7 @@
   }
 
   window.mountAdminTreasuryPrimeConnectionTest = mount;
+  window.addEventListener('sra:admin-booted', () => mount());
+  window.addEventListener('sra:admin-workspace-features-ready', (event) => { if (event.detail?.workspaceId === 'settlement') mount(); });
+  window.addEventListener('hashchange', () => queueMicrotask(() => mount()));
 })();
