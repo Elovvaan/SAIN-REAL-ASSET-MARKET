@@ -15,6 +15,15 @@ function actorId(req) {
 function isStaffRequest(req) {
   return (req.sraOperationsAuth?.roles || []).some((role) => STAFF_ROLES.has(String(role).toUpperCase()));
 }
+function hasExplicitApplicantInput(body = {}) {
+  return Boolean(
+    body?.applicantParticipantId ||
+    body?.applicantReference ||
+    body?.manualApplicant ||
+    body?.applicantDisplayName ||
+    body?.applicantSource
+  );
+}
 function createParticipantId() {
   return `P-${crypto.randomUUID().split('-')[0].toUpperCase()}`;
 }
@@ -179,9 +188,11 @@ export function createFundingOpportunityRouter(service, documentService = null) 
   router.post('/opportunities', async (req, res) => {
     try {
       const staff = isStaffRequest(req);
-      const participantSelfService = req.sraOperationsAuth?.source === 'SERVER_SESSION' && !staff;
+      const serverSession = req.sraOperationsAuth?.source === 'SERVER_SESSION';
+      const explicitApplicant = hasExplicitApplicantInput(req.body);
+      const participantSelfService = serverSession && !explicitApplicant;
       const authenticatedParticipantId = participantSelfService ? await resolveParticipantForIdentity(service, req.sraIdentity) : null;
-      const adminParticipantId = staff ? await resolveAdminApplicant(service, req.body, actorId(req)) : null;
+      const adminParticipantId = staff && explicitApplicant ? await resolveAdminApplicant(service, req.body, actorId(req)) : null;
       const resolvedParticipantId = authenticatedParticipantId || adminParticipantId || req.body?.applicantParticipantId || null;
       const input = resolvedParticipantId
         ? { ...req.body, applicantParticipantId: resolvedParticipantId, relatedParticipantIds: [resolvedParticipantId, ...(req.body?.relatedParticipantIds || [])] }
