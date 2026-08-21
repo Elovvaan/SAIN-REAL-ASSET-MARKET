@@ -15,11 +15,14 @@ function normalizeEmail(value) {
 function resolveParticipantForIdentity(service, identity) {
   if (!identity?.actorId) return null;
   const participants = service.domain.list(PARTICIPANT_TYPE);
+  const direct = participants.find((record) => record?.metadata?.accessAccountId === identity.actorId);
+  if (direct) return direct;
+  const universal = participants.find((record) => identity.universalAccountId && record?.metadata?.universalAccountId === identity.universalAccountId);
+  if (universal) return universal;
   const email = normalizeEmail(identity.email);
-  return participants.find((record) => record?.metadata?.accessAccountId === identity.actorId)
-    || participants.find((record) => identity.universalAccountId && record?.metadata?.universalAccountId === identity.universalAccountId)
-    || participants.find((record) => email && normalizeEmail(record?.metadata?.contactEmail || record?.metadata?.email) === email)
-    || null;
+  if (!email) return null;
+  const emailMatches = participants.filter((record) => normalizeEmail(record?.metadata?.contactEmail || record?.metadata?.email) === email);
+  return emailMatches.length === 1 ? emailMatches[0] : null;
 }
 
 function participantAction(opportunity) {
@@ -102,6 +105,7 @@ export function createFundingOpportunityVerificationRouter(service) {
       const submittedAt = new Date().toISOString();
       const updated = {
         ...opportunity,
+        fundingPhase: 'VERIFIED_VALUE_PREPARATION',
         applicantInstrumentInformation: {
           ...applicantInformation,
           submittedBy: actorId(req),
@@ -164,30 +168,8 @@ export function createFundingOpportunityVerificationRouter(service) {
   });
 
   router.post('/requests/:requestId/decision', async (req, res) => {
-    try {
-      const result = await service.decide(req.params.requestId, req.body, actorId(req));
-      if (String(req.body?.decision || '').toUpperCase() === 'VERIFIED' && result?.opportunity) {
-        const current = service.domain.get(OPPORTUNITY_TYPE, result.opportunity.opportunityId) || result.opportunity;
-        if (!participantAction(current)) {
-          const requestedAt = new Date().toISOString();
-          const updated = {
-            ...current,
-            participantInformationRequirement: {
-              type: ACTION_TYPE,
-              status: 'REQUIRED',
-              requestedAt,
-              requestedBy: actorId(req),
-              alert: 'Action required: complete your applicant information so SRA can prepare the financing instrument.',
-            },
-            updatedAt: requestedAt,
-          };
-          await service.domain.put(OPPORTUNITY_TYPE, current.opportunityId, updated, { actorId: actorId(req), eventType: 'PARTICIPANT_APPLICANT_INFORMATION_REQUESTED' });
-          await service.domain.lifecycle({ objectType: OPPORTUNITY_TYPE, objectId: current.opportunityId, eventType: 'PARTICIPANT_APPLICANT_INFORMATION_REQUESTED', actorId: actorId(req), payload: { actionType: ACTION_TYPE } });
-          result.opportunity = updated;
-        }
-      }
-      return res.status(201).json(result);
-    } catch (error) { return handle(res, error); }
+    try { return res.status(201).json(await service.decide(req.params.requestId, req.body, actorId(req))); }
+    catch (error) { return handle(res, error); }
   });
 
   return router;
