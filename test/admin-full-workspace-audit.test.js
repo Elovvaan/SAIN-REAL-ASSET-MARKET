@@ -61,13 +61,13 @@ test('only one administration shell is visible', () => {
   assert.match(css, /\.admin-workspace-controls>\.card/);
 });
 
-test('administration conceals legacy first paint and loads consolidated controls after the suite shell', () => {
+test('administration loads the single suite shell before lazy workspace controls', () => {
   const shellIndex = bootstrap.indexOf("['/admin/admin-suite-shell.js'");
   const controlsIndex = bootstrap.indexOf("['/admin/admin-workstation-controls.js'");
   const diagnosticsIndex = bootstrap.indexOf("['/admin/admin-button-diagnostics-core.js'");
   assert.ok(shellIndex >= 0, 'suite shell must be declared');
-  assert.ok(controlsIndex > shellIndex, 'consolidated workstation controls must load after the suite shell');
-  assert.ok(diagnosticsIndex > controlsIndex, 'diagnostics must load after workstation controls');
+  assert.ok(controlsIndex > shellIndex, 'workspace controls must be declared after the suite shell');
+  assert.ok(diagnosticsIndex > controlsIndex, 'diagnostics must remain after workstation controls');
   for (const retired of [
     'listing-authorization-ui.js',
     'hybrid-liquidity-admin.js',
@@ -77,12 +77,14 @@ test('administration conceals legacy first paint and loads consolidated controls
     'admin-instrument-approvals.js',
     'listing-readiness-policy-ui.js',
   ]) assert.doesNotMatch(bootstrap, new RegExp(retired.replaceAll('.', '\\.')));
-  assert.match(bootstrap, /concealLegacyFirstPaint\(admin\)/);
-  assert.match(bootstrap, /admin\.style\.visibility = 'hidden'/);
-  assert.match(bootstrap, /await loadScript\(shellSource, shellMarker\)/);
+  assert.match(bootstrap, /const WORKSPACE_FEATURES = \{/);
+  assert.match(bootstrap, /await ensureShell\(\)/);
+  assert.match(bootstrap, /await loadWorkspaceFeatures\(activeWorkspaceId\(\)\)/);
   assert.match(bootstrap, /admin\.querySelector\('\.admin-suite'\)/);
-  assert.match(bootstrap, /revealAdminSuite\(admin\)/);
-  assert.match(bootstrap, /FEATURES\.slice\(1\)/);
+  assert.match(bootstrap, /removeBootPlaceholder\(admin\)/);
+  assert.match(bootstrap, /admin\.dataset\.presentationOwner = 'admin-suite'/);
+  assert.doesNotMatch(bootstrap, /concealLegacyFirstPaint/);
+  assert.doesNotMatch(bootstrap, /revealAdminSuite/);
 });
 
 test('workspace opened during the shared initial request is rendered when that request settles', () => {
@@ -97,14 +99,18 @@ test('successful admin mutations synchronize through the consolidated data clien
   assert.match(client, /sra:admin-mutated/);
   assert.match(bootstrap, /sra:admin-mutated/);
   assert.match(bootstrap, /data-refresh-workspace/);
-  assert.match(bootstrap, /window\.loadSummary/);
+  assert.match(bootstrap, /sra:admin-workspace-synchronized/);
+  assert.match(bootstrap, /window\.sraRefreshAdministration = requestAdministrationRefresh/);
   assert.doesNotMatch(bootstrap, /admin-workspace-sync\.js/);
 });
 
-test('active bootstrap has one feature ownership path', () => {
-  assert.match(bootstrap, /const FEATURES = \[/);
+test('active bootstrap has one lazy feature ownership path', () => {
+  assert.match(bootstrap, /const WORKSPACE_FEATURES = \{/);
+  assert.match(bootstrap, /const workspaceLoads = new Map\(\)/);
+  assert.match(bootstrap, /async function loadWorkspaceFeatures/);
   assert.match(bootstrap, /admin-suite-shell\.js/);
   assert.match(bootstrap, /admin-workstation-controls\.js/);
+  assert.match(bootstrap, /admin-settlement-execution-controls\.js/);
   assert.doesNotMatch(bootstrap, /admin-button-diagnostics\.js/);
   assert.doesNotMatch(bootstrap, /admin-action-reconciliation\.js/);
   assert.doesNotMatch(bootstrap, /admin-workspace-data-bridge\.js/);
