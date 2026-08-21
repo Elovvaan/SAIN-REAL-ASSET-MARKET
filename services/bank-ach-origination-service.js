@@ -50,7 +50,7 @@ export class BankAchOriginationService{
   async submit(instruction){
     if(!instruction)throw new Error('Settlement instruction is required.');
     if(String(instruction.rail||'').toUpperCase()!=='ACH')throw new Error('Bank ACH origination only accepts ACH instructions.');
-    if(!['READY','EXCEPTION'].includes(String(instruction.state||'').toUpperCase()))throw new Error(`ACH instruction cannot be submitted from ${instruction.state}.`);
+    if(!['READY','EXCEPTION','DISPATCHED'].includes(String(instruction.state||'').toUpperCase()))throw new Error(`ACH instruction cannot be submitted from ${instruction.state}.`);
     const accountNumber=required(instruction.receivingAccountReference,'receivingAccountReference');
     const routingNumber=required(instruction.routingNumber,'routingNumber');
     const amount=Math.round(Number(instruction.amount)*100);
