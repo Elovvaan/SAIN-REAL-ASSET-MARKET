@@ -20,6 +20,9 @@ async function treasuryPrimeRequest(path,{method='GET',body=null,idempotencyKey=
   if(!response.ok){const error=new Error(payload?.error||`Treasury Prime request failed (HTTP ${response.status}).`);error.status=response.status;throw error;}
   return {payload,baseUrl};
 }
+function mapCounterparty(counterparty){
+  return {id:counterparty.id,name:counterparty.name||counterparty.name_on_account||counterparty.id,accountType:counterparty.ach?.account_type||null,last4:String(counterparty.ach?.account_number||'').slice(-4)||null,routingLast4:String(counterparty.ach?.routing_number||'').slice(-4)||null,achAvailable:Boolean(counterparty.ach?.account_number&&counterparty.ach?.routing_number)};
+}
 async function treasuryPrimePing(_req,res){
   try{
     const {payload,baseUrl}=await treasuryPrimeRequest('/ping');
@@ -36,9 +39,24 @@ async function treasuryPrimeAccounts(_req,res){
 async function treasuryPrimeCounterparties(_req,res){
   try{
     const {payload,baseUrl}=await treasuryPrimeRequest('/counterparty');
-    const counterparties=(payload?.data||[]).map((counterparty)=>({id:counterparty.id,name:counterparty.name||counterparty.id,accountType:counterparty.ach?.account_type||null,last4:String(counterparty.ach?.account_number||'').slice(-4)||null,routingLast4:String(counterparty.ach?.routing_number||'').slice(-4)||null,achAvailable:Boolean(counterparty.ach?.account_number&&counterparty.ach?.routing_number)})).filter((item)=>item.achAvailable);
+    const counterparties=(payload?.data||[]).map(mapCounterparty).filter((item)=>item.achAvailable);
     return res.json({ok:true,environment:baseUrl.includes('sandbox')?'SANDBOX':'PRODUCTION',counterparties});
   }catch(error){return res.status(error.status===503?503:502).json({ok:false,error:`Treasury Prime counterparty lookup failed: ${error?.message||error}`});}
+}
+async function treasuryPrimeCreateSandboxCounterparty(_req,res){
+  try{
+    const {baseUrl}=treasuryPrimeConfig();
+    if(!baseUrl.includes('sandbox'))return res.status(400).json({ok:false,error:'Sandbox ACH destination creation is restricted to Treasury Prime sandbox.'});
+    const body={
+      name_on_account:'SRA Sandbox ACH Receiver',
+      ach:{account_number:'12345678',account_type:'checking',routing_number:'051883043'},
+      userdata:{purpose:'SRA_SANDBOX_ACH_TEST'}
+    };
+    const {payload}=await treasuryPrimeRequest('/counterparty',{method:'POST',body,idempotencyKey:`sra-sandbox-counterparty-${randomUUID()}`});
+    const counterparty=mapCounterparty(payload);
+    if(!counterparty.id||!counterparty.achAvailable)return res.status(502).json({ok:false,error:'Treasury Prime did not return an ACH-enabled sandbox counterparty.'});
+    return res.status(201).json({ok:true,counterparty});
+  }catch(error){return res.status(error.status===503?503:502).json({ok:false,error:`Treasury Prime sandbox counterparty creation failed: ${error?.message||error}`});}
 }
 async function treasuryPrimeAchTest(req,res){
   try{
@@ -56,6 +74,7 @@ export function createTreasuryBankConnectorRouter(service){const router=express.
 router.post('/treasury-prime/ping',treasuryPrimePing);
 router.get('/treasury-prime/accounts',treasuryPrimeAccounts);
 router.get('/treasury-prime/counterparties',treasuryPrimeCounterparties);
+router.post('/treasury-prime/counterparties/sandbox-test',treasuryPrimeCreateSandboxCounterparty);
 router.post('/treasury-prime/ach-test',treasuryPrimeAchTest);
 router.get('/connections',(req,res)=>res.json({connections:service.listConnections({institutionId:req.query.institutionId||null,state:req.query.state||null})}));
 router.post('/connections',async(req,res)=>{try{return res.status(201).json(await service.createConnection(req.body||{},actorId(req)));}catch(e){return fail(res,e);}});
