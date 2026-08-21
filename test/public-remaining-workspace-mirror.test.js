@@ -38,6 +38,37 @@ test('participant financing is self-service, document-first, and separated from 
   assert.doesNotMatch(financing, /Manual applicant entry/);
 });
 
+test('startup business selection builds the complete startup funding package before submission', () => {
+  assert.match(financing, /option value=\"STARTUP_BUSINESS\">Startup business/);
+  assert.match(financing, /function startupPayload\(formData\)/);
+  assert.match(financing, /payload\.startupFundingRequest = startupPayload\(formData\)/);
+  for (const marker of [
+    'startupBusinessLegalEntityName',
+    'startupBusinessLocation',
+    'startupEmailPhone',
+    'startupBusinessFormationStatus',
+    'startupBusinessDescription',
+    'startupRequestedLaunchDate',
+    'startupExactFundingPurpose',
+    'startupUseItem',
+    'startupUseCost',
+    'startupPrimaryProductService',
+    'startupAverageSellingPrice',
+    'startupDirectCost',
+    'startupMonthlySalesVolume',
+    'startupMonthlyRevenue',
+    'startupMonthlyOperatingExpenses',
+    'startupMonthlyAvailableBeforeDebt',
+    'startupTargetCustomer',
+    'startupSalesChannel',
+    'startupDemandEvidence',
+    'startupPrintedName',
+    'startupCertificationDate',
+    'startupCertifiedAccurate',
+  ]) assert.match(financing, new RegExp(marker));
+  assert.match(financing, /Startup use of funds must total the requested amount/);
+});
+
 test('liquidity capability is explicit and observer-free', () => {
   assert.match(bootstrap, /\/hybrid-liquidity-market\.js/);
   assert.match(liquidity, /window\.renderHybridLiquidityWorkspace = render/);
