@@ -41,7 +41,7 @@
         <select data-tp-account style="width:100%;background:#050505;border:1px solid #292929;border-radius:10px;color:#f5f5f5;padding:12px"></select>
       </div>
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px">
-        <button type="button" data-tp-load-counterparties disabled>3 · Load ACH Destinations</button>
+        <button type="button" data-tp-load-counterparties disabled>3 · Prepare ACH Destination</button>
       </div>
       <div data-tp-counterparty-row style="display:none;margin-top:12px">
         <select data-tp-counterparty style="width:100%;background:#050505;border:1px solid #292929;border-radius:10px;color:#f5f5f5;padding:12px"></select>
@@ -104,22 +104,35 @@
       const selected = Boolean(accountSelect.value);
       counterpartiesButton.disabled = !selected;
       accountStatus.textContent = selected ? `Selected · ${accountSelect.options[accountSelect.selectedIndex]?.textContent || accountSelect.value}` : 'Select an account';
-      counterpartyStatus.textContent = selected ? 'Ready to load' : 'Waiting for account';
+      counterpartyStatus.textContent = selected ? 'Ready to prepare' : 'Waiting for account';
       counterpartySelect.value = '';
       achButton.disabled = true;
     });
 
     counterpartiesButton.addEventListener('click', async () => {
       counterpartiesButton.disabled = true;
-      result.textContent = 'Loading Treasury Prime ACH destinations…';
+      result.textContent = 'Preparing Treasury Prime ACH destination…';
       try {
-        const payload = await request('/api/treasury/treasury-prime/counterparties');
-        const counterparties = payload.counterparties || [];
-        if (!counterparties.length) throw new Error('No ACH-enabled sandbox counterparties were returned.');
+        let payload = await request('/api/treasury/treasury-prime/counterparties');
+        let counterparties = payload.counterparties || [];
+        if (!counterparties.length) {
+          result.textContent = 'No sandbox ACH destination exists yet. Creating one now…';
+          const created = await request('/api/treasury/treasury-prime/counterparties/sandbox-test', { method: 'POST' });
+          counterparties = created.counterparty ? [created.counterparty] : [];
+        }
+        if (!counterparties.length) throw new Error('Treasury Prime did not return an ACH-enabled sandbox destination.');
         counterpartySelect.innerHTML = counterpartyOptions(counterparties);
         counterpartyRow.style.display = '';
-        counterpartyStatus.textContent = `${counterparties.length} destination${counterparties.length === 1 ? '' : 's'} available`;
-        result.textContent = 'Select the ACH destination for the $1 sandbox test.';
+        if (counterparties.length === 1) {
+          counterpartySelect.value = counterparties[0].id;
+          achButton.disabled = !accountSelect.value;
+          counterpartyStatus.textContent = `Selected · ${counterpartySelect.options[counterpartySelect.selectedIndex]?.textContent || counterparties[0].id}`;
+          achStatus.textContent = 'Ready for $1 sandbox ACH';
+          result.textContent = 'Sandbox ACH destination is ready.';
+        } else {
+          counterpartyStatus.textContent = `${counterparties.length} destinations available`;
+          result.textContent = 'Select the ACH destination for the $1 sandbox test.';
+        }
       } catch (error) {
         counterpartyStatus.textContent = 'FAILED';
         result.textContent = error.message;
