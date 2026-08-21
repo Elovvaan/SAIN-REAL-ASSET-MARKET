@@ -1,5 +1,7 @@
 import express from 'express';
 
+const OPPORTUNITY_TYPE = 'FUNDING_OPPORTUNITY';
+
 function actorId(req) {
   return req.sraOperationsAuth?.actorId || null;
 }
@@ -14,8 +16,19 @@ function requireAuthenticatedActor(req, res, next) {
   return next();
 }
 
+function requireApplicantInformationComplete(service, opportunityId) {
+  const opportunity = service.domain.get(OPPORTUNITY_TYPE, opportunityId);
+  if (!opportunity) throw new Error('Funding opportunity was not found.');
+  const requirement = opportunity.participantInformationRequirement;
+  if (requirement?.type === 'COMPLETE_APPLICANT_INFORMATION' && requirement.status !== 'COMPLETED') {
+    const error = new Error('Applicant information must be completed before Verified Value preparation can begin.');
+    error.code = 'APPLICANT_INFORMATION_REQUIRED';
+    throw error;
+  }
+}
+
 function handle(res, error) {
-  const status = /not found/i.test(error.message) ? 404 : 400;
+  const status = error.code === 'APPLICANT_INFORMATION_REQUIRED' ? 409 : /not found/i.test(error.message) ? 404 : 400;
   return res.status(status).json({ error: error.message, code: error.code || 'FUNDING_VALUE_PREPARATION_ERROR' });
 }
 
@@ -35,7 +48,10 @@ export function createFundingOpportunityValuePreparationRouter(service) {
   });
 
   router.post('/opportunities/:opportunityId/preparations', requireAuthenticatedActor, async (req, res) => {
-    try { return res.status(201).json(await service.createPreparation(req.params.opportunityId, req.body, actorId(req))); }
+    try {
+      requireApplicantInformationComplete(service, req.params.opportunityId);
+      return res.status(201).json(await service.createPreparation(req.params.opportunityId, req.body, actorId(req)));
+    }
     catch (error) { return handle(res, error); }
   });
 
