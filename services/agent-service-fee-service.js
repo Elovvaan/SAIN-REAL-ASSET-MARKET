@@ -23,9 +23,12 @@ export class AgentServiceFeeService {
   }
 
   quoteWorkOrder(workOrder={}) {
+    // The assigned worker is authoritative for compensation/service-fee attribution.
+    // A workflow-stage quote is used only when no agent has been assigned yet.
+    const assignedAgentId = String(workOrder.agentId || '').trim();
+    const agentQuote = assignedAgentId ? this.quoteAgent(assignedAgentId) : null;
     const stageQuote = this.quoteWorkflowStage(workOrder.sourceStage);
-    const agentQuote = this.quoteAgent(workOrder.agentId);
-    const quote = stageQuote || agentQuote;
+    const quote = agentQuote || stageQuote;
     if (!quote) return null;
     return {
       scheduleId: SRA_AGENT_SERVICE_FEE_SCHEDULE.scheduleId,
@@ -33,7 +36,7 @@ export class AgentServiceFeeService {
       basis: SRA_AGENT_SERVICE_FEE_SCHEDULE.basis,
       feeCode: quote.feeCode,
       serviceName: quote.serviceName,
-      agentId: quote.agentId,
+      agentId: assignedAgentId || quote.agentId,
       workflowStage: workOrder.sourceStage || null,
       sourceRecordId: workOrder.sourceRecordId || null,
       requestedAction: workOrder.requestedAction || null,
