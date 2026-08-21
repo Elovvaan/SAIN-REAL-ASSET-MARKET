@@ -69,13 +69,14 @@
       await window.initializeAccess();
     }
 
-    // Preserve the renderer ownership dependency: participation defines the base
-    // signed-in marketplace function and Tier One intentionally replaces it.
+    // Preserve renderer ownership and late-load initialization order:
+    // participation defines the base renderer, Tier One replaces it, then
+    // participation initializes so an already-active marketplace renders Tier One.
     await loadScript('/participation.js');
+    await loadScript('/marketplace-tier-one.js');
     if (document.readyState !== 'loading' && typeof window.initializeParticipation === 'function') {
       await window.initializeParticipation();
     }
-    await loadScript('/marketplace-tier-one.js');
 
     await Promise.all(CORE_FINAL_FEATURES.map(loadScript));
 
