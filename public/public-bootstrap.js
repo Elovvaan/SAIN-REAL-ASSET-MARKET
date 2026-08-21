@@ -25,7 +25,7 @@
     '/transaction-market-ui.js',
     '/order-intent-ui.js',
     '/funding-intake-ui.js',
-    '/funding-operations-ui.js',
+    '/participant-financing-ui.js',
     '/funding-intake-identity-evidence.js',
     '/hybrid-liquidity-market.js',
     '/participant-workspace-bootstrap.js',

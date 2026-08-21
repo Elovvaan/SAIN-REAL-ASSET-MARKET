@@ -3,9 +3,14 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 const allowedMimeTypes = new Set([
-  'application/pdf','image/jpeg','image/png','image/webp',
+  'application/pdf',
+  'image/jpeg','image/png','image/webp',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'application/msword','text/plain'
+  'application/msword',
+  'text/plain',
+  'text/csv','application/csv',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 ]);
 
 const TWO_YEARS_MS = 2 * 365 * 24 * 60 * 60 * 1000;
@@ -73,7 +78,9 @@ export class PrivateDocumentService {
 
   validateFile(file) {
     if (!file) return 'A document file is required.';
-    if (!allowedMimeTypes.has(file.mimetype)) return 'Unsupported document type.';
+    const mimetype = String(file.mimetype || '').toLowerCase();
+    const supported = allowedMimeTypes.has(mimetype) || mimetype.startsWith('image/');
+    if (!supported) return 'Unsupported document type.';
     if (file.size > 15 * 1024 * 1024) return 'Each document must be 15 MB or smaller.';
     return null;
   }
