@@ -72,6 +72,9 @@
     // Preserve the renderer ownership dependency: participation defines the base
     // signed-in marketplace function and Tier One intentionally replaces it.
     await loadScript('/participation.js');
+    if (document.readyState !== 'loading' && typeof window.initializeParticipation === 'function') {
+      await window.initializeParticipation();
+    }
     await loadScript('/marketplace-tier-one.js');
 
     await Promise.all(CORE_FINAL_FEATURES.map(loadScript));
