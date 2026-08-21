@@ -283,8 +283,12 @@
     finally { action.disabled = false; }
   }
 
-  function setRequired(group, enabled) {
-    group?.querySelectorAll('input,select').forEach((field) => { field.disabled = !enabled; if (!enabled) field.required = false; });
+  function setRequired(group, enabled, requireWhenEnabled = false) {
+    group?.querySelectorAll('input,select').forEach((field) => {
+      if (field.dataset.sraRequiredWhenEnabled === undefined) field.dataset.sraRequiredWhenEnabled = field.required ? 'true' : 'false';
+      field.disabled = !enabled;
+      field.required = enabled && (requireWhenEnabled || field.dataset.sraRequiredWhenEnabled === 'true');
+    });
   }
 
   function toggleExecutionRoute(form, chainReady, instructions) {
@@ -296,7 +300,7 @@
     form.querySelector('[data-bank-execution-status]').style.display = onChain ? 'none' : '';
     form.querySelector('[data-onchain-execution-status]').style.display = onChain ? '' : 'none';
     setRequired(bankFields, !onChain);
-    setRequired(chainFields, onChain);
+    setRequired(chainFields, onChain, true);
     const button = form.querySelector('[data-execute-button]');
     button.style.display = onChain ? '' : 'none';
     button.disabled = onChain ? !chainReady : true;
