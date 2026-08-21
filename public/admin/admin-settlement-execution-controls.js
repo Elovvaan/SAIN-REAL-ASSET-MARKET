@@ -234,7 +234,7 @@
       return;
     }
     if (state === 'EXECUTED') {
-      fields.innerHTML = `<label><span>Institution transaction reference</span><input name="institutionTransactionReference" type="text" value="${esc(instruction.institutionTransactionReference || '')}" required></label><label><span>${instruction.rail === 'ACH' ? 'ACH Trace Number' : instruction.rail === 'FEDWIRE' ? 'Fedwire IMAD' : 'Network reference'}</span><input name="networkReference" type="text" value="${esc(instruction.networkReference || '')}" required></label><label><span>Receiving confirmation reference</span><input name="receivingConfirmationReference" type="text" placeholder="Receiving confirmation" required></label><label><span>Confirmed amount</span><input name="confirmedAmount" type="text" inputmode="decimal" value="${Number(instruction.amount || 0).toFixed(2)}" required></label>`;
+      fields.innerHTML = `<label><span>Institution transaction reference</span><input name="institutionTransactionReference" type="text" value="${esc(instruction.institutionTransactionReference || '')}" required></label><label><span>${instruction.rail === 'ACH' ? 'ACH Trace Number' : instruction.rail === 'FEDWIRE' ? 'Fedwire IMAD' : 'Network reference'}</span><input name="networkReference" type="text" value="${esc(instruction.networkReference || '')}" required></label><label><span>Receiving confirmation reference</span><input name="receivingConfirmationReference" type="text" placeholder="Receiving confirmation" required></label><label><span>Confirmed amount</span><input name="confirmedAmount" type="number" inputmode="decimal" step="0.01" min="0.01" value="${Number(instruction.amount || 0).toFixed(2)}" required></label>`;
       action.textContent = 'Reconcile Settlement';
       return;
     }
@@ -255,7 +255,19 @@
     if (state === 'READY' || state === 'EXCEPTION') targetState = 'DISPATCHED';
     else if (state === 'DISPATCHED') { targetState = 'ACCEPTED'; body.institutionTransactionReference = values.institutionTransactionReference; }
     else if (state === 'ACCEPTED') { targetState = 'EXECUTED'; body.institutionTransactionReference = values.institutionTransactionReference || instruction.institutionTransactionReference; body.networkReference = values.networkReference; }
-    else if (state === 'EXECUTED') { targetState = 'RECONCILED'; body.institutionTransactionReference = values.institutionTransactionReference || instruction.institutionTransactionReference; body.networkReference = values.networkReference || instruction.networkReference; body.receivingConfirmationReference = values.receivingConfirmationReference; body.confirmedAmount = Number(values.confirmedAmount || instruction.amount); }
+    else if (state === 'EXECUTED') {
+      const confirmedAmount = Number(String(values.confirmedAmount ?? '').trim());
+      if (!Number.isFinite(confirmedAmount) || confirmedAmount <= 0) {
+        result.textContent = 'Enter a valid finite confirmed amount before reconciling.';
+        form.elements.confirmedAmount?.focus();
+        return;
+      }
+      targetState = 'RECONCILED';
+      body.institutionTransactionReference = values.institutionTransactionReference || instruction.institutionTransactionReference;
+      body.networkReference = values.networkReference || instruction.networkReference;
+      body.receivingConfirmationReference = values.receivingConfirmationReference;
+      body.confirmedAmount = confirmedAmount;
+    }
     if (!targetState) return;
     action.disabled = true;
     result.textContent = `Recording ${targetState}…`;
@@ -283,9 +295,8 @@
     chainFields.style.display = onChain ? '' : 'none';
     form.querySelector('[data-bank-execution-status]').style.display = onChain ? 'none' : '';
     form.querySelector('[data-onchain-execution-status]').style.display = onChain ? '' : 'none';
+    setRequired(bankFields, !onChain);
     setRequired(chainFields, onChain);
-    form.elements.bankInstructionId.disabled = onChain;
-    form.elements.bankInstructionId.required = !onChain;
     const button = form.querySelector('[data-execute-button]');
     button.style.display = onChain ? '' : 'none';
     button.disabled = onChain ? !chainReady : true;
