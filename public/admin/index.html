@@ -80,6 +80,7 @@
     document.querySelector('#signout').addEventListener('click',async()=>{await json('/api/admin/signout',{method:'POST'});location.reload()});
     checkSession().catch(error=>{showAuthentication(loginView);loginError.textContent=error.message});
   </script>
+  <script src="/admin/admin-treasury-prime-connection-test.js" defer></script>
   <script src="/admin/admin-bootstrap.js" defer></script>
 </body>
 </html>
