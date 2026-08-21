@@ -26,13 +26,20 @@ test('public index delegates JavaScript ownership to one bootstrap', () => {
   }
 });
 
-test('public bootstrap keeps one participant bootstrap and retires redundant signed-in routers', () => {
+test('public bootstrap keeps one participant bootstrap and preserves marketplace renderer dependency order', () => {
   assert.match(bootstrap, /'\/participant-workspace-bootstrap\.js'/);
   for (const retired of ['/app.js','/workspace-shell.js','/workspace-panel-routing.js','/current-workspace-market.js']) {
     assert.doesNotMatch(bootstrap, new RegExp(retired.replaceAll('/', '\\/').replaceAll('.', '\\.')));
   }
   assert.match(bootstrap, /'\/public-chat-runtime\.js'/);
-  assert.match(bootstrap, /for \(const source of FEATURES\) \{\s*await loadScript\(source\);/);
+  assert.match(bootstrap, /Promise\.all\(CORE_PARALLEL_FEATURES\.map\(loadScript\)\)/);
+  const participationLoad = bootstrap.indexOf("await loadScript('/participation.js')");
+  const tierOneLoad = bootstrap.indexOf("await loadScript('/marketplace-tier-one.js')");
+  const participationInit = bootstrap.indexOf('await window.initializeParticipation()');
+  assert.ok(participationLoad >= 0);
+  assert.ok(tierOneLoad > participationLoad);
+  assert.ok(participationInit > tierOneLoad);
+  assert.match(bootstrap, /document\.readyState !== 'loading'.*initializeParticipation/s);
   assert.match(bootstrap, /sra:public-booted/);
 });
 

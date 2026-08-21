@@ -2,14 +2,15 @@
   if (window.__sraPublicBootstrapInstalled) return;
   window.__sraPublicBootstrapInstalled = true;
 
-  const CORE_FEATURES = [
+  const CORE_PARALLEL_FEATURES = [
     '/sane-skills.js',
     '/public-chat-runtime.js',
     '/sane-chat-format.js',
     '/access.js',
     '/sra-authenticated-fetch.js',
-    '/participation.js',
-    '/marketplace-tier-one.js',
+  ];
+
+  const CORE_FINAL_FEATURES = [
     '/public-home.js',
     '/live-market-publication-sync.js',
   ];
@@ -62,15 +63,26 @@
   }
 
   async function loadCore() {
-    await Promise.all(CORE_FEATURES.map(loadScript));
+    await Promise.all(CORE_PARALLEL_FEATURES.map(loadScript));
 
     if (document.readyState !== 'loading' && typeof window.initializeAccess === 'function') {
       await window.initializeAccess();
     }
 
+    // Preserve renderer ownership and late-load initialization order:
+    // participation defines the base renderer, Tier One replaces it, then
+    // participation initializes so an already-active marketplace renders Tier One.
+    await loadScript('/participation.js');
+    await loadScript('/marketplace-tier-one.js');
+    if (document.readyState !== 'loading' && typeof window.initializeParticipation === 'function') {
+      await window.initializeParticipation();
+    }
+
+    await Promise.all(CORE_FINAL_FEATURES.map(loadScript));
+
     window.dispatchEvent(new CustomEvent('sra:public-booted', {
       detail: {
-        featureCount: CORE_FEATURES.length,
+        featureCount: CORE_PARALLEL_FEATURES.length + 2 + CORE_FINAL_FEATURES.length,
         deferredFeatureCount: DEFERRED_FEATURES.length,
         bootedAt: new Date().toISOString(),
       },
