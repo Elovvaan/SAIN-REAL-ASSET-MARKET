@@ -1,9 +1,6 @@
 (() => {
-  if (window.__sraParticipantInstrumentInfoInstalled) return;
-  window.__sraParticipantInstrumentInfoInstalled = true;
-
-  const originalRender = window.renderParticipantFundingOperations;
-  if (typeof originalRender !== 'function') return;
+  if (window.__sraParticipantInstrumentInfoBootstrapped) return;
+  window.__sraParticipantInstrumentInfoBootstrapped = true;
 
   const esc = (value) => String(value ?? '')
     .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
@@ -114,8 +111,19 @@
     }
   }
 
-  window.renderParticipantFundingOperations = function renderParticipantFundingOperations(root) {
-    originalRender(root);
-    void mount(root);
-  };
+  function install() {
+    if (window.__sraParticipantInstrumentInfoInstalled) return true;
+    const originalRender = window.renderParticipantFundingOperations;
+    if (typeof originalRender !== 'function') return false;
+    window.__sraParticipantInstrumentInfoInstalled = true;
+    window.renderParticipantFundingOperations = function renderParticipantFundingOperations(root) {
+      originalRender(root);
+      void mount(root);
+    };
+    return true;
+  }
+
+  if (!install()) {
+    window.addEventListener('sra:public-features-ready', install, { once: true });
+  }
 })();
