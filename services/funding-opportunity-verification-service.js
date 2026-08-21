@@ -11,6 +11,7 @@ const TYPES = Object.freeze({
 
 const FINDING_RESULTS = new Set(['VERIFIED', 'PARTIALLY_VERIFIED', 'UNVERIFIED', 'CONFLICT', 'NOT_APPLICABLE']);
 const DECISIONS = new Set(['VERIFIED', 'MORE_EVIDENCE_REQUIRED', 'REJECTED_FOR_VERIFICATION']);
+const PARTICIPANT_INFORMATION_ACTION = 'COMPLETE_APPLICANT_INFORMATION';
 
 function id(prefix) {
   return `${prefix}-${crypto.randomUUID().split('-')[0].toUpperCase()}`;
@@ -191,7 +192,7 @@ export class FundingOpportunityVerificationService {
     let fundingPhase = 'VERIFIED_TRANSACTION_REVIEW';
     if (input.decision === 'VERIFIED') {
       opportunityStatus = 'VERIFIED';
-      fundingPhase = 'VERIFIED_VALUE_PREPARATION';
+      fundingPhase = 'APPLICANT_INFORMATION_REQUIRED';
     } else if (input.decision === 'MORE_EVIDENCE_REQUIRED') {
       opportunityStatus = 'MORE_EVIDENCE_REQUIRED';
       fundingPhase = 'EVIDENCE_REMEDIATION';
@@ -200,15 +201,27 @@ export class FundingOpportunityVerificationService {
       fundingPhase = 'CLOSED';
     }
 
+    const decidedAt = decision.decidedAt;
+    const participantInformationRequirement = input.decision === 'VERIFIED'
+      ? (opportunity.participantInformationRequirement || {
+        type: PARTICIPANT_INFORMATION_ACTION,
+        status: 'REQUIRED',
+        requestedAt: decidedAt,
+        requestedBy: actorId,
+        alert: 'Action required: complete your applicant information so SRA can prepare the financing instrument.',
+      })
+      : opportunity.participantInformationRequirement;
+
     const opportunityUpdate = {
       ...opportunity,
       status: opportunityStatus,
       fundingPhase,
       verificationDecisionId: decision.decisionId,
-      updatedAt: now(),
+      ...(participantInformationRequirement ? { participantInformationRequirement } : {}),
+      updatedAt: decidedAt,
       history: [
         ...(opportunity.history || []),
-        { from: opportunity.status, to: opportunityStatus, at: now(), actorId, note: input.rationale || input.decision },
+        { from: opportunity.status, to: opportunityStatus, at: decidedAt, actorId, note: input.rationale || input.decision },
       ],
     };
     await this.domain.put(TYPES.OPPORTUNITY, opportunity.opportunityId, opportunityUpdate, { actorId, eventType: 'FUNDING_OPPORTUNITY_VERIFICATION_DECIDED' });
@@ -230,11 +243,19 @@ export class FundingOpportunityVerificationService {
         transactionIds: unique(request.sourceTransactionIds || []),
         verifiedFacts: summary.coveredChecks,
         status: 'FROZEN',
-        frozenAt: now(),
+        frozenAt: decidedAt,
         createdBy: actorId,
       };
       await this.domain.put(TYPES.VERIFIED_RECORD, verifiedRecord.verifiedRecordId, verifiedRecord, { actorId, eventType: 'FUNDING_OPPORTUNITY_VERIFIED_RECORD_CREATED' });
-      await this.domain.put(TYPES.OPPORTUNITY, opportunity.opportunityId, { ...opportunityUpdate, verifiedRecordId: verifiedRecord.verifiedRecordId }, { actorId, eventType: 'FUNDING_OPPORTUNITY_READY_FOR_VERIFIED_VALUE' });
+      const verifiedOpportunity = { ...opportunityUpdate, verifiedRecordId: verifiedRecord.verifiedRecordId, updatedAt: decidedAt };
+      await this.domain.put(TYPES.OPPORTUNITY, opportunity.opportunityId, verifiedOpportunity, { actorId, eventType: 'PARTICIPANT_APPLICANT_INFORMATION_REQUESTED' });
+      await this.domain.lifecycle({
+        objectType: TYPES.OPPORTUNITY,
+        objectId: opportunity.opportunityId,
+        eventType: 'PARTICIPANT_APPLICANT_INFORMATION_REQUESTED',
+        actorId,
+        payload: { actionType: PARTICIPANT_INFORMATION_ACTION, decisionId: decision.decisionId },
+      });
     }
 
     await this.domain.lifecycle({
