@@ -1,12 +1,40 @@
 import { AgentWorkforceService } from '../services/agent-workforce-service.js';
+import { SraAgentOperatingSystemService } from '../services/sra-agent-operating-system-service.js';
+import { UnifiedMarketOperationsQueueService } from '../services/unified-market-operations-queue-service.js';
 
 export async function installAgentWorkforceAdminRoutes({ router, domain, database, requireAdmin }) {
   const workforce = new AgentWorkforceService({ domain, database });
+  const operationsQueue = new UnifiedMarketOperationsQueueService(domain);
+  const agentOS = new SraAgentOperatingSystemService(domain, { operationsQueue });
   await workforce.initialize();
+
+  const synchronizedAgents = await workforce.synchronizeOperatingAgents(agentOS.registry(), { id: 'SRA_AGENT_OS' });
+  const initialQueue = operationsQueue.explain();
+  const initialRun = await workforce.runOperationalQueue(initialQueue, { id: 'SRA_AGENT_OS' });
 
   router.get('/api/admin/agent-workforce/status', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
-    return res.json(workforce.status());
+    return res.json({
+      workforce: workforce.status(),
+      agentOS: agentOS.brief(),
+      synchronizedAgents: { createdCount: synchronizedAgents.created.length, existingCount: synchronizedAgents.existing.length, agentCount: synchronizedAgents.agentCount },
+      initialRun: { createdCount: initialRun.createdCount, completedCount: initialRun.completedCount, skippedCount: initialRun.skippedCount },
+    });
+  });
+
+  router.post('/api/admin/agent-workforce/run', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    try {
+      const synchronized = await workforce.synchronizeOperatingAgents(agentOS.registry(), session);
+      const queue = operationsQueue.explain();
+      const run = await workforce.runOperationalQueue(queue, { id: 'SRA_AGENT_OS' });
+      return res.json({
+        agentOS: agentOS.brief(),
+        synchronizedAgents: { createdCount: synchronized.created.length, existingCount: synchronized.existing.length, agentCount: synchronized.agentCount },
+        queue: { state: queue.state, totalAwaitingAction: queue.totalAwaitingAction, totalExceptions: queue.totalExceptions, nextRecommendedAction: queue.nextRecommendedAction },
+        run,
+      });
+    } catch (error) { return res.status(422).json({ error: error.message, code: 'SRA_AGENT_WORKFORCE_RUN_FAILED' }); }
   });
 
   router.get('/api/admin/agent-workforce/agents', async (req, res) => {
