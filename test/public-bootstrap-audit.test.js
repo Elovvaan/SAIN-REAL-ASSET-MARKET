@@ -33,8 +33,13 @@ test('public bootstrap keeps one participant bootstrap and preserves marketplace
   }
   assert.match(bootstrap, /'\/public-chat-runtime\.js'/);
   assert.match(bootstrap, /Promise\.all\(CORE_PARALLEL_FEATURES\.map\(loadScript\)\)/);
-  assert.match(bootstrap, /await loadScript\('\/participation\.js'\);\s*await loadScript\('\/marketplace-tier-one\.js'\);/);
-  assert.ok(bootstrap.indexOf("await loadScript('/participation.js')") < bootstrap.indexOf("await loadScript('/marketplace-tier-one.js')"));
+  const participationLoad = bootstrap.indexOf("await loadScript('/participation.js')");
+  const tierOneLoad = bootstrap.indexOf("await loadScript('/marketplace-tier-one.js')");
+  const participationInit = bootstrap.indexOf('await window.initializeParticipation()');
+  assert.ok(participationLoad >= 0);
+  assert.ok(tierOneLoad > participationLoad);
+  assert.ok(participationInit > tierOneLoad);
+  assert.match(bootstrap, /document\.readyState !== 'loading'.*initializeParticipation/s);
   assert.match(bootstrap, /sra:public-booted/);
 });
 
