@@ -26,10 +26,14 @@ test('participant suite mounts after Financing and Liquidity capabilities are av
   assert.ok(suiteIndex > liquidityIndex);
 });
 
-test('participant financing is self-service and separated from the admin workstation', () => {
-  assert.match(financing, /Submit financing request/);
+test('participant financing is self-service, document-first, and separated from the admin workstation', () => {
+  assert.match(financing, /Submit financing package/);
   assert.match(financing, /\/api\/funding\/opportunities/);
+  assert.match(financing, /\/documents/);
+  assert.match(financing, /type=\"file\" multiple required/);
+  assert.match(financing, /data\.append\('documents', file\)/);
   assert.match(financing, /signed-in account is attached automatically/i);
+  assert.match(financing, /one complete intake package/i);
   assert.doesNotMatch(financing, /funding-operations\/dashboard/);
   assert.doesNotMatch(financing, /Manual applicant entry/);
 });
