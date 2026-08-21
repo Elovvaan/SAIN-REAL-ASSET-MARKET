@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const suite = fs.readFileSync(new URL('../public/participant-workspace-suite.js', import.meta.url), 'utf8');
+const financing = fs.readFileSync(new URL('../public/participant-financing-ui.js', import.meta.url), 'utf8');
 const liquidity = fs.readFileSync(new URL('../public/hybrid-liquidity-market.js', import.meta.url), 'utf8');
 const bootstrap = fs.readFileSync(new URL('../public/public-bootstrap.js', import.meta.url), 'utf8');
 const access = fs.readFileSync(new URL('../public/access.js', import.meta.url), 'utf8');
@@ -13,15 +14,24 @@ test('remaining participant workspaces use their authoritative capability owners
   assert.match(suite, /renderCapabilities/);
   assert.match(suite, /window\.accessState\?\.session\?\.capabilities/);
   assert.match(suite, /Issuance boundary/);
+  assert.match(financing, /window\.renderParticipantFundingOperations = render/);
 });
 
 test('participant suite mounts after Financing and Liquidity capabilities are available', () => {
-  const fundingIndex = bootstrap.indexOf("'/funding-operations-ui.js'");
+  const fundingIndex = bootstrap.indexOf("'/participant-financing-ui.js'");
   const liquidityIndex = bootstrap.indexOf("'/hybrid-liquidity-market.js'");
   const suiteIndex = bootstrap.indexOf("'/participant-workspace-bootstrap.js'");
   assert.ok(fundingIndex >= 0 && liquidityIndex >= 0 && suiteIndex >= 0);
   assert.ok(suiteIndex > fundingIndex);
   assert.ok(suiteIndex > liquidityIndex);
+});
+
+test('participant financing is self-service and separated from the admin workstation', () => {
+  assert.match(financing, /Submit financing request/);
+  assert.match(financing, /\/api\/funding\/opportunities/);
+  assert.match(financing, /signed-in account is attached automatically/i);
+  assert.doesNotMatch(financing, /funding-operations\/dashboard/);
+  assert.doesNotMatch(financing, /Manual applicant entry/);
 });
 
 test('liquidity capability is explicit and observer-free', () => {
