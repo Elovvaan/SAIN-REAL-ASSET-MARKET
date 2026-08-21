@@ -2,24 +2,27 @@
   if (window.__sraPublicBootstrapInstalled) return;
   window.__sraPublicBootstrapInstalled = true;
 
-  const FEATURES = [
+  const CORE_FEATURES = [
     '/sane-skills.js',
     '/public-chat-runtime.js',
     '/sane-chat-format.js',
-    '/interoperability.js',
-    '/onboarding.js',
-    '/custody.js',
     '/access.js',
     '/sra-authenticated-fetch.js',
     '/participation.js',
     '/marketplace-tier-one.js',
-    '/platform-admin-workspace.js',
     '/public-home.js',
+    '/live-market-publication-sync.js',
+  ];
+
+  const DEFERRED_FEATURES = [
+    '/interoperability.js',
+    '/onboarding.js',
+    '/custody.js',
+    '/platform-admin-workspace.js',
     '/home-project-workspace.js',
     '/institution-workspace-loader.js',
     '/transaction-market-ui.js',
     '/order-intent-ui.js',
-    '/live-market-publication-sync.js',
     '/funding-intake-ui.js',
     '/funding-operations-ui.js',
     '/funding-intake-identity-evidence.js',
@@ -38,12 +41,16 @@
       const existing = document.querySelector(`script[${marker}]`);
       if (existing) {
         if (existing.dataset.loaded === 'true') resolve();
-        else existing.addEventListener('load', resolve, { once: true });
+        else {
+          existing.addEventListener('load', resolve, { once: true });
+          existing.addEventListener('error', reject, { once: true });
+        }
         return;
       }
+
       const script = document.createElement('script');
       script.src = source;
-      script.async = false;
+      script.async = true;
       script.setAttribute(marker, 'true');
       script.addEventListener('load', () => {
         script.dataset.loaded = 'true';
@@ -54,19 +61,42 @@
     });
   }
 
-  async function boot() {
-    for (const source of FEATURES) {
-      await loadScript(source);
-      if (source === '/access.js' && document.readyState !== 'loading' && typeof window.initializeAccess === 'function') {
-        await window.initializeAccess();
-      }
+  async function loadCore() {
+    await Promise.all(CORE_FEATURES.map(loadScript));
+
+    if (document.readyState !== 'loading' && typeof window.initializeAccess === 'function') {
+      await window.initializeAccess();
     }
+
     window.dispatchEvent(new CustomEvent('sra:public-booted', {
-      detail: { featureCount: FEATURES.length, bootedAt: new Date().toISOString() },
+      detail: {
+        featureCount: CORE_FEATURES.length,
+        deferredFeatureCount: DEFERRED_FEATURES.length,
+        bootedAt: new Date().toISOString(),
+      },
     }));
   }
 
-  void boot().catch((error) => {
-    console.error('SRA public bootstrap failed.', error);
-  });
+  function loadDeferred() {
+    void Promise.allSettled(DEFERRED_FEATURES.map(loadScript)).then((results) => {
+      const failed = results.filter((result) => result.status === 'rejected');
+      if (failed.length) console.warn('Some deferred SRA public features failed to load.', failed);
+
+      window.dispatchEvent(new CustomEvent('sra:public-features-ready', {
+        detail: { featureCount: DEFERRED_FEATURES.length, readyAt: new Date().toISOString() },
+      }));
+    });
+  }
+
+  void loadCore()
+    .then(() => {
+      if ('requestIdleCallback' in window) {
+        window.requestIdleCallback(loadDeferred, { timeout: 1500 });
+      } else {
+        window.setTimeout(loadDeferred, 0);
+      }
+    })
+    .catch((error) => {
+      console.error('SRA public bootstrap failed.', error);
+    });
 })();
