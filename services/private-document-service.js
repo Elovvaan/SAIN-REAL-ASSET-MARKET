@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { TransactionDocumentExtractionService } from './transaction-document-extraction-service.js';
 
 const allowedMimeTypes = new Set([
   'application/pdf',
@@ -14,6 +15,7 @@ const allowedMimeTypes = new Set([
 ]);
 
 const TWO_YEARS_MS = 2 * 365 * 24 * 60 * 60 * 1000;
+const extractableMimeTypes = new Set(['application/pdf','image/jpeg','image/png','image/webp']);
 
 function createId() { return `DOC-${crypto.randomUUID().split('-')[0].toUpperCase()}`; }
 function safeExtension(originalName = '') {
@@ -33,9 +35,10 @@ function retentionMetadata({ uploadedAt, retentionPolicy = 'PRIVATE_EVIDENCE', r
 }
 
 export class PrivateDocumentService {
-  constructor({ root = process.env.SRA_PRIVATE_DOCUMENT_ROOT || '/tmp/sra-private-documents', database = null } = {}) {
+  constructor({ root = process.env.SRA_PRIVATE_DOCUMENT_ROOT || '/tmp/sra-private-documents', database = null, extractionService = null } = {}) {
     this.root = root;
     this.database = database;
+    this.extractionService = extractionService || new TransactionDocumentExtractionService();
     this.records = new Map();
     this.ready = false;
   }
@@ -95,11 +98,26 @@ export class PrivateDocumentService {
     const storagePath = path.join(this.root, storedName);
     await fs.writeFile(storagePath, file.buffer, { flag: 'wx' });
     const uploadedAt = new Date().toISOString();
+    let extraction = { status: extractableMimeTypes.has(String(file.mimetype || '').toLowerCase()) ? 'PENDING' : 'NOT_APPLICABLE', documentId: id, sha256: digest, facts: null };
+    if (extractableMimeTypes.has(String(file.mimetype || '').toLowerCase())) {
+      try {
+        extraction = await this.extractionService.extract({
+          buffer: file.buffer,
+          mimeType: file.mimetype,
+          filename: file.originalname,
+          documentId: id,
+          sha256: digest,
+        });
+      } catch (error) {
+        extraction = { status: 'EXTRACTION_ERROR', documentId: id, sha256: digest, facts: null, error: error.message, attemptedAt: new Date().toISOString() };
+      }
+    }
     const record = {
       id, documentType, originalName: file.originalname, mimeType: file.mimetype,
       size: file.size, sha256: digest, storageClass: 'PRIVATE_EVIDENCE',
       accessState: 'RESTRICTED', uploaderId, uploadedAt,
       reviewState: 'SUBMITTED', public: false, storagePath,
+      extraction,
       ...retentionMetadata({ uploadedAt, retentionPolicy, retentionReferenceId }),
     };
     if (this.database?.pool) {
@@ -142,6 +160,8 @@ export class PrivateDocumentService {
           retentionPolicy: record.retentionPolicy,
           retentionReferenceId: record.retentionReferenceId,
           retentionReviewAt: record.retentionReviewAt,
+          extractionStatus: extraction.status,
+          extractedTransactionType: extraction.facts?.transactionType || null,
         }
       });
     }
