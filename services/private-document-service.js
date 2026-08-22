@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { TransactionDocumentExtractionService } from './transaction-document-extraction-service.js';
+import { TransactionFactsMappingService } from './transaction-facts-mapping-service.js';
 
 const allowedMimeTypes = new Set([
   'application/pdf',
@@ -147,6 +148,13 @@ export class PrivateDocumentService {
       await this.database.putDocument(id, record);
     }
     this.records.set(id, record);
+
+    let mapping = null;
+    const domain = this.database?.persistentDomain || null;
+    if (domain && retentionReferenceId && extraction.status === 'EXTRACTED' && domain.get('FUNDING_OPPORTUNITY', retentionReferenceId)) {
+      mapping = await new TransactionFactsMappingService(domain).applyToOpportunity(retentionReferenceId, this.toPublicMetadata(record), uploaderId);
+    }
+
     if (this.database) {
       await this.database.audit({
         actorId: uploaderId,
@@ -162,10 +170,11 @@ export class PrivateDocumentService {
           retentionReviewAt: record.retentionReviewAt,
           extractionStatus: extraction.status,
           extractedTransactionType: extraction.facts?.transactionType || null,
+          transactionFactsMapped: Boolean(mapping?.mapped),
         }
       });
     }
-    return { ok: true, document: this.toPublicMetadata(record) };
+    return { ok: true, document: this.toPublicMetadata(record), mapping };
   }
 
   get(id) { return this.records.get(id) || null; }
