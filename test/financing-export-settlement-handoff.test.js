@@ -32,6 +32,16 @@ function seedFinancing(domain) {
   domain.records.set(domain.key(RECORD_TYPES.SRA_TRANSACTION, record.transactionId), record);
 }
 
+const agreementEvidence = {
+  documentReference: 'DOC-VEHICLE-PA-1',
+  documentHash: 'a'.repeat(64),
+  documentType: 'VEHICLE_PURCHASE_AGREEMENT',
+  auditTrailReference: 'AUDIT-VEHICLE-PA-1',
+  signatureEvidenceReference: 'SIG-VEHICLE-PA-1',
+  consentEvidenceReference: 'CONSENT-VEHICLE-PA-1',
+  executedAt: '2026-08-22T15:30:00.000Z',
+};
+
 test('authorized financing becomes an export package before a bank rail is selected', async () => {
   const domain = new Domain();
   seedFinancing(domain);
@@ -50,6 +60,26 @@ test('authorized financing becomes an export package before a bank rail is selec
   assert.equal(authorized.exportPackage.amount, 250000);
   assert.equal(authorized.exportPackage.state, 'READY_FOR_SETTLEMENT_INSTRUCTION');
   assert.equal(authorized.exportPackage.selectedRail, null);
+});
+
+test('executed agreement evidence is preserved from closing through the financing export package', async () => {
+  const domain = new Domain();
+  seedFinancing(domain);
+  const service = new FinancingClosingService(domain);
+  await service.initialize();
+
+  const { closing } = await service.open({ financingTransactionId: 'LFA-EXPORT-1' }, 'ADMIN');
+  const ready = await service.markReady(closing.closingId, {
+    beneficiaryName: 'Vehicle Seller',
+    documentaryEvidence: agreementEvidence,
+  }, 'ADMIN');
+
+  assert.equal(ready.documentaryEvidence.documentReference, 'DOC-VEHICLE-PA-1');
+  assert.equal(ready.documentaryEvidence.hashAlgorithm, 'SHA-256');
+
+  const authorized = await service.authorize(closing.closingId, { approval: 'APPROVE' }, 'ADMIN');
+  assert.deepEqual(authorized.disbursement.documentaryEvidence, ready.documentaryEvidence);
+  assert.deepEqual(authorized.exportPackage.documentaryEvidence, ready.documentaryEvidence);
 });
 
 test('settlement instruction can be prepared from the financing export package before any execution adapter is selected', async () => {
@@ -87,6 +117,34 @@ test('settlement instruction can be prepared from the financing export package b
   assert.equal(updatedPackage.state, 'SETTLEMENT_INSTRUCTION_READY');
   assert.equal(updatedPackage.selectedRail, 'ACH');
   assert.equal(updatedPackage.settlementInstructionId, instruction.instructionId);
+});
+
+test('ACH settlement instruction inherits executed agreement evidence without changing payment semantics', async () => {
+  const domain = new Domain();
+  seedFinancing(domain);
+  const closingService = new FinancingClosingService(domain);
+  await closingService.initialize();
+  const { closing } = await closingService.open({ financingTransactionId: 'LFA-EXPORT-1' }, 'ADMIN');
+  await closingService.markReady(closing.closingId, {
+    beneficiaryName: 'Vehicle Seller',
+    documentaryEvidence: agreementEvidence,
+  }, 'ADMIN');
+  const authorized = await closingService.authorize(closing.closingId, { approval: 'APPROVE' }, 'ADMIN');
+
+  const gateway = new SettlementRailGatewayService(domain, null, null);
+  const instruction = await gateway.createInstruction({
+    exportPackageId: authorized.exportPackage.exportPackageId,
+    rail: 'ACH',
+    receivingInstitutionReference: 'Receiving Bank',
+    receivingAccountReference: '1234567890',
+    routingNumber: '123456789',
+    accountType: 'CHECKING',
+  }, 'ADMIN');
+
+  assert.equal(instruction.documentaryEvidence.documentReference, 'DOC-VEHICLE-PA-1');
+  assert.equal(instruction.supportingDocumentHash, agreementEvidence.documentHash);
+  assert.equal(instruction.amount, 250000);
+  assert.equal(instruction.purpose, 'SRA_FINANCING_DISBURSEMENT');
 });
 
 test('an active execution adapter can still be attached when one is actually available', async () => {
