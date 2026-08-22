@@ -7,6 +7,7 @@
     .replaceAll('"', '&quot;').replaceAll("'", '&#039;');
 
   let currentOpportunityId = null;
+  let autoOpenOpportunityId = null;
 
   async function jsonRequest(url, options = {}) {
     const response = await fetch(url, {
@@ -215,6 +216,27 @@
     void mountWorkflow(root, detail).catch(() => {});
   }
 
+  function captureCreatedOpportunity(root) {
+    const message = root?.querySelector('#funding-intake-result strong')?.textContent || '';
+    const match = message.match(/Created\s+(FOR-[A-Z0-9-]+)/i);
+    if (!match) return;
+    const opportunityId = match[1];
+    if (autoOpenOpportunityId === opportunityId || currentOpportunityId === opportunityId) return;
+    currentOpportunityId = opportunityId;
+    autoOpenOpportunityId = opportunityId;
+  }
+
+  function continueCreatedOpportunity(root) {
+    if (!root || !autoOpenOpportunityId) return false;
+    const row = queueRow(root, autoOpenOpportunityId);
+    if (!row || root.querySelector('.funding-detail.open')) return false;
+    const opportunityId = autoOpenOpportunityId;
+    autoOpenOpportunityId = null;
+    currentOpportunityId = opportunityId;
+    row.click();
+    return true;
+  }
+
   function bind(root) {
     if (!root || root.dataset.adminFinancingEvidenceBound === 'true') return;
     root.dataset.adminFinancingEvidenceBound = 'true';
@@ -227,9 +249,11 @@
     }, true);
 
     const observer = new MutationObserver(() => {
+      captureCreatedOpportunity(root);
+      if (continueCreatedOpportunity(root)) return;
       if (currentOpportunityId) mountSoon(root, 2);
     });
-    observer.observe(root, { childList: true, subtree: true });
+    observer.observe(root, { childList: true, subtree: true, characterData: true });
   }
 
   function init() {
