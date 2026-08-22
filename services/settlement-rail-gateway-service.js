@@ -208,6 +208,7 @@ export class SettlementRailGatewayService{
     const settlement=source.settlement||null;
     const pkg=source.exportPackage||null;
     const beneficiaryName=pkg?.beneficiaryName||input.beneficiaryName||null;
+    const documentaryEvidence=pkg?.documentaryEvidence||input.documentaryEvidence||null;
     const requestedExecutionDate=input.requestedExecutionDate||null;
     const remittanceReference=input.remittanceReference||pkg?.exportPackageId||settlement?.homeProjectId||null;
     const routingNumber=requestedRail==='ACH'?normalizedRoutingNumber(input.routingNumber):requestedRail==='FEDWIRE'?optionalRoutingNumber(input.routingNumber):input.routingNumber||null;
@@ -235,6 +236,7 @@ export class SettlementRailGatewayService{
       opportunityId:pkg?.opportunityId||null,
       instrumentId:pkg?.instrumentId||null,
       beneficiaryName,
+      documentaryEvidence,
       settlementInstrumentReference:input.settlementInstrumentReference||settlement?.executionReference||pkg?.financingTransactionId||null,
       homeProjectId:settlement?.homeProjectId||null,
       commitmentId,
@@ -254,6 +256,7 @@ export class SettlementRailGatewayService{
       requestedExecutionDate,
       remittanceReference,
       packageHash:settlement?.settlementPackage?.packageHash||null,
+      supportingDocumentHash:documentaryEvidence?.documentHash||null,
       messageStandard:adapter?.messageStandard||defaultStandard(requestedRail),
       standardDetails,
     };
@@ -272,7 +275,7 @@ export class SettlementRailGatewayService{
     else {
       for(const change of changes)await this.domain.put(change.type,change.id,change.payload,{actorId,eventType:change.eventType});
     }
-    await this.domain.lifecycle({objectType:RECORD_TYPES.SETTLEMENT_RAIL_INSTRUCTION,objectId:instructionId,eventType:'SETTLEMENT_RAIL_INSTRUCTION_CREATED',actorId,payload:{settlementId:record.settlementId,exportPackageId:record.exportPackageId,institutionId:record.institutionId,amount:instructionAmount,rail:record.rail,executionMode:record.executionMode,messageStandard:record.messageStandard}});
+    await this.domain.lifecycle({objectType:RECORD_TYPES.SETTLEMENT_RAIL_INSTRUCTION,objectId:instructionId,eventType:'SETTLEMENT_RAIL_INSTRUCTION_CREATED',actorId,payload:{settlementId:record.settlementId,exportPackageId:record.exportPackageId,institutionId:record.institutionId,amount:instructionAmount,rail:record.rail,executionMode:record.executionMode,messageStandard:record.messageStandard,documentReference:documentaryEvidence?.documentReference||null,documentHash:documentaryEvidence?.documentHash||null}});
     return record;
   }
 
