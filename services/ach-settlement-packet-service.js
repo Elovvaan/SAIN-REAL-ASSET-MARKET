@@ -277,7 +277,7 @@ export class AchSettlementPacketService {
     return false;
   }
 
-  async render(exportPackageId) {
+  async renderFundingPackage(exportPackageId) {
     const data = this.source(exportPackageId);
     const sourceDocuments = await this.linkedDocuments(data);
     const coverBytes = await this.renderCover(data, sourceDocuments);
@@ -301,5 +301,9 @@ export class AchSettlementPacketService {
 
     const bytes = await output.save();
     return Buffer.from(bytes);
+  }
+
+  async render(exportPackageId) {
+    return this.renderSettlementPage(exportPackageId);
   }
 }
