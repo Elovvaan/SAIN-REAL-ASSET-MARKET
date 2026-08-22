@@ -29,7 +29,7 @@ export class CoinbasePublicMarketService {
     this.enabled = String(environment.COINBASE_PUBLIC_MARKET_ENABLED || '').toLowerCase() === 'true';
     this.endpoint = environment.COINBASE_PUBLIC_MARKET_WS_URL || DEFAULT_ENDPOINT;
     this.products = productList(environment.COINBASE_PUBLIC_MARKET_PRODUCTS);
-    this.maxTradesPerMinute = positiveInteger(environment.COINBASE_PUBLIC_MARKET_MAX_TRADES_PER_MINUTE, 600);
+    this.maxTradesPerMinute = positiveInteger(environment.COINBASE_PUBLIC_MARKET_MAX_TRADES_PER_MINUTE, 60);
     this.reconnectBaseMs = positiveInteger(environment.COINBASE_PUBLIC_MARKET_RECONNECT_MS, 1000);
     this.socket = null;
     this.reconnectTimer = null;
@@ -37,6 +37,7 @@ export class CoinbasePublicMarketService {
     this.closedByService = false;
     this.minuteStartedAt = Date.now();
     this.tradesThisMinute = 0;
+    this.messageQueue = Promise.resolve();
     this.state = this.enabled ? 'IDLE' : 'DISABLED';
     this.connectedAt = null;
     this.lastMessageAt = null;
@@ -118,7 +119,9 @@ export class CoinbasePublicMarketService {
     });
 
     socket.on('message', (payload) => {
-      this.handleMessage(payload).catch((error) => this.captureError(error));
+      this.messageQueue = this.messageQueue
+        .then(() => this.handleMessage(payload))
+        .catch((error) => this.captureError(error));
     });
 
     socket.on('error', (error) => this.captureError(error));
@@ -220,9 +223,12 @@ export class CoinbasePublicMarketService {
       sourceReference: `coinbase:advanced-trade:market_trades:${productId}:${tradeId}`
     }, CONNECTOR_ID);
     this.lastTradeAt = trade.time || envelope.timestamp || now();
-    if (result.created) this.recordedTrades += 1;
-    else this.duplicateTrades += 1;
-    await this.processAssetPipeline(result.observation);
+    if (result.created) {
+      this.recordedTrades += 1;
+      await this.processAssetPipeline(result.observation);
+    } else {
+      this.duplicateTrades += 1;
+    }
   }
 }
 
