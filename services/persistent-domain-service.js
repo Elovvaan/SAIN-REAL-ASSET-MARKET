@@ -13,7 +13,7 @@ function recordId(record) {
 }
 
 export class PersistentDomainService {
-  constructor(database) { this.database = database; this.cache = new Map(); }
+  constructor(database) { this.database = database; this.cache = new Map(); if (database) database.persistentDomain = this; }
   key(type, id) { return `${type}:${id}`; }
   async hydrate(types = Object.values(RECORD_TYPES)) { for (const type of types) { const records = await this.database.listRecords(type); for (const record of records) { const id = recordId(record); if (id) this.cache.set(this.key(type, id), copy(record)); } } return this.snapshot(); }
   async seed(type, records = []) { const existing = this.list(type); if (existing.length) return existing; for (const record of records) { const id = recordId(record); if (!id) throw new Error(`Cannot seed ${type} without an identifier.`); await this.put(type, id, record, { audit: false }); } return this.list(type); }
