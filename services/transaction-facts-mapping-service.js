@@ -17,6 +17,14 @@ function compactObject(value) {
   return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined));
 }
 
+function agreementIdentifier(facts = {}, current = null) {
+  const type = String(facts.documentType || '').toUpperCase();
+  const identifiers = facts.identifiers || {};
+  const contractDocument = /BUYER.?S?_?ORDER|SALES?_?CONTRACT|PURCHASE_?AGREEMENT|RETAIL_?INSTALLMENT|PROMISSORY_?NOTE|LOAN_?AGREEMENT|MORTGAGE/.test(type);
+  if (contractDocument) return first(identifiers.contractNumber, identifiers.agreementNumber, current);
+  return first(identifiers.agreementNumber, identifiers.contractNumber, current);
+}
+
 export class TransactionFactsMappingService {
   constructor(domain) {
     this.domain = domain;
@@ -68,7 +76,7 @@ export class TransactionFactsMappingService {
       transactionProfile: {
         ...(opportunity.transactionProfile || {}),
         transactionType: first(facts.transactionType, opportunity.transactionProfile?.transactionType),
-        agreementNumber: first(facts.identifiers?.agreementNumber, facts.identifiers?.contractNumber, opportunity.transactionProfile?.agreementNumber),
+        agreementNumber: agreementIdentifier(facts, opportunity.transactionProfile?.agreementNumber),
         loanNumber: first(facts.identifiers?.loanNumber, opportunity.transactionProfile?.loanNumber),
         fileNumber: first(facts.identifiers?.fileNumber, opportunity.transactionProfile?.fileNumber),
         purchaserName: first(buyer?.legalName, opportunity.transactionProfile?.purchaserName),
