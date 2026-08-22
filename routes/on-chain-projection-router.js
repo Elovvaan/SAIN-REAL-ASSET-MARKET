@@ -110,9 +110,13 @@ export function createOnChainProjectionRouter(service) {
       const asset = requestedAsset
         || text(instrument?.assetCode)
         || text(instrument?.symbol)
-        || text(instrument?.ticker)
-        || instrumentId;
-      const symbol = text(req.body?.symbol) || text(instrument?.symbol) || text(instrument?.ticker) || asset;
+        || text(instrument?.ticker);
+      if (!asset) {
+        const error = new Error('Asset code is required before creating this instrument on chain. Enter the network asset code explicitly.');
+        error.code = 'ON_CHAIN_ASSET_CODE_REQUIRED';
+        throw error;
+      }
+      const symbol = text(req.body?.symbol) || asset;
       const id = assetIdFor(instrumentId || asset, network);
       const existing = service.getAsset(id) || service.findAsset({ instrumentId, asset, network });
       if (existing) return res.status(200).json({ created: false, asset: existing });
@@ -134,7 +138,7 @@ export function createOnChainProjectionRouter(service) {
         throw error;
       }
 
-      const created = await adapter.createAsset({ asset: symbol, symbol });
+      const created = await adapter.createAsset({ asset, symbol });
       const record = await service.recordCreated({
         assetId: id,
         network,
