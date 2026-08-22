@@ -28,6 +28,9 @@ const EXTRACTION_INSTRUCTIONS = `You extract transaction facts from financial an
 Return JSON only. Extract facts that are actually present in the supplied source. Never infer, calculate, fabricate, complete, normalize into a different legal value, or supply a missing identifier.
 Use null when a field is absent. Preserve identifying numbers exactly as printed except surrounding whitespace.
 The same schema is used across vehicle purchases and financing, mortgages and real-estate closings, commercial credit, promissory notes, invoices, equipment finance, payment instructions, and other financial transactions.
+For transaction identifiers, use the value printed next to the document's explicit transaction label. Examples include Contract #, Contract Number, Agreement #, Agreement Number, Loan #, Loan Number, Invoice #, File #, Application #, Account Reference, and Settlement Reference.
+Do not classify form numbers, form-template identifiers, revision numbers, footer/page codes, printer/control strings, stock numbers, dealer numbers, customer numbers, permit numbers, or document publication identifiers as agreementNumber or contractNumber unless the source itself explicitly labels that value as the transaction agreement/contract identifier.
+When a sales contract, buyer's order, purchase agreement, retail installment contract, mortgage, promissory note, or similar agreement has an explicit Contract # or Contract Number, place that exact value in identifiers.contractNumber. When it has an explicit Agreement # or Agreement Number, place that exact value in identifiers.agreementNumber. Do not substitute a nearby unlabeled number.
 For each important extracted fact include sourceEvidence entries with field, value, page when available, and a short sourceLabel describing the printed label or nearby text.
 Return this shape:
 {
