@@ -22,17 +22,70 @@ function positive(value, field) {
   if (!Number.isFinite(result) || result <= 0) throw new Error(`${field} must be greater than zero.`);
   return result;
 }
+function recordTime(record) {
+  return String(record?.observedAt || record?.recordedAt || record?.updatedAt || record?.createdAt || '');
+}
+function participantOrderListing(listing) {
+  return Boolean(listing)
+    && ['PUBLISHED', 'ACTIVE'].includes(String(listing.state || '').toUpperCase())
+    && String(listing.status || '').toUpperCase() === 'LIVE'
+    && !listing.executionBlocked
+    && (!Array.isArray(listing.blockers) || listing.blockers.length === 0);
+}
 
 export class HybridLiquidityMarketService {
   constructor(domain) { this.domain = domain; }
 
-  list() {
+  rawList() {
     return this.domain.list(HYBRID_MARKET_DEFINITION)
       .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
   }
 
+  latestReference(marketId) {
+    return this.domain.list(HYBRID_MARKET_REFERENCE)
+      .filter((item) => item.marketId === marketId)
+      .sort((a, b) => recordTime(b).localeCompare(recordTime(a)))[0] || null;
+  }
+
+  marketplaceListing(instrumentId) {
+    return this.domain.list('MARKETPLACE_LISTING')
+      .filter((item) => item.instrumentId === instrumentId)
+      .sort((a, b) => String(b.updatedAt || b.publishedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.publishedAt || a.createdAt || '')))
+      .find(participantOrderListing) || null;
+  }
+
+  marketView(market) {
+    if (!market) return null;
+    const latestReference = this.latestReference(market.marketId);
+    const listing = market.mode === MARKET_MODES.SPOT ? this.marketplaceListing(market.underlyingInstrumentId) : null;
+    const participantOrderAvailable = market.mode === MARKET_MODES.SPOT && participantOrderListing(listing);
+    return {
+      ...market,
+      latestReference,
+      marketplaceAccess: {
+        mode: market.mode === MARKET_MODES.SPOT ? 'GOVERNED_SPOT_HANDOFF' : 'REFERENCE_ONLY',
+        participantOrderAvailable,
+        listingId: listing?.listingId || null,
+        listingState: listing?.state || null,
+        listingStatus: listing?.status || null,
+        quantity: listing?.quantity ?? null,
+        unit: listing?.unit || null,
+        askingPrice: listing?.pricing?.askingPrice ?? listing?.unitPrice ?? null,
+        quoteCurrency: listing?.pricing?.currency || 'USD',
+        pricingAuthority: participantOrderAvailable ? 'MARKETPLACE_LISTING' : null,
+        hybridReferenceExecutable: false,
+        orderPreviewEndpoint: participantOrderAvailable ? '/api/sane/order-intents/preview' : null,
+        orderConfirmEndpoint: participantOrderAvailable ? '/api/sane/order-intents/confirm' : null,
+      },
+    };
+  }
+
+  list() {
+    return this.rawList().map((market) => this.marketView(market));
+  }
+
   get(marketId) {
-    return this.domain.get(HYBRID_MARKET_DEFINITION, marketId) || null;
+    return this.marketView(this.domain.get(HYBRID_MARKET_DEFINITION, marketId) || null);
   }
 
   preview(input = {}) {
@@ -63,7 +116,9 @@ export class HybridLiquidityMarketService {
       marketIdentity: input.marketIdentity || `${instrument.denomination?.symbol || 'SRA'} / USD`,
       mode,
       underlyingInstrumentId,
-      purpose: 'Continuous price discovery for a verified SRA instrument without changing the underlying asset record.',
+      purpose: mode === MARKET_MODES.SPOT
+        ? 'Governed spot participation in a published SRA instrument through the existing Marketplace Engine.'
+        : 'Continuous price discovery for a verified SRA instrument without changing the underlying asset record.',
       indexMethodology: {
         method: String(input.indexMethod || 'VERIFIED_REFERENCE_COMPOSITE').toUpperCase(),
         referenceSources,
@@ -105,12 +160,12 @@ export class HybridLiquidityMarketService {
       statusHistory: [{ state: 'APPROVED_REFERENCE_MARKET', actorId, occurredAt: approvedAt }],
     };
     await this.domain.put(HYBRID_MARKET_DEFINITION, marketId, record, { actorId, eventType: 'HYBRID_MARKET_DEFINITION_APPROVED' });
-    return record;
+    return this.marketView(record);
   }
 
   async recordReference(input = {}, actorId = 'SRA_REFERENCE_ENGINE') {
     const marketId = text(input.marketId, 'marketId');
-    const market = this.get(marketId);
+    const market = this.domain.get(HYBRID_MARKET_DEFINITION, marketId);
     if (!market) throw new Error('Hybrid market definition was not found.');
     const referenceValue = positive(input.referenceValue, 'referenceValue');
     const observedAt = input.observedAt || now();
@@ -133,15 +188,17 @@ export class HybridLiquidityMarketService {
   }
 
   status() {
-    const markets = this.list();
+    const markets = this.rawList();
+    const views = markets.map((market) => this.marketView(market));
     const references = this.domain.list(HYBRID_MARKET_REFERENCE);
     return {
       marketCount: markets.length,
       referenceCount: references.length,
       approvedReferenceMarkets: markets.filter((item) => item.state === 'APPROVED_REFERENCE_MARKET').length,
       executionEnabledMarkets: markets.filter((item) => item.executionState === 'ENABLED').length,
+      spotOrderAvailableMarkets: views.filter((item) => item.marketplaceAccess?.participantOrderAvailable).length,
       modes: Object.values(MARKET_MODES),
-      boundary: 'REFERENCE_AND_PRICE_DISCOVERY_ONLY',
+      boundary: 'REFERENCE_AND_GOVERNED_SPOT_HANDOFF',
     };
   }
 }
