@@ -95,23 +95,6 @@ export function createOnChainProjectionRouter(service) {
       if (!network) throw new Error('network is required.');
       if (!instrumentId && !requestedAsset) throw new Error('asset or instrumentId is required.');
 
-      const adapter = adapters.get(network);
-      if (!adapter || typeof adapter.createAsset !== 'function') {
-        const error = new Error(`Asset creation is not available for ${network}.`);
-        error.code = 'ON_CHAIN_CREATE_UNSUPPORTED';
-        throw error;
-      }
-      const health = await adapterHealth(network, adapter);
-      if (!health.ready) {
-        const missing = [];
-        if (health.issuerConfigured === false) missing.push('issuer signer');
-        if (health.distributorConfigured === false) missing.push('distribution signer');
-        const reason = health.error || (missing.length ? `Missing ${missing.join(' and ')}.` : 'Network health check did not report ready.');
-        const error = new Error(`${network} is not ready for on-chain asset creation. ${reason}`);
-        error.code = 'ON_CHAIN_NETWORK_NOT_READY';
-        throw error;
-      }
-
       let instrument = null;
       if (instrumentId) {
         instrument = service.domain.get('SRA_INSTRUMENT', instrumentId);
@@ -133,6 +116,23 @@ export function createOnChainProjectionRouter(service) {
       const id = assetIdFor(instrumentId || asset, network);
       const existing = service.getAsset(id) || service.findAsset({ instrumentId, asset, network });
       if (existing) return res.status(200).json({ created: false, asset: existing });
+
+      const adapter = adapters.get(network);
+      if (!adapter || typeof adapter.createAsset !== 'function') {
+        const error = new Error(`Asset creation is not available for ${network}.`);
+        error.code = 'ON_CHAIN_CREATE_UNSUPPORTED';
+        throw error;
+      }
+      const health = await adapterHealth(network, adapter);
+      if (!health.ready) {
+        const missing = [];
+        if (health.issuerConfigured === false) missing.push('issuer signer');
+        if (health.distributorConfigured === false) missing.push('distribution signer');
+        const reason = health.error || (missing.length ? `Missing ${missing.join(' and ')}.` : 'Network health check did not report ready.');
+        const error = new Error(`${network} is not ready for on-chain asset creation. ${reason}`);
+        error.code = 'ON_CHAIN_NETWORK_NOT_READY';
+        throw error;
+      }
 
       const created = await adapter.createAsset({ asset: symbol, symbol });
       const record = await service.recordCreated({
