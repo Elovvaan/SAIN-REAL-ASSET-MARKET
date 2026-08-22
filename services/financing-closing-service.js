@@ -15,6 +15,24 @@ const positiveAmount = (value) => { const n = Number(value); if (!Number.isFinit
 const required = (value, field) => { const text = String(value || '').trim(); if (!text) throw new Error(`${field} is required.`); return text; };
 const financingExportId = (disbursementId) => `EXP-${disbursementId}`;
 
+function normalizeDocumentaryEvidence(value = null) {
+  if (!value) return null;
+  const documentReference = required(value.documentReference, 'documentaryEvidence.documentReference');
+  const documentHash = required(value.documentHash, 'documentaryEvidence.documentHash').toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(documentHash)) throw new Error('documentaryEvidence.documentHash must be a SHA-256 hex digest.');
+  return {
+    documentReference,
+    documentHash,
+    hashAlgorithm: 'SHA-256',
+    documentType: String(value.documentType || 'EXECUTED_AGREEMENT').trim().toUpperCase(),
+    auditTrailReference: value.auditTrailReference || null,
+    signatureEvidenceReference: value.signatureEvidenceReference || null,
+    consentEvidenceReference: value.consentEvidenceReference || null,
+    executedAt: value.executedAt || null,
+    authoritativeCopyStatus: value.authoritativeCopyStatus || null,
+  };
+}
+
 export class FinancingClosingService {
   constructor(domain, assetServicingService = null) { this.domain = domain; this.assetServicingService = assetServicingService; }
 
@@ -82,6 +100,7 @@ export class FinancingClosingService {
     if (financing.status !== 'FUNDING_CREDITED_PENDING_DISBURSEMENT') throw new Error(`Closing cannot open from financing status ${financing.status}.`);
     const timestamp = now();
     const closingId = id('FCL');
+    const documentaryEvidence = normalizeDocumentaryEvidence(input.documentaryEvidence || input.settlementInstructions?.documentaryEvidence || null);
     const closing = {
       closingId,
       financingTransactionId: financing.transactionId,
@@ -95,6 +114,7 @@ export class FinancingClosingService {
       beneficiaryName: input.beneficiaryName || null,
       settlementMethod: input.settlementMethod || null,
       settlementInstructions: input.settlementInstructions || {},
+      documentaryEvidence,
       status: 'IN_PROGRESS',
       openedBy: actorId,
       openedAt: timestamp,
@@ -139,8 +159,9 @@ export class FinancingClosingService {
     if (finalFundingAmount > Number(current.approvedAmount)) throw new Error('Final funding amount cannot exceed the approved financing amount.');
     const beneficiaryName = required(input.beneficiaryName || current.beneficiaryName, 'beneficiaryName');
     const settlementMethod = String(input.settlementMethod || current.settlementMethod || '').trim().toUpperCase() || null;
+    const documentaryEvidence = normalizeDocumentaryEvidence(input.documentaryEvidence || input.settlementInstructions?.documentaryEvidence || current.documentaryEvidence || null);
     const timestamp = now();
-    const updated = { ...current, finalFundingAmount, beneficiaryName, settlementMethod, settlementInstructions: input.settlementInstructions || current.settlementInstructions || {}, status: 'READY_TO_FUND', readyAt: timestamp, updatedAt: timestamp };
+    const updated = { ...current, finalFundingAmount, beneficiaryName, settlementMethod, settlementInstructions: input.settlementInstructions || current.settlementInstructions || {}, documentaryEvidence, status: 'READY_TO_FUND', readyAt: timestamp, updatedAt: timestamp };
     const lifecycle = this.opportunityTransition(current.opportunityId, 'READY_TO_FUND', actorId, timestamp, closingId);
     const changes = [{ type: CLOSING_TYPE, id: closingId, payload: updated, actorId, eventType: 'FINANCING_CLOSING_READY_TO_FUND' }];
     if (lifecycle?.changed) changes.push({ type: OPPORTUNITY_TYPE, id: current.opportunityId, payload: lifecycle.opportunity, actorId, eventType: 'FINANCING_STAGE_READY_TO_FUND' });
@@ -160,7 +181,8 @@ export class FinancingClosingService {
     const timestamp = now();
     const disbursementId = id('FDB');
     const exportPackageId = financingExportId(disbursementId);
-    const disbursement = { disbursementId, closingId, financingTransactionId: current.financingTransactionId, opportunityId: current.opportunityId, instrumentId: current.instrumentId, amount: current.finalFundingAmount, currency: current.currency, beneficiaryName: current.beneficiaryName, settlementMethod: current.settlementMethod, settlementInstructions: current.settlementInstructions || {}, exportPackageId, status: 'AUTHORIZED', externalReference: null, authorizedBy: actorId, authorizedAt: timestamp, submittedAt: null, settledAt: null, createdAt: timestamp, updatedAt: timestamp };
+    const documentaryEvidence = normalizeDocumentaryEvidence(input.documentaryEvidence || current.documentaryEvidence || current.settlementInstructions?.documentaryEvidence || null);
+    const disbursement = { disbursementId, closingId, financingTransactionId: current.financingTransactionId, opportunityId: current.opportunityId, instrumentId: current.instrumentId, amount: current.finalFundingAmount, currency: current.currency, beneficiaryName: current.beneficiaryName, settlementMethod: current.settlementMethod, settlementInstructions: current.settlementInstructions || {}, documentaryEvidence, exportPackageId, status: 'AUTHORIZED', externalReference: null, authorizedBy: actorId, authorizedAt: timestamp, submittedAt: null, settledAt: null, createdAt: timestamp, updatedAt: timestamp };
     const exportPackage = {
       exportPackageId,
       exportKind: 'FINANCING_DISBURSEMENT',
@@ -176,6 +198,8 @@ export class FinancingClosingService {
       amount: current.finalFundingAmount,
       currency: current.currency || 'USD',
       preferredRail: current.settlementMethod || null,
+      settlementInstructions: current.settlementInstructions || {},
+      documentaryEvidence,
       selectedRail: null,
       settlementInstructionId: null,
       state: 'READY_FOR_SETTLEMENT_INSTRUCTION',
@@ -187,13 +211,13 @@ export class FinancingClosingService {
       updatedAt: timestamp,
       statusHistory: [{ state: 'READY_FOR_SETTLEMENT_INSTRUCTION', actorId, occurredAt: timestamp }],
     };
-    const updated = { ...current, status: 'AUTHORIZED', exportPackageId, authorizedBy: actorId, authorizedAt: timestamp, updatedAt: timestamp };
+    const updated = { ...current, documentaryEvidence, status: 'AUTHORIZED', exportPackageId, authorizedBy: actorId, authorizedAt: timestamp, updatedAt: timestamp };
     await this.domain.atomicPut([
       { type: DISBURSEMENT_TYPE, id: disbursementId, payload: disbursement, actorId, eventType: 'FINANCING_DISBURSEMENT_AUTHORIZED' },
       { type: EXPORT_PACKAGE_TYPE, id: exportPackageId, payload: exportPackage, actorId, eventType: 'FINANCING_EXPORT_PACKAGE_CREATED' },
       { type: CLOSING_TYPE, id: closingId, payload: updated, actorId, eventType: 'FINANCING_CLOSING_AUTHORIZED' },
     ]);
-    await this.domain.lifecycle({ objectType: EXPORT_PACKAGE_TYPE, objectId: exportPackageId, eventType: 'FINANCING_EXPORT_PACKAGE_READY', actorId, payload: { financingTransactionId: current.financingTransactionId, closingId, disbursementId, amount: current.finalFundingAmount, currency: current.currency || 'USD' } });
+    await this.domain.lifecycle({ objectType: EXPORT_PACKAGE_TYPE, objectId: exportPackageId, eventType: 'FINANCING_EXPORT_PACKAGE_READY', actorId, payload: { financingTransactionId: current.financingTransactionId, closingId, disbursementId, amount: current.finalFundingAmount, currency: current.currency || 'USD', documentReference: documentaryEvidence?.documentReference || null, documentHash: documentaryEvidence?.documentHash || null } });
     return { closing: updated, disbursement, exportPackage, created: true };
   }
 
