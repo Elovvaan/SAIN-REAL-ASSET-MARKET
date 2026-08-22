@@ -1,6 +1,13 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import PDFKitDocument from 'pdfkit';
 import { PDFDocument as PDFLibDocument } from 'pdf-lib';
 import { PrivateDocumentService } from './private-document-service.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const PLATFORM_LOGO_PATH = path.resolve(__dirname, '..', 'SRA LOGO.png');
 
 function text(value) {
   return value == null || value === '' ? null : String(value).trim();
@@ -41,6 +48,15 @@ function rule(doc) {
   const y = doc.y;
   doc.moveTo(54, y).lineTo(558, y).strokeColor('#b9b9b9').lineWidth(0.6).stroke();
   doc.moveDown(0.6);
+}
+
+function drawPlatformLogo(doc) {
+  if (!fs.existsSync(PLATFORM_LOGO_PATH)) return;
+  const width = 82;
+  const x = (612 - width) / 2;
+  const y = doc.y;
+  doc.image(PLATFORM_LOGO_PATH, x, y, { fit: [width, 82], align: 'center' });
+  doc.y = y + 88;
 }
 
 function unique(values = []) {
@@ -140,8 +156,8 @@ export class AchSettlementPacketService {
     doc.on('data', (chunk) => chunks.push(chunk));
     const done = new Promise((resolve, reject) => { doc.on('end', resolve); doc.on('error', reject); });
 
-    doc.font('Helvetica-Bold').fontSize(18).text('SRA', { align: 'center' });
-    doc.fontSize(16).text('FUNDING PACKAGE', { align: 'center' });
+    drawPlatformLogo(doc);
+    doc.font('Helvetica-Bold').fontSize(16).text('FUNDING PACKAGE', { align: 'center' });
     doc.font('Helvetica').fontSize(10).text('Transaction Documents and Settlement Instructions', { align: 'center' });
     doc.moveDown(0.8);
     rule(doc);
@@ -202,8 +218,8 @@ export class AchSettlementPacketService {
     doc.on('data', (chunk) => chunks.push(chunk));
     const done = new Promise((resolve, reject) => { doc.on('end', resolve); doc.on('error', reject); });
 
-    doc.font('Helvetica-Bold').fontSize(18).text('SRA', { align: 'center' });
-    doc.fontSize(16).text('ACH SETTLEMENT EXECUTION', { align: 'center' });
+    drawPlatformLogo(doc);
+    doc.font('Helvetica-Bold').fontSize(16).text('ACH SETTLEMENT EXECUTION', { align: 'center' });
     doc.font('Helvetica').fontSize(10).text('Dealership Completion Page', { align: 'center' });
     doc.moveDown(0.8);
     rule(doc);
