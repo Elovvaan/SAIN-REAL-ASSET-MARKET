@@ -13,6 +13,12 @@ function item(id, stage, state, participantId, action, explanation, record = {})
     positionId: record.positionId || record.buyerPositionId || record.sellerPositionId || null,
     listingId: record.listingId || null,
     instrumentId: record.instrumentId || null,
+    exportPackageId: record.exportPackageId || null,
+    opportunityId: record.opportunityId || null,
+    closingId: record.closingId || null,
+    beneficiaryName: record.beneficiaryName || null,
+    amount: Number(record.amount || 0) || null,
+    currency: record.currency || null,
     quantity: Number(record.quantity || record.matchedQuantity || 0) || null,
     valueAmount: Number(record.valueAmount || record.proposedNotional || 0) || null,
     nextAction: action,
@@ -87,14 +93,38 @@ export class UnifiedMarketOperationsQueueService {
     }
 
     for (const pkg of this.domain.list('EXPORT_PACKAGE')) {
+      if (String(pkg.exportKind || '').toUpperCase() === 'FINANCING_DISBURSEMENT' && String(pkg.state || '').toUpperCase() === 'READY_FOR_SETTLEMENT_INSTRUCTION') {
+        queue.push({
+          ...item(pkg.exportPackageId, 'FINANCING_EXPORT', pkg.state, pkg.borrowerParticipantId || pkg.participantId, 'PREPARE_SETTLEMENT_METHOD', 'Financing export is ready. SRA Export Agent should prepare the selected settlement path: bank rail instructions or the dealer funding package.', pkg),
+          agentId: 'SRA-EXPORT-AGENT',
+          agentType: 'EXPORT_AGENT',
+          humanApprovalRequired: true,
+          availableActions: ['PREPARE_BANK_SETTLEMENT_INSTRUCTION', 'GENERATE_DEALER_FUNDING_PACKAGE'],
+        });
+      }
       if (pkg.state === 'READY_FOR_EXPORT' && !pkg.transferInstructionId) {
-        queue.push(item(pkg.exportPackageId, 'EXPORT_PACKAGE', pkg.state, pkg.participantId, 'TRANSFER_INSTRUCTION', 'Export package is authorized and waiting for destination verification.', pkg));
+        queue.push({
+          ...item(pkg.exportPackageId, 'EXPORT_PACKAGE', pkg.state, pkg.participantId, 'TRANSFER_INSTRUCTION', 'Export package is authorized and waiting for destination verification.', pkg),
+          agentId: 'SRA-EXPORT-AGENT',
+          agentType: 'EXPORT_AGENT',
+          humanApprovalRequired: true,
+        });
       }
       if (pkg.state === 'TRANSFER_INSTRUCTION_VERIFIED' && pkg.exportExecutionState === 'AWAITING_EXECUTION_AUTHORIZATION') {
-        queue.push(item(pkg.exportPackageId, 'EXPORT_PACKAGE', pkg.state, pkg.participantId, 'AUTHORIZE_EXECUTION', 'Transfer instruction is verified and awaiting execution authorization.', pkg));
+        queue.push({
+          ...item(pkg.exportPackageId, 'EXPORT_PACKAGE', pkg.state, pkg.participantId, 'AUTHORIZE_EXECUTION', 'Transfer instruction is verified and awaiting execution authorization.', pkg),
+          agentId: 'SRA-EXPORT-AGENT',
+          agentType: 'EXPORT_AGENT',
+          humanApprovalRequired: true,
+        });
       }
       if (pkg.exportExecutionState === 'FAILED') {
-        exceptions.push(item(pkg.exportPackageId, 'EXPORT_EXCEPTION', pkg.state, pkg.participantId, 'REVIEW_FAILURE', 'Export execution failed and requires administrator review.', pkg));
+        exceptions.push({
+          ...item(pkg.exportPackageId, 'EXPORT_EXCEPTION', pkg.state, pkg.participantId, 'REVIEW_FAILURE', 'Export execution failed and requires administrator review.', pkg),
+          agentId: 'SRA-EXPORT-AGENT',
+          agentType: 'EXPORT_AGENT',
+          humanApprovalRequired: true,
+        });
       }
     }
 
@@ -143,6 +173,7 @@ export class UnifiedMarketOperationsQueueService {
         id: next.id,
         stage: next.stage,
         action: next.nextAction,
+        agentId: next.agentId || null,
         explanation: next.coinAgent?.explanation || next.explanation,
       } : null,
     };
