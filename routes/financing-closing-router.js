@@ -67,7 +67,18 @@ export function createFinancingClosingRouter(service) {
     try {
       if (!actorId(req)) return res.status(401).json({ error: 'An authenticated financing-operations identity is required.' });
       const exportPackageId = String(req.params.exportPackageId || '').trim();
-      const pdf = await achSettlementPacket.render(exportPackageId);
+      const pdf = await achSettlementPacket.renderSettlementPage(exportPackageId);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('Content-Disposition', `attachment; filename="SRA-ACH-Settlement-${exportPackageId}.pdf"`);
+      return res.send(pdf);
+    } catch (error) { return fail(res, error); }
+  });
+  router.get('/exports/:exportPackageId/funding-package', async (req, res) => {
+    try {
+      if (!actorId(req)) return res.status(401).json({ error: 'An authenticated financing-operations identity is required.' });
+      const exportPackageId = String(req.params.exportPackageId || '').trim();
+      const pdf = await achSettlementPacket.renderFundingPackage(exportPackageId);
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Cache-Control', 'no-store');
       res.setHeader('Content-Disposition', `attachment; filename="SRA-Funding-Package-${exportPackageId}.pdf"`);
