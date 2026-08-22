@@ -66,24 +66,37 @@
     return card;
   }
 
+  function step(label, state, detail) {
+    return `<div style="border:1px solid #292929;border-radius:10px;padding:10px 12px;background:#090909"><span style="display:block;color:#9a9a9a;font-size:10px;text-transform:uppercase">${esc(label)}</span><strong style="display:block;margin-top:4px">${esc(state)}</strong>${detail ? `<small style="display:block;color:#777;margin-top:4px;line-height:1.4">${esc(detail)}</small>` : ''}</div>`;
+  }
+
+  function lifecycleSteps(item, networkReady, asset, issued) {
+    const workflow = item.workflow || {};
+    return [
+      step('1 · Instrument approval', workflow.instrumentApproval || 'COMPLETE', 'Instrument must be approved before representation work begins.'),
+      step('2 · Representation approval', item.representationApproved ? 'COMPLETE' : (workflow.representationApproval || 'REQUIRED'), 'Authorizes this instrument for on-chain representation preparation.'),
+      step('3 · Network readiness', networkReady ? 'COMPLETE' : 'WAITING', 'Selected network signer accounts and network connection must be live.'),
+      step('4 · Asset identity', asset ? 'COMPLETE' : (networkReady && item.representationApproved ? 'READY' : 'WAITING'), 'Register the asset code + issuer identity on the selected network.'),
+      step('5 · Issue supply', issued ? 'COMPLETE' : (asset ? 'READY' : 'WAITING'), 'Issue the approved amount to the platform distribution account.'),
+      step('6 · Transfer', issued ? 'READY' : 'WAITING', 'Transfer issued units from the distribution account to a destination address.'),
+    ].join('');
+  }
+
   function approvalCard(item) {
     const instrument = item.instrument || {};
     const id = instrumentId(instrument);
     const assessment = item.assessment || {};
     const blockers = Array.isArray(assessment.blockers) ? assessment.blockers : [];
     const authorized = authorizedAmount(instrument);
+    const workflow = item.workflow || {};
     if (item.representationApproved) {
-      return `<article class="admin-record-card"><header><strong>${esc(id)}</strong><em>APPROVED</em></header><div class="admin-record-grid"><div><span>State</span><strong>${esc(assessment.state || instrument.state || instrument.status || '—')}</strong></div><div><span>Amount / supply</span><strong>${esc(authorized ?? '—')}</strong></div><div><span>On-chain approval</span><strong>APPROVED</strong></div></div></article>`;
+      return `<article class="admin-record-card"><header><strong>${esc(id)}</strong><em>REPRESENTATION APPROVED</em></header><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:12px 0">${step('1 · Instrument approval',workflow.instrumentApproval || 'COMPLETE','Instrument approval is complete.')}${step('2 · Representation approval','COMPLETE','On-chain representation approval is recorded.')}${step('3 · On-chain preparation',workflow.onChainPreparation || 'READY','Continue to the On-Chain tab for network readiness and execution.')}</div><div class="admin-record-grid"><div><span>Instrument state</span><strong>${esc(assessment.state || instrument.state || instrument.status || '—')}</strong></div><div><span>Amount / supply</span><strong>${esc(authorized ?? '—')}</strong></div></div></article>`;
     }
-    return `<article class="admin-record-card" data-approval-card="${esc(id)}"><header><strong>${esc(id)}</strong><em>${assessment.eligible === false ? 'NOT ELIGIBLE' : 'APPROVAL REQUIRED'}</em></header><div class="admin-record-grid"><div><span>State</span><strong>${esc(assessment.state || instrument.state || instrument.status || '—')}</strong></div><div><span>Amount / supply</span><strong>${esc(authorized ?? '—')}</strong></div></div>${blockers.length ? `<p style="color:#d6a92f;font-size:12px;line-height:1.45;margin:12px 0 0">${esc(blockers.join(', '))}</p>` : ''}<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px"><button data-approve-on-chain="${esc(id)}" ${assessment.eligible === false ? 'disabled' : ''}>Approve On-Chain</button><span data-approval-result style="color:#d6a92f;font-size:12px"></span></div></article>`;
+    return `<article class="admin-record-card" data-approval-card="${esc(id)}"><header><strong>${esc(id)}</strong><em>${assessment.eligible === false ? 'NOT ELIGIBLE' : 'STEP 2 · REPRESENTATION APPROVAL'}</em></header><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:12px 0">${step('1 · Instrument approval',workflow.instrumentApproval || 'COMPLETE','Instrument approval must be complete first.')}${step('2 · Representation approval',assessment.eligible === false ? 'BLOCKED' : 'REQUIRED','Explicitly approve this instrument for on-chain representation.')}${step('3 · On-chain preparation','WAITING','Begins only after representation approval is recorded.')}</div><div class="admin-record-grid"><div><span>Instrument state</span><strong>${esc(assessment.state || instrument.state || instrument.status || '—')}</strong></div><div><span>Amount / supply</span><strong>${esc(authorized ?? '—')}</strong></div></div>${blockers.length ? `<p style="color:#d6a92f;font-size:12px;line-height:1.45;margin:12px 0 0">${esc(blockers.join(', '))}</p>` : ''}<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px"><button data-approve-on-chain="${esc(id)}" ${assessment.eligible === false ? 'disabled' : ''}>Approve Representation</button><span data-approval-result style="color:#d6a92f;font-size:12px"></span></div></article>`;
   }
 
   function networkOptions(status) {
     return (status?.networks || []).filter((item) => item?.ready).map((item) => `<option value="${esc(item.network)}">${esc(item.network)}</option>`).join('');
-  }
-
-  function step(label, state, detail) {
-    return `<div style="border:1px solid #292929;border-radius:10px;padding:10px 12px;background:#090909"><span style="display:block;color:#9a9a9a;font-size:10px;text-transform:uppercase">${esc(label)}</span><strong style="display:block;margin-top:4px">${esc(state)}</strong>${detail ? `<small style="display:block;color:#777;margin-top:4px;line-height:1.4">${esc(detail)}</small>` : ''}</div>`;
   }
 
   function onChainCard(item, assets, status) {
@@ -92,19 +105,25 @@
     const authorized = authorizedAmount(instrument);
     const asset = assets.find((candidate) => candidate.instrumentId === id);
     const options = networkOptions(status);
+    const networkReady = Boolean(options);
+    const issued = Number(asset?.issuedSupply || 0) > 0;
+    const lifecycle = lifecycleSteps(item, networkReady, asset, issued);
 
     if (!item.representationApproved) {
-      return `<article class="admin-record-card"><header><strong>${esc(id)}</strong><em>APPROVAL REQUIRED</em></header><div class="admin-record-grid"><div><span>Amount / supply</span><strong>${esc(authorized ?? '—')}</strong></div><div><span>Next step</span><strong>Complete Approval tab</strong></div></div></article>`;
+      return `<article class="admin-record-card"><header><strong>${esc(id)}</strong><em>STEP 2 · REPRESENTATION APPROVAL</em></header><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:12px 0">${lifecycle}</div><div class="admin-record-grid"><div><span>Approved amount / supply</span><strong>${esc(authorized ?? '—')}</strong></div><div><span>Next step</span><strong>Complete Representation Approval</strong></div></div><p style="color:#9a9a9a;line-height:1.5">This instrument cannot enter network preparation until its representation approval record is complete.</p></article>`;
     }
 
     if (!asset) {
-      return `<article class="admin-record-card" data-create-card="${esc(id)}"><header><strong>${esc(id)}</strong><em>STEP 1 · ASSET IDENTITY</em></header><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:12px 0">${step('Step 1','Create asset identity','Register the network asset identity for this approved instrument.')}${step('Step 2','Issue supply','After the asset identity exists, issue the approved amount to the platform distribution account.')}${step('Step 3','Transfer','After supply exists, send units to a destination address.')}</div><p style="color:#9a9a9a;line-height:1.5">Select a ready network and create the asset identity. On Stellar this records the asset code + issuer identity; the supply transaction happens in Step 2.</p><div class="admin-record-grid"><div><span>Approved amount / supply</span><strong>${esc(authorized ?? '—')}</strong></div><label><span>Network</span><select data-create-network ${options ? '' : 'disabled'}>${options || '<option value="">No ready network</option>'}</select></label></div><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px"><button data-create-on-chain="${esc(id)}" ${options ? '' : 'disabled'}>Create Asset Identity</button><span data-create-result style="color:#d6a92f;font-size:12px"></span></div></article>`;
+      const current = networkReady ? 'STEP 4 · ASSET IDENTITY' : 'STEP 3 · NETWORK READINESS';
+      const explanation = networkReady
+        ? 'Network readiness is complete. Create the asset identity next.'
+        : 'Representation approval is complete. The next required handoff is live network readiness; asset identity remains locked until a network is ready.';
+      return `<article class="admin-record-card" data-create-card="${esc(id)}"><header><strong>${esc(id)}</strong><em>${current}</em></header><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:12px 0">${lifecycle}</div><p style="color:#9a9a9a;line-height:1.5">${esc(explanation)} On Stellar, asset identity is the asset code + issuer identity; supply is issued only after that identity exists.</p><div class="admin-record-grid"><div><span>Approved amount / supply</span><strong>${esc(authorized ?? '—')}</strong></div><label><span>Network</span><select data-create-network ${networkReady ? '' : 'disabled'}>${options || '<option value="">No ready network</option>'}</select></label></div><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px"><button data-create-on-chain="${esc(id)}" ${networkReady ? '' : 'disabled'}>Create Asset Identity</button><span data-create-result style="color:#d6a92f;font-size:12px">${networkReady ? '' : 'Waiting for network readiness.'}</span></div></article>`;
     }
 
-    const issued = Number(asset.issuedSupply || 0) > 0;
-    return `<article class="admin-record-card" data-asset-card="${esc(asset.assetId)}"><header><strong>${esc(id)}</strong><em>${esc(asset.state || 'CREATED')}</em></header><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:12px 0">${step('Step 1','COMPLETE','Asset identity exists on the selected network.')}${step('Step 2',issued ? 'COMPLETE' : 'READY','Issue supply from the issuer to the platform distribution account.')}${step('Step 3',issued ? 'READY' : 'WAITING','Transfer issued units to an external destination.')}</div><div class="admin-record-grid"><div><span>Network</span><strong>${esc(asset.network)}</strong></div><div><span>Asset address</span><strong>${esc(asset.assetAddress)}</strong></div><div><span>Network decimals</span><strong>${esc(asset.decimals)}</strong></div><div><span>Issued supply</span><strong>${esc(asset.issuedSupply ?? '0')}</strong></div><div><span>Asset identity transaction</span><strong>${esc(asset.createdTransactionId || 'Not applicable / not broadcast')}</strong></div><div><span>Last issue transaction</span><strong>${esc(asset.lastIssueTransactionId || '—')}</strong></div></div>
-      <section style="margin-top:16px;border-top:1px solid #292929;padding-top:16px"><strong>Step 2 · Issue Supply</strong><p style="color:#9a9a9a;font-size:12px;line-height:1.45">Issue units to the platform distribution account. The network adapter handles the required trustline and signed issuance transaction.</p><div class="admin-record-grid" style="margin-top:10px"><label><span>Amount</span><input data-issue-amount type="text" inputmode="decimal" autocomplete="off" placeholder="Amount"></label></div><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px"><button data-issue-asset="${esc(asset.assetId)}">Issue Supply</button><span data-issue-result style="color:#d6a92f;font-size:12px"></span></div></section>
-      <section style="margin-top:16px;border-top:1px solid #292929;padding-top:16px"><strong>Step 3 · Transfer On Chain</strong><p style="color:#9a9a9a;font-size:12px;line-height:1.45">Send issued units from the platform distribution account to a destination address.</p><div class="admin-record-grid" style="margin-top:10px"><label><span>Amount</span><input data-transfer-amount type="text" inputmode="decimal" autocomplete="off" placeholder="Amount"></label><label><span>Destination address</span><input data-transfer-destination type="text" autocomplete="off" placeholder="Destination wallet"></label></div><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px"><button data-transfer-asset="${esc(asset.assetId)}" data-transfer-symbol="${esc(asset.asset)}" data-transfer-network="${esc(asset.network)}" ${issued ? '' : 'disabled'}>Send On Chain</button><span data-transfer-result style="color:#d6a92f;font-size:12px">${issued ? '' : 'Issue supply first.'}</span></div></section>
+    return `<article class="admin-record-card" data-asset-card="${esc(asset.assetId)}"><header><strong>${esc(id)}</strong><em>${issued ? 'STEP 6 · TRANSFER' : 'STEP 5 · ISSUE SUPPLY'}</em></header><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:12px 0">${lifecycle}</div><div class="admin-record-grid"><div><span>Network</span><strong>${esc(asset.network)}</strong></div><div><span>Asset address</span><strong>${esc(asset.assetAddress)}</strong></div><div><span>Network decimals</span><strong>${esc(asset.decimals)}</strong></div><div><span>Issued supply</span><strong>${esc(asset.issuedSupply ?? '0')}</strong></div><div><span>Asset identity transaction</span><strong>${esc(asset.createdTransactionId || 'Not applicable / not broadcast')}</strong></div><div><span>Last issue transaction</span><strong>${esc(asset.lastIssueTransactionId || '—')}</strong></div></div>
+      <section style="margin-top:16px;border-top:1px solid #292929;padding-top:16px"><strong>Step 5 · Issue Supply</strong><p style="color:#9a9a9a;font-size:12px;line-height:1.45">Issue units to the platform distribution account. The network adapter handles the required trustline and signed issuance transaction.</p><div class="admin-record-grid" style="margin-top:10px"><label><span>Amount</span><input data-issue-amount type="text" inputmode="decimal" autocomplete="off" placeholder="Amount"></label></div><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px"><button data-issue-asset="${esc(asset.assetId)}">Issue Supply</button><span data-issue-result style="color:#d6a92f;font-size:12px"></span></div></section>
+      <section style="margin-top:16px;border-top:1px solid #292929;padding-top:16px"><strong>Step 6 · Transfer On Chain</strong><p style="color:#9a9a9a;font-size:12px;line-height:1.45">Send issued units from the platform distribution account to a destination address.</p><div class="admin-record-grid" style="margin-top:10px"><label><span>Amount</span><input data-transfer-amount type="text" inputmode="decimal" autocomplete="off" placeholder="Amount"></label><label><span>Destination address</span><input data-transfer-destination type="text" autocomplete="off" placeholder="Destination wallet"></label></div><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px"><button data-transfer-asset="${esc(asset.assetId)}" data-transfer-symbol="${esc(asset.asset)}" data-transfer-network="${esc(asset.network)}" ${issued ? '' : 'disabled'}>Send On Chain</button><span data-transfer-result style="color:#d6a92f;font-size:12px">${issued ? '' : 'Issue supply first.'}</span></div></section>
     </article>`;
   }
 
@@ -113,14 +132,14 @@
       const id = button.dataset.approveOnChain;
       const row = button.closest('[data-approval-card]');
       const result = row?.querySelector('[data-approval-result]');
-      if (!confirm(`Approve ${id} for on-chain creation?`)) return;
+      if (!confirm(`Approve ${id} for on-chain representation?`)) return;
       button.disabled = true;
-      if (result) result.textContent = 'Recording approval…';
+      if (result) result.textContent = 'Recording representation approval…';
       try {
         await request(`/api/admin/instruments/${encodeURIComponent(id)}/representation/approve`, {
           method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ approval:'APPROVE' }),
         });
-        if (result) result.textContent = 'Approved.';
+        if (result) result.textContent = 'Representation approved.';
         window.SRAAdminDataClient?.refresh?.('on-chain-approved');
         await render(workspace);
       } catch (error) {
@@ -200,16 +219,16 @@
   }
 
   async function renderApproval(workspace, card) {
-    card.innerHTML = '<header><strong>On-Chain Approval</strong><em>CHECKING</em></header><p>Loading instruments…</p>';
+    card.innerHTML = '<header><strong>Representation Approval</strong><em>CHECKING</em></header><p>Loading instruments…</p>';
     const approvalStatus = await request(`/api/admin/instruments/approval-status?_=${Date.now()}`);
     if (!active(workspace) || activeTab(workspace) !== 'Approval') return;
     const eligible = approvalStatus.representationReady || [];
-    card.innerHTML = `<header><strong>On-Chain Approval</strong><em>INSTRUMENTS</em></header><p style="color:#9a9a9a;line-height:1.5">Approve which existing SRA instruments may be sent to the on-chain creation flow.</p><div style="display:grid;gap:10px">${eligible.length ? eligible.map(approvalCard).join('') : '<p>No eligible instruments are currently available.</p>'}</div>`;
+    card.innerHTML = `<header><strong>Representation Approval</strong><em>INSTRUMENT LIFECYCLE</em></header><p style="color:#9a9a9a;line-height:1.5">Instrument approval comes first. Representation approval is the explicit handoff that authorizes an approved instrument to enter on-chain preparation.</p><div style="display:grid;gap:10px">${eligible.length ? eligible.map(approvalCard).join('') : '<p>No approved instruments are currently available for representation review.</p>'}</div>`;
     bindApproval(workspace, card);
   }
 
   async function renderOnChain(workspace, card) {
-    card.innerHTML = '<header><strong>On-Chain</strong><em>CHECKING</em></header><p>Loading network assets…</p>';
+    card.innerHTML = '<header><strong>On-Chain</strong><em>CHECKING</em></header><p>Loading instrument lifecycle and network state…</p>';
     const [approvalStatus, status, assetsResult] = await Promise.all([
       request(`/api/admin/instruments/approval-status?_=${Date.now()}`),
       request('/api/on-chain/status'),
@@ -219,7 +238,7 @@
     const eligible = approvalStatus.representationReady || [];
     const assets = assetsResult.records || [];
     const ready = (status.networks || []).some((item) => item.ready);
-    card.innerHTML = `<header><strong>On-Chain</strong><em>${ready ? 'READY' : 'NETWORK NOT READY'}</em></header><p style="color:#9a9a9a;line-height:1.5">Approved instrument → create asset identity → issue supply → transfer. New on-chain operations require a live ready network; completed records remain available independently of network health.</p><div style="display:grid;gap:10px">${eligible.length ? eligible.map((item) => onChainCard(item, assets, status)).join('') : '<p>No eligible instruments are currently available.</p>'}</div>`;
+    card.innerHTML = `<header><strong>On-Chain</strong><em>${ready ? 'NETWORK READY' : 'NETWORK NOT READY'}</em></header><p style="color:#9a9a9a;line-height:1.5">Instrument approval → representation approval → network readiness → asset identity → issue supply → transfer. Each stage must complete before the next stage becomes actionable.</p><div style="display:grid;gap:10px">${eligible.length ? eligible.map((item) => onChainCard(item, assets, status)).join('') : '<p>No approved instruments are currently available.</p>'}</div>`;
     bindOnChain(workspace, card);
   }
 
