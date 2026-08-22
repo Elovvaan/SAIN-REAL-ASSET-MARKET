@@ -43,9 +43,7 @@
 
   function networkOptions(status) {
     const networks = status?.networks || [];
-    return networks.length
-      ? networks.map((item) => `<option value="${esc(item.network)}">${esc(item.network)}</option>`).join('')
-      : '<option value="">No configured network adapter</option>';
+    return networks.length ? networks.map((item) => `<option value="${esc(item.network)}">${esc(item.network)}</option>`).join('') : '<option value="">No configured network adapter</option>';
   }
 
   function packageOptions(packages) {
@@ -55,379 +53,43 @@
 
   function railOptions(rails) {
     const values = (rails || []).map((item) => String(item.rail || '').toUpperCase()).filter((rail) => bankRails.has(rail));
-    const bank = values.length
-      ? values.map((rail) => `<option value="${esc(rail)}">${esc(railDisplayName(rail))}</option>`).join('')
-      : '';
+    const bank = values.length ? values.map((rail) => `<option value="${esc(rail)}">${esc(railDisplayName(rail))}</option>`).join('') : '';
     return `${bank}<option value="${DEAL_PACKAGE}">${railDisplayName(DEAL_PACKAGE)}</option>`;
   }
 
   function preparationMarkup({ packages, rails }) {
-    return `<section class="admin-record-card" data-settlement-instruction-preparation>
-      <header><strong>New Settlement Instruction / Funding Package</strong><em>PUBLIC STANDARD</em></header>
-      <p style="color:#9a9a9a;margin:0 0 14px;line-height:1.5">Select the authorized financing export package, then select the settlement method. Bank rails prepare receiving-bank instructions. Dealer Funding Package generates the printable transaction package from the financing record and linked transaction documents.</p>
-      <form data-settlement-instruction-form autocomplete="off">
-        <div class="admin-record-grid">
-          <label><span>Export package / financing</span><select name="exportPackageId" required style="width:100%;background:#050505;border:1px solid #292929;border-radius:10px;color:#f5f5f5;padding:12px">${packageOptions(packages)}</select></label>
-          <label><span>Settlement method</span><select name="rail" required style="width:100%;background:#050505;border:1px solid #292929;border-radius:10px;color:#f5f5f5;padding:12px">${railOptions(rails)}</select></label>
-        </div>
-        <div data-bank-settlement-fields class="admin-record-grid" style="margin-top:12px">
-          <label><span data-receiving-institution-label>Receiving institution</span><input name="bankName" type="text" placeholder="Receiving institution" required></label>
-          <label><span>ABA routing number</span><input name="routingNumber" type="text" inputmode="numeric" pattern="[0-9]{9}" maxlength="9" placeholder="9 digits" required></label>
-          <label><span data-account-label>Receiving account number</span><input name="accountNumber" type="password" inputmode="numeric" pattern="[0-9]{4,17}" maxlength="17" placeholder="4–17 digits" required></label>
-          <label data-ach-account-type><span>ACH account type</span><select name="accountType" style="width:100%;background:#050505;border:1px solid #292929;border-radius:10px;color:#f5f5f5;padding:12px"><option value="CHECKING">Checking</option><option value="SAVINGS">Savings</option></select></label>
-        </div>
-        <div data-deal-package-fields style="display:none;margin-top:12px">
-          <div class="admin-record-grid">
-            <div><span>Package source</span><strong>Financing record + linked uploaded transaction documents</strong></div>
-            <div><span>Package output</span><strong>Printable SRA Funding Package PDF</strong></div>
-            <div><span>Dealer completion</span><strong>Destination banking information + settlement confirmation</strong></div>
-            <div><span>Document verification</span><strong>Review generated package for extracted vehicle / VIN / agreement facts</strong></div>
-          </div>
-        </div>
-        <div data-export-package-summary class="admin-record-grid" style="margin-top:14px"></div>
-        <div data-standard-summary class="admin-record-grid" style="margin-top:14px"></div>
-        <p data-settlement-method-note style="color:#9a9a9a;font-size:12px;line-height:1.45;margin:12px 0"></p>
-        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><button type="submit" data-prepare-settlement-action>Prepare Settlement Instruction</button><span data-settlement-instruction-result style="color:#d6a92f;font-size:12px"></span></div>
-      </form>
-    </section>`;
+    return `<section class="admin-record-card" data-settlement-instruction-preparation><header><strong>New Settlement Instruction / Funding Package</strong><em>PUBLIC STANDARD</em></header><p style="color:#9a9a9a;margin:0 0 14px;line-height:1.5">Select the authorized financing export package, then select the settlement method. Bank rails prepare receiving-bank instructions. Dealer Funding Package generates the printable transaction package from the financing record and linked transaction documents.</p><form data-settlement-instruction-form autocomplete="off"><div class="admin-record-grid"><label><span>Export package / financing</span><select name="exportPackageId" required style="width:100%;background:#050505;border:1px solid #292929;border-radius:10px;color:#f5f5f5;padding:12px">${packageOptions(packages)}</select></label><label><span>Settlement method</span><select name="rail" required style="width:100%;background:#050505;border:1px solid #292929;border-radius:10px;color:#f5f5f5;padding:12px">${railOptions(rails)}</select></label></div><div data-bank-settlement-fields class="admin-record-grid" style="margin-top:12px"><label><span data-receiving-institution-label>Receiving institution</span><input name="bankName" type="text" placeholder="Receiving institution" required></label><label><span>ABA routing number</span><input name="routingNumber" type="text" inputmode="numeric" pattern="[0-9]{9}" maxlength="9" placeholder="9 digits" required></label><label><span data-account-label>Receiving account number</span><input name="accountNumber" type="password" inputmode="numeric" pattern="[0-9]{4,17}" maxlength="17" placeholder="4–17 digits" required></label><label data-ach-account-type><span>ACH account type</span><select name="accountType" style="width:100%;background:#050505;border:1px solid #292929;border-radius:10px;color:#f5f5f5;padding:12px"><option value="CHECKING">Checking</option><option value="SAVINGS">Savings</option></select></label></div><div data-deal-package-fields style="display:none;margin-top:12px"><div class="admin-record-grid"><div><span>Package source</span><strong>Financing record + linked uploaded transaction documents</strong></div><div><span>Package output</span><strong>Printable SRA Funding Package PDF</strong></div><div><span>Dealer completion</span><strong>Destination banking information + settlement confirmation</strong></div><div><span>Document verification</span><strong>Review generated package for extracted vehicle / VIN / agreement facts</strong></div></div></div><div data-export-package-summary class="admin-record-grid" style="margin-top:14px"></div><div data-standard-summary class="admin-record-grid" style="margin-top:14px"></div><p data-settlement-method-note style="color:#9a9a9a;font-size:12px;line-height:1.45;margin:12px 0"></p><div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><button type="submit" data-prepare-settlement-action>Prepare Settlement Instruction</button><span data-settlement-instruction-result style="color:#d6a92f;font-size:12px"></span></div></form></section>`;
   }
 
-  function selectedPackage(form, packages) {
-    return packages.find((pkg) => pkg.exportPackageId === form.elements.exportPackageId.value) || null;
-  }
+  function selectedPackage(form, packages) { return packages.find((pkg) => pkg.exportPackageId === form.elements.exportPackageId.value) || null; }
+  function refreshPackageSummary(form, packages) { const pkg=selectedPackage(form,packages),root=form.querySelector('[data-export-package-summary]'); if(!root)return; root.innerHTML=!pkg?'<div><span>Financing</span><strong>Select an export package</strong></div>':`<div><span>Financing reference</span><strong>${esc(pkg.financingTransactionId||pkg.exportPackageId)}</strong></div><div><span>Beneficiary</span><strong>${esc(pkg.beneficiaryName||'—')}</strong></div><div><span>Amount</span><strong>${esc(pkg.currency||'USD')} ${money(pkg.amount)}</strong></div><div><span>Opportunity</span><strong>${esc(pkg.opportunityId||'—')}</strong></div>`; }
+  function refreshStandardSummary(form) { const rail=String(form.elements.rail.value||'').toUpperCase(),root=form.querySelector('[data-standard-summary]'); if(!root)return; if(rail==='ACH')root.innerHTML='<div><span>Network</span><strong>ACH Network</strong></div><div><span>Rules / format</span><strong>Nacha Operating Rules</strong></div><div><span>Routing structure</span><strong>Receiving DFI Identification + Check Digit</strong></div><div><span>Network reference</span><strong>Trace Number</strong></div>'; else if(rail==='FEDWIRE')root.innerHTML='<div><span>Service</span><strong>Fedwire Funds Service</strong></div><div><span>Message standard</span><strong>ISO 20022</strong></div><div><span>Financing credit transfer</span><strong>head.001 + pacs.008</strong></div><div><span>Fedwire reference</span><strong>IMAD</strong></div>'; else if(rail===DEAL_PACKAGE)root.innerHTML='<div><span>Settlement method</span><strong>Dealer Funding Package</strong></div><div><span>Document source</span><strong>Linked uploaded transaction records</strong></div><div><span>Output</span><strong>Funding Package PDF</strong></div><div><span>Handoff</span><strong>Print or electronic delivery to dealer</strong></div>'; else root.innerHTML='<div><span>Settlement standard</span><strong>Institution-defined bank wire instructions</strong></div>'; }
+  function refreshRailFields(form) { const rail=String(form.elements.rail.value||'').toUpperCase(),deal=rail===DEAL_PACKAGE,bank=form.querySelector('[data-bank-settlement-fields]'),dealFields=form.querySelector('[data-deal-package-fields]'),ach=form.querySelector('[data-ach-account-type]'),note=form.querySelector('[data-settlement-method-note]'),action=form.querySelector('[data-prepare-settlement-action]'); if(bank)bank.style.display=deal?'none':''; if(dealFields)dealFields.style.display=deal?'':'none'; bank?.querySelectorAll('input,select').forEach(f=>f.disabled=deal); if(form.elements.bankName)form.elements.bankName.required=!deal; if(form.elements.routingNumber)form.elements.routingNumber.required=!deal; if(form.elements.accountNumber)form.elements.accountNumber.required=!deal; if(ach)ach.style.display=!deal&&rail==='ACH'?'':'none'; if(form.elements.accountType)form.elements.accountType.required=!deal&&rail==='ACH'; const al=form.querySelector('[data-account-label]'); if(al)al.textContent=rail==='ACH'?'Account number':rail==='FEDWIRE'?'Creditor account':'Receiving account number'; const il=form.querySelector('[data-receiving-institution-label]'); if(il)il.textContent=rail==='FEDWIRE'?'Creditor Agent / receiving institution':'Receiving institution'; if(action)action.textContent=deal?'Generate Dealer Funding Package':'Prepare Settlement Instruction'; if(note)note.textContent=deal?'SRA will generate the existing funding package for the selected financing export. Review the generated PDF to confirm the vehicle, VIN, agreement number and purchase amount extracted into the transaction profile.':'You do not re-enter the authorized amount. Preparing the instruction records the selected rail and receiving instructions.'; refreshStandardSummary(form); }
 
-  function refreshPackageSummary(form, packages) {
-    const pkg = selectedPackage(form, packages);
-    const root = form.querySelector('[data-export-package-summary]');
-    if (!root) return;
-    if (!pkg) {
-      root.innerHTML = '<div><span>Financing</span><strong>Select an export package</strong></div>';
-      return;
-    }
-    root.innerHTML = `<div><span>Financing reference</span><strong>${esc(pkg.financingTransactionId || pkg.exportPackageId)}</strong></div><div><span>Beneficiary</span><strong>${esc(pkg.beneficiaryName || '—')}</strong></div><div><span>Amount</span><strong>${esc(pkg.currency || 'USD')} ${money(pkg.amount)}</strong></div><div><span>Opportunity</span><strong>${esc(pkg.opportunityId || '—')}</strong></div>`;
-  }
-
-  function refreshStandardSummary(form) {
-    const rail = String(form.elements.rail.value || '').toUpperCase();
-    const root = form.querySelector('[data-standard-summary]');
-    if (!root) return;
-    if (rail === 'ACH') {
-      root.innerHTML = '<div><span>Network</span><strong>ACH Network</strong></div><div><span>Rules / format</span><strong>Nacha Operating Rules</strong></div><div><span>Routing structure</span><strong>Receiving DFI Identification + Check Digit</strong></div><div><span>Network reference</span><strong>Trace Number</strong></div>';
-      return;
-    }
-    if (rail === 'FEDWIRE') {
-      root.innerHTML = '<div><span>Service</span><strong>Fedwire Funds Service</strong></div><div><span>Message standard</span><strong>ISO 20022</strong></div><div><span>Financing credit transfer</span><strong>head.001 + pacs.008</strong></div><div><span>Fedwire reference</span><strong>IMAD</strong></div>';
-      return;
-    }
-    if (rail === DEAL_PACKAGE) {
-      root.innerHTML = '<div><span>Settlement method</span><strong>Dealer Funding Package</strong></div><div><span>Document source</span><strong>Linked uploaded transaction records</strong></div><div><span>Output</span><strong>Funding Package PDF</strong></div><div><span>Handoff</span><strong>Print or electronic delivery to dealer</strong></div>';
-      return;
-    }
-    root.innerHTML = '<div><span>Settlement standard</span><strong>Institution-defined bank wire instructions</strong></div>';
-  }
-
-  function refreshRailFields(form) {
-    const rail = String(form.elements.rail.value || '').toUpperCase();
-    const dealPackage = rail === DEAL_PACKAGE;
-    const bankFields = form.querySelector('[data-bank-settlement-fields]');
-    const dealFields = form.querySelector('[data-deal-package-fields]');
-    const ach = form.querySelector('[data-ach-account-type]');
-    const note = form.querySelector('[data-settlement-method-note]');
-    const action = form.querySelector('[data-prepare-settlement-action]');
-
-    if (bankFields) bankFields.style.display = dealPackage ? 'none' : '';
-    if (dealFields) dealFields.style.display = dealPackage ? '' : 'none';
-    bankFields?.querySelectorAll('input,select').forEach((field) => { field.disabled = dealPackage; });
-
-    if (form.elements.bankName) form.elements.bankName.required = !dealPackage;
-    if (form.elements.routingNumber) form.elements.routingNumber.required = !dealPackage;
-    if (form.elements.accountNumber) form.elements.accountNumber.required = !dealPackage;
-    if (ach) ach.style.display = !dealPackage && rail === 'ACH' ? '' : 'none';
-    if (form.elements.accountType) form.elements.accountType.required = !dealPackage && rail === 'ACH';
-
-    const accountLabel = form.querySelector('[data-account-label]');
-    if (accountLabel) accountLabel.textContent = rail === 'ACH' ? 'Account number' : rail === 'FEDWIRE' ? 'Creditor account' : 'Receiving account number';
-    const institutionLabel = form.querySelector('[data-receiving-institution-label]');
-    if (institutionLabel) institutionLabel.textContent = rail === 'FEDWIRE' ? 'Creditor Agent / receiving institution' : 'Receiving institution';
-
-    if (action) action.textContent = dealPackage ? 'Generate Dealer Funding Package' : 'Prepare Settlement Instruction';
-    if (note) note.textContent = dealPackage
-      ? 'SRA will generate the existing funding package for the selected financing export. The package generator reads the financing transaction, beneficiary, amount, linked opportunity/closing records, and linked uploaded transaction documents. Review the generated PDF to confirm the vehicle, VIN, agreement number and purchase amount extracted into the transaction profile.'
-      : 'You do not re-enter the authorized amount. Preparing the instruction records the selected rail and receiving instructions; an execution connection is not required at this stage. For ACH, SRA derives the Receiving DFI Identification and Check Digit from the 9-digit ABA routing number. For Fedwire, SRA records the Fedwire Funds Service ISO 20022 vocabulary.';
-    refreshStandardSummary(form);
-  }
-
-  function standardResultText(instruction) {
-    const details = instruction.standardDetails || {};
-    if (instruction.rail === 'ACH') {
-      const dfi = details.receivingDfiIdentification ? ` · Receiving DFI ${details.receivingDfiIdentification}-${details.checkDigit || ''}` : '';
-      return `ACH Network · Nacha${dfi}`;
-    }
-    if (instruction.rail === 'FEDWIRE') return `Fedwire Funds Service · ISO 20022 · ${details.businessApplicationHeader || 'head.001'} + ${details.messageType || 'pacs.008'}`;
-    return railDisplayName(instruction.rail);
-  }
-
-  async function prepareInstruction(form, packages) {
-    const values = Object.fromEntries(new FormData(form).entries());
-    const result = form.querySelector('[data-settlement-instruction-result]');
-    const button = form.querySelector('[data-prepare-settlement-action]');
-    const pkg = selectedPackage(form, packages);
-    if (!pkg) { result.textContent = 'Select a financing export package.'; return; }
-
-    if (String(values.rail || '').toUpperCase() === DEAL_PACKAGE) {
-      const href = `/api/financing-closing/exports/${encodeURIComponent(pkg.exportPackageId)}/funding-package`;
-      result.textContent = `Generating dealer funding package for ${pkg.exportPackageId}…`;
-      window.open(href, '_blank', 'noopener');
-      result.textContent = `${pkg.exportPackageId} · Dealer Funding Package requested`;
-      return;
-    }
-
-    button.disabled = true;
-    result.textContent = `Preparing ${railDisplayName(values.rail)} settlement instruction for ${pkg.exportPackageId}…`;
+  async function generateFundingPackage(pkg,result,button) {
+    button.disabled=true; result.textContent=`Generating dealer funding package for ${pkg.exportPackageId}…`;
     try {
-      const instruction = await request('/api/settlement-rails/instructions', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({
-          exportPackageId: pkg.exportPackageId,
-          rail: values.rail,
-          amount: Number(pkg.amount),
-          currency: pkg.currency || 'USD',
-          beneficiaryName: pkg.beneficiaryName,
-          receivingInstitutionReference: values.bankName,
-          receivingAccountReference: values.accountNumber,
-          routingNumber: values.routingNumber,
-          accountType: values.rail === 'ACH' ? values.accountType : null,
-          purpose: 'SRA_FINANCING_DISBURSEMENT',
-          remittanceReference: pkg.exportPackageId,
-        }),
-      });
-      form.elements.routingNumber.value = '';
-      form.elements.accountNumber.value = '';
-      result.textContent = `${instruction.instructionId} · ${standardResultText(instruction)} · ${instruction.currency} ${money(instruction.amount)} · READY`;
-      client()?.refresh('financing-settlement-instruction-prepared');
-      window.dispatchEvent(new CustomEvent('sra:admin-refresh',{ detail:{ source:'financing-settlement-instruction-prepared' } }));
-    } catch (error) {
-      result.textContent = error.message;
-    } finally {
-      button.disabled = false;
-    }
+      const response=await fetch(`/api/financing-closing/exports/${encodeURIComponent(pkg.exportPackageId)}/funding-package`,{credentials:'same-origin',cache:'no-store',headers:{Accept:'application/pdf'}});
+      if(!response.ok){const payload=await response.json().catch(()=>({}));throw new Error(payload.error||`Funding package request failed with ${response.status}.`);}
+      const blob=await response.blob(); const url=URL.createObjectURL(blob); const opened=window.open(url,'_blank');
+      if(!opened){const a=document.createElement('a');a.href=url;a.download=`SRA-Funding-Package-${pkg.exportPackageId}.pdf`;document.body.appendChild(a);a.click();a.remove();}
+      setTimeout(()=>URL.revokeObjectURL(url),60000); result.textContent=`${pkg.exportPackageId} · Dealer Funding Package generated`;
+    } catch(error){result.textContent=error.message;} finally{button.disabled=false;}
   }
 
-  function bankInstructionOptions(instructions) {
-    return instructions.length
-      ? `<option value="">Select prepared bank instruction</option>${instructions.map((record) => `<option value="${esc(record.instructionId)}">${esc(record.instructionId)} · ${esc(railDisplayName(record.rail))} · ${esc(record.currency || 'USD')} ${money(record.amount)} · ${esc(record.state)}</option>`).join('')}`
-      : '<option value="">No prepared bank instruction</option>';
-  }
+  async function prepareInstruction(form,packages) { const values=Object.fromEntries(new FormData(form).entries()),result=form.querySelector('[data-settlement-instruction-result]'),button=form.querySelector('[data-prepare-settlement-action]'),pkg=selectedPackage(form,packages); if(!pkg){result.textContent='Select a financing export package.';return;} if(String(values.rail||'').toUpperCase()===DEAL_PACKAGE)return generateFundingPackage(pkg,result,button); button.disabled=true; result.textContent=`Preparing ${railDisplayName(values.rail)} settlement instruction for ${pkg.exportPackageId}…`; try{const instruction=await request('/api/settlement-rails/instructions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({exportPackageId:pkg.exportPackageId,rail:values.rail,amount:Number(pkg.amount),currency:pkg.currency||'USD',beneficiaryName:pkg.beneficiaryName,receivingInstitutionReference:values.bankName,receivingAccountReference:values.accountNumber,routingNumber:values.routingNumber,accountType:values.rail==='ACH'?values.accountType:null,purpose:'SRA_FINANCING_DISBURSEMENT',remittanceReference:pkg.exportPackageId})}); form.elements.routingNumber.value='';form.elements.accountNumber.value='';result.textContent=`${instruction.instructionId} · ${railDisplayName(instruction.rail)} · ${instruction.currency} ${money(instruction.amount)} · READY`;client()?.refresh('financing-settlement-instruction-prepared');window.dispatchEvent(new CustomEvent('sra:admin-refresh',{detail:{source:'financing-settlement-instruction-prepared'}}));}catch(error){result.textContent=error.message;}finally{button.disabled=false;} }
 
-  function selectedInstruction(form, instructions) {
-    return instructions.find((record) => record.instructionId === form.elements.bankInstructionId.value) || null;
-  }
-
-  function executionMarkup({ bankInstructions, onChainStatus }) {
-    const chainReady = (onChainStatus?.networks || []).some((item) => item.ready);
-    return `<section class="admin-record-card" data-settlement-execution>
-      <header><strong>Send Settlement</strong><em>DESTINATION VERIFICATION</em></header>
-      <p style="color:#9a9a9a;margin:0 0 14px;line-height:1.5">The prepared bank instruction and its downstream lifecycle stay together here. Record dispatch, institution acceptance, network execution, and reconciliation as those events occur.</p>
-      <form data-settlement-execution-form autocomplete="off">
-        <div class="admin-record-grid">
-          <label><span>Execution path</span><select name="route" data-execution-route required style="width:100%;background:#050505;border:1px solid #292929;border-radius:10px;color:#f5f5f5;padding:12px"><option value="BANK">Bank rail</option><option value="ON_CHAIN">On-chain</option></select></label>
-        </div>
-        <div data-bank-execution-fields style="margin-top:12px">
-          <div class="admin-record-grid"><label><span>Settlement instruction</span><select name="bankInstructionId" style="width:100%;background:#050505;border:1px solid #292929;border-radius:10px;color:#f5f5f5;padding:12px">${bankInstructionOptions(bankInstructions)}</select></label></div>
-          <div data-bank-lifecycle style="margin-top:12px"><div data-bank-lifecycle-summary class="admin-record-grid"></div><div data-bank-reference-fields class="admin-record-grid" style="margin-top:12px"></div><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px"><button type="button" data-bank-lifecycle-action></button><span data-bank-lifecycle-result style="color:#d6a92f;font-size:12px"></span></div></div>
-        </div>
-        <div data-onchain-execution-fields class="admin-record-grid" style="display:none;margin-top:12px">
-          <label><span>Network</span><select name="network" style="width:100%;background:#050505;border:1px solid #292929;border-radius:10px;color:#f5f5f5;padding:12px">${networkOptions(onChainStatus)}</select></label>
-          <label><span>Asset</span><input name="asset" type="text" placeholder="Asset"></label>
-          <label><span>Amount</span><input name="amount" type="text" inputmode="decimal" placeholder="Amount"></label>
-          <label><span>Destination address</span><input name="destinationAddress" type="text" placeholder="Destination address"></label>
-        </div>
-        <p data-bank-execution-status style="color:#9a9a9a;font-size:12px;line-height:1.45;margin:12px 0">This panel records the bank-rail lifecycle in SRA. Trace Number, IMAD, institution reference, and receiving confirmation are entered only when actually returned or confirmed by the applicable institution/network process.</p>
-        <p data-onchain-execution-status style="display:none;color:#9a9a9a;font-size:12px;line-height:1.45;margin:12px 0">On-chain adapter: ${chainReady ? 'READY' : 'NOT READY'}. Enter the standard transfer inputs and send directly.</p>
-        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><button type="submit" data-execute-button>Send On Chain</button><span data-settlement-execution-result style="color:#d6a92f;font-size:12px"></span></div>
-      </form>
-    </section>`;
-  }
-
-  function renderBankLifecycle(form, instructions) {
-    const instruction = selectedInstruction(form, instructions);
-    const root = form.querySelector('[data-bank-lifecycle]');
-    const summary = root?.querySelector('[data-bank-lifecycle-summary]');
-    const fields = root?.querySelector('[data-bank-reference-fields]');
-    const action = root?.querySelector('[data-bank-lifecycle-action]');
-    const result = root?.querySelector('[data-bank-lifecycle-result]');
-    if (!root || !summary || !fields || !action || !result) return;
-    const successForSelection = lastBankLifecycleSuccess && (!instruction || lastBankLifecycleSuccess.instructionId === instruction.instructionId);
-    result.textContent = successForSelection ? `${lastBankLifecycleSuccess.instructionId} · ${lastBankLifecycleSuccess.state}` : '';
-    if (!instruction) {
-      summary.innerHTML = '<div><span>Status</span><strong>Select a settlement instruction</strong></div>';
-      fields.innerHTML = '';
-      action.style.display = 'none';
-      return;
-    }
-    const state = String(instruction.state || '').toUpperCase();
-    summary.innerHTML = `<div><span>Instruction</span><strong>${esc(instruction.instructionId)}</strong></div><div><span>Rail</span><strong>${esc(railDisplayName(instruction.rail))}</strong></div><div><span>Amount</span><strong>${esc(instruction.currency || 'USD')} ${money(instruction.amount)}</strong></div><div><span>State</span><strong>${esc(state)}</strong></div>`;
-    action.style.display = '';
-    fields.innerHTML = '';
-    if (state === 'READY') { action.textContent = 'Record Sent / Dispatch'; return; }
-    if (state === 'DISPATCHED') {
-      fields.innerHTML = '<label><span>Institution transaction reference</span><input name="institutionTransactionReference" type="text" placeholder="Reference returned by institution" required></label>';
-      action.textContent = 'Record Institution Acceptance';
-      return;
-    }
-    if (state === 'ACCEPTED') {
-      fields.innerHTML = `<label><span>Institution transaction reference</span><input name="institutionTransactionReference" type="text" value="${esc(instruction.institutionTransactionReference || '')}" required></label><label><span>${instruction.rail === 'ACH' ? 'ACH Trace Number' : instruction.rail === 'FEDWIRE' ? 'Fedwire IMAD' : 'Network reference'}</span><input name="networkReference" type="text" placeholder="Network-assigned reference" required></label>`;
-      action.textContent = 'Record Network Execution';
-      return;
-    }
-    if (state === 'EXECUTED') {
-      fields.innerHTML = `<label><span>Institution transaction reference</span><input name="institutionTransactionReference" type="text" value="${esc(instruction.institutionTransactionReference || '')}" required></label><label><span>${instruction.rail === 'ACH' ? 'ACH Trace Number' : instruction.rail === 'FEDWIRE' ? 'Fedwire IMAD' : 'Network reference'}</span><input name="networkReference" type="text" value="${esc(instruction.networkReference || '')}" required></label><label><span>Receiving confirmation reference</span><input name="receivingConfirmationReference" type="text" placeholder="Receiving confirmation" required></label><label><span>Confirmed amount</span><input name="confirmedAmount" type="number" inputmode="decimal" step="0.01" min="0.01" value="${Number(instruction.amount || 0).toFixed(2)}" required></label>`;
-      action.textContent = 'Reconcile Settlement';
-      return;
-    }
-    if (state === 'EXCEPTION') { action.textContent = 'Retry Dispatch'; return; }
-    action.style.display = 'none';
-  }
-
-  async function transitionBankInstruction(form, instructions) {
-    const instruction = selectedInstruction(form, instructions);
-    const root = form.querySelector('[data-bank-lifecycle]');
-    const result = root?.querySelector('[data-bank-lifecycle-result]');
-    const action = root?.querySelector('[data-bank-lifecycle-action]');
-    if (!instruction || !result || !action) return;
-    if (!form.reportValidity()) return;
-    const values = Object.fromEntries(new FormData(form).entries());
-    const state = String(instruction.state || '').toUpperCase();
-    let targetState = null;
-    const body = {};
-    if (state === 'READY' || state === 'EXCEPTION') targetState = 'DISPATCHED';
-    else if (state === 'DISPATCHED') { targetState = 'ACCEPTED'; body.institutionTransactionReference = values.institutionTransactionReference; }
-    else if (state === 'ACCEPTED') { targetState = 'EXECUTED'; body.institutionTransactionReference = values.institutionTransactionReference || instruction.institutionTransactionReference; body.networkReference = values.networkReference; }
-    else if (state === 'EXECUTED') {
-      const confirmedAmount = Number(String(values.confirmedAmount ?? '').trim());
-      if (!Number.isFinite(confirmedAmount) || confirmedAmount <= 0) {
-        result.textContent = 'Enter a valid finite confirmed amount before reconciling.';
-        form.elements.confirmedAmount?.focus();
-        return;
-      }
-      targetState = 'RECONCILED';
-      body.institutionTransactionReference = values.institutionTransactionReference || instruction.institutionTransactionReference;
-      body.networkReference = values.networkReference || instruction.networkReference;
-      body.receivingConfirmationReference = values.receivingConfirmationReference;
-      body.confirmedAmount = confirmedAmount;
-    }
-    if (!targetState) return;
-    action.disabled = true;
-    result.textContent = `Recording ${targetState}…`;
-    try {
-      const updated = await request(`/api/settlement-rails/instructions/${encodeURIComponent(instruction.instructionId)}/transition`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ state:targetState, ...body }) });
-      const index = instructions.findIndex((item) => item.instructionId === updated.instructionId);
-      if (index >= 0) instructions[index] = updated;
-      lastBankLifecycleSuccess = { instructionId: updated.instructionId, state: updated.state };
-      renderBankLifecycle(form, instructions);
-      result.textContent = `${updated.instructionId} · ${updated.state}`;
-      client()?.refresh(`settlement-${String(updated.state || '').toLowerCase()}`);
-      window.dispatchEvent(new CustomEvent('sra:admin-refresh',{ detail:{ source:`settlement-${String(updated.state || '').toLowerCase()}` } }));
-    } catch (error) { result.textContent = error.message; }
-    finally { action.disabled = false; }
-  }
-
-  function setRequired(group, enabled, requireWhenEnabled = false) {
-    group?.querySelectorAll('input,select').forEach((field) => {
-      if (field.dataset.sraRequiredWhenEnabled === undefined) field.dataset.sraRequiredWhenEnabled = field.required ? 'true' : 'false';
-      field.disabled = !enabled;
-      field.required = enabled && (requireWhenEnabled || field.dataset.sraRequiredWhenEnabled === 'true');
-    });
-  }
-
-  function toggleExecutionRoute(form, chainReady, instructions) {
-    const onChain = form.elements.route.value === 'ON_CHAIN';
-    const bankFields = form.querySelector('[data-bank-execution-fields]');
-    const chainFields = form.querySelector('[data-onchain-execution-fields]');
-    bankFields.style.display = onChain ? 'none' : '';
-    chainFields.style.display = onChain ? '' : 'none';
-    form.querySelector('[data-bank-execution-status]').style.display = onChain ? 'none' : '';
-    form.querySelector('[data-onchain-execution-status]').style.display = onChain ? '' : 'none';
-    setRequired(bankFields, !onChain);
-    setRequired(chainFields, onChain, true);
-    const button = form.querySelector('[data-execute-button]');
-    button.style.display = onChain ? '' : 'none';
-    button.disabled = onChain ? !chainReady : true;
-    if (!onChain) renderBankLifecycle(form, instructions);
-  }
-
-  async function executeOnChain(form) {
-    const values = Object.fromEntries(new FormData(form).entries());
-    const result = form.querySelector('[data-settlement-execution-result]');
-    const button = form.querySelector('button[type="submit"]');
-    if (values.route !== 'ON_CHAIN') return;
-    button.disabled = true;
-    try {
-      result.textContent = 'Building, signing, and broadcasting on-chain transaction…';
-      const response = await request('/api/on-chain/transfers', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ network:values.network, asset:values.asset, amount:values.amount, destinationAddress:values.destinationAddress }) });
-      result.textContent = `${response.state} · ${response.transactionId || 'transaction ID pending'}`;
-      client()?.refresh('settlement-executed');
-      window.dispatchEvent(new CustomEvent('sra:admin-refresh',{ detail:{ source:'settlement-executed' } }));
-    } catch (error) { result.textContent = error.message; }
-    finally { button.disabled = false; }
-  }
-
-  async function renderPreparation(workspace, controls) {
-    const [workspaces, railCatalog] = await Promise.all([ request('/api/admin/workspaces?limit=100').catch(() => ({ records:{} })), request('/api/settlement-rails/rails').catch(() => ({ rails:[] })) ]);
-    if (!controls.isConnected || workspace.dataset.activeTab !== 'Settlement Instructions') return;
-    const packages = financingPackages(workspaces);
-    const rails = railCatalog.rails || [];
-    controls.insertAdjacentHTML('afterbegin', preparationMarkup({ packages, rails }));
-    const form = controls.querySelector('[data-settlement-instruction-form]');
-    if (!form) return;
-    refreshPackageSummary(form, packages);
-    refreshRailFields(form);
-    form.elements.exportPackageId.addEventListener('change', () => {
-      const pkg = selectedPackage(form, packages);
-      refreshPackageSummary(form, packages);
-      if (pkg?.preferredRail && bankRails.has(String(pkg.preferredRail).toUpperCase()) && form.elements.rail.value !== DEAL_PACKAGE) {
-        form.elements.rail.value = String(pkg.preferredRail).toUpperCase();
-      }
-      refreshRailFields(form);
-    });
-    form.elements.rail.addEventListener('change', () => refreshRailFields(form));
-    form.addEventListener('submit', (event) => { event.preventDefault(); void prepareInstruction(form, packages); });
-  }
-
-  async function renderExecution(workspace, controls) {
-    controls.querySelector('[data-native-ach-destination-control]')?.remove();
-    const [instructionPayload, onChainStatus] = await Promise.all([ request('/api/settlement-rails/instructions').catch(() => ({ instructions:[] })), request('/api/on-chain/status').catch(() => ({ networks:[] })) ]);
-    if (!controls.isConnected || workspace.dataset.activeTab !== 'Destination Verification') return;
-    const instructions = preparedBankInstructions(instructionPayload);
-    controls.insertAdjacentHTML('afterbegin', executionMarkup({ bankInstructions: instructions, onChainStatus }));
-    const form = controls.querySelector('[data-settlement-execution-form]');
-    if (!form) return;
-    const chainReady = (onChainStatus.networks || []).some((item) => item.ready);
-    toggleExecutionRoute(form, chainReady, instructions);
-    form.elements.route.addEventListener('change', () => toggleExecutionRoute(form, chainReady, instructions));
-    form.elements.bankInstructionId.addEventListener('change', () => renderBankLifecycle(form, instructions));
-    form.querySelector('[data-bank-lifecycle-action]')?.addEventListener('click', () => void transitionBankInstruction(form, instructions));
-    form.addEventListener('submit', (event) => { event.preventDefault(); void executeOnChain(form); });
-  }
-
-  async function render(workspace) {
-    const controls = workspace?.querySelector('.admin-workspace-controls');
-    if (!controls) return;
-    controls.querySelector('[data-live-ach-control]')?.remove();
-    controls.querySelector('[data-settlement-instruction-preparation]')?.remove();
-    controls.querySelector('[data-settlement-execution]')?.remove();
-    if (workspace.dataset.activeTab === 'Settlement Instructions') return renderPreparation(workspace, controls);
-    if (workspace.dataset.activeTab === 'Destination Verification') return renderExecution(workspace, controls);
-  }
-
-  function mount(workspace) {
-    if (!workspace || workspace.dataset.settlementExecutionMounted === 'true') return;
-    workspace.dataset.settlementExecutionMounted = 'true';
-    workspace.addEventListener('click', (event) => { if (!event.target.closest('[data-admin-tab]')) return; setTimeout(() => void render(workspace), 0); });
-    window.addEventListener('sra:admin-workspace-synchronized', (event) => { if (event.detail?.workspaceId === 'settlement') void render(workspace); });
-    void render(workspace);
-  }
-
-  window.mountAdminSettlementExecutionControls = mount;
+  function bankInstructionOptions(instructions){return instructions.length?`<option value="">Select prepared bank instruction</option>${instructions.map(r=>`<option value="${esc(r.instructionId)}">${esc(r.instructionId)} · ${esc(railDisplayName(r.rail))} · ${esc(r.currency||'USD')} ${money(r.amount)} · ${esc(r.state)}</option>`).join('')}`:'<option value="">No prepared bank instruction</option>';}
+  function selectedInstruction(form,instructions){return instructions.find(r=>r.instructionId===form.elements.bankInstructionId.value)||null;}
+  function executionMarkup({bankInstructions,onChainStatus}){const ready=(onChainStatus?.networks||[]).some(i=>i.ready);return `<section class="admin-record-card" data-settlement-execution><header><strong>Send Settlement</strong><em>DESTINATION VERIFICATION</em></header><form data-settlement-execution-form autocomplete="off"><div class="admin-record-grid"><label><span>Execution path</span><select name="route" data-execution-route required style="width:100%;background:#050505;border:1px solid #292929;border-radius:10px;color:#f5f5f5;padding:12px"><option value="BANK">Bank rail</option><option value="ON_CHAIN">On-chain</option></select></label></div><div data-bank-execution-fields style="margin-top:12px"><div class="admin-record-grid"><label><span>Settlement instruction</span><select name="bankInstructionId" style="width:100%;background:#050505;border:1px solid #292929;border-radius:10px;color:#f5f5f5;padding:12px">${bankInstructionOptions(bankInstructions)}</select></label></div><div data-bank-lifecycle style="margin-top:12px"><div data-bank-lifecycle-summary class="admin-record-grid"></div><div data-bank-reference-fields class="admin-record-grid" style="margin-top:12px"></div><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px"><button type="button" data-bank-lifecycle-action></button><span data-bank-lifecycle-result style="color:#d6a92f;font-size:12px"></span></div></div></div><div data-onchain-execution-fields class="admin-record-grid" style="display:none;margin-top:12px"><label><span>Network</span><select name="network">${networkOptions(onChainStatus)}</select></label><label><span>Asset</span><input name="asset"></label><label><span>Amount</span><input name="amount"></label><label><span>Destination address</span><input name="destinationAddress"></label></div><p data-bank-execution-status></p><p data-onchain-execution-status style="display:none">On-chain adapter: ${ready?'READY':'NOT READY'}.</p><button type="submit" data-execute-button>Send On Chain</button><span data-settlement-execution-result></span></form></section>`;}
+  function renderBankLifecycle(form,instructions){const i=selectedInstruction(form,instructions),root=form.querySelector('[data-bank-lifecycle]'),summary=root?.querySelector('[data-bank-lifecycle-summary]'),fields=root?.querySelector('[data-bank-reference-fields]'),action=root?.querySelector('[data-bank-lifecycle-action]'),result=root?.querySelector('[data-bank-lifecycle-result]');if(!root||!summary||!fields||!action||!result)return;result.textContent=lastBankLifecycleSuccess&&(!i||lastBankLifecycleSuccess.instructionId===i.instructionId)?`${lastBankLifecycleSuccess.instructionId} · ${lastBankLifecycleSuccess.state}`:'';if(!i){summary.innerHTML='<div><span>Status</span><strong>Select a settlement instruction</strong></div>';fields.innerHTML='';action.style.display='none';return;}const s=String(i.state||'').toUpperCase();summary.innerHTML=`<div><span>Instruction</span><strong>${esc(i.instructionId)}</strong></div><div><span>Rail</span><strong>${esc(railDisplayName(i.rail))}</strong></div><div><span>Amount</span><strong>${esc(i.currency||'USD')} ${money(i.amount)}</strong></div><div><span>State</span><strong>${esc(s)}</strong></div>`;action.style.display='';fields.innerHTML='';if(s==='READY'){action.textContent='Record Sent / Dispatch';return;}if(s==='DISPATCHED'){fields.innerHTML='<label><span>Institution transaction reference</span><input name="institutionTransactionReference" required></label>';action.textContent='Record Institution Acceptance';return;}if(s==='ACCEPTED'){fields.innerHTML='<label><span>Institution transaction reference</span><input name="institutionTransactionReference" required></label><label><span>Network reference</span><input name="networkReference" required></label>';action.textContent='Record Network Execution';return;}if(s==='EXECUTED'){fields.innerHTML=`<label><span>Institution transaction reference</span><input name="institutionTransactionReference" value="${esc(i.institutionTransactionReference||'')}" required></label><label><span>Network reference</span><input name="networkReference" value="${esc(i.networkReference||'')}" required></label><label><span>Receiving confirmation reference</span><input name="receivingConfirmationReference" required></label><label><span>Confirmed amount</span><input name="confirmedAmount" type="number" step="0.01" value="${Number(i.amount||0).toFixed(2)}" required></label>`;action.textContent='Reconcile Settlement';return;}if(s==='EXCEPTION'){action.textContent='Retry Dispatch';return;}action.style.display='none';}
+  async function transitionBankInstruction(form,instructions){const i=selectedInstruction(form,instructions),root=form.querySelector('[data-bank-lifecycle]'),result=root?.querySelector('[data-bank-lifecycle-result]'),action=root?.querySelector('[data-bank-lifecycle-action]');if(!i||!result||!action||!form.reportValidity())return;const v=Object.fromEntries(new FormData(form).entries()),s=String(i.state||'').toUpperCase(),body={};let target=null;if(s==='READY'||s==='EXCEPTION')target='DISPATCHED';else if(s==='DISPATCHED'){target='ACCEPTED';body.institutionTransactionReference=v.institutionTransactionReference;}else if(s==='ACCEPTED'){target='EXECUTED';body.institutionTransactionReference=v.institutionTransactionReference||i.institutionTransactionReference;body.networkReference=v.networkReference;}else if(s==='EXECUTED'){target='RECONCILED';body.institutionTransactionReference=v.institutionTransactionReference||i.institutionTransactionReference;body.networkReference=v.networkReference||i.networkReference;body.receivingConfirmationReference=v.receivingConfirmationReference;body.confirmedAmount=Number(v.confirmedAmount);}if(!target)return;action.disabled=true;try{const u=await request(`/api/settlement-rails/instructions/${encodeURIComponent(i.instructionId)}/transition`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({state:target,...body})});const x=instructions.findIndex(a=>a.instructionId===u.instructionId);if(x>=0)instructions[x]=u;lastBankLifecycleSuccess={instructionId:u.instructionId,state:u.state};renderBankLifecycle(form,instructions);result.textContent=`${u.instructionId} · ${u.state}`;}catch(e){result.textContent=e.message;}finally{action.disabled=false;}}
+  function setRequired(group,enabled,requireWhenEnabled=false){group?.querySelectorAll('input,select').forEach(f=>{if(f.dataset.sraRequiredWhenEnabled===undefined)f.dataset.sraRequiredWhenEnabled=f.required?'true':'false';f.disabled=!enabled;f.required=enabled&&(requireWhenEnabled||f.dataset.sraRequiredWhenEnabled==='true');});}
+  function toggleExecutionRoute(form,ready,instructions){const chain=form.elements.route.value==='ON_CHAIN',bank=form.querySelector('[data-bank-execution-fields]'),cf=form.querySelector('[data-onchain-execution-fields]');bank.style.display=chain?'none':'';cf.style.display=chain?'':'none';setRequired(bank,!chain);setRequired(cf,chain,true);const b=form.querySelector('[data-execute-button]');b.style.display=chain?'':'none';b.disabled=chain?!ready:true;if(!chain)renderBankLifecycle(form,instructions);}
+  async function executeOnChain(form){const v=Object.fromEntries(new FormData(form).entries()),r=form.querySelector('[data-settlement-execution-result]'),b=form.querySelector('[data-execute-button]');if(v.route!=='ON_CHAIN')return;b.disabled=true;try{const x=await request('/api/on-chain/transfers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({network:v.network,asset:v.asset,amount:v.amount,destinationAddress:v.destinationAddress})});r.textContent=`${x.state} · ${x.transactionId||'transaction ID pending'}`;}catch(e){r.textContent=e.message;}finally{b.disabled=false;}}
+  async function renderPreparation(workspace,controls){const [w,c]=await Promise.all([request('/api/admin/workspaces?limit=100').catch(()=>({records:{}})),request('/api/settlement-rails/rails').catch(()=>({rails:[]}))]);if(!controls.isConnected||workspace.dataset.activeTab!=='Settlement Instructions')return;const packages=financingPackages(w),rails=c.rails||[];controls.insertAdjacentHTML('afterbegin',preparationMarkup({packages,rails}));const form=controls.querySelector('[data-settlement-instruction-form]');if(!form)return;refreshPackageSummary(form,packages);refreshRailFields(form);form.elements.exportPackageId.addEventListener('change',()=>refreshPackageSummary(form,packages));form.elements.rail.addEventListener('change',()=>refreshRailFields(form));form.addEventListener('submit',e=>{e.preventDefault();void prepareInstruction(form,packages);});}
+  async function renderExecution(workspace,controls){const [p,s]=await Promise.all([request('/api/settlement-rails/instructions').catch(()=>({instructions:[]})),request('/api/on-chain/status').catch(()=>({networks:[]}))]);if(!controls.isConnected||workspace.dataset.activeTab!=='Destination Verification')return;const instructions=preparedBankInstructions(p);controls.insertAdjacentHTML('afterbegin',executionMarkup({bankInstructions:instructions,onChainStatus:s}));const form=controls.querySelector('[data-settlement-execution-form]');if(!form)return;const ready=(s.networks||[]).some(i=>i.ready);toggleExecutionRoute(form,ready,instructions);form.elements.route.addEventListener('change',()=>toggleExecutionRoute(form,ready,instructions));form.elements.bankInstructionId.addEventListener('change',()=>renderBankLifecycle(form,instructions));form.querySelector('[data-bank-lifecycle-action]')?.addEventListener('click',()=>void transitionBankInstruction(form,instructions));form.addEventListener('submit',e=>{e.preventDefault();void executeOnChain(form);});}
+  async function render(workspace){const controls=workspace?.querySelector('.admin-workspace-controls');if(!controls)return;controls.querySelector('[data-settlement-instruction-preparation]')?.remove();controls.querySelector('[data-settlement-execution]')?.remove();if(workspace.dataset.activeTab==='Settlement Instructions')return renderPreparation(workspace,controls);if(workspace.dataset.activeTab==='Destination Verification')return renderExecution(workspace,controls);}
+  function mount(workspace){if(!workspace||workspace.dataset.settlementExecutionMounted==='true')return;workspace.dataset.settlementExecutionMounted='true';workspace.addEventListener('click',e=>{if(!e.target.closest('[data-admin-tab]'))return;setTimeout(()=>void render(workspace),0);});window.addEventListener('sra:admin-workspace-synchronized',e=>{if(e.detail?.workspaceId==='settlement')void render(workspace);});void render(workspace);}
+  window.mountAdminSettlementExecutionControls=mount;
 })();
