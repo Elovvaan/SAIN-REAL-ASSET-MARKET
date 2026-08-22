@@ -108,6 +108,7 @@
     const networkReady = Boolean(options);
     const issued = Number(asset?.issuedSupply || 0) > 0;
     const lifecycle = lifecycleSteps(item, networkReady, asset, issued);
+    const existingAssetCode = String(instrument.assetCode || instrument.symbol || instrument.ticker || '').trim().toUpperCase();
 
     if (!item.representationApproved) {
       return `<article class="admin-record-card"><header><strong>${esc(id)}</strong><em>STEP 2 · REPRESENTATION APPROVAL</em></header><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:12px 0">${lifecycle}</div><div class="admin-record-grid"><div><span>Approved amount / supply</span><strong>${esc(authorized ?? '—')}</strong></div><div><span>Next step</span><strong>Complete Representation Approval</strong></div></div><p style="color:#9a9a9a;line-height:1.5">This instrument cannot enter network preparation until its representation approval record is complete.</p></article>`;
@@ -116,9 +117,9 @@
     if (!asset) {
       const current = networkReady ? 'STEP 4 · ASSET IDENTITY' : 'STEP 3 · NETWORK READINESS';
       const explanation = networkReady
-        ? 'Network readiness is complete. Create the asset identity next.'
+        ? 'Network readiness is complete. Enter the network asset code and create the asset identity next.'
         : 'Representation approval is complete. The next required handoff is live network readiness; asset identity remains locked until a network is ready.';
-      return `<article class="admin-record-card" data-create-card="${esc(id)}"><header><strong>${esc(id)}</strong><em>${current}</em></header><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:12px 0">${lifecycle}</div><p style="color:#9a9a9a;line-height:1.5">${esc(explanation)} On Stellar, asset identity is the asset code + issuer identity; supply is issued only after that identity exists.</p><div class="admin-record-grid"><div><span>Approved amount / supply</span><strong>${esc(authorized ?? '—')}</strong></div><label><span>Network</span><select data-create-network ${networkReady ? '' : 'disabled'}>${options || '<option value="">No ready network</option>'}</select></label></div><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px"><button data-create-on-chain="${esc(id)}" ${networkReady ? '' : 'disabled'}>Create Asset Identity</button><span data-create-result style="color:#d6a92f;font-size:12px">${networkReady ? '' : 'Waiting for network readiness.'}</span></div></article>`;
+      return `<article class="admin-record-card" data-create-card="${esc(id)}"><header><strong>${esc(id)}</strong><em>${current}</em></header><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:12px 0">${lifecycle}</div><p style="color:#9a9a9a;line-height:1.5">${esc(explanation)} On Stellar, the asset code is 1–12 letters or numbers and is paired with the issuer identity; the SRA instrument ID remains the internal instrument reference.</p><div class="admin-record-grid"><div><span>Approved amount / supply</span><strong>${esc(authorized ?? '—')}</strong></div><label><span>Network</span><select data-create-network ${networkReady ? '' : 'disabled'}>${options || '<option value="">No ready network</option>'}</select></label><label><span>Asset code</span><input data-create-asset-code type="text" maxlength="12" autocomplete="off" placeholder="1–12 letters or numbers" value="${esc(existingAssetCode)}" ${networkReady ? '' : 'disabled'}></label></div><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px"><button data-create-on-chain="${esc(id)}" ${networkReady ? '' : 'disabled'}>Create Asset Identity</button><span data-create-result style="color:#d6a92f;font-size:12px">${networkReady ? '' : 'Waiting for network readiness.'}</span></div></article>`;
     }
 
     return `<article class="admin-record-card" data-asset-card="${esc(asset.assetId)}"><header><strong>${esc(id)}</strong><em>${issued ? 'STEP 6 · TRANSFER' : 'STEP 5 · ISSUE SUPPLY'}</em></header><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:12px 0">${lifecycle}</div><div class="admin-record-grid"><div><span>Network</span><strong>${esc(asset.network)}</strong></div><div><span>Asset address</span><strong>${esc(asset.assetAddress)}</strong></div><div><span>Network decimals</span><strong>${esc(asset.decimals)}</strong></div><div><span>Issued supply</span><strong>${esc(asset.issuedSupply ?? '0')}</strong></div><div><span>Asset identity transaction</span><strong>${esc(asset.createdTransactionId || 'Not applicable / not broadcast')}</strong></div><div><span>Last issue transaction</span><strong>${esc(asset.lastIssueTransactionId || '—')}</strong></div></div>
@@ -154,14 +155,17 @@
       const id = button.dataset.createOnChain;
       const row = button.closest('[data-create-card]');
       const network = row?.querySelector('[data-create-network]')?.value;
+      const assetCode = row?.querySelector('[data-create-asset-code]')?.value?.trim().toUpperCase();
       const result = row?.querySelector('[data-create-result]');
       if (!network) { if (result) result.textContent = 'Select a ready network.'; return; }
-      if (!confirm(`Create the ${id} asset identity on ${network}?`)) return;
+      if (!assetCode) { if (result) result.textContent = 'Enter the network asset code.'; return; }
+      if (!/^[A-Z0-9]{1,12}$/.test(assetCode)) { if (result) result.textContent = 'Asset code must be 1–12 letters or numbers.'; return; }
+      if (!confirm(`Create ${assetCode} for ${id} on ${network}?`)) return;
       button.disabled = true;
       if (result) result.textContent = 'Creating asset identity…';
       try {
         const response = await request('/api/on-chain/assets', {
-          method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ instrumentId:id, network }),
+          method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ instrumentId:id, network, asset:assetCode, symbol:assetCode }),
         });
         if (result) result.textContent = `Asset identity ready: ${response.asset?.assetAddress || 'recorded'}`;
         window.SRAAdminDataClient?.refresh?.('on-chain-created');
