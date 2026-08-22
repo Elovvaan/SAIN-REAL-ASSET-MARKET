@@ -16,11 +16,7 @@ function assetIdFor(asset, network) {
 
 function handle(res, error) {
   const status = /not found/i.test(error.message) ? 404 : 400;
-  return res.status(status).json({
-    error: error.message,
-    code: error.code || 'ON_CHAIN_ERROR',
-    transactionId: error.transactionId || error.transactionSignature || null,
-  });
+  return res.status(status).json({ error: error.message, code: error.code || 'ON_CHAIN_ERROR', transactionId: error.transactionId || error.transactionSignature || null });
 }
 
 function normalizeDirectMount(req, _res, next) {
@@ -52,7 +48,6 @@ async function adapterHealth(network, adapter) {
 export function createOnChainProjectionRouter(service) {
   const router = express.Router();
   router.use(normalizeDirectMount);
-
   const stellar = new StellarTransferService({ domain: service.domain });
   const adapters = new Map([['STELLAR', stellar]]);
   const transfers = new OnChainTransferService({ domain: service.domain, adapters: { STELLAR: stellar } });
@@ -60,22 +55,13 @@ export function createOnChainProjectionRouter(service) {
   router.get('/status', async (_req, res) => {
     try {
       const networks = await Promise.all([...adapters.entries()].map(([network, adapter]) => adapterHealth(network, adapter)));
-      return res.json({
-        service: service.status(),
-        networks,
-        readyNetworks: networks.filter((item) => item.ready).map((item) => item.network),
-        transfer: transfers.status(),
-      });
+      return res.json({ service: service.status(), networks, readyNetworks: networks.filter((item) => item.ready).map((item) => item.network), transfer: transfers.status() });
     } catch (error) { return handle(res, error); }
   });
 
   router.get('/assets', (req, res) => {
     try {
-      return res.json({ records: service.listAssets({
-        network: req.query.network,
-        asset: req.query.asset,
-        instrumentId: req.query.instrumentId,
-      }) });
+      return res.json({ records: service.listAssets({ network: req.query.network, asset: req.query.asset, instrumentId: req.query.instrumentId }) });
     } catch (error) { return handle(res, error); }
   });
 
@@ -107,18 +93,18 @@ export function createOnChainProjectionRouter(service) {
         }
       }
 
-      const asset = requestedAsset
-        || text(instrument?.assetCode)
-        || text(instrument?.symbol)
-        || text(instrument?.ticker);
+      const id = assetIdFor(instrumentId || requestedAsset, network);
+      const existingById = service.getAsset(id);
+      if (existingById) return res.status(200).json({ created: false, asset: existingById });
+
+      const asset = requestedAsset || text(instrument?.assetCode) || text(instrument?.symbol) || text(instrument?.ticker);
       if (!asset) {
         const error = new Error('Asset code is required before creating this instrument on chain. Enter the network asset code explicitly.');
         error.code = 'ON_CHAIN_ASSET_CODE_REQUIRED';
         throw error;
       }
       const symbol = text(req.body?.symbol) || asset;
-      const id = assetIdFor(instrumentId || asset, network);
-      const existing = service.getAsset(id) || service.findAsset({ instrumentId, asset, network });
+      const existing = service.findAsset({ instrumentId, asset, network });
       if (existing) return res.status(200).json({ created: false, asset: existing });
 
       const adapter = adapters.get(network);
@@ -139,18 +125,7 @@ export function createOnChainProjectionRouter(service) {
       }
 
       const created = await adapter.createAsset({ asset, symbol });
-      const record = await service.recordCreated({
-        assetId: id,
-        network,
-        asset: created.asset || asset,
-        instrumentId: instrumentId || null,
-        symbol: created.symbol || symbol,
-        assetAddress: created.assetAddress,
-        sourceAccount: created.distributionAddress || null,
-        decimals: created.decimals,
-        transactionId: created.transactionId,
-      }, actor);
-
+      const record = await service.recordCreated({ assetId: id, network, asset: created.asset || asset, instrumentId: instrumentId || null, symbol: created.symbol || symbol, assetAddress: created.assetAddress, sourceAccount: created.distributionAddress || null, decimals: created.decimals, transactionId: created.transactionId }, actor);
       return res.status(201).json({ created: true, asset: record, networkResult: created });
     } catch (error) { return handle(res, error); }
   });
@@ -203,7 +178,6 @@ export function createOnChainProjectionRouter(service) {
         const existing = transfers.get(requestedTransferId);
         if (existing) return res.status(200).json(existing);
       }
-
       const network = upper(req.body?.network);
       const adapter = adapters.get(network);
       if (adapter) {
