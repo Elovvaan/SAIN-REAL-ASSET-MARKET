@@ -82,6 +82,10 @@
     return (status?.networks || []).filter((item) => item?.ready).map((item) => `<option value="${esc(item.network)}">${esc(item.network)}</option>`).join('');
   }
 
+  function step(label, state, detail) {
+    return `<div style="border:1px solid #292929;border-radius:10px;padding:10px 12px;background:#090909"><span style="display:block;color:#9a9a9a;font-size:10px;text-transform:uppercase">${esc(label)}</span><strong style="display:block;margin-top:4px">${esc(state)}</strong>${detail ? `<small style="display:block;color:#777;margin-top:4px;line-height:1.4">${esc(detail)}</small>` : ''}</div>`;
+  }
+
   function onChainCard(item, assets, status) {
     const instrument = item.instrument || {};
     const id = instrumentId(instrument);
@@ -94,12 +98,13 @@
     }
 
     if (!asset) {
-      return `<article class="admin-record-card" data-create-card="${esc(id)}"><header><strong>${esc(id)}</strong><em>NOT ON CHAIN</em></header><p style="color:#9a9a9a;line-height:1.5">Create the network asset first. This creates the chain asset address only; supply is issued as the next step.</p><div class="admin-record-grid"><div><span>Amount / supply</span><strong>${esc(authorized ?? '—')}</strong></div><label><span>Network</span><select data-create-network ${options ? '' : 'disabled'}>${options || '<option value="">No ready network</option>'}</select></label><label><span>Decimals</span><input data-create-decimals type="number" min="0" max="255" step="1" value="9" autocomplete="off"></label></div><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px"><button data-create-on-chain="${esc(id)}" ${options ? '' : 'disabled'}>Create On Chain</button><span data-create-result style="color:#d6a92f;font-size:12px"></span></div></article>`;
+      return `<article class="admin-record-card" data-create-card="${esc(id)}"><header><strong>${esc(id)}</strong><em>STEP 1 · ASSET IDENTITY</em></header><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:12px 0">${step('Step 1','Create asset identity','Register the network asset identity for this approved instrument.')}${step('Step 2','Issue supply','After the asset identity exists, issue the approved amount to the platform distribution account.')}${step('Step 3','Transfer','After supply exists, send units to a destination address.')}</div><p style="color:#9a9a9a;line-height:1.5">Select a ready network and create the asset identity. On Stellar this records the asset code + issuer identity; the supply transaction happens in Step 2.</p><div class="admin-record-grid"><div><span>Approved amount / supply</span><strong>${esc(authorized ?? '—')}</strong></div><label><span>Network</span><select data-create-network ${options ? '' : 'disabled'}>${options || '<option value="">No ready network</option>'}</select></label></div><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px"><button data-create-on-chain="${esc(id)}" ${options ? '' : 'disabled'}>Create Asset Identity</button><span data-create-result style="color:#d6a92f;font-size:12px"></span></div></article>`;
     }
 
-    return `<article class="admin-record-card" data-asset-card="${esc(asset.assetId)}"><header><strong>${esc(id)}</strong><em>${esc(asset.state || 'CREATED')}</em></header><div class="admin-record-grid"><div><span>Network</span><strong>${esc(asset.network)}</strong></div><div><span>Asset address</span><strong>${esc(asset.assetAddress)}</strong></div><div><span>Decimals</span><strong>${esc(asset.decimals)}</strong></div><div><span>Issued supply</span><strong>${esc(asset.issuedSupply ?? '0')}</strong></div><div><span>Create transaction</span><strong>${esc(asset.createdTransactionId || '—')}</strong></div><div><span>Last issue transaction</span><strong>${esc(asset.lastIssueTransactionId || '—')}</strong></div></div>
-      <section style="margin-top:16px;border-top:1px solid #292929;padding-top:16px"><strong>Issue Supply</strong><div class="admin-record-grid" style="margin-top:10px"><label><span>Amount</span><input data-issue-amount type="text" inputmode="decimal" autocomplete="off" placeholder="Amount"></label><label><span>Destination address</span><input data-issue-destination type="text" autocomplete="off" placeholder="Leave blank for platform wallet"></label></div><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px"><button data-issue-asset="${esc(asset.assetId)}">Issue Supply</button><span data-issue-result style="color:#d6a92f;font-size:12px"></span></div></section>
-      <section style="margin-top:16px;border-top:1px solid #292929;padding-top:16px"><strong>Transfer</strong><div class="admin-record-grid" style="margin-top:10px"><label><span>Amount</span><input data-transfer-amount type="text" inputmode="decimal" autocomplete="off" placeholder="Amount"></label><label><span>Destination address</span><input data-transfer-destination type="text" autocomplete="off" placeholder="Destination wallet"></label></div><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px"><button data-transfer-asset="${esc(asset.assetId)}" data-transfer-symbol="${esc(asset.asset)}" data-transfer-network="${esc(asset.network)}">Send On Chain</button><span data-transfer-result style="color:#d6a92f;font-size:12px"></span></div></section>
+    const issued = Number(asset.issuedSupply || 0) > 0;
+    return `<article class="admin-record-card" data-asset-card="${esc(asset.assetId)}"><header><strong>${esc(id)}</strong><em>${esc(asset.state || 'CREATED')}</em></header><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:12px 0">${step('Step 1','COMPLETE','Asset identity exists on the selected network.')}${step('Step 2',issued ? 'COMPLETE' : 'READY','Issue supply from the issuer to the platform distribution account.')}${step('Step 3',issued ? 'READY' : 'WAITING','Transfer issued units to an external destination.')}</div><div class="admin-record-grid"><div><span>Network</span><strong>${esc(asset.network)}</strong></div><div><span>Asset address</span><strong>${esc(asset.assetAddress)}</strong></div><div><span>Network decimals</span><strong>${esc(asset.decimals)}</strong></div><div><span>Issued supply</span><strong>${esc(asset.issuedSupply ?? '0')}</strong></div><div><span>Asset identity transaction</span><strong>${esc(asset.createdTransactionId || 'Not applicable / not broadcast')}</strong></div><div><span>Last issue transaction</span><strong>${esc(asset.lastIssueTransactionId || '—')}</strong></div></div>
+      <section style="margin-top:16px;border-top:1px solid #292929;padding-top:16px"><strong>Step 2 · Issue Supply</strong><p style="color:#9a9a9a;font-size:12px;line-height:1.45">Issue units to the platform distribution account. The network adapter handles the required trustline and signed issuance transaction.</p><div class="admin-record-grid" style="margin-top:10px"><label><span>Amount</span><input data-issue-amount type="text" inputmode="decimal" autocomplete="off" placeholder="Amount"></label></div><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px"><button data-issue-asset="${esc(asset.assetId)}">Issue Supply</button><span data-issue-result style="color:#d6a92f;font-size:12px"></span></div></section>
+      <section style="margin-top:16px;border-top:1px solid #292929;padding-top:16px"><strong>Step 3 · Transfer On Chain</strong><p style="color:#9a9a9a;font-size:12px;line-height:1.45">Send issued units from the platform distribution account to a destination address.</p><div class="admin-record-grid" style="margin-top:10px"><label><span>Amount</span><input data-transfer-amount type="text" inputmode="decimal" autocomplete="off" placeholder="Amount"></label><label><span>Destination address</span><input data-transfer-destination type="text" autocomplete="off" placeholder="Destination wallet"></label></div><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px"><button data-transfer-asset="${esc(asset.assetId)}" data-transfer-symbol="${esc(asset.asset)}" data-transfer-network="${esc(asset.network)}" ${issued ? '' : 'disabled'}>Send On Chain</button><span data-transfer-result style="color:#d6a92f;font-size:12px">${issued ? '' : 'Issue supply first.'}</span></div></section>
     </article>`;
   }
 
@@ -130,17 +135,16 @@
       const id = button.dataset.createOnChain;
       const row = button.closest('[data-create-card]');
       const network = row?.querySelector('[data-create-network]')?.value;
-      const decimals = row?.querySelector('[data-create-decimals]')?.value;
       const result = row?.querySelector('[data-create-result]');
-      if (!network || decimals === '') { if (result) result.textContent = 'Enter network and decimals.'; return; }
-      if (!confirm(`Create ${id} on ${network}?`)) return;
+      if (!network) { if (result) result.textContent = 'Select a ready network.'; return; }
+      if (!confirm(`Create the ${id} asset identity on ${network}?`)) return;
       button.disabled = true;
-      if (result) result.textContent = 'Creating network asset…';
+      if (result) result.textContent = 'Creating asset identity…';
       try {
         const response = await request('/api/on-chain/assets', {
-          method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ instrumentId:id, network, decimals:Number(decimals) }),
+          method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ instrumentId:id, network }),
         });
-        if (result) result.textContent = `Created: ${response.asset?.assetAddress || 'recorded'}`;
+        if (result) result.textContent = `Asset identity ready: ${response.asset?.assetAddress || 'recorded'}`;
         window.SRAAdminDataClient?.refresh?.('on-chain-created');
         await render(workspace);
       } catch (error) {
@@ -152,14 +156,13 @@
     card.querySelectorAll('[data-issue-asset]').forEach((button) => button.addEventListener('click', async () => {
       const row = button.closest('[data-asset-card]');
       const amount = row?.querySelector('[data-issue-amount]')?.value?.trim();
-      const destinationAddress = row?.querySelector('[data-issue-destination]')?.value?.trim();
       const result = row?.querySelector('[data-issue-result]');
       if (!amount) { if (result) result.textContent = 'Enter amount.'; return; }
       button.disabled = true;
-      if (result) result.textContent = 'Issuing supply…';
+      if (result) result.textContent = 'Building, signing, broadcasting, and confirming issuance…';
       try {
         const response = await request(`/api/on-chain/assets/${encodeURIComponent(button.dataset.issueAsset)}/issue`, {
-          method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ amount, destinationAddress: destinationAddress || undefined }),
+          method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ amount }),
         });
         if (result) result.textContent = `Issued · ${response.issuance?.transactionId || 'transaction recorded'}`;
         window.SRAAdminDataClient?.refresh?.('on-chain-issued');
@@ -177,7 +180,7 @@
       const result = row?.querySelector('[data-transfer-result]');
       if (!amount || !destinationAddress) { if (result) result.textContent = 'Enter amount and destination address.'; return; }
       button.disabled = true;
-      if (result) result.textContent = 'Building, signing, and broadcasting…';
+      if (result) result.textContent = 'Building, signing, broadcasting, and confirming transfer…';
       try {
         const response = await request('/api/on-chain/transfers', {
           method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
@@ -216,7 +219,7 @@
     const eligible = approvalStatus.representationReady || [];
     const assets = assetsResult.records || [];
     const ready = (status.networks || []).some((item) => item.ready);
-    card.innerHTML = `<header><strong>On-Chain</strong><em>${ready ? 'READY' : 'NETWORK NOT READY'}</em></header><p style="color:#9a9a9a;line-height:1.5">Create → issue → transfer. Network-specific transaction code stays inside the selected network adapter.</p><div style="display:grid;gap:10px">${eligible.length ? eligible.map((item) => onChainCard(item, assets, status)).join('') : '<p>No eligible instruments are currently available.</p>'}</div>`;
+    card.innerHTML = `<header><strong>On-Chain</strong><em>${ready ? 'READY' : 'NETWORK NOT READY'}</em></header><p style="color:#9a9a9a;line-height:1.5">Approved instrument → create asset identity → issue supply → transfer. New on-chain operations require a live ready network; completed records remain available independently of network health.</p><div style="display:grid;gap:10px">${eligible.length ? eligible.map((item) => onChainCard(item, assets, status)).join('') : '<p>No eligible instruments are currently available.</p>'}</div>`;
     bindOnChain(workspace, card);
   }
 
