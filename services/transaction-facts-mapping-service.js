@@ -98,6 +98,32 @@ export class TransactionFactsMappingService {
     };
 
     await this.domain.put('FUNDING_OPPORTUNITY', opportunityId, updated, { actorId, eventType: 'TRANSACTION_DOCUMENT_FACTS_MAPPED' });
+
+    const relatedAssetIds = Array.isArray(updated.relatedAssetIds) ? updated.relatedAssetIds : [];
+    const assetUpdates = [];
+    for (const assetId of relatedAssetIds) {
+      const currentAsset = this.domain.get('ASSET_ACCOUNT', assetId);
+      if (!currentAsset) continue;
+      const metadata = {
+        ...(currentAsset.metadata || {}),
+        type: first(asset.type, currentAsset.metadata?.type),
+        description: first(asset.description, currentAsset.metadata?.description),
+        vin: first(asset.vin, currentAsset.metadata?.vin),
+        year: first(asset.year, currentAsset.metadata?.year),
+        make: first(asset.make, currentAsset.metadata?.make),
+        model: first(asset.model, currentAsset.metadata?.model),
+        serialNumber: first(asset.serialNumber, currentAsset.metadata?.serialNumber),
+        propertyAddress: first(asset.propertyAddress, currentAsset.metadata?.propertyAddress),
+        apn: first(asset.apn, currentAsset.metadata?.apn),
+        legalDescription: first(asset.legalDescription, currentAsset.metadata?.legalDescription),
+        sourceDocumentId: document.id,
+        sourceDocumentSha256: document.sha256,
+      };
+      const assetUpdated = { ...currentAsset, metadata, updatedAt: new Date().toISOString() };
+      await this.domain.put('ASSET_ACCOUNT', assetId, assetUpdated, { actorId, eventType: 'ASSET_TRANSACTION_FACTS_MAPPED' });
+      assetUpdates.push(assetUpdated);
+    }
+
     await this.domain.lifecycle({
       objectType: 'FUNDING_OPPORTUNITY',
       objectId: opportunityId,
@@ -109,8 +135,9 @@ export class TransactionFactsMappingService {
         documentType: facts.documentType || null,
         transactionType: facts.transactionType || null,
         identifiers: facts.identifiers || {},
+        relatedAssetIds: assetUpdates.map((item) => item.assetId || item.id).filter(Boolean),
       },
     });
-    return { opportunity: updated, mapped: true, transactionProfile: updated.transactionProfile };
+    return { opportunity: updated, mapped: true, transactionProfile: updated.transactionProfile, assets: assetUpdates };
   }
 }
