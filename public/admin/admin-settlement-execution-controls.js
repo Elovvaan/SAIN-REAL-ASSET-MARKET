@@ -14,12 +14,14 @@
   };
 
   const bankRails = new Set(['ACH','FEDWIRE','WIRE']);
+  const DEAL_PACKAGE = 'DEAL_PACKAGE';
   let lastBankLifecycleSuccess = null;
 
   function railDisplayName(rail) {
     if (rail === 'ACH') return 'ACH Network · Nacha';
     if (rail === 'FEDWIRE') return 'Fedwire Funds Service · ISO 20022';
     if (rail === 'WIRE') return 'Bank Wire';
+    if (rail === DEAL_PACKAGE) return 'Dealer Funding Package · Printable PDF';
     return rail;
   }
 
@@ -53,28 +55,39 @@
 
   function railOptions(rails) {
     const values = (rails || []).map((item) => String(item.rail || '').toUpperCase()).filter((rail) => bankRails.has(rail));
-    return values.length
+    const bank = values.length
       ? values.map((rail) => `<option value="${esc(rail)}">${esc(railDisplayName(rail))}</option>`).join('')
-      : '<option value="">No bank settlement rails available</option>';
+      : '';
+    return `${bank}<option value="${DEAL_PACKAGE}">${railDisplayName(DEAL_PACKAGE)}</option>`;
   }
 
   function preparationMarkup({ packages, rails }) {
     return `<section class="admin-record-card" data-settlement-instruction-preparation>
-      <header><strong>New Bank Settlement Instruction</strong><em>PUBLIC STANDARD</em></header>
-      <p style="color:#9a9a9a;margin:0 0 14px;line-height:1.5">Select the authorized financing export package. SRA supplies the financing reference, beneficiary, amount and currency. Enter the receiving institution instructions and select the settlement rail.</p>
+      <header><strong>New Settlement Instruction / Funding Package</strong><em>PUBLIC STANDARD</em></header>
+      <p style="color:#9a9a9a;margin:0 0 14px;line-height:1.5">Select the authorized financing export package, then select the settlement method. Bank rails prepare receiving-bank instructions. Dealer Funding Package generates the printable transaction package from the financing record and linked transaction documents.</p>
       <form data-settlement-instruction-form autocomplete="off">
         <div class="admin-record-grid">
           <label><span>Export package / financing</span><select name="exportPackageId" required style="width:100%;background:#050505;border:1px solid #292929;border-radius:10px;color:#f5f5f5;padding:12px">${packageOptions(packages)}</select></label>
-          <label><span>Settlement rail</span><select name="rail" required style="width:100%;background:#050505;border:1px solid #292929;border-radius:10px;color:#f5f5f5;padding:12px">${railOptions(rails)}</select></label>
+          <label><span>Settlement method</span><select name="rail" required style="width:100%;background:#050505;border:1px solid #292929;border-radius:10px;color:#f5f5f5;padding:12px">${railOptions(rails)}</select></label>
+        </div>
+        <div data-bank-settlement-fields class="admin-record-grid" style="margin-top:12px">
           <label><span data-receiving-institution-label>Receiving institution</span><input name="bankName" type="text" placeholder="Receiving institution" required></label>
           <label><span>ABA routing number</span><input name="routingNumber" type="text" inputmode="numeric" pattern="[0-9]{9}" maxlength="9" placeholder="9 digits" required></label>
           <label><span data-account-label>Receiving account number</span><input name="accountNumber" type="password" inputmode="numeric" pattern="[0-9]{4,17}" maxlength="17" placeholder="4–17 digits" required></label>
           <label data-ach-account-type><span>ACH account type</span><select name="accountType" style="width:100%;background:#050505;border:1px solid #292929;border-radius:10px;color:#f5f5f5;padding:12px"><option value="CHECKING">Checking</option><option value="SAVINGS">Savings</option></select></label>
         </div>
+        <div data-deal-package-fields style="display:none;margin-top:12px">
+          <div class="admin-record-grid">
+            <div><span>Package source</span><strong>Financing record + linked uploaded transaction documents</strong></div>
+            <div><span>Package output</span><strong>Printable SRA Funding Package PDF</strong></div>
+            <div><span>Dealer completion</span><strong>Destination banking information + settlement confirmation</strong></div>
+            <div><span>Document verification</span><strong>Review generated package for extracted vehicle / VIN / agreement facts</strong></div>
+          </div>
+        </div>
         <div data-export-package-summary class="admin-record-grid" style="margin-top:14px"></div>
         <div data-standard-summary class="admin-record-grid" style="margin-top:14px"></div>
-        <p style="color:#9a9a9a;font-size:12px;line-height:1.45;margin:12px 0">You do not re-enter the authorized amount. Preparing the instruction records the selected rail and receiving instructions; an execution connection is not required at this stage. For ACH, SRA derives the Receiving DFI Identification and Check Digit from the 9-digit ABA routing number and records the Nacha fields under the instruction. For Fedwire, SRA records the Fedwire Funds Service ISO 20022 vocabulary, including head.001 and the applicable credit-transfer message.</p>
-        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><button type="submit">Prepare Settlement Instruction</button><span data-settlement-instruction-result style="color:#d6a92f;font-size:12px"></span></div>
+        <p data-settlement-method-note style="color:#9a9a9a;font-size:12px;line-height:1.45;margin:12px 0"></p>
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><button type="submit" data-prepare-settlement-action>Prepare Settlement Instruction</button><span data-settlement-instruction-result style="color:#d6a92f;font-size:12px"></span></div>
       </form>
     </section>`;
   }
@@ -106,18 +119,41 @@
       root.innerHTML = '<div><span>Service</span><strong>Fedwire Funds Service</strong></div><div><span>Message standard</span><strong>ISO 20022</strong></div><div><span>Financing credit transfer</span><strong>head.001 + pacs.008</strong></div><div><span>Fedwire reference</span><strong>IMAD</strong></div>';
       return;
     }
+    if (rail === DEAL_PACKAGE) {
+      root.innerHTML = '<div><span>Settlement method</span><strong>Dealer Funding Package</strong></div><div><span>Document source</span><strong>Linked uploaded transaction records</strong></div><div><span>Output</span><strong>Funding Package PDF</strong></div><div><span>Handoff</span><strong>Print or electronic delivery to dealer</strong></div>';
+      return;
+    }
     root.innerHTML = '<div><span>Settlement standard</span><strong>Institution-defined bank wire instructions</strong></div>';
   }
 
   function refreshRailFields(form) {
     const rail = String(form.elements.rail.value || '').toUpperCase();
+    const dealPackage = rail === DEAL_PACKAGE;
+    const bankFields = form.querySelector('[data-bank-settlement-fields]');
+    const dealFields = form.querySelector('[data-deal-package-fields]');
     const ach = form.querySelector('[data-ach-account-type]');
-    if (ach) ach.style.display = rail === 'ACH' ? '' : 'none';
-    form.elements.accountType.required = rail === 'ACH';
+    const note = form.querySelector('[data-settlement-method-note]');
+    const action = form.querySelector('[data-prepare-settlement-action]');
+
+    if (bankFields) bankFields.style.display = dealPackage ? 'none' : '';
+    if (dealFields) dealFields.style.display = dealPackage ? '' : 'none';
+    bankFields?.querySelectorAll('input,select').forEach((field) => { field.disabled = dealPackage; });
+
+    if (form.elements.bankName) form.elements.bankName.required = !dealPackage;
+    if (form.elements.routingNumber) form.elements.routingNumber.required = !dealPackage;
+    if (form.elements.accountNumber) form.elements.accountNumber.required = !dealPackage;
+    if (ach) ach.style.display = !dealPackage && rail === 'ACH' ? '' : 'none';
+    if (form.elements.accountType) form.elements.accountType.required = !dealPackage && rail === 'ACH';
+
     const accountLabel = form.querySelector('[data-account-label]');
     if (accountLabel) accountLabel.textContent = rail === 'ACH' ? 'Account number' : rail === 'FEDWIRE' ? 'Creditor account' : 'Receiving account number';
     const institutionLabel = form.querySelector('[data-receiving-institution-label]');
     if (institutionLabel) institutionLabel.textContent = rail === 'FEDWIRE' ? 'Creditor Agent / receiving institution' : 'Receiving institution';
+
+    if (action) action.textContent = dealPackage ? 'Generate Dealer Funding Package' : 'Prepare Settlement Instruction';
+    if (note) note.textContent = dealPackage
+      ? 'SRA will generate the existing funding package for the selected financing export. The package generator reads the financing transaction, beneficiary, amount, linked opportunity/closing records, and linked uploaded transaction documents. Review the generated PDF to confirm the vehicle, VIN, agreement number and purchase amount extracted into the transaction profile.'
+      : 'You do not re-enter the authorized amount. Preparing the instruction records the selected rail and receiving instructions; an execution connection is not required at this stage. For ACH, SRA derives the Receiving DFI Identification and Check Digit from the 9-digit ABA routing number. For Fedwire, SRA records the Fedwire Funds Service ISO 20022 vocabulary.';
     refreshStandardSummary(form);
   }
 
@@ -134,9 +170,18 @@
   async function prepareInstruction(form, packages) {
     const values = Object.fromEntries(new FormData(form).entries());
     const result = form.querySelector('[data-settlement-instruction-result]');
-    const button = form.querySelector('button[type="submit"]');
+    const button = form.querySelector('[data-prepare-settlement-action]');
     const pkg = selectedPackage(form, packages);
     if (!pkg) { result.textContent = 'Select a financing export package.'; return; }
+
+    if (String(values.rail || '').toUpperCase() === DEAL_PACKAGE) {
+      const href = `/api/financing-closing/exports/${encodeURIComponent(pkg.exportPackageId)}/funding-package`;
+      result.textContent = `Generating dealer funding package for ${pkg.exportPackageId}…`;
+      window.open(href, '_blank', 'noopener');
+      result.textContent = `${pkg.exportPackageId} · Dealer Funding Package requested`;
+      return;
+    }
+
     button.disabled = true;
     result.textContent = `Preparing ${railDisplayName(values.rail)} settlement instruction for ${pkg.exportPackageId}…`;
     try {
@@ -183,7 +228,7 @@
     const chainReady = (onChainStatus?.networks || []).some((item) => item.ready);
     return `<section class="admin-record-card" data-settlement-execution>
       <header><strong>Send Settlement</strong><em>DESTINATION VERIFICATION</em></header>
-      <p style="color:#9a9a9a;margin:0 0 14px;line-height:1.5">The prepared bank instruction and its downstream lifecycle now stay together here. Record dispatch, institution acceptance, network execution, and reconciliation as those events occur.</p>
+      <p style="color:#9a9a9a;margin:0 0 14px;line-height:1.5">The prepared bank instruction and its downstream lifecycle stay together here. Record dispatch, institution acceptance, network execution, and reconciliation as those events occur.</p>
       <form data-settlement-execution-form autocomplete="off">
         <div class="admin-record-grid">
           <label><span>Execution path</span><select name="route" data-execution-route required style="width:100%;background:#050505;border:1px solid #292929;border-radius:10px;color:#f5f5f5;padding:12px"><option value="BANK">Bank rail</option><option value="ON_CHAIN">On-chain</option></select></label>
@@ -198,7 +243,7 @@
           <label><span>Amount</span><input name="amount" type="text" inputmode="decimal" placeholder="Amount"></label>
           <label><span>Destination address</span><input name="destinationAddress" type="text" placeholder="Destination address"></label>
         </div>
-        <p data-bank-execution-status style="color:#9a9a9a;font-size:12px;line-height:1.45;margin:12px 0">This panel records the bank-rail lifecycle in SRA. It does not fabricate a network reference: Trace Number, IMAD, institution reference, and receiving confirmation are entered only when actually returned or confirmed by the applicable institution/network process.</p>
+        <p data-bank-execution-status style="color:#9a9a9a;font-size:12px;line-height:1.45;margin:12px 0">This panel records the bank-rail lifecycle in SRA. Trace Number, IMAD, institution reference, and receiving confirmation are entered only when actually returned or confirmed by the applicable institution/network process.</p>
         <p data-onchain-execution-status style="display:none;color:#9a9a9a;font-size:12px;line-height:1.45;margin:12px 0">On-chain adapter: ${chainReady ? 'READY' : 'NOT READY'}. Enter the standard transfer inputs and send directly.</p>
         <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><button type="submit" data-execute-button>Send On Chain</button><span data-settlement-execution-result style="color:#d6a92f;font-size:12px"></span></div>
       </form>
@@ -341,7 +386,10 @@
     form.elements.exportPackageId.addEventListener('change', () => {
       const pkg = selectedPackage(form, packages);
       refreshPackageSummary(form, packages);
-      if (pkg?.preferredRail && bankRails.has(String(pkg.preferredRail).toUpperCase())) { form.elements.rail.value = String(pkg.preferredRail).toUpperCase(); refreshRailFields(form); }
+      if (pkg?.preferredRail && bankRails.has(String(pkg.preferredRail).toUpperCase()) && form.elements.rail.value !== DEAL_PACKAGE) {
+        form.elements.rail.value = String(pkg.preferredRail).toUpperCase();
+      }
+      refreshRailFields(form);
     });
     form.elements.rail.addEventListener('change', () => refreshRailFields(form));
     form.addEventListener('submit', (event) => { event.preventDefault(); void prepareInstruction(form, packages); });
