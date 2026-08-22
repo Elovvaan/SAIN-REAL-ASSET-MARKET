@@ -22,6 +22,8 @@ export class SraCoinAgentService {
     for (const type of POSITION_TYPES) {
       const record = this.domain.get(type, id);
       if (record) return { type, record };
+      const persisted = this.domain.list(type).find((item) => String(recordId(item) || '').trim() === id);
+      if (persisted) return { type, record: persisted };
     }
     throw new Error('SRA Coin Position was not found.');
   }
