@@ -42,9 +42,15 @@
     overview?.insertAdjacentElement('afterend', button) || tabs.prepend(button);
   }
 
+  function recordAction(record) {
+    if (String(record?.exportKind || '').toUpperCase() !== 'FINANCING_DISBURSEMENT' || !record?.exportPackageId) return '';
+    const href = `/api/financing-closing/exports/${encodeURIComponent(record.exportPackageId)}/ach-settlement-packet`;
+    return `<div style="margin-top:12px"><a href="${esc(href)}" style="display:inline-block;padding:9px 12px;border:1px solid #4a4a4a;border-radius:8px;color:#f5f5f5;text-decoration:none" target="_blank" rel="noopener">Download ACH Settlement Packet</a></div>`;
+  }
+
   function recordCards(records, emptyText) {
     if (!records.length) return `<div class="admin-placeholder">${esc(emptyText)}</div>`;
-    return `<div class="admin-record-list">${records.map((record) => `<article class="admin-record-card"><header><strong>${esc(idOf(record))}</strong><em>${esc(stateOf(record))}</em></header><div class="admin-record-grid"><div><span>Type</span><strong>${esc(record.opportunityType || record.transactionType || record.eventType || record.type || 'Operation')}</strong></div>${record.requestedAmount != null ? `<div><span>Requested</span><strong>${Number(record.requestedAmount).toLocaleString()} ${esc(record.currency || 'USD')}</strong></div>` : ''}${record.amount != null ? `<div><span>Amount</span><strong>${Number(record.amount).toLocaleString()} ${esc(record.currency || 'USD')}</strong></div>` : ''}<div><span>Updated</span><strong>${esc(record.updatedAt || record.createdAt || record.occurredAt || record.submittedAt || '')}</strong></div></div><details><summary>Record details</summary><pre>${esc(JSON.stringify(record, null, 2))}</pre></details></article>`).join('')}</div>`;
+    return `<div class="admin-record-list">${records.map((record) => `<article class="admin-record-card"><header><strong>${esc(idOf(record))}</strong><em>${esc(stateOf(record))}</em></header><div class="admin-record-grid"><div><span>Type</span><strong>${esc(record.opportunityType || record.transactionType || record.eventType || record.type || 'Operation')}</strong></div>${record.requestedAmount != null ? `<div><span>Requested</span><strong>${Number(record.requestedAmount).toLocaleString()} ${esc(record.currency || 'USD')}</strong></div>` : ''}${record.amount != null ? `<div><span>Amount</span><strong>${Number(record.amount).toLocaleString()} ${esc(record.currency || 'USD')}</strong></div>` : ''}<div><span>Updated</span><strong>${esc(record.updatedAt || record.createdAt || record.occurredAt || record.submittedAt || '')}</strong></div></div>${recordAction(record)}<details><summary>Record details</summary><pre>${esc(JSON.stringify(record, null, 2))}</pre></details></article>`).join('')}</div>`;
   }
 
   async function loadWorkspaceRecords(force = false) {
