@@ -38,6 +38,11 @@ function horizonUrl(environment) {
   const name = upper(environment.STELLAR_NETWORK || 'PUBLIC');
   return name === 'TESTNET' ? 'https://horizon-testnet.stellar.org' : 'https://horizon.stellar.org';
 }
+function accountHealthError(role, address, error) {
+  const status = error?.response?.status;
+  if (status === 404) return `${role} account ${address} was not found on the configured Stellar network.`;
+  return `${role} account ${address} could not be loaded from Horizon: ${String(error?.message || error)}.`;
+}
 
 export class StellarTransferService {
   constructor(options = {}) {
@@ -82,8 +87,28 @@ export class StellarTransferService {
     if (!configuration.configured) return { ...configuration, reachable: false };
     try {
       const { server, issuer, distributor } = this.ensure();
-      await Promise.all([server.loadAccount(issuer.publicKey()), server.loadAccount(distributor.publicKey())]);
-      return { ...configuration, reachable: true, ready: true, issuerAddress: issuer.publicKey(), distributorAddress: distributor.publicKey() };
+      const issuerAddress = issuer.publicKey();
+      const distributorAddress = distributor.publicKey();
+      const [issuerResult, distributorResult] = await Promise.allSettled([
+        server.loadAccount(issuerAddress),
+        server.loadAccount(distributorAddress),
+      ]);
+      const issuerReachable = issuerResult.status === 'fulfilled';
+      const distributorReachable = distributorResult.status === 'fulfilled';
+      const errors = [];
+      if (!issuerReachable) errors.push(accountHealthError('Issuer', issuerAddress, issuerResult.reason));
+      if (!distributorReachable) errors.push(accountHealthError('Distributor', distributorAddress, distributorResult.reason));
+      const ready = issuerReachable && distributorReachable;
+      return {
+        ...configuration,
+        reachable: ready,
+        ready,
+        issuerAddress,
+        distributorAddress,
+        issuerReachable,
+        distributorReachable,
+        error: errors.length ? errors.join(' ') : undefined,
+      };
     } catch (error) {
       return { ...configuration, reachable: false, ready: false, error: String(error?.message || error) };
     }
