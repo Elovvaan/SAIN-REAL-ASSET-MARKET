@@ -2,6 +2,10 @@ import crypto from 'node:crypto';
 import express from 'express';
 import { OnChainTransferService } from '../services/on-chain-transfer-service.js';
 import { StellarTransferService } from '../services/stellar-transfer-service.js';
+import { BitcoinTransferService } from '../services/bitcoin-transfer-service.js';
+import { EthereumTransferService } from '../services/ethereum-transfer-service.js';
+import { XrplTransferService } from '../services/xrpl-transfer-service.js';
+import { SolanaTransferService } from '../services/solana-transfer-service.js';
 
 function actorId(req) {
   return req.sraOperationsAuth?.actorId || req.sraIdentity?.actorId || null;
@@ -48,9 +52,21 @@ async function adapterHealth(network, adapter) {
 export function createOnChainProjectionRouter(service) {
   const router = express.Router();
   router.use(normalizeDirectMount);
+
   const stellar = new StellarTransferService({ domain: service.domain });
-  const adapters = new Map([['STELLAR', stellar]]);
-  const transfers = new OnChainTransferService({ domain: service.domain, adapters: { STELLAR: stellar } });
+  const bitcoin = new BitcoinTransferService();
+  const ethereum = new EthereumTransferService();
+  const xrpl = new XrplTransferService();
+  const solana = new SolanaTransferService();
+  const adapters = new Map([
+    ['STELLAR', stellar],
+    ['BITCOIN', bitcoin],
+    ['ETHEREUM', ethereum],
+    ['XRPL', xrpl],
+    ['SOLANA', solana],
+  ]);
+  const transferAdapters = Object.fromEntries(adapters.entries());
+  const transfers = new OnChainTransferService({ domain: service.domain, adapters: transferAdapters });
 
   router.get('/status', async (_req, res) => {
     try {
