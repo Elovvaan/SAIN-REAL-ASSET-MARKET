@@ -193,6 +193,13 @@ export function createOnChainProjectionRouter(service) {
   router.post('/transfers', async (req, res) => {
     try {
       const actor = requireActor(req);
+      const requestedTransferId = text(req.body?.transferId);
+      if (requestedTransferId) {
+        await transfers.ensure();
+        const existing = transfers.get(requestedTransferId);
+        if (existing) return res.status(200).json(existing);
+      }
+
       const network = upper(req.body?.network);
       const adapter = adapters.get(network);
       if (adapter) {
