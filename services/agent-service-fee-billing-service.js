@@ -14,6 +14,9 @@ function required(value, field) {
   if (!v) throw new Error(`${field} is required.`);
   return v;
 }
+function sameMoney(left, right) {
+  return Number(Number(left).toFixed(2)) === Number(Number(right).toFixed(2));
+}
 
 export class AgentServiceFeeBillingService {
   constructor(domain) {
@@ -103,19 +106,39 @@ export class AgentServiceFeeBillingService {
     return { requested: true, account };
   }
 
+  validateQuoteMatch(calculation, quote) {
+    if (!calculation || !quote) throw new Error('Service-fee calculation and quote are required.');
+    const matchingLines = (calculation.lines || []).filter((line) => line.feeCode === quote.feeCode);
+    if (matchingLines.length !== 1 || calculation.lines.length !== 1 || !sameMoney(calculation.total, quote.amount) || !sameMoney(matchingLines[0]?.amount, quote.amount)) {
+      throw new Error('Configured service fee does not match the authoritative agent service-fee quote.');
+    }
+    return calculation;
+  }
+
+  validateExistingCharge(charge, quote) {
+    const matchingLines = (charge?.lines || []).filter((line) => line.feeCode === quote.feeCode);
+    if (!charge || matchingLines.length !== 1 || charge.lines.length !== 1 || !sameMoney(charge.total, quote.amount) || !sameMoney(matchingLines[0]?.amount, quote.amount)) {
+      throw new Error('Existing service fee charge does not match the authoritative agent service-fee quote.');
+    }
+    return charge;
+  }
+
   async assessAcceptedWork(work, input = {}, actorId = null) {
     if (!work || work.state !== 'ACCEPTED') throw new Error('Accepted agent work is required before assessing a service fee.');
     const quote = this.serviceFees.quoteWorkOrder(work);
     if (!quote) return { assessed: false, reason: 'NO_SERVICE_FEE_QUOTE', charge: null };
 
     const existing = this.existingChargeForWork(work.workOrderId);
-    if (existing) return { assessed: true, existing: true, charge: existing, quote };
+    if (existing) {
+      this.validateExistingCharge(existing, quote);
+      return { assessed: true, existing: true, charge: existing, quote };
+    }
 
     const payerId = String(input.payerId || work.serviceFeePayerId || '').trim();
     if (!payerId) return { assessed: false, reason: 'PAYER_NOT_LINKED', charge: null, quote };
 
     const payerType = String(input.payerType || work.serviceFeePayerType || 'PARTICIPANT').trim().toUpperCase();
-    const charge = await this.economics.assess({
+    const assessmentInput = {
       scheduleId: SRA_AGENT_SERVICE_FEE_SCHEDULE.scheduleId,
       trigger: TRIGGER,
       subjectType: SUBJECT_TYPE,
@@ -128,12 +151,15 @@ export class AgentServiceFeeBillingService {
         sourceStage: work.sourceStage || null,
         sourceRecordId: work.sourceRecordId || null,
       },
-    }, actorId);
+    };
 
-    if (charge.total !== quote.amount) {
-      throw new Error('Assessed service fee does not match the authoritative agent service-fee quote.');
-    }
+    // Validate the stored Platform Economics schedule against the authoritative
+    // workforce quote before assess() is allowed to persist a FEE_CHARGE.
+    const calculation = this.economics.calculate(assessmentInput);
+    this.validateQuoteMatch(calculation, quote);
 
+    const charge = await this.economics.assess(assessmentInput, actorId);
+    this.validateExistingCharge(charge, quote);
     return { assessed: true, existing: false, charge, quote };
   }
 
