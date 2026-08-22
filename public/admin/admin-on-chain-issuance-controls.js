@@ -75,7 +75,7 @@
     return [
       step('1 · Instrument approval', workflow.instrumentApproval || 'COMPLETE', 'Instrument must be approved before representation work begins.'),
       step('2 · Representation approval', item.representationApproved ? 'COMPLETE' : (workflow.representationApproval || 'REQUIRED'), 'Authorizes this instrument for on-chain representation preparation.'),
-      step('3 · Network readiness', networkReady ? 'COMPLETE' : 'WAITING', 'Selected network signer accounts and network connection must be live.'),
+      step('3 · Network readiness', item.representationApproved && networkReady ? 'COMPLETE' : 'WAITING', 'Selected network signer accounts and network connection must be live.'),
       step('4 · Asset identity', asset ? 'COMPLETE' : (networkReady && item.representationApproved ? 'READY' : 'WAITING'), 'Register the asset code + issuer identity on the selected network.'),
       step('5 · Issue supply', issued ? 'COMPLETE' : (asset ? 'READY' : 'WAITING'), 'Issue the approved amount to the platform distribution account.'),
       step('6 · Transfer', issued ? 'READY' : 'WAITING', 'Transfer issued units from the distribution account to a destination address.'),
