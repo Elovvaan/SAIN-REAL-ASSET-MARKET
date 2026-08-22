@@ -1,14 +1,17 @@
 import { AgentWorkforceService } from '../services/agent-workforce-service.js';
 import { AgentServiceFeeService } from '../services/agent-service-fee-service.js';
+import { AgentServiceFeeBillingService } from '../services/agent-service-fee-billing-service.js';
 import { SraAgentOperatingSystemService } from '../services/sra-agent-operating-system-service.js';
 import { UnifiedMarketOperationsQueueService } from '../services/unified-market-operations-queue-service.js';
 
 export async function installAgentWorkforceAdminRoutes({ router, domain, database, requireAdmin }) {
   const workforce = new AgentWorkforceService({ domain, database });
   const serviceFees = new AgentServiceFeeService();
+  const serviceFeeBilling = new AgentServiceFeeBillingService(domain);
   const operationsQueue = new UnifiedMarketOperationsQueueService(domain);
   const agentOS = new SraAgentOperatingSystemService(domain, { operationsQueue });
   await workforce.initialize();
+  await serviceFeeBilling.initialize('SRA_AGENT_OS');
 
   const synchronizedAgents = await workforce.synchronizeOperatingAgents(agentOS.registry(), { id: 'SRA_AGENT_OS' });
   const initialQueue = operationsQueue.explain();
@@ -35,6 +38,7 @@ export async function installAgentWorkforceAdminRoutes({ router, domain, databas
       synchronizedAgents: { createdCount: synchronizedAgents.created.length, existingCount: synchronizedAgents.existing.length, agentCount: synchronizedAgents.agentCount },
       initialRun: { createdCount: initialRun.createdCount, completedCount: initialRun.completedCount, skippedCount: initialRun.skippedCount },
       serviceFeeSchedule: serviceFees.policy(),
+      serviceFeeBilling: serviceFeeBilling.status(),
       workflowServiceRates: serviceFees.workflowRates(),
       currentQueueServiceRates: queueRates(queue),
     });
@@ -45,6 +49,7 @@ export async function installAgentWorkforceAdminRoutes({ router, domain, databas
     const queue = operationsQueue.explain();
     return res.json({
       schedule: serviceFees.policy(),
+      billing: serviceFeeBilling.status(),
       workflowRates: serviceFees.workflowRates(),
       currentQueue: {
         state: queue.state,
@@ -53,6 +58,20 @@ export async function installAgentWorkforceAdminRoutes({ router, domain, databas
         records: queueRates(queue),
       },
     });
+  });
+
+  router.get('/api/admin/agent-workforce/service-fees', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    return res.json({
+      status: serviceFeeBilling.status(),
+      records: serviceFeeBilling.listCharges({ payerId: req.query.payerId, subjectId: req.query.subjectId, state: req.query.state }),
+    });
+  });
+
+  router.post('/api/admin/agent-workforce/service-fees/:chargeId/servicing', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    try { return res.json(await serviceFeeBilling.attachChargeToServicing(req.params.chargeId, req.body || {}, session.id)); }
+    catch (error) { return res.status(422).json({ error: error.message, code: 'SRA_AGENT_SERVICE_FEE_SERVICING_FAILED' }); }
   });
 
   router.post('/api/admin/agent-workforce/run', async (req, res) => {
@@ -84,7 +103,7 @@ export async function installAgentWorkforceAdminRoutes({ router, domain, databas
 
   router.get('/api/admin/agent-workforce/work', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
-    return res.json({ records: workforce.listWork({ agentId: req.query.agentId, state: req.query.state, opportunityId: req.query.opportunityId }).map(work => ({ ...work, serviceFee: serviceFees.quoteWorkOrder(work) })) });
+    return res.json({ records: workforce.listWork({ agentId: req.query.agentId, state: req.query.state, opportunityId: req.query.opportunityId }).map(work => ({ ...work, serviceFee: serviceFees.quoteWorkOrder(work), serviceFeeCharge: serviceFeeBilling.existingChargeForWork(work.workOrderId) })) });
   });
 
   router.post('/api/admin/agent-workforce/work', async (req, res) => {
@@ -112,7 +131,19 @@ export async function installAgentWorkforceAdminRoutes({ router, domain, databas
     const session = await requireAdmin(req, res); if (!session) return;
     try {
       const accepted = await workforce.acceptWork(req.params.workOrderId, req.body || {}, session);
-      return res.json({ ...accepted, serviceFee: serviceFees.quoteWorkOrder(accepted.work) });
+      const feeAssessment = await serviceFeeBilling.assessAcceptedWork(accepted.work, {
+        payerId: req.body?.payerId,
+        payerType: req.body?.payerType,
+      }, session.id);
+      let servicing = null;
+      if (feeAssessment.charge && req.body?.servicingAccountId && req.body?.dueDate) {
+        servicing = await serviceFeeBilling.attachChargeToServicing(feeAssessment.charge.chargeId, {
+          servicingAccountId: req.body.servicingAccountId,
+          dueDate: req.body.dueDate,
+          recurrence: req.body.recurrence || null,
+        }, session.id);
+      }
+      return res.json({ ...accepted, serviceFee: serviceFees.quoteWorkOrder(accepted.work), serviceFeeAssessment: feeAssessment, servicing });
     }
     catch (error) { return res.status(422).json({ error: error.message, code: 'SRA_AGENT_WORK_ACCEPTANCE_FAILED' }); }
   });
