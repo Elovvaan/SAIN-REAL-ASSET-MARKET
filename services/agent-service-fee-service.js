@@ -23,12 +23,13 @@ export class AgentServiceFeeService {
   }
 
   quoteWorkOrder(workOrder={}) {
-    // The assigned worker is authoritative for compensation/service-fee attribution.
-    // A workflow-stage quote is used only when no agent has been assigned yet.
+    // Once a worker is assigned, that worker is authoritative. If the assigned
+    // worker does not have a configured SRA service fee, do not borrow another
+    // worker's stage rate. Stage mapping is only a pre-assignment lookup.
     const assignedAgentId = String(workOrder.agentId || '').trim();
-    const agentQuote = assignedAgentId ? this.quoteAgent(assignedAgentId) : null;
-    const stageQuote = this.quoteWorkflowStage(workOrder.sourceStage);
-    const quote = agentQuote || stageQuote;
+    const quote = assignedAgentId
+      ? this.quoteAgent(assignedAgentId)
+      : this.quoteWorkflowStage(workOrder.sourceStage);
     if (!quote) return null;
     return {
       scheduleId: SRA_AGENT_SERVICE_FEE_SCHEDULE.scheduleId,

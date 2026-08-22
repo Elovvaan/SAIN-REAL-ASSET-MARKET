@@ -129,23 +129,54 @@ export async function installAgentWorkforceAdminRoutes({ router, domain, databas
 
   router.post('/api/admin/agent-workforce/work/:workOrderId/accept', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
+    const current = workforce.getWork(req.params.workOrderId);
+    if (!current) return res.status(404).json({ error: 'Agent work order not found.', code: 'SRA_AGENT_WORK_NOT_FOUND' });
+    const payerId = String(req.body?.payerId || current.serviceFeePayerId || '').trim() || null;
     try {
-      const accepted = await workforce.acceptWork(req.params.workOrderId, req.body || {}, session);
-      const feeAssessment = await serviceFeeBilling.assessAcceptedWork(accepted.work, {
+      serviceFeeBilling.validateServicingTarget({
+        payerId,
+        servicingAccountId: req.body?.servicingAccountId,
+        dueDate: req.body?.dueDate,
+      });
+    } catch (error) {
+      return res.status(422).json({ error: error.message, code: 'SRA_AGENT_SERVICE_FEE_SERVICING_VALIDATION_FAILED' });
+    }
+
+    let accepted;
+    try {
+      accepted = await workforce.acceptWork(req.params.workOrderId, req.body || {}, session);
+    } catch (error) {
+      return res.status(422).json({ error: error.message, code: 'SRA_AGENT_WORK_ACCEPTANCE_FAILED' });
+    }
+
+    let feeAssessment;
+    try {
+      feeAssessment = await serviceFeeBilling.assessAcceptedWork(accepted.work, {
         payerId: req.body?.payerId,
         payerType: req.body?.payerType,
       }, session.id);
-      let servicing = null;
-      if (feeAssessment.charge && req.body?.servicingAccountId && req.body?.dueDate) {
+    } catch (error) {
+      return res.json({
+        ...accepted,
+        serviceFee: serviceFees.quoteWorkOrder(accepted.work),
+        serviceFeeAssessment: { assessed: false, error: error.message, code: 'SRA_AGENT_SERVICE_FEE_ASSESSMENT_FAILED' },
+        servicing: null,
+      });
+    }
+
+    let servicing = null;
+    if (feeAssessment.charge && req.body?.servicingAccountId && req.body?.dueDate) {
+      try {
         servicing = await serviceFeeBilling.attachChargeToServicing(feeAssessment.charge.chargeId, {
           servicingAccountId: req.body.servicingAccountId,
           dueDate: req.body.dueDate,
           recurrence: req.body.recurrence || null,
         }, session.id);
+      } catch (error) {
+        servicing = { attached: false, error: error.message, code: 'SRA_AGENT_SERVICE_FEE_SERVICING_FAILED' };
       }
-      return res.json({ ...accepted, serviceFee: serviceFees.quoteWorkOrder(accepted.work), serviceFeeAssessment: feeAssessment, servicing });
     }
-    catch (error) { return res.status(422).json({ error: error.message, code: 'SRA_AGENT_WORK_ACCEPTANCE_FAILED' }); }
+    return res.json({ ...accepted, serviceFee: serviceFees.quoteWorkOrder(accepted.work), serviceFeeAssessment: feeAssessment, servicing });
   });
 
   router.get('/api/admin/agent-workforce/compensation', async (req, res) => {

@@ -6,6 +6,7 @@ import { SRA_AGENT_SERVICE_FEE_SCHEDULE } from '../config/agent-service-fee-sche
 
 const TRIGGER = 'AGENT_WORK_ACCEPTED';
 const SUBJECT_TYPE = 'SRA_AGENT_WORK_ORDER';
+const SERVICING_ELIGIBLE_CHARGE_STATES = new Set(['ASSESSED', 'INVOICED']);
 
 function now() { return new Date().toISOString(); }
 function required(value, field) {
@@ -89,6 +90,19 @@ export class AgentServiceFeeBillingService {
     return this.listCharges({ subjectId: workOrderId })[0] || null;
   }
 
+  validateServicingTarget({ payerId, servicingAccountId, dueDate } = {}) {
+    if (!servicingAccountId && !dueDate) return { requested: false };
+    const accountId = required(servicingAccountId, 'servicingAccountId');
+    required(dueDate, 'dueDate');
+    const account = this.servicing.getAccount(accountId);
+    if (!account) throw new Error('Asset Servicing Account not found.');
+    const resolvedPayerId = String(payerId || '').trim();
+    if (resolvedPayerId && account.ownerId && resolvedPayerId !== account.ownerId) {
+      throw new Error('Service fee payer does not match the servicing account owner.');
+    }
+    return { requested: true, account };
+  }
+
   async assessAcceptedWork(work, input = {}, actorId = null) {
     if (!work || work.state !== 'ACCEPTED') throw new Error('Accepted agent work is required before assessing a service fee.');
     const quote = this.serviceFees.quoteWorkOrder(work);
@@ -110,11 +124,15 @@ export class AgentServiceFeeBillingService {
       payerType,
       currency: quote.currency,
       context: {
-        agentId: work.agentId,
+        agentId: quote.agentId,
         sourceStage: work.sourceStage || null,
         sourceRecordId: work.sourceRecordId || null,
       },
     }, actorId);
+
+    if (charge.total !== quote.amount) {
+      throw new Error('Assessed service fee does not match the authoritative agent service-fee quote.');
+    }
 
     return { assessed: true, existing: false, charge, quote };
   }
@@ -126,14 +144,14 @@ export class AgentServiceFeeBillingService {
       const existing = this.servicing.getObligation(charge.servicingObligationId);
       return { attached: true, existing: true, charge, obligation: existing };
     }
+    if (!SERVICING_ELIGIBLE_CHARGE_STATES.has(String(charge.state || '').toUpperCase())) {
+      throw new Error(`Service fee charge in ${charge.state || 'UNKNOWN'} state cannot be added to repayment servicing.`);
+    }
 
     const servicingAccountId = required(input.servicingAccountId, 'servicingAccountId');
     const dueDate = required(input.dueDate, 'dueDate');
-    const account = this.servicing.getAccount(servicingAccountId);
-    if (!account) throw new Error('Asset Servicing Account not found.');
-    if (charge.payerId && account.ownerId && charge.payerId !== account.ownerId) {
-      throw new Error('Service fee payer does not match the servicing account owner.');
-    }
+    const validation = this.validateServicingTarget({ payerId: charge.payerId, servicingAccountId, dueDate });
+    const account = validation.account;
 
     const names = (charge.lines || []).map((line) => line.name || line.feeCode).filter(Boolean);
     const obligation = await this.servicing.createObligation({
@@ -160,6 +178,6 @@ export class AgentServiceFeeBillingService {
       eventType: 'SRA_AGENT_SERVICE_FEE_LINKED_TO_SERVICING',
     });
 
-    return { attached: true, existing: false, charge: updatedCharge, obligation };
+    return { attached: true, existing: false, charge: updatedCharge, obligation, servicingAccount: account };
   }
 }
