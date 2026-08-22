@@ -70,7 +70,7 @@ export function createFinancingClosingRouter(service) {
       const pdf = await achSettlementPacket.render(exportPackageId);
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Cache-Control', 'no-store');
-      res.setHeader('Content-Disposition', `attachment; filename="SRA-ACH-Settlement-${exportPackageId}.pdf"`);
+      res.setHeader('Content-Disposition', `attachment; filename="SRA-Funding-Package-${exportPackageId}.pdf"`);
       return res.send(pdf);
     } catch (error) { return fail(res, error); }
   });
