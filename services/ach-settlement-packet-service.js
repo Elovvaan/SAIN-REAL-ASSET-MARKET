@@ -56,6 +56,7 @@ export class AchSettlementPacketService {
     const participantId = pkg.borrowerParticipantId || pkg.participantId || opportunity?.applicantParticipantId || null;
     const participant = participantId ? this.domain.get('PARTICIPANT', participantId) : null;
     const evidence = pkg.documentaryEvidence || closing?.documentaryEvidence || {};
+    const profile = opportunity?.transactionProfile || {};
 
     const relatedAssetId = Array.isArray(opportunity?.relatedAssetIds) ? opportunity.relatedAssetIds[0] : null;
     const asset = relatedAssetId ? this.domain.get('ASSET_ACCOUNT', relatedAssetId) : null;
@@ -68,12 +69,17 @@ export class AchSettlementPacketService {
       opportunity,
       participant,
       evidence,
-      purchaserName: first(participant?.displayName, participant?.metadata?.legalName, opportunity?.applicantDisplayName, participantId),
-      dealershipName: first(pkg.beneficiaryName, closing?.beneficiaryName),
-      vehicleYear: first(assetMeta.year, opportunityMeta.vehicleYear, opportunity?.vehicleYear),
-      vehicleMake: first(assetMeta.make, opportunityMeta.vehicleMake, opportunity?.vehicleMake),
-      vehicleModel: first(assetMeta.model, opportunityMeta.vehicleModel, opportunity?.vehicleModel, opportunity?.title),
-      vin: first(assetMeta.vin, assetMeta.VIN, opportunityMeta.vin, opportunityMeta.VIN, opportunity?.vin, opportunity?.VIN),
+      profile,
+      purchaserName: first(profile.purchaserName, participant?.displayName, participant?.metadata?.legalName, opportunity?.applicantDisplayName, participantId),
+      dealershipName: first(pkg.beneficiaryName, closing?.beneficiaryName, profile.payeeName),
+      vehicleYear: first(profile.vehicleYear, assetMeta.year, opportunityMeta.vehicleYear, opportunity?.vehicleYear),
+      vehicleMake: first(profile.vehicleMake, assetMeta.make, opportunityMeta.vehicleMake, opportunity?.vehicleMake),
+      vehicleModel: first(profile.vehicleModel, assetMeta.model, opportunityMeta.vehicleModel, opportunity?.vehicleModel, opportunity?.title),
+      vin: first(profile.vin, assetMeta.vin, assetMeta.VIN, opportunityMeta.vin, opportunityMeta.VIN, opportunity?.vin, opportunity?.VIN),
+      agreementNumber: first(profile.agreementNumber, evidence.agreementNumber),
+      sourceDocumentId: first(profile.sourceDocumentId, evidence.documentReference),
+      sourceDocumentSha256: first(profile.sourceDocumentSha256, evidence.documentSha256),
+      purchasePrice: first(profile.purchasePrice, pkg.amount),
     };
   }
 
@@ -102,14 +108,15 @@ export class AchSettlementPacketService {
     const vehicle = [data.vehicleYear, data.vehicleMake, data.vehicleModel].filter(Boolean).join(' ');
     line(doc, 'Vehicle', vehicle || null);
     line(doc, 'VIN', data.vin);
-    line(doc, 'Purchase Amount', money(pkg.amount, pkg.currency || 'USD'));
+    line(doc, 'Purchase Agreement No.', data.agreementNumber);
+    line(doc, 'Purchase Amount', money(data.purchasePrice, pkg.currency || 'USD'));
     line(doc, 'Authorized Settlement Amount', money(pkg.amount, pkg.currency || 'USD'));
     line(doc, 'Payment Purpose', 'Vehicle purchase settlement');
     line(doc, 'Remittance / Payment Reference', pkg.exportPackageId);
 
     section(doc, '2. Supporting Transaction Documents - Prepared by SRA');
-    line(doc, 'Executed Purchase Agreement', evidence.documentReference || null);
-    line(doc, 'Agreement SHA-256', evidence.documentSha256 || null);
+    line(doc, 'Executed Purchase Agreement', first(data.sourceDocumentId, evidence.documentReference));
+    line(doc, 'Agreement SHA-256', first(data.sourceDocumentSha256, evidence.documentSha256));
     line(doc, 'Signature / Execution Evidence', evidence.signatureEvidenceReference || null);
     line(doc, 'Audit / Consent Evidence', first(evidence.auditTrailReference, evidence.consentEvidenceReference));
     line(doc, 'Financing Closing Reference', closing?.closingId || pkg.closingId || null);
@@ -135,7 +142,7 @@ export class AchSettlementPacketService {
     line(doc, 'SRA Packet Reference', pkg.exportPackageId);
     line(doc, 'Page / Attachment Count', null);
     doc.moveDown(0.5);
-    doc.font('Helvetica').fontSize(7.5).fillColor('#555555').text(`Generated from SRA financing records for export package ${pkg.exportPackageId}. Supporting transaction documents remain identified by their recorded references and hashes.`, { align: 'center' });
+    doc.font('Helvetica').fontSize(7.5).fillColor('#555555').text(`Generated from SRA financing records for export package ${pkg.exportPackageId}.`, { align: 'center' });
 
     doc.end();
     await done;
