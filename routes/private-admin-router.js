@@ -11,6 +11,7 @@ import { installDeterminationAdminRoutes } from './determination-admin-routes.js
 import { installInstrumentAdminRoutes } from './instrument-admin-routes.js';
 import { installTreasuryAdminRoutes } from './treasury-admin-routes.js';
 import { installTreasuryTransferReadinessRoutes } from './treasury-transfer-readiness-routes.js';
+import { installAgentWorkforceAdminRoutes } from './agent-workforce-admin-routes.js';
 
 function readCookie(req, name) {
   const cookie = req.headers.cookie || '';
@@ -171,6 +172,7 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
   const determinationAdministration = await installDeterminationAdminRoutes({ router, service: determinationEngine, requireAdmin });
   const treasuryAdministration = await installTreasuryAdminRoutes({ router, domain, requireAdmin, database });
   const treasuryTransferReadiness = await installTreasuryTransferReadinessRoutes({ router, domain, requireAdmin, database });
+  const agentWorkforceAdministration = await installAgentWorkforceAdminRoutes({ router, domain, database, requireAdmin });
 
   router.get('/api/admin/workspaces', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
@@ -279,6 +281,7 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
       instrumentAdministration: { representationApprovalCount: instrumentAdministration.representations.list().length },
       treasury,
       treasuryTransferReadiness: treasuryTransferReadiness.status(),
+      agentWorkforce: agentWorkforceAdministration.status(),
       recordedValueRepresentation: treasuryAdministration.recordedValue.preview(),
       connectors: { coinbasePublicMarket: coinbase },
       adminIntelligenceAgent: intelligenceAgent.capabilities(),
