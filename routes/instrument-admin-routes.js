@@ -6,6 +6,18 @@ const REPRESENTATION_STATES = new Set(['APPROVED', 'ISSUED', 'ACTIVE', 'RECORDED
 
 function stateOf(record) { return String(record?.state || record?.status || '').toUpperCase(); }
 function idOf(record) { return record?.instrumentId || record?.id || null; }
+function workflowFor(instrument, representationApproved) {
+  const state = stateOf(instrument);
+  const instrumentApproved = REPRESENTATION_STATES.has(state);
+  return {
+    instrumentApproval: instrumentApproved ? 'COMPLETE' : 'REQUIRED',
+    representationApproval: instrumentApproved ? (representationApproved ? 'COMPLETE' : 'REQUIRED') : 'WAITING',
+    onChainPreparation: representationApproved ? 'READY' : 'WAITING',
+    currentStage: !instrumentApproved
+      ? 'INSTRUMENT_APPROVAL'
+      : (representationApproved ? 'ON_CHAIN_PREPARATION' : 'REPRESENTATION_APPROVAL'),
+  };
+}
 
 export async function installInstrumentAdminRoutes({ router, domain, requireAdmin, database = null }) {
   await domain.hydrate?.([INSTRUMENT_REPRESENTATION_APPROVAL_TYPE]);
@@ -22,11 +34,16 @@ export async function installInstrumentAdminRoutes({ router, domain, requireAdmi
     return res.json({
       pending,
       pendingCount: pending.length,
-      representationReady: representationReady.map((instrument) => ({
-        instrument,
-        assessment: representations.evaluate(idOf(instrument)),
-        representationApproved: approvedIds.has(idOf(instrument)),
-      })),
+      representationReady: representationReady.map((instrument) => {
+        const instrumentId = idOf(instrument);
+        const representationApproved = approvedIds.has(instrumentId);
+        return {
+          instrument,
+          assessment: representations.evaluate(instrumentId),
+          representationApproved,
+          workflow: workflowFor(instrument, representationApproved),
+        };
+      }),
       representationApprovalCount: approvedIds.size,
       representationApprovals,
     });
