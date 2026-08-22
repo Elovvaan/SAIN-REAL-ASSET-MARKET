@@ -1,6 +1,7 @@
 import express from 'express';
 import { FinancedPositionDistributionService } from '../services/financed-position-distribution-service.js';
 import { GovernedLoanFinancingService } from '../services/governed-loan-financing-service.js';
+import { AchSettlementPacketService } from '../services/ach-settlement-packet-service.js';
 import { normalizeFinancingStage } from '../services/financing-lifecycle-service.js';
 import { financingLetterClosingRequirements } from '../services/financing-letter-closing-requirements.js';
 
@@ -16,6 +17,7 @@ export function createFinancingClosingRouter(service) {
   const distributionReady = positionDistribution.initialize();
   const loanFinancing = new GovernedLoanFinancingService(service.domain);
   const loanFinancingReady = loanFinancing.initialize();
+  const achSettlementPacket = new AchSettlementPacketService(service.domain);
 
   router.get('/status', (_req, res) => res.json({ ...service.status(), positionDistribution: positionDistribution.status(), loanFinancing: loanFinancing.status() }));
   router.get('/authorizations', (req, res) => {
@@ -59,6 +61,17 @@ export function createFinancingClosingRouter(service) {
       res.setHeader('Cache-Control', 'no-store');
       res.setHeader('Content-Disposition', `inline; filename="SAIN-Financing-Availability-${opportunityId}.html"`);
       return res.send(document);
+    } catch (error) { return fail(res, error); }
+  });
+  router.get('/exports/:exportPackageId/ach-settlement-packet', async (req, res) => {
+    try {
+      if (!actorId(req)) return res.status(401).json({ error: 'An authenticated financing-operations identity is required.' });
+      const exportPackageId = String(req.params.exportPackageId || '').trim();
+      const pdf = await achSettlementPacket.render(exportPackageId);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('Content-Disposition', `attachment; filename="SRA-ACH-Settlement-${exportPackageId}.pdf"`);
+      return res.send(pdf);
     } catch (error) { return fail(res, error); }
   });
   router.post('/authorizations/opportunities/:opportunityId/approve', async (req, res) => { const administrator = actorId(req); if (!administrator) return res.status(401).json({ error: 'An authenticated administrator identity is required.' }); try { await loanFinancingReady; return res.status(201).json(await loanFinancing.approveOpportunity(req.params.opportunityId, req.body || {}, administrator)); } catch (error) { return fail(res, error); } });
