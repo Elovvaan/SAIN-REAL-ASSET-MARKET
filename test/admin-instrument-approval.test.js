@@ -41,3 +41,18 @@ test('admin bootstrap loads workstation controls and instrument UI calls dedicat
   assert.match(ui,/SRAAdminDataClient/);
   assert.doesNotMatch(ui,/listing-readiness-batch\/approve[^\n]+instrumentId/);
 });
+
+test('on-chain admin UI preserves the ordered instrument lifecycle before asset execution', () => {
+  const ui=fs.readFileSync(new URL('../public/admin/admin-on-chain-issuance-controls.js',import.meta.url),'utf8');
+  assert.match(ui,/Instrument approval → representation approval → network readiness → asset identity → issue supply → transfer/);
+  assert.match(ui,/STEP 3 · NETWORK READINESS/);
+  assert.match(ui,/STEP 4 · ASSET IDENTITY/);
+  assert.match(ui,/Complete Representation Approval/);
+  assert.match(ui,/Each stage must complete before the next stage becomes actionable/);
+
+  const routes=fs.readFileSync(new URL('../routes/instrument-admin-routes.js',import.meta.url),'utf8');
+  assert.match(routes,/currentStage/);
+  assert.match(routes,/REPRESENTATION_APPROVAL/);
+  assert.match(routes,/ON_CHAIN_PREPARATION/);
+  assert.match(routes,/representationApproval/);
+});
