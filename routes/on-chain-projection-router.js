@@ -44,6 +44,11 @@ function approvalFor(domain, instrumentId) {
   return domain.get('INSTRUMENT_REPRESENTATION_APPROVAL', `IRA-${instrumentId}`) || null;
 }
 
+async function adapterHealth(network, adapter) {
+  const health = typeof adapter.health === 'function' ? await adapter.health() : adapter.status();
+  return { network, ...health };
+}
+
 export function createOnChainProjectionRouter(service) {
   const router = express.Router();
   router.use(normalizeDirectMount);
@@ -52,12 +57,16 @@ export function createOnChainProjectionRouter(service) {
   const adapters = new Map([['STELLAR', stellar]]);
   const transfers = new OnChainTransferService({ domain: service.domain, adapters: { STELLAR: stellar } });
 
-  router.get('/status', (_req, res) => {
-    return res.json({
-      service: service.status(),
-      networks: [...adapters.entries()].map(([network, adapter]) => ({ network, ...adapter.status() })),
-      transfer: transfers.status(),
-    });
+  router.get('/status', async (_req, res) => {
+    try {
+      const networks = await Promise.all([...adapters.entries()].map(([network, adapter]) => adapterHealth(network, adapter)));
+      return res.json({
+        service: service.status(),
+        networks,
+        readyNetworks: networks.filter((item) => item.ready).map((item) => item.network),
+        transfer: transfers.status(),
+      });
+    } catch (error) { return handle(res, error); }
   });
 
   router.get('/assets', (req, res) => {
@@ -92,8 +101,13 @@ export function createOnChainProjectionRouter(service) {
         error.code = 'ON_CHAIN_CREATE_UNSUPPORTED';
         throw error;
       }
-      if (!adapter.status().ready) {
-        const error = new Error(`${network} is not ready for on-chain asset creation.`);
+      const health = await adapterHealth(network, adapter);
+      if (!health.ready) {
+        const missing = [];
+        if (health.issuerConfigured === false) missing.push('issuer signer');
+        if (health.distributorConfigured === false) missing.push('distribution signer');
+        const reason = health.error || (missing.length ? `Missing ${missing.join(' and ')}.` : 'Network health check did not report ready.');
+        const error = new Error(`${network} is not ready for on-chain asset creation. ${reason}`);
         error.code = 'ON_CHAIN_NETWORK_NOT_READY';
         throw error;
       }
@@ -149,6 +163,12 @@ export function createOnChainProjectionRouter(service) {
         error.code = 'ON_CHAIN_ISSUE_UNSUPPORTED';
         throw error;
       }
+      const health = await adapterHealth(upper(asset.network), adapter);
+      if (!health.ready) {
+        const error = new Error(`${asset.network} is not ready for on-chain issuance. ${health.error || 'Network health check did not report ready.'}`);
+        error.code = 'ON_CHAIN_NETWORK_NOT_READY';
+        throw error;
+      }
       const issuance = await adapter.issueAsset(asset, { amount: req.body.amount });
       const updated = await service.recordIssued(asset.assetId, issuance, actor);
       return res.status(201).json({ asset: updated, issuance });
@@ -173,6 +193,16 @@ export function createOnChainProjectionRouter(service) {
   router.post('/transfers', async (req, res) => {
     try {
       const actor = requireActor(req);
+      const network = upper(req.body?.network);
+      const adapter = adapters.get(network);
+      if (adapter) {
+        const health = await adapterHealth(network, adapter);
+        if (!health.ready) {
+          const error = new Error(`${network} is not ready for on-chain transfer. ${health.error || 'Network health check did not report ready.'}`);
+          error.code = 'ON_CHAIN_NETWORK_NOT_READY';
+          throw error;
+        }
+      }
       return res.status(201).json(await transfers.send(req.body || {}, actor));
     } catch (error) { return handle(res, error); }
   });
