@@ -23,9 +23,25 @@ function sameJson(left, right) {
   return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
 }
 
+const VEHICLE_CLASSIFICATIONS = new Set([
+  'VEHICLE',
+  'MOTOR_VEHICLE',
+  'PASSENGER_VEHICLE',
+  'COMMERCIAL_VEHICLE',
+  'ROAD_VEHICLE',
+  'AUTO',
+  'AUTOMOBILE',
+  'CAR',
+  'TRUCK',
+  'PICKUP_TRUCK',
+  'LIGHT_TRUCK',
+  'HEAVY_TRUCK',
+  'VAN',
+  'SUV',
+]);
+
 function vehicleClassification(value) {
-  const normalized = upper(value);
-  return ['VEHICLE', 'AUTO', 'AUTOMOBILE', 'CAR', 'TRUCK', 'MOTOR_VEHICLE'].some((token) => normalized.includes(token));
+  return VEHICLE_CLASSIFICATIONS.has(upper(value));
 }
 
 export class ContextInstructionReasoningService {
