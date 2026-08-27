@@ -15,6 +15,14 @@ function unique(values = []) {
   return [...new Set(values.filter(Boolean))];
 }
 
+function now() {
+  return new Date().toISOString();
+}
+
+function sameJson(left, right) {
+  return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+}
+
 export class ContextInstructionReasoningService {
   constructor(domain, intelligence = null) {
     if (!domain) throw new Error('Context reasoning requires the SRA domain store.');
@@ -106,47 +114,86 @@ export class ContextInstructionReasoningService {
     };
   }
 
-  recordReasoning(exportPackageId, agentId = 'SRA-EXPORT-AGENT') {
+  async persistRecord(type, id, record) {
+    if (typeof this.domain.put === 'function') return await this.domain.put(type, id, record);
+    if (typeof this.domain.create === 'function') return await this.domain.create(type, record);
+    if (typeof this.domain.set === 'function') return await this.domain.set(type, id, record);
+    throw new Error('SRA domain store does not expose a supported persistence method.');
+  }
+
+  async recordReasoning(exportPackageId, agentId = 'SRA-EXPORT-AGENT') {
     const reasoning = this.reasonForExportPackage(exportPackageId);
     const transactionId = reasoning.financingTransactionId || reasoning.exportPackageId;
     const decisionId = `AD-CONTEXT-${reasoning.exportPackageId}`;
     const planId = `AP-CONTEXT-${reasoning.exportPackageId}`;
+    const currentTime = now();
 
-    let decision = this.intelligence.records('AGENT_DECISION').find((record) => record.decisionId === decisionId || record.id === decisionId);
-    if (!decision) {
-      decision = this.intelligence.recordDecision({
+    const desiredDecision = reasoning.readyForInstructionGeneration ? 'GENERATE_CONTEXT_REQUIRED_INSTRUCTIONS' : 'FLAG_UNRESOLVED_CONTEXT';
+    const desiredReason = reasoning.readyForInstructionGeneration
+      ? `Required documents: ${reasoning.requiredDocuments.join(', ')}`
+      : `Unresolved fields: ${reasoning.unresolvedFields.join(', ')}`;
+
+    let decision = this.intelligence.records('AGENT_DECISION').find((record) => record.decisionId === decisionId || record.id === decisionId) || null;
+    const decisionChanged = !decision
+      || decision.decision !== desiredDecision
+      || decision.reason !== desiredReason
+      || decision.transactionId !== transactionId
+      || !sameJson(decision.evidence || [], reasoning.historySignals);
+
+    if (decisionChanged) {
+      decision = {
+        ...(decision || {}),
+        id: decisionId,
         decisionId,
         agentId,
-        decision: reasoning.readyForInstructionGeneration ? 'GENERATE_CONTEXT_REQUIRED_INSTRUCTIONS' : 'FLAG_UNRESOLVED_CONTEXT',
-        reason: reasoning.readyForInstructionGeneration
-          ? `Required documents: ${reasoning.requiredDocuments.join(', ')}`
-          : `Unresolved fields: ${reasoning.unresolvedFields.join(', ')}`,
+        decision: desiredDecision,
+        reason: desiredReason,
         evidence: reasoning.historySignals,
         transactionId,
+        workOrderId: decision?.workOrderId || null,
+        sourceEventIds: decision?.sourceEventIds || [],
         authorityRequired: false,
-      });
+        authorityStatus: 'NOT_REQUIRED',
+        decidedAt: decision?.decidedAt || currentTime,
+        updatedAt: currentTime,
+      };
+      await this.persistRecord('AGENT_DECISION', decisionId, decision);
     }
 
-    let plan = this.intelligence.records('ACTION_PLAN').find((record) => record.planId === planId || record.id === planId);
-    if (!plan) {
-      const steps = reasoning.requiredDocuments.map((documentType) => ({
-        id: documentType,
-        action: 'INCLUDE_DOCUMENT',
-        documentType,
-        status: 'REQUIRED',
-      }));
-      for (const flag of reasoning.flags) {
-        steps.push({ id: flag.code, action: flag.instruction, fields: flag.fields || [], status: 'REQUIRED' });
-      }
-      plan = this.intelligence.createPlan({
+    const steps = reasoning.requiredDocuments.map((documentType) => ({
+      id: documentType,
+      action: 'INCLUDE_DOCUMENT',
+      documentType,
+      status: 'REQUIRED',
+    }));
+    for (const flag of reasoning.flags) {
+      steps.push({ id: flag.code, action: flag.instruction, fields: flag.fields || [], status: 'REQUIRED' });
+    }
+    const desiredPlanStatus = reasoning.readyForInstructionGeneration ? 'READY' : 'BLOCKED_CONTEXT_REQUIRED';
+
+    let plan = this.intelligence.records('ACTION_PLAN').find((record) => record.planId === planId || record.id === planId) || null;
+    const planChanged = !plan
+      || plan.status !== desiredPlanStatus
+      || plan.transactionId !== transactionId
+      || plan.sourceDecisionId !== decisionId
+      || !sameJson(plan.steps || [], steps);
+
+    if (planChanged) {
+      plan = {
+        ...(plan || {}),
+        id: planId,
         planId,
         goal: 'Assemble transaction instructions from recorded context without inventing missing fields.',
         transactionId,
         createdByAgentId: agentId,
-        sourceDecisionId: decision.decisionId,
+        sourceDecisionId: decisionId,
         steps,
-        status: reasoning.readyForInstructionGeneration ? 'READY' : 'BLOCKED_CONTEXT_REQUIRED',
-      });
+        dependencies: plan?.dependencies || [],
+        status: desiredPlanStatus,
+        createdAt: plan?.createdAt || currentTime,
+        updatedAt: currentTime,
+      };
+      await this.persistRecord('ACTION_PLAN', planId, plan);
     }
 
     return { reasoning, decision, plan };
