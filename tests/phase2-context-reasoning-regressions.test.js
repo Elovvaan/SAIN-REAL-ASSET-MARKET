@@ -28,7 +28,7 @@ class Domain {
   }
 }
 
-function baseRecords(asset) {
+function baseRecords(asset, opportunityOverrides = {}) {
   return {
     EXPORT_PACKAGE: [{
       id: 'EXP-1', exportPackageId: 'EXP-1', exportKind: 'FINANCING_DISBURSEMENT',
@@ -38,6 +38,7 @@ function baseRecords(asset) {
     FINANCING_CLOSING: [{ id: 'FCL-1', closingId: 'FCL-1', beneficiaryName: 'External Recipient' }],
     FUNDING_OPPORTUNITY: [{
       id: 'FOR-1', opportunityId: 'FOR-1', relatedAssetIds: ['ASSET-1'], transactionProfile: {},
+      ...opportunityOverrides,
     }],
     ASSET_ACCOUNT: [asset],
     OPERATIONAL_EVENT: [], OPERATIONAL_MEMORY: [], AGENT_DECISION: [], ACTION_PLAN: [], ACTION_RESULT: [], OUTCOME_EVALUATION: [],
@@ -49,6 +50,28 @@ test('dealer reasoning detects vehicle data from linked asset metadata', () => {
     id: 'ASSET-1', assetId: 'ASSET-1', classification: 'MOTOR_VEHICLE',
     metadata: { vin: 'VIN-123', year: '2026', make: 'Audi', model: 'Q5' },
   }));
+  const reasoning = new ContextInstructionReasoningService(domain).reasonForExportPackage('EXP-1');
+  assert.equal(reasoning.recipientType, 'DEALER');
+  assert.ok(reasoning.requiredDocuments.includes('DEALER_PROCESSING_INSTRUCTIONS'));
+});
+
+test('explicit vehicle profile fields trigger dealer instructions without VIN or classification', () => {
+  const records = baseRecords({
+    id: 'ASSET-1', assetId: 'ASSET-1', classification: 'EQUIPMENT', metadata: {},
+  });
+  records.FUNDING_OPPORTUNITY[0].transactionProfile = {
+    vehicleYear: '2026', vehicleMake: 'Audi', vehicleModel: 'Q5',
+  };
+  const reasoning = new ContextInstructionReasoningService(new Domain(records)).reasonForExportPackage('EXP-1');
+  assert.equal(reasoning.recipientType, 'DEALER');
+  assert.ok(reasoning.requiredDocuments.includes('DEALER_PROCESSING_INSTRUCTIONS'));
+});
+
+test('explicit opportunity vehicle fields trigger dealer instructions without VIN or classification', () => {
+  const domain = new Domain(baseRecords(
+    { id: 'ASSET-1', assetId: 'ASSET-1', classification: 'EQUIPMENT', metadata: {} },
+    { vehicleYear: '2026', vehicleMake: 'Audi', vehicleModel: 'Q5' },
+  ));
   const reasoning = new ContextInstructionReasoningService(domain).reasonForExportPackage('EXP-1');
   assert.equal(reasoning.recipientType, 'DEALER');
   assert.ok(reasoning.requiredDocuments.includes('DEALER_PROCESSING_INSTRUCTIONS'));
