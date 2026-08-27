@@ -103,6 +103,17 @@ export class ContextInstructionReasoningService {
       opportunity?.vin,
       opportunity?.VIN,
     );
+    const explicitVehicleDetails = Boolean(first(
+      profile.vehicleYear,
+      profile.vehicleMake,
+      profile.vehicleModel,
+      opportunityMeta.vehicleYear,
+      opportunityMeta.vehicleMake,
+      opportunityMeta.vehicleModel,
+      opportunity?.vehicleYear,
+      opportunity?.vehicleMake,
+      opportunity?.vehicleModel,
+    ));
     const classifiedVehicle = vehicleClassification(first(
       profile.assetType,
       profile.assetClassification,
@@ -115,21 +126,12 @@ export class ContextInstructionReasoningService {
       opportunityMeta.assetType,
       opportunityMeta.assetClassification,
     ));
-    const classifiedVehicleDetails = classifiedVehicle && Boolean(first(
-      profile.vehicleYear,
-      profile.vehicleMake,
-      profile.vehicleModel,
+    const classifiedGenericAssetDetails = classifiedVehicle && Boolean(first(
       assetMeta.year,
       assetMeta.make,
       assetMeta.model,
-      opportunityMeta.vehicleYear,
-      opportunityMeta.vehicleMake,
-      opportunityMeta.vehicleModel,
-      opportunity?.vehicleYear,
-      opportunity?.vehicleMake,
-      opportunity?.vehicleModel,
     ));
-    const vehicleLike = Boolean(vehicleIdentity || classifiedVehicleDetails);
+    const vehicleLike = Boolean(vehicleIdentity || explicitVehicleDetails || classifiedGenericAssetDetails);
     const recipientType = upper(first(profile.recipientType, profile.payeeType, vehicleLike ? 'DEALER' : null));
     const externalRecipient = Boolean(first(profile.payeeName, pkg.beneficiaryName, closing?.beneficiaryName));
 
