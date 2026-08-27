@@ -1,4 +1,5 @@
 import { SraCoinAgentService } from './sra-coin-agent-service.js';
+import { ContextInstructionReasoningService } from './context-instruction-reasoning-service.js';
 
 const TRANSACTION_TYPE = 'SRA_TRANSACTION';
 
@@ -33,6 +34,7 @@ export class UnifiedMarketOperationsQueueService {
     this.orderReviewService = orderReviewService;
     this.coreHeartbeat = coreHeartbeat;
     this.coinAgents = new SraCoinAgentService(domain);
+    this.contextReasoning = new ContextInstructionReasoningService(domain);
   }
 
   transactions() { return this.domain.list(TRANSACTION_TYPE); }
@@ -94,12 +96,22 @@ export class UnifiedMarketOperationsQueueService {
 
     for (const pkg of this.domain.list('EXPORT_PACKAGE')) {
       if (String(pkg.exportKind || '').toUpperCase() === 'FINANCING_DISBURSEMENT' && String(pkg.state || '').toUpperCase() === 'READY_FOR_SETTLEMENT_INSTRUCTION') {
+        const context = this.contextReasoning.recordReasoning(pkg.exportPackageId, 'SRA-EXPORT-AGENT');
         queue.push({
           ...item(pkg.exportPackageId, 'FINANCING_EXPORT', pkg.state, pkg.borrowerParticipantId || pkg.participantId, 'PREPARE_SETTLEMENT_METHOD', 'Financing export is ready. SRA Export Agent should prepare the selected settlement path: bank rail instructions or the dealer funding package.', pkg),
           agentId: 'SRA-EXPORT-AGENT',
           agentType: 'EXPORT_AGENT',
           humanApprovalRequired: true,
           availableActions: ['PREPARE_BANK_SETTLEMENT_INSTRUCTION', 'GENERATE_DEALER_FUNDING_PACKAGE'],
+          instructionReasoning: {
+            requiredDocuments: context.reasoning.requiredDocuments,
+            unresolvedFields: context.reasoning.unresolvedFields,
+            unresolvedServicingFields: context.reasoning.unresolvedServicingFields,
+            flags: context.reasoning.flags,
+            readyForInstructionGeneration: context.reasoning.readyForInstructionGeneration,
+            decisionId: context.decision.decisionId,
+            planId: context.plan.planId,
+          },
         });
       }
       if (pkg.state === 'READY_FOR_EXPORT' && !pkg.transferInstructionId) {
