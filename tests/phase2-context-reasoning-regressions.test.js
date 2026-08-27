@@ -23,23 +23,40 @@ class Domain {
   }
 }
 
-test('dealer reasoning detects vehicle data from linked asset metadata', () => {
-  const domain = new Domain({
+function baseRecords(asset) {
+  return {
     EXPORT_PACKAGE: [{
       id: 'EXP-1', exportPackageId: 'EXP-1', exportKind: 'FINANCING_DISBURSEMENT',
       financingTransactionId: 'FT-1', opportunityId: 'FOR-1', closingId: 'FCL-1',
-      beneficiaryName: 'Example Dealer', amount: 50000, currency: 'USD',
+      beneficiaryName: 'External Recipient', amount: 50000, currency: 'USD',
     }],
-    FINANCING_CLOSING: [{ id: 'FCL-1', closingId: 'FCL-1', beneficiaryName: 'Example Dealer' }],
+    FINANCING_CLOSING: [{ id: 'FCL-1', closingId: 'FCL-1', beneficiaryName: 'External Recipient' }],
     FUNDING_OPPORTUNITY: [{
       id: 'FOR-1', opportunityId: 'FOR-1', relatedAssetIds: ['ASSET-1'], transactionProfile: {},
     }],
-    ASSET_ACCOUNT: [{ id: 'ASSET-1', assetId: 'ASSET-1', metadata: { vin: 'VIN-123', year: '2026', make: 'Audi', model: 'Q5' } }],
+    ASSET_ACCOUNT: [asset],
     OPERATIONAL_EVENT: [], OPERATIONAL_MEMORY: [], AGENT_DECISION: [], ACTION_PLAN: [], ACTION_RESULT: [], OUTCOME_EVALUATION: [],
-  });
+  };
+}
+
+test('dealer reasoning detects vehicle data from linked asset metadata', () => {
+  const domain = new Domain(baseRecords({
+    id: 'ASSET-1', assetId: 'ASSET-1', classification: 'MOTOR_VEHICLE',
+    metadata: { vin: 'VIN-123', year: '2026', make: 'Audi', model: 'Q5' },
+  }));
   const reasoning = new ContextInstructionReasoningService(domain).reasonForExportPackage('EXP-1');
   assert.equal(reasoning.recipientType, 'DEALER');
   assert.ok(reasoning.requiredDocuments.includes('DEALER_PROCESSING_INSTRUCTIONS'));
+});
+
+test('generic year make and model do not turn a non-vehicle asset into dealer financing', () => {
+  const domain = new Domain(baseRecords({
+    id: 'ASSET-1', assetId: 'ASSET-1', classification: 'REAL_ESTATE',
+    metadata: { year: '1998', make: 'Commercial', model: 'Warehouse' },
+  }));
+  const reasoning = new ContextInstructionReasoningService(domain).reasonForExportPackage('EXP-1');
+  assert.notEqual(reasoning.recipientType, 'DEALER');
+  assert.ok(!reasoning.requiredDocuments.includes('DEALER_PROCESSING_INSTRUCTIONS'));
 });
 
 test('persisted operations build hydrates all intelligence record types before reasoning', async () => {
@@ -52,7 +69,8 @@ test('persisted operations build hydrates all intelligence record types before r
   ]));
 });
 
-test('SANE operations queue uses the persisted reasoning path', () => {
+test('SANE operations queue uses persisted reasoning and catches async failures', () => {
   const source = fs.readFileSync(new URL('../routes/sane-router.js', import.meta.url), 'utf8');
   assert.match(source, /router\.get\('\/operations-queue',[\s\S]*await unifiedOperationsQueue\.explainPersisted\(\)/);
+  assert.match(source, /router\.get\('\/operations-queue',[\s\S]*catch \(error\)[\s\S]*SRA_OPERATIONS_QUEUE_FAILED/);
 });
