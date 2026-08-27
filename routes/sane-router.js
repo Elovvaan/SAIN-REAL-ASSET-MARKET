@@ -91,7 +91,7 @@ export function createSaneRouter(service = new SaneSkillService(), edxOperations
   });
 
   router.get('/order-review/queue', (_req, res) => orderReviewMatching ? res.json(orderReviewMatching.status()) : res.status(503).json({ error: 'Order review and matching service is unavailable.' }));
-  router.get('/operations-queue', (_req, res) => unifiedOperationsQueue ? res.json(unifiedOperationsQueue.explain()) : res.status(503).json({ error: 'Unified market operations queue is unavailable.' }));
+  router.get('/operations-queue', async (_req, res) => unifiedOperationsQueue ? res.json(await unifiedOperationsQueue.explainPersisted()) : res.status(503).json({ error: 'Unified market operations queue is unavailable.' }));
   router.post('/order-review/preview', (req, res) => {
     if (!orderReviewMatching) return res.status(503).json({ error: 'Order review and matching service is unavailable.' });
     try { return res.json(orderReviewMatching.preview(req.body || {})); }
