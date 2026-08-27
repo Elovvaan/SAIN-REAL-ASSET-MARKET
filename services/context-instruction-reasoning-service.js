@@ -23,6 +23,11 @@ function sameJson(left, right) {
   return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
 }
 
+function vehicleClassification(value) {
+  const normalized = upper(value);
+  return ['VEHICLE', 'AUTO', 'AUTOMOBILE', 'CAR', 'TRUCK', 'MOTOR_VEHICLE'].some((token) => normalized.includes(token));
+}
+
 export class ContextInstructionReasoningService {
   constructor(domain, intelligence = null) {
     if (!domain) throw new Error('Context reasoning requires the SRA domain store.');
@@ -65,6 +70,7 @@ export class ContextInstructionReasoningService {
       closing,
       opportunity,
       profile,
+      asset,
       assetMeta,
       opportunityMeta,
       financingTransactionId,
@@ -72,27 +78,42 @@ export class ContextInstructionReasoningService {
     } = context;
     const exportKind = upper(pkg.exportKind);
     const isFinancingDisbursement = exportKind === 'FINANCING_DISBURSEMENT';
-    const vehicleLike = Boolean(first(
+    const vehicleIdentity = first(
       profile.vin,
+      assetMeta.vin,
+      assetMeta.VIN,
+      opportunityMeta.vin,
+      opportunityMeta.VIN,
+      opportunity?.vin,
+      opportunity?.VIN,
+    );
+    const classifiedVehicle = vehicleClassification(first(
+      profile.assetType,
+      profile.assetClassification,
+      asset?.type,
+      asset?.classification,
+      assetMeta.type,
+      assetMeta.classification,
+      opportunity?.assetType,
+      opportunity?.assetClassification,
+      opportunityMeta.assetType,
+      opportunityMeta.assetClassification,
+    ));
+    const classifiedVehicleDetails = classifiedVehicle && Boolean(first(
       profile.vehicleYear,
       profile.vehicleMake,
       profile.vehicleModel,
-      assetMeta.vin,
-      assetMeta.VIN,
       assetMeta.year,
       assetMeta.make,
       assetMeta.model,
-      opportunityMeta.vin,
-      opportunityMeta.VIN,
       opportunityMeta.vehicleYear,
       opportunityMeta.vehicleMake,
       opportunityMeta.vehicleModel,
-      opportunity?.vin,
-      opportunity?.VIN,
       opportunity?.vehicleYear,
       opportunity?.vehicleMake,
       opportunity?.vehicleModel,
     ));
+    const vehicleLike = Boolean(vehicleIdentity || classifiedVehicleDetails);
     const recipientType = upper(first(profile.recipientType, profile.payeeType, vehicleLike ? 'DEALER' : null));
     const externalRecipient = Boolean(first(profile.payeeName, pkg.beneficiaryName, closing?.beneficiaryName));
 
