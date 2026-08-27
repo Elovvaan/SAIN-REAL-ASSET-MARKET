@@ -77,6 +77,17 @@ test('explicit opportunity vehicle fields trigger dealer instructions without VI
   assert.ok(reasoning.requiredDocuments.includes('DEALER_PROCESSING_INSTRUCTIONS'));
 });
 
+test('later authoritative vehicle classification is not shadowed by earlier generic type', () => {
+  const records = baseRecords({
+    id: 'ASSET-1', assetId: 'ASSET-1', classification: 'MOTOR_VEHICLE',
+    metadata: { year: '2026', make: 'Audi', model: 'Q5' },
+  });
+  records.FUNDING_OPPORTUNITY[0].transactionProfile = { assetType: 'REAL_ASSET' };
+  const reasoning = new ContextInstructionReasoningService(new Domain(records)).reasonForExportPackage('EXP-1');
+  assert.equal(reasoning.recipientType, 'DEALER');
+  assert.ok(reasoning.requiredDocuments.includes('DEALER_PROCESSING_INSTRUCTIONS'));
+});
+
 test('generic year make and model do not turn a non-vehicle asset into dealer financing', () => {
   const domain = new Domain(baseRecords({
     id: 'ASSET-1', assetId: 'ASSET-1', classification: 'REAL_ESTATE',
