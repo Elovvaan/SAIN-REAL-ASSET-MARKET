@@ -8,12 +8,17 @@ class Domain {
   constructor(records = {}) {
     this.records = new Map(Object.entries(records));
     this.hydrated = [];
+    this.hydrateCalls = 0;
   }
   get(type, id) {
     return (this.records.get(type) || []).find((record) => [record.id, record.exportPackageId, record.opportunityId, record.closingId, record.participantId, record.assetId].includes(id)) || null;
   }
   list(type) { return this.records.get(type) || []; }
-  async hydrate(types) { this.hydrated.push(...types); return {}; }
+  async hydrate(types) {
+    this.hydrateCalls += 1;
+    this.hydrated.push(...types);
+    return {};
+  }
   async put(type, id, record) {
     const list = this.records.get(type) || [];
     const next = list.filter((item) => item.id !== id);
@@ -59,10 +64,24 @@ test('generic year make and model do not turn a non-vehicle asset into dealer fi
   assert.ok(!reasoning.requiredDocuments.includes('DEALER_PROCESSING_INSTRUCTIONS'));
 });
 
-test('persisted operations build hydrates all intelligence record types before reasoning', async () => {
+test('AUTO substrings in non-vehicle classifications do not trigger dealer financing', () => {
+  for (const classification of ['AUTOMATION_EQUIPMENT', 'AUTOMOBILE_PARTS']) {
+    const domain = new Domain(baseRecords({
+      id: 'ASSET-1', assetId: 'ASSET-1', classification,
+      metadata: { year: '2024', make: 'Industrial', model: 'Series A' },
+    }));
+    const reasoning = new ContextInstructionReasoningService(domain).reasonForExportPackage('EXP-1');
+    assert.notEqual(reasoning.recipientType, 'DEALER');
+    assert.ok(!reasoning.requiredDocuments.includes('DEALER_PROCESSING_INSTRUCTIONS'));
+  }
+});
+
+test('persisted operations build hydrates intelligence once per queue service', async () => {
   const domain = new Domain({ SRA_TRANSACTION: [], EXPORT_PACKAGE: [], COIN_POSITION: [] });
   const queue = new UnifiedMarketOperationsQueueService(domain);
   await queue.explainPersisted();
+  await queue.explainPersisted();
+  assert.equal(domain.hydrateCalls, 1);
   assert.deepEqual(new Set(domain.hydrated), new Set([
     'OPERATIONAL_EVENT', 'OPERATIONAL_MEMORY', 'AGENT_DECISION',
     'ACTION_PLAN', 'ACTION_RESULT', 'OUTCOME_EVALUATION',
