@@ -114,7 +114,7 @@ export class ContextInstructionReasoningService {
       opportunity?.vehicleMake,
       opportunity?.vehicleModel,
     ));
-    const classifiedVehicle = vehicleClassification(first(
+    const classificationCandidates = [
       profile.assetType,
       profile.assetClassification,
       asset?.type,
@@ -125,7 +125,8 @@ export class ContextInstructionReasoningService {
       opportunity?.assetClassification,
       opportunityMeta.assetType,
       opportunityMeta.assetClassification,
-    ));
+    ];
+    const classifiedVehicle = classificationCandidates.some((value) => vehicleClassification(value));
     const classifiedGenericAssetDetails = classifiedVehicle && Boolean(first(
       assetMeta.year,
       assetMeta.make,
