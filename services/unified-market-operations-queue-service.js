@@ -2,6 +2,14 @@ import { SraCoinAgentService } from './sra-coin-agent-service.js';
 import { ContextInstructionReasoningService } from './context-instruction-reasoning-service.js';
 
 const TRANSACTION_TYPE = 'SRA_TRANSACTION';
+const INTELLIGENCE_RECORD_TYPES = Object.freeze([
+  'OPERATIONAL_EVENT',
+  'OPERATIONAL_MEMORY',
+  'AGENT_DECISION',
+  'ACTION_PLAN',
+  'ACTION_RESULT',
+  'OUTCOME_EVALUATION',
+]);
 
 function now() { return new Date().toISOString(); }
 function sortByTime(items) { return [...items].sort((a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || ''))); }
@@ -175,6 +183,9 @@ export class UnifiedMarketOperationsQueueService {
   }
 
   async buildPersisted() {
+    if (typeof this.domain.hydrate === 'function') {
+      await this.domain.hydrate(INTELLIGENCE_RECORD_TYPES);
+    }
     const contextRecords = new Map();
     for (const pkg of this.domain.list('EXPORT_PACKAGE')) {
       if (String(pkg.exportKind || '').toUpperCase() !== 'FINANCING_DISBURSEMENT') continue;
