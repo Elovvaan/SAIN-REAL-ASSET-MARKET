@@ -15,12 +15,19 @@ function text(value) {
 
 function money(value, currency = 'USD') {
   const amount = Number(value || 0);
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount);
 }
 
 function dateLabel(value) {
   const date = new Date(value || Date.now());
-  return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  return Number.isNaN(date.getTime())
+    ? ''
+    : date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
 function first(...values) {
@@ -33,14 +40,19 @@ function first(...values) {
 function line(doc, label, value, options = {}) {
   const y = doc.y;
   const labelWidth = options.labelWidth || 175;
-  doc.font('Helvetica-Bold').fontSize(9).text(label, 54, y, { width: labelWidth });
-  doc.font('Helvetica').fontSize(9).text(value || '______________________________________________', 54 + labelWidth, y, { width: 330 });
+  doc.font('Helvetica-Bold').fontSize(9).fillColor('#000000').text(label, 54, y, { width: labelWidth });
+  doc.font('Helvetica').fontSize(9).fillColor('#000000').text(
+    value || '______________________________________________',
+    54 + labelWidth,
+    y,
+    { width: 330 },
+  );
   doc.moveDown(0.8);
 }
 
 function section(doc, title) {
   doc.moveDown(0.55);
-  doc.font('Helvetica-Bold').fontSize(12).text(title);
+  doc.font('Helvetica-Bold').fontSize(12).fillColor('#000000').text(title);
   doc.moveDown(0.35);
 }
 
@@ -79,6 +91,13 @@ function documentPriority(record) {
   return 100;
 }
 
+function instruction(doc, number, body) {
+  const y = doc.y;
+  doc.font('Helvetica-Bold').fontSize(9).fillColor('#000000').text(`${number}.`, 54, y, { width: 20 });
+  doc.font('Helvetica').fontSize(9).fillColor('#000000').text(body, 76, y, { width: 482, lineGap: 1.5 });
+  doc.moveDown(0.55);
+}
+
 export class AchSettlementPacketService {
   constructor(domain, documentService = null) {
     this.domain = domain;
@@ -88,16 +107,23 @@ export class AchSettlementPacketService {
   source(exportPackageId) {
     const pkg = this.domain.get('EXPORT_PACKAGE', exportPackageId);
     if (!pkg) throw new Error('Financing export package was not found.');
-    if (pkg.exportKind !== 'FINANCING_DISBURSEMENT') throw new Error('Export package is not a financing disbursement package.');
+    if (pkg.exportKind !== 'FINANCING_DISBURSEMENT') {
+      throw new Error('Export package is not a financing disbursement package.');
+    }
 
     const closing = pkg.closingId ? this.domain.get('FINANCING_CLOSING', pkg.closingId) : null;
     const opportunity = pkg.opportunityId ? this.domain.get('FUNDING_OPPORTUNITY', pkg.opportunityId) : null;
-    const participantId = pkg.borrowerParticipantId || pkg.participantId || opportunity?.applicantParticipantId || null;
+    const participantId = pkg.borrowerParticipantId
+      || pkg.participantId
+      || opportunity?.applicantParticipantId
+      || null;
     const participant = participantId ? this.domain.get('PARTICIPANT', participantId) : null;
     const evidence = pkg.documentaryEvidence || closing?.documentaryEvidence || {};
     const profile = opportunity?.transactionProfile || {};
 
-    const relatedAssetId = Array.isArray(opportunity?.relatedAssetIds) ? opportunity.relatedAssetIds[0] : null;
+    const relatedAssetId = Array.isArray(opportunity?.relatedAssetIds)
+      ? opportunity.relatedAssetIds[0]
+      : null;
     const asset = relatedAssetId ? this.domain.get('ASSET_ACCOUNT', relatedAssetId) : null;
     const assetMeta = asset?.metadata || asset?.details || {};
     const opportunityMeta = opportunity?.metadata || {};
@@ -109,16 +135,105 @@ export class AchSettlementPacketService {
       participant,
       evidence,
       profile,
-      purchaserName: first(profile.purchaserName, participant?.displayName, participant?.metadata?.legalName, opportunity?.applicantDisplayName, participantId),
+      purchaserName: first(
+        profile.purchaserName,
+        participant?.displayName,
+        participant?.metadata?.legalName,
+        opportunity?.applicantDisplayName,
+        participantId,
+      ),
       dealershipName: first(profile.payeeName, pkg.beneficiaryName, closing?.beneficiaryName),
       vehicleYear: first(profile.vehicleYear, assetMeta.year, opportunityMeta.vehicleYear, opportunity?.vehicleYear),
       vehicleMake: first(profile.vehicleMake, assetMeta.make, opportunityMeta.vehicleMake, opportunity?.vehicleMake),
-      vehicleModel: first(profile.vehicleModel, assetMeta.model, opportunityMeta.vehicleModel, opportunity?.vehicleModel, opportunity?.title),
-      vin: first(profile.vin, assetMeta.vin, assetMeta.VIN, opportunityMeta.vin, opportunityMeta.VIN, opportunity?.vin, opportunity?.VIN),
+      vehicleModel: first(
+        profile.vehicleModel,
+        assetMeta.model,
+        opportunityMeta.vehicleModel,
+        opportunity?.vehicleModel,
+        opportunity?.title,
+      ),
+      vin: first(
+        profile.vin,
+        assetMeta.vin,
+        assetMeta.VIN,
+        opportunityMeta.vin,
+        opportunityMeta.VIN,
+        opportunity?.vin,
+        opportunity?.VIN,
+      ),
       agreementNumber: first(profile.agreementNumber, evidence.agreementNumber),
       sourceDocumentId: first(profile.sourceDocumentId, evidence.documentReference),
       sourceDocumentSha256: first(profile.sourceDocumentSha256, evidence.documentSha256),
       purchasePrice: first(profile.purchasePrice, pkg.amount),
+    };
+  }
+
+  servicingData(data) {
+    const { pkg, closing, opportunity, profile } = data;
+    const servicing = first(
+      pkg.servicing,
+      closing?.servicing,
+      opportunity?.servicing,
+      profile?.servicing,
+    ) || {};
+    const terms = first(
+      pkg.repaymentTerms,
+      closing?.repaymentTerms,
+      opportunity?.repaymentTerms,
+      profile?.repaymentTerms,
+      servicing?.repaymentTerms,
+    ) || {};
+
+    return {
+      servicingReference: first(
+        servicing.servicingReference,
+        servicing.reference,
+        pkg.servicingReference,
+        closing?.servicingReference,
+        pkg.financingTransactionId,
+      ),
+      paymentFrequency: first(
+        terms.paymentFrequency,
+        terms.frequency,
+        servicing.paymentFrequency,
+        profile.paymentFrequency,
+      ),
+      scheduledPaymentAmount: first(
+        terms.paymentAmount,
+        terms.scheduledPaymentAmount,
+        servicing.scheduledPaymentAmount,
+        profile.scheduledPaymentAmount,
+      ),
+      firstPaymentDate: first(
+        terms.firstPaymentDate,
+        servicing.firstPaymentDate,
+        profile.firstPaymentDate,
+      ),
+      maturityDate: first(
+        terms.maturityDate,
+        servicing.maturityDate,
+        profile.maturityDate,
+      ),
+      paymentMethod: first(
+        terms.paymentMethod,
+        servicing.paymentMethod,
+        profile.servicingPaymentMethod,
+      ),
+      paymentDestination: first(
+        servicing.paymentDestination,
+        servicing.destinationReference,
+        profile.servicingPaymentDestination,
+      ),
+      paymentReference: first(
+        servicing.paymentReference,
+        pkg.financingTransactionId,
+        pkg.exportPackageId,
+      ),
+      contact: first(
+        servicing.contact,
+        servicing.processingContact,
+        profile.servicingContact,
+      ),
     };
   }
 
@@ -152,13 +267,20 @@ export class AchSettlementPacketService {
   async renderCover(data, sourceDocuments) {
     const { pkg, closing } = data;
     const chunks = [];
-    const doc = new PDFKitDocument({ size: 'LETTER', margins: { top: 42, bottom: 42, left: 54, right: 54 }, info: { Title: `SRA Funding Package ${pkg.exportPackageId}` } });
+    const doc = new PDFKitDocument({
+      size: 'LETTER',
+      margins: { top: 42, bottom: 42, left: 54, right: 54 },
+      info: { Title: `SRA Funding Package ${pkg.exportPackageId}` },
+    });
     doc.on('data', (chunk) => chunks.push(chunk));
-    const done = new Promise((resolve, reject) => { doc.on('end', resolve); doc.on('error', reject); });
+    const done = new Promise((resolve, reject) => {
+      doc.on('end', resolve);
+      doc.on('error', reject);
+    });
 
     drawPlatformLogo(doc);
-    doc.font('Helvetica-Bold').fontSize(16).text('FUNDING PACKAGE', { align: 'center' });
-    doc.font('Helvetica').fontSize(10).text('Transaction Documents and Settlement Instructions', { align: 'center' });
+    doc.font('Helvetica-Bold').fontSize(16).text('FUNDING / SETTLEMENT PACKAGE', { align: 'center' });
+    doc.font('Helvetica').fontSize(10).text('Document 1 of 3 - Transaction Documents and Settlement', { align: 'center' });
     doc.moveDown(0.8);
     rule(doc);
 
@@ -182,11 +304,18 @@ export class AchSettlementPacketService {
 
     section(doc, 'Package Document Manifest');
     if (!sourceDocuments.length) {
-      doc.font('Helvetica').fontSize(9).text('No linked source documents are currently recorded for this funding opportunity.');
+      doc.font('Helvetica').fontSize(9).text(
+        'No linked source documents are currently recorded for this funding opportunity.',
+      );
     } else {
       sourceDocuments.forEach((record, index) => {
-        doc.font('Helvetica-Bold').fontSize(9).text(`${index + 1}. ${text(documentType(record)) || 'Transaction Document'}`);
-        doc.font('Helvetica').fontSize(8).text(`${record.originalName || record.id}  |  ${record.id}  |  SHA-256 ${record.sha256 || 'not recorded'}`, { indent: 12 });
+        doc.font('Helvetica-Bold').fontSize(9).text(
+          `${index + 1}. ${text(documentType(record)) || 'Transaction Document'}`,
+        );
+        doc.font('Helvetica').fontSize(8).text(
+          `${record.originalName || record.id}  |  ${record.id}  |  SHA-256 ${record.sha256 || 'not recorded'}`,
+          { indent: 12 },
+        );
         doc.moveDown(0.35);
       });
     }
@@ -197,14 +326,74 @@ export class AchSettlementPacketService {
         .filter((condition) => String(condition.status || '').toUpperCase() !== 'CANCELLED')
         .forEach((condition) => {
           const status = String(condition.status || 'OPEN').toUpperCase();
-          const description = first(condition.description, condition.requirement, condition.title, 'Closing requirement');
+          const description = first(
+            condition.description,
+            condition.requirement,
+            condition.title,
+            'Closing requirement',
+          );
           doc.font('Helvetica').fontSize(8.5).text(`[${status}] ${description}`);
           doc.moveDown(0.25);
         });
     }
 
     doc.moveDown(0.7);
-    doc.font('Helvetica').fontSize(7.5).fillColor('#555555').text(`Generated from SRA financing and transaction-document records for export package ${pkg.exportPackageId}.`, { align: 'center' });
+    doc.font('Helvetica').fontSize(7.5).fillColor('#555555').text(
+      `Generated from SRA financing and transaction-document records for export package ${pkg.exportPackageId}.`,
+      { align: 'center' },
+    );
+    doc.end();
+    await done;
+    return Buffer.concat(chunks);
+  }
+
+  async renderDealerProcessingInstructions(exportPackageId) {
+    const data = this.source(exportPackageId);
+    const { pkg, closing } = data;
+    const chunks = [];
+    const doc = new PDFKitDocument({
+      size: 'LETTER',
+      margins: { top: 42, bottom: 42, left: 54, right: 54 },
+      info: { Title: `SRA Dealer Processing Instructions ${exportPackageId}` },
+    });
+    doc.on('data', (chunk) => chunks.push(chunk));
+    const done = new Promise((resolve, reject) => {
+      doc.on('end', resolve);
+      doc.on('error', reject);
+    });
+
+    drawPlatformLogo(doc);
+    doc.font('Helvetica-Bold').fontSize(16).text('DEALER PROCESSING INSTRUCTIONS', { align: 'center' });
+    doc.font('Helvetica').fontSize(10).text('Document 2 of 3 - Recipient Processing Steps', { align: 'center' });
+    doc.moveDown(0.8);
+    rule(doc);
+
+    line(doc, 'SRA Transaction ID', pkg.financingTransactionId || pkg.exportPackageId);
+    line(doc, 'Funding Package Reference', pkg.exportPackageId);
+    line(doc, 'Financing Closing Reference', closing?.closingId || pkg.closingId || null);
+    line(doc, 'Dealer / Payee', data.dealershipName);
+    line(doc, 'Authorized Settlement Amount', money(pkg.amount, pkg.currency || 'USD'));
+    line(doc, 'Settlement Method', 'ACH Credit');
+
+    section(doc, 'Processing Procedure');
+    instruction(doc, 1, 'Review the funding package and verify the transaction identifiers, purchaser / obligated party, dealer / payee, asset information, purchase documentation, and authorized settlement amount.');
+    instruction(doc, 2, 'Route the package to the dealership\'s authorized finance, accounting, treasury, receivables, or settlement-processing function.');
+    instruction(doc, 3, 'Complete the Destination Banking Information on the ACH Settlement Execution / Dealership Completion Page within the dealership\'s controlled financial-processing environment. Sensitive banking information does not need to be returned to SRA solely for re-entry.');
+    instruction(doc, 4, 'Process the authorized settlement amount using the settlement method identified in the package and the dealership\'s established financial-processing procedure.');
+    instruction(doc, 5, 'Upon processing, record the ACH / bank confirmation reference, ACH trace / network reference, execution date, and actual settled amount on the Dealership Completion Page.');
+    instruction(doc, 6, 'Reconcile the resulting settlement to the SRA Transaction ID and Funding Package Reference shown above.');
+    instruction(doc, 7, 'If the transaction cannot be processed as presented, identify the specific processing exception or additional information required and reference the SRA Transaction ID and Funding Package Reference in the response.');
+
+    section(doc, 'Processing Control');
+    line(doc, 'Remittance / Payment Reference', pkg.exportPackageId);
+    line(doc, 'Agreement / Contract No.', data.agreementNumber);
+    line(doc, 'Settlement Completion Record', 'ACH Settlement Execution / Dealership Completion Page');
+
+    doc.moveDown(0.8);
+    doc.font('Helvetica').fontSize(7.5).fillColor('#555555').text(
+      'These instructions describe recipient-side handling of the transaction package. The recipient retains its own internal accounting classifications, financial controls, and processing procedures.',
+    );
+
     doc.end();
     await done;
     return Buffer.concat(chunks);
@@ -214,13 +403,20 @@ export class AchSettlementPacketService {
     const data = this.source(exportPackageId);
     const { pkg, closing, evidence } = data;
     const chunks = [];
-    const doc = new PDFKitDocument({ size: 'LETTER', margins: { top: 42, bottom: 42, left: 54, right: 54 }, info: { Title: `SRA ACH Settlement Execution ${exportPackageId}` } });
+    const doc = new PDFKitDocument({
+      size: 'LETTER',
+      margins: { top: 42, bottom: 42, left: 54, right: 54 },
+      info: { Title: `SRA ACH Settlement Execution ${exportPackageId}` },
+    });
     doc.on('data', (chunk) => chunks.push(chunk));
-    const done = new Promise((resolve, reject) => { doc.on('end', resolve); doc.on('error', reject); });
+    const done = new Promise((resolve, reject) => {
+      doc.on('end', resolve);
+      doc.on('error', reject);
+    });
 
     drawPlatformLogo(doc);
     doc.font('Helvetica-Bold').fontSize(16).text('ACH SETTLEMENT EXECUTION', { align: 'center' });
-    doc.font('Helvetica').fontSize(10).text('Dealership Completion Page', { align: 'center' });
+    doc.font('Helvetica').fontSize(10).text('Dealership Completion Page - Funding / Settlement Record', { align: 'center' });
     doc.moveDown(0.8);
     rule(doc);
 
@@ -268,6 +464,71 @@ export class AchSettlementPacketService {
     return Buffer.concat(chunks);
   }
 
+  async renderServicingInstructions(exportPackageId) {
+    const data = this.source(exportPackageId);
+    const { pkg, closing } = data;
+    const servicing = this.servicingData(data);
+    const chunks = [];
+    const doc = new PDFKitDocument({
+      size: 'LETTER',
+      margins: { top: 42, bottom: 42, left: 54, right: 54 },
+      info: { Title: `SRA Servicing and Payment Instructions ${exportPackageId}` },
+    });
+    doc.on('data', (chunk) => chunks.push(chunk));
+    const done = new Promise((resolve, reject) => {
+      doc.on('end', resolve);
+      doc.on('error', reject);
+    });
+
+    drawPlatformLogo(doc);
+    doc.font('Helvetica-Bold').fontSize(16).text('SERVICING & PAYMENT INSTRUCTIONS', { align: 'center' });
+    doc.font('Helvetica').fontSize(10).text('Document 3 of 3 - Post-Settlement Obligation Servicing', { align: 'center' });
+    doc.moveDown(0.8);
+    rule(doc);
+
+    line(doc, 'SRA Transaction ID', pkg.financingTransactionId || pkg.exportPackageId);
+    line(doc, 'Funding Package Reference', pkg.exportPackageId);
+    line(doc, 'Financing Closing Reference', closing?.closingId || pkg.closingId || null);
+    line(doc, 'Purchaser / Obligated Party', data.purchaserName);
+    line(doc, 'Servicing Reference', servicing.servicingReference);
+
+    section(doc, 'Recorded Payment Terms');
+    line(doc, 'Payment Frequency', servicing.paymentFrequency);
+    line(
+      doc,
+      'Scheduled Payment Amount',
+      servicing.scheduledPaymentAmount == null
+        ? null
+        : money(servicing.scheduledPaymentAmount, pkg.currency || 'USD'),
+    );
+    line(doc, 'First Payment Date', servicing.firstPaymentDate ? dateLabel(servicing.firstPaymentDate) : null);
+    line(doc, 'Maturity / Final Payment Date', servicing.maturityDate ? dateLabel(servicing.maturityDate) : null);
+    line(doc, 'Servicing Payment Method', servicing.paymentMethod);
+    line(doc, 'Payment Destination / Reference', servicing.paymentDestination);
+    line(doc, 'Required Payment Reference', servicing.paymentReference);
+
+    section(doc, 'Post-Settlement Procedure');
+    instruction(doc, 1, 'Activate servicing only after settlement has been confirmed against the funding transaction.');
+    instruction(doc, 2, 'Apply each received payment to the same financing transaction and servicing reference identified above.');
+    instruction(doc, 3, 'Record the received amount, payment date, external payment / trace reference, principal application, finance / interest application when applicable, remaining principal, and outstanding balance in the servicing record.');
+    instruction(doc, 4, 'Use the payment terms recorded for this transaction. Any term not present above remains unresolved in the transaction record and must not be inferred by the document generator.');
+    instruction(doc, 5, 'Maintain settlement and servicing records under the same SRA Transaction ID so the funding event, settlement confirmation, repayment history, and final closure remain linked to one obligation.');
+    instruction(doc, 6, 'When the obligation is fully satisfied, record the payoff / closure event against the same financing transaction and servicing reference.');
+
+    section(doc, 'Servicing Contact / Exception Handling');
+    line(doc, 'Recorded Servicing Contact', servicing.contact);
+    line(doc, 'Transaction Reference for Questions', pkg.financingTransactionId || pkg.exportPackageId);
+
+    doc.moveDown(0.8);
+    doc.font('Helvetica').fontSize(7.5).fillColor('#555555').text(
+      'This page is generated from recorded SRA transaction and servicing data. Blank fields indicate that the corresponding servicing term has not been recorded in the source transaction and is not supplied by assumption.',
+    );
+
+    doc.end();
+    await done;
+    return Buffer.concat(chunks);
+  }
+
   async appendSourceDocument(output, record) {
     const bytes = await this.documents.read(record.id);
     if (!bytes) return false;
@@ -287,39 +548,50 @@ export class AchSettlementPacketService {
       const scale = Math.min(availableWidth / image.width, availableHeight / image.height, 1);
       const width = image.width * scale;
       const height = image.height * scale;
-      page.drawImage(image, { x: (612 - width) / 2, y: (792 - height) / 2, width, height });
+      page.drawImage(image, {
+        x: (612 - width) / 2,
+        y: (792 - height) / 2,
+        width,
+        height,
+      });
       return true;
     }
     return false;
+  }
+
+  async appendPdf(output, bytes) {
+    const source = await PDFLibDocument.load(bytes);
+    const pages = await output.copyPages(source, source.getPageIndices());
+    pages.forEach((page) => output.addPage(page));
   }
 
   async renderFundingPackage(exportPackageId) {
     const data = this.source(exportPackageId);
     const sourceDocuments = await this.linkedDocuments(data);
     const coverBytes = await this.renderCover(data, sourceDocuments);
+    const dealerInstructionsBytes = await this.renderDealerProcessingInstructions(exportPackageId);
     const settlementBytes = await this.renderSettlementPage(exportPackageId);
+    const servicingBytes = await this.renderServicingInstructions(exportPackageId);
 
     const output = await PDFLibDocument.create();
     output.setTitle(`SRA Funding Package ${exportPackageId}`);
-    output.setSubject('Transaction funding documents and ACH settlement instructions');
+    output.setSubject('Three-document transaction funding, recipient processing, settlement, and servicing package');
 
-    const cover = await PDFLibDocument.load(coverBytes);
-    const coverPages = await output.copyPages(cover, cover.getPageIndices());
-    coverPages.forEach((page) => output.addPage(page));
+    await this.appendPdf(output, coverBytes);
 
     for (const record of sourceDocuments) {
       await this.appendSourceDocument(output, record);
     }
 
-    const settlement = await PDFLibDocument.load(settlementBytes);
-    const settlementPages = await output.copyPages(settlement, settlement.getPageIndices());
-    settlementPages.forEach((page) => output.addPage(page));
+    await this.appendPdf(output, dealerInstructionsBytes);
+    await this.appendPdf(output, settlementBytes);
+    await this.appendPdf(output, servicingBytes);
 
     const bytes = await output.save();
     return Buffer.from(bytes);
   }
 
   async render(exportPackageId) {
-    return this.renderSettlementPage(exportPackageId);
+    return this.renderFundingPackage(exportPackageId);
   }
 }
