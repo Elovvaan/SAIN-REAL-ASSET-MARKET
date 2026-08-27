@@ -23,6 +23,27 @@ function sameJson(left, right) {
   return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
 }
 
+const VEHICLE_CLASSIFICATIONS = new Set([
+  'VEHICLE',
+  'MOTOR_VEHICLE',
+  'PASSENGER_VEHICLE',
+  'COMMERCIAL_VEHICLE',
+  'ROAD_VEHICLE',
+  'AUTO',
+  'AUTOMOBILE',
+  'CAR',
+  'TRUCK',
+  'PICKUP_TRUCK',
+  'LIGHT_TRUCK',
+  'HEAVY_TRUCK',
+  'VAN',
+  'SUV',
+]);
+
+function vehicleClassification(value) {
+  return VEHICLE_CLASSIFICATIONS.has(upper(value));
+}
+
 export class ContextInstructionReasoningService {
   constructor(domain, intelligence = null) {
     if (!domain) throw new Error('Context reasoning requires the SRA domain store.');
@@ -38,6 +59,10 @@ export class ContextInstructionReasoningService {
     const participantId = pkg.borrowerParticipantId || pkg.participantId || opportunity?.applicantParticipantId || null;
     const participant = participantId ? this.domain.get('PARTICIPANT', participantId) : null;
     const profile = opportunity?.transactionProfile || {};
+    const relatedAssetId = Array.isArray(opportunity?.relatedAssetIds) ? opportunity.relatedAssetIds[0] : null;
+    const asset = relatedAssetId ? this.domain.get('ASSET_ACCOUNT', relatedAssetId) : null;
+    const assetMeta = asset?.metadata || asset?.details || {};
+    const opportunityMeta = opportunity?.metadata || {};
     const financingTransactionId = pkg.financingTransactionId || closing?.financingTransactionId || null;
     return {
       pkg,
@@ -45,6 +70,9 @@ export class ContextInstructionReasoningService {
       opportunity,
       participant,
       profile,
+      asset,
+      assetMeta,
+      opportunityMeta,
       participantId,
       financingTransactionId,
       history: this.intelligence.contextFor(financingTransactionId || exportPackageId),
@@ -53,10 +81,58 @@ export class ContextInstructionReasoningService {
 
   reasonForExportPackage(exportPackageId) {
     const context = this.exportContext(exportPackageId);
-    const { pkg, closing, opportunity, profile, financingTransactionId, history } = context;
+    const {
+      pkg,
+      closing,
+      opportunity,
+      profile,
+      asset,
+      assetMeta,
+      opportunityMeta,
+      financingTransactionId,
+      history,
+    } = context;
     const exportKind = upper(pkg.exportKind);
     const isFinancingDisbursement = exportKind === 'FINANCING_DISBURSEMENT';
-    const vehicleLike = Boolean(first(profile.vin, profile.vehicleYear, profile.vehicleMake, profile.vehicleModel, opportunity?.vin));
+    const vehicleIdentity = first(
+      profile.vin,
+      assetMeta.vin,
+      assetMeta.VIN,
+      opportunityMeta.vin,
+      opportunityMeta.VIN,
+      opportunity?.vin,
+      opportunity?.VIN,
+    );
+    const explicitVehicleDetails = Boolean(first(
+      profile.vehicleYear,
+      profile.vehicleMake,
+      profile.vehicleModel,
+      opportunityMeta.vehicleYear,
+      opportunityMeta.vehicleMake,
+      opportunityMeta.vehicleModel,
+      opportunity?.vehicleYear,
+      opportunity?.vehicleMake,
+      opportunity?.vehicleModel,
+    ));
+    const classificationCandidates = [
+      profile.assetType,
+      profile.assetClassification,
+      asset?.type,
+      asset?.classification,
+      assetMeta.type,
+      assetMeta.classification,
+      opportunity?.assetType,
+      opportunity?.assetClassification,
+      opportunityMeta.assetType,
+      opportunityMeta.assetClassification,
+    ];
+    const classifiedVehicle = classificationCandidates.some((value) => vehicleClassification(value));
+    const classifiedGenericAssetDetails = classifiedVehicle && Boolean(first(
+      assetMeta.year,
+      assetMeta.make,
+      assetMeta.model,
+    ));
+    const vehicleLike = Boolean(vehicleIdentity || explicitVehicleDetails || classifiedGenericAssetDetails);
     const recipientType = upper(first(profile.recipientType, profile.payeeType, vehicleLike ? 'DEALER' : null));
     const externalRecipient = Boolean(first(profile.payeeName, pkg.beneficiaryName, closing?.beneficiaryName));
 
