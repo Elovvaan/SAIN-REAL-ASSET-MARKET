@@ -43,9 +43,25 @@ export class UnifiedMarketOperationsQueueService {
     this.coreHeartbeat = coreHeartbeat;
     this.coinAgents = new SraCoinAgentService(domain);
     this.contextReasoning = new ContextInstructionReasoningService(domain);
+    this.intelligenceHydrated = false;
+    this.intelligenceHydrationPromise = null;
   }
 
   transactions() { return this.domain.list(TRANSACTION_TYPE); }
+
+  async ensureIntelligenceHydrated() {
+    if (this.intelligenceHydrated) return;
+    if (typeof this.domain.hydrate !== 'function') {
+      this.intelligenceHydrated = true;
+      return;
+    }
+    if (!this.intelligenceHydrationPromise) {
+      this.intelligenceHydrationPromise = Promise.resolve(this.domain.hydrate(INTELLIGENCE_RECORD_TYPES))
+        .then(() => { this.intelligenceHydrated = true; })
+        .finally(() => { this.intelligenceHydrationPromise = null; });
+    }
+    await this.intelligenceHydrationPromise;
+  }
 
   attachCoinAgent(entry) {
     if (!entry.positionId) return entry;
@@ -183,9 +199,7 @@ export class UnifiedMarketOperationsQueueService {
   }
 
   async buildPersisted() {
-    if (typeof this.domain.hydrate === 'function') {
-      await this.domain.hydrate(INTELLIGENCE_RECORD_TYPES);
-    }
+    await this.ensureIntelligenceHydrated();
     const contextRecords = new Map();
     for (const pkg of this.domain.list('EXPORT_PACKAGE')) {
       if (String(pkg.exportKind || '').toUpperCase() !== 'FINANCING_DISBURSEMENT') continue;
