@@ -38,6 +38,10 @@ export class ContextInstructionReasoningService {
     const participantId = pkg.borrowerParticipantId || pkg.participantId || opportunity?.applicantParticipantId || null;
     const participant = participantId ? this.domain.get('PARTICIPANT', participantId) : null;
     const profile = opportunity?.transactionProfile || {};
+    const relatedAssetId = Array.isArray(opportunity?.relatedAssetIds) ? opportunity.relatedAssetIds[0] : null;
+    const asset = relatedAssetId ? this.domain.get('ASSET_ACCOUNT', relatedAssetId) : null;
+    const assetMeta = asset?.metadata || asset?.details || {};
+    const opportunityMeta = opportunity?.metadata || {};
     const financingTransactionId = pkg.financingTransactionId || closing?.financingTransactionId || null;
     return {
       pkg,
@@ -45,6 +49,9 @@ export class ContextInstructionReasoningService {
       opportunity,
       participant,
       profile,
+      asset,
+      assetMeta,
+      opportunityMeta,
       participantId,
       financingTransactionId,
       history: this.intelligence.contextFor(financingTransactionId || exportPackageId),
@@ -53,10 +60,39 @@ export class ContextInstructionReasoningService {
 
   reasonForExportPackage(exportPackageId) {
     const context = this.exportContext(exportPackageId);
-    const { pkg, closing, opportunity, profile, financingTransactionId, history } = context;
+    const {
+      pkg,
+      closing,
+      opportunity,
+      profile,
+      assetMeta,
+      opportunityMeta,
+      financingTransactionId,
+      history,
+    } = context;
     const exportKind = upper(pkg.exportKind);
     const isFinancingDisbursement = exportKind === 'FINANCING_DISBURSEMENT';
-    const vehicleLike = Boolean(first(profile.vin, profile.vehicleYear, profile.vehicleMake, profile.vehicleModel, opportunity?.vin));
+    const vehicleLike = Boolean(first(
+      profile.vin,
+      profile.vehicleYear,
+      profile.vehicleMake,
+      profile.vehicleModel,
+      assetMeta.vin,
+      assetMeta.VIN,
+      assetMeta.year,
+      assetMeta.make,
+      assetMeta.model,
+      opportunityMeta.vin,
+      opportunityMeta.VIN,
+      opportunityMeta.vehicleYear,
+      opportunityMeta.vehicleMake,
+      opportunityMeta.vehicleModel,
+      opportunity?.vin,
+      opportunity?.VIN,
+      opportunity?.vehicleYear,
+      opportunity?.vehicleMake,
+      opportunity?.vehicleModel,
+    ));
     const recipientType = upper(first(profile.recipientType, profile.payeeType, vehicleLike ? 'DEALER' : null));
     const externalRecipient = Boolean(first(profile.payeeName, pkg.beneficiaryName, closing?.beneficiaryName));
 
