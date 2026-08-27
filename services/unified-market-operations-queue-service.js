@@ -60,7 +60,7 @@ export class UnifiedMarketOperationsQueueService {
     }
   }
 
-  build() {
+  build(contextRecords = new Map()) {
     const tx = this.transactions();
     const queue = [];
     const exceptions = [];
@@ -96,7 +96,10 @@ export class UnifiedMarketOperationsQueueService {
 
     for (const pkg of this.domain.list('EXPORT_PACKAGE')) {
       if (String(pkg.exportKind || '').toUpperCase() === 'FINANCING_DISBURSEMENT' && String(pkg.state || '').toUpperCase() === 'READY_FOR_SETTLEMENT_INSTRUCTION') {
-        const context = this.contextReasoning.recordReasoning(pkg.exportPackageId, 'SRA-EXPORT-AGENT');
+        const persisted = contextRecords.get(pkg.exportPackageId) || null;
+        const reasoning = persisted?.reasoning || this.contextReasoning.reasonForExportPackage(pkg.exportPackageId);
+        const decisionId = persisted?.decision?.decisionId || `AD-CONTEXT-${pkg.exportPackageId}`;
+        const planId = persisted?.plan?.planId || `AP-CONTEXT-${pkg.exportPackageId}`;
         queue.push({
           ...item(pkg.exportPackageId, 'FINANCING_EXPORT', pkg.state, pkg.borrowerParticipantId || pkg.participantId, 'PREPARE_SETTLEMENT_METHOD', 'Financing export is ready. SRA Export Agent should prepare the selected settlement path: bank rail instructions or the dealer funding package.', pkg),
           agentId: 'SRA-EXPORT-AGENT',
@@ -104,13 +107,13 @@ export class UnifiedMarketOperationsQueueService {
           humanApprovalRequired: true,
           availableActions: ['PREPARE_BANK_SETTLEMENT_INSTRUCTION', 'GENERATE_DEALER_FUNDING_PACKAGE'],
           instructionReasoning: {
-            requiredDocuments: context.reasoning.requiredDocuments,
-            unresolvedFields: context.reasoning.unresolvedFields,
-            unresolvedServicingFields: context.reasoning.unresolvedServicingFields,
-            flags: context.reasoning.flags,
-            readyForInstructionGeneration: context.reasoning.readyForInstructionGeneration,
-            decisionId: context.decision.decisionId,
-            planId: context.plan.planId,
+            requiredDocuments: reasoning.requiredDocuments,
+            unresolvedFields: reasoning.unresolvedFields,
+            unresolvedServicingFields: reasoning.unresolvedServicingFields,
+            flags: reasoning.flags,
+            readyForInstructionGeneration: reasoning.readyForInstructionGeneration,
+            decisionId,
+            planId,
           },
         });
       }
@@ -171,8 +174,18 @@ export class UnifiedMarketOperationsQueueService {
     };
   }
 
-  explain() {
-    const result = this.build();
+  async buildPersisted() {
+    const contextRecords = new Map();
+    for (const pkg of this.domain.list('EXPORT_PACKAGE')) {
+      if (String(pkg.exportKind || '').toUpperCase() !== 'FINANCING_DISBURSEMENT') continue;
+      if (String(pkg.state || '').toUpperCase() !== 'READY_FOR_SETTLEMENT_INSTRUCTION') continue;
+      const context = await this.contextReasoning.recordReasoning(pkg.exportPackageId, 'SRA-EXPORT-AGENT');
+      contextRecords.set(pkg.exportPackageId, context);
+    }
+    return this.build(contextRecords);
+  }
+
+  explainResult(result) {
     const next = result.exceptions[0] || result.queue[0] || null;
     return {
       ...result,
@@ -189,5 +202,13 @@ export class UnifiedMarketOperationsQueueService {
         explanation: next.coinAgent?.explanation || next.explanation,
       } : null,
     };
+  }
+
+  explain() {
+    return this.explainResult(this.build());
+  }
+
+  async explainPersisted() {
+    return this.explainResult(await this.buildPersisted());
   }
 }
