@@ -14,7 +14,7 @@ export async function installAgentWorkforceAdminRoutes({ router, domain, databas
   await serviceFeeBilling.initialize('SRA_AGENT_OS');
 
   const synchronizedAgents = await workforce.synchronizeOperatingAgents(agentOS.registry(), { id: 'SRA_AGENT_OS' });
-  const initialQueue = operationsQueue.explain();
+  const initialQueue = await operationsQueue.explainPersisted();
   const initialRun = await workforce.runOperationalQueue(initialQueue, { id: 'SRA_AGENT_OS' });
 
   const queueRates = (queue) => [...(queue.queue || []), ...(queue.exceptions || [])].map(entry => ({
@@ -31,7 +31,7 @@ export async function installAgentWorkforceAdminRoutes({ router, domain, databas
 
   router.get('/api/admin/agent-workforce/status', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
-    const queue = operationsQueue.explain();
+    const queue = await operationsQueue.explainPersisted();
     return res.json({
       workforce: workforce.status(),
       agentOS: agentOS.brief(),
@@ -46,7 +46,7 @@ export async function installAgentWorkforceAdminRoutes({ router, domain, databas
 
   router.get('/api/admin/agent-workforce/service-rates', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
-    const queue = operationsQueue.explain();
+    const queue = await operationsQueue.explainPersisted();
     return res.json({
       schedule: serviceFees.policy(),
       billing: serviceFeeBilling.status(),
@@ -78,7 +78,7 @@ export async function installAgentWorkforceAdminRoutes({ router, domain, databas
     const session = await requireAdmin(req, res); if (!session) return;
     try {
       const synchronized = await workforce.synchronizeOperatingAgents(agentOS.registry(), session);
-      const queue = operationsQueue.explain();
+      const queue = await operationsQueue.explainPersisted();
       const run = await workforce.runOperationalQueue(queue, { id: 'SRA_AGENT_OS' });
       return res.json({
         agentOS: agentOS.brief(),
