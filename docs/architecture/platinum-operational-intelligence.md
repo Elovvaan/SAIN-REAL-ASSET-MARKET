@@ -77,4 +77,4 @@ The gateway closes the operational loop:
 
 `SRA context -> decision -> plan -> governed action -> funding package -> external participant response -> operational event -> next reasoning cycle`
 
-External settlement completion, dealer acceptance, bank processing, receipt of funds, or any other outside-world result remains unverified until evidence supports an `OUTCOME_EVALUATION`.
+A participant statement such as "submitted for processing" is recorded as evidence of that participant's statement, not as proof of final settlement. Dealer acceptance, bank processing, receipt of funds, settlement completion, and other outside-world outcomes remain unresolved until their required evidence supports an `OUTCOME_EVALUATION`.
