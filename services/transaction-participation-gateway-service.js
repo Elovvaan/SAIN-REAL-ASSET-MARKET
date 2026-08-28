@@ -16,6 +16,8 @@ export class TransactionParticipationGatewayService {
   constructor(domain) {
     if (!domain) throw new Error('Transaction participation requires the SRA domain store.');
     this.domain = domain;
+    this.hydrated = false;
+    this.hydrationPromise = null;
   }
 
   records(type) { return typeof this.domain.list === 'function' ? this.domain.list(type) : []; }
@@ -24,6 +26,20 @@ export class TransactionParticipationGatewayService {
     if (typeof this.domain.create === 'function') return await this.domain.create(type, record);
     if (typeof this.domain.set === 'function') return await this.domain.set(type, recordId, record);
     throw new Error('SRA domain store does not expose a supported persistence method.');
+  }
+
+  async ensureHydrated() {
+    if (this.hydrated) return;
+    if (typeof this.domain.hydrate !== 'function') {
+      this.hydrated = true;
+      return;
+    }
+    if (!this.hydrationPromise) {
+      this.hydrationPromise = Promise.resolve(this.domain.hydrate([WINDOW_TYPE, EVENT_TYPE]))
+        .then(() => { this.hydrated = true; })
+        .finally(() => { this.hydrationPromise = null; });
+    }
+    await this.hydrationPromise;
   }
 
   async observe(input = {}) {
@@ -63,11 +79,13 @@ export class TransactionParticipationGatewayService {
   }
 
   async createWindow(exportPackageId, input = {}) {
+    await this.ensureHydrated();
     const pkg = this.findPackage(exportPackageId);
     if (!pkg) throw new Error('Funding package was not found.');
     const existing = this.windowsForPackage(pkg.exportPackageId)
       .find((record) => record.state === 'OPEN' && (!record.expiresAt || new Date(record.expiresAt) > new Date()));
-    if (existing && !input.rotateAccessCode) {
+    if (existing) {
+      if (input.rotateAccessCode) return await this.reissueAccessCode(existing.windowId, { actorName: input.createdBy || 'SRA' });
       return { window: this.publicWindow(existing, pkg), accessCode: null, existing: true };
     }
 
@@ -99,6 +117,7 @@ export class TransactionParticipationGatewayService {
       createdAt,
       expiresAt,
       lastAccessedAt: null,
+      accessCodeRotatedAt: null,
       closedAt: null,
     };
     await this.persist(WINDOW_TYPE, windowId, record);
@@ -108,6 +127,32 @@ export class TransactionParticipationGatewayService {
       summary: 'Transaction participation window opened.',
     });
     return { window: this.publicWindow(record, pkg), accessCode, existing: false };
+  }
+
+  async reissueAccessCode(windowId, input = {}) {
+    await this.ensureHydrated();
+    const record = this.findWindow(windowId);
+    if (!record) throw new Error('Participation window was not found.');
+    if (record.state !== 'OPEN') throw new Error('Participation window is not open.');
+    if (record.expiresAt && new Date(record.expiresAt) <= new Date()) throw new Error('Participation access has expired.');
+    const accessCode = crypto.randomBytes(6).toString('hex').toUpperCase();
+    const updated = {
+      ...record,
+      accessCodeHash: hash(accessCode),
+      accessCodeRotatedAt: now(),
+    };
+    await this.persist(WINDOW_TYPE, record.windowId, updated);
+    await this.recordEvent(updated, 'PARTICIPATION_ACCESS_CODE_REISSUED', {
+      actorType: 'SRA',
+      actorName: input.actorName || 'SRA',
+      summary: 'Transaction participation access code reissued.',
+    });
+    return {
+      window: this.publicWindow(updated, this.findPackage(updated.exportPackageId)),
+      accessCode,
+      existing: true,
+      reissued: true,
+    };
   }
 
   publicWindow(record, pkg = null) {
@@ -165,6 +210,7 @@ export class TransactionParticipationGatewayService {
   }
 
   async access(credentials) {
+    await this.ensureHydrated();
     const { record, pkg } = this.authenticate(credentials);
     const updated = { ...record, lastAccessedAt: now() };
     await this.persist(WINDOW_TYPE, record.windowId, updated);
@@ -212,6 +258,7 @@ export class TransactionParticipationGatewayService {
   }
 
   async confirmReceipt(credentials, input = {}) {
+    await this.ensureHydrated();
     const { record } = this.authenticate(credentials);
     const event = await this.recordEvent(record, 'FUNDING_PACKAGE_RECEIPT_CONFIRMED', {
       actorName: input.contactName,
@@ -223,6 +270,7 @@ export class TransactionParticipationGatewayService {
   }
 
   async identifyContact(credentials, input = {}) {
+    await this.ensureHydrated();
     const { record } = this.authenticate(credentials);
     const event = await this.recordEvent(record, 'TRANSACTION_CONTACT_IDENTIFIED', {
       actorName: input.contactName,
@@ -235,6 +283,7 @@ export class TransactionParticipationGatewayService {
   }
 
   async askQuestion(credentials, input = {}) {
+    await this.ensureHydrated();
     const { record } = this.authenticate(credentials);
     const question = clean(input.question, 5000);
     if (!question) throw new Error('A processing question is required.');
@@ -249,6 +298,7 @@ export class TransactionParticipationGatewayService {
   }
 
   async reportIssue(credentials, input = {}) {
+    await this.ensureHydrated();
     const { record } = this.authenticate(credentials);
     const issue = clean(input.issue, 5000);
     if (!issue) throw new Error('A processing issue is required.');
@@ -263,6 +313,7 @@ export class TransactionParticipationGatewayService {
   }
 
   async confirmProcessing(credentials, input = {}) {
+    await this.ensureHydrated();
     const { record } = this.authenticate(credentials);
     const event = await this.recordEvent(record, 'PACKAGE_SUBMITTED_FOR_PROCESSING', {
       actorName: input.contactName,
@@ -275,6 +326,7 @@ export class TransactionParticipationGatewayService {
   }
 
   async recordDocument(credentials, document, input = {}) {
+    await this.ensureHydrated();
     const { record } = this.authenticate(credentials);
     if (!document?.id) throw new Error('Stored document metadata is required.');
     const event = await this.recordEvent(record, 'TRANSACTION_DOCUMENT_UPLOADED', {
