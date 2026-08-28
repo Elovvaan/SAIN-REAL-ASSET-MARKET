@@ -5,86 +5,45 @@ import { FinancingClosingService } from './financing-closing-service.js';
 import { FinancingLifecycleService, normalizeFinancingStage } from './financing-lifecycle-service.js';
 import { AssetServicingService } from './asset-servicing-service.js';
 
-const CONTINUATION_TYPE = 'AUTONOMOUS_CONTINUATION';
-const FOLLOW_UP_TYPE = 'AUTONOMOUS_CONTINUATION_FOLLOW_UP';
-const BLOCKING_PHASE5 = new Set(['AWAITING_AUTHORITY','EXCEPTION_RESOLUTION_ACTIVE','FAILED_EXTERNAL_OUTCOME_BLOCKED']);
-const TERMINAL_SERVICING = new Set(['COMPLETED','CLOSED','ARCHIVED']);
+const CONTINUATION_TYPE='AUTONOMOUS_CONTINUATION';
+const FOLLOW_UP_TYPE='AUTONOMOUS_CONTINUATION_FOLLOW_UP';
+const BLOCKING_PHASE5=new Set(['AWAITING_AUTHORITY','EXCEPTION_RESOLUTION_ACTIVE','FAILED_EXTERNAL_OUTCOME_BLOCKED']);
+const TERMINAL_SERVICING=new Set(['COMPLETED','CLOSED','ARCHIVED']);
 function now(){return new Date().toISOString();}
 function digest(...parts){return crypto.createHash('sha256').update(parts.map(v=>String(v??'')).join('|')).digest('hex').slice(0,20).toUpperCase();}
 
-export class AutonomousOperationalContinuationService {
-  constructor(domain, options={}){
-    if(!domain) throw new Error('Autonomous operational continuation requires the SRA domain store.');
-    this.domain=domain;
-    this.outcomes=options.outcomes||new ExternalOutcomeReconciliationService(domain);
-    this.counterparty=options.counterparty||new CounterpartyOperationsService(domain);
-    this.servicing=options.servicing||new AssetServicingService(domain);
-    this.closing=options.closing||new FinancingClosingService(domain,this.servicing);
-    this.lifecycle=options.lifecycle||new FinancingLifecycleService(domain);
-  }
-  records(type){return typeof this.domain.list==='function'?this.domain.list(type):[];}
-  async persist(type,id,record){if(typeof this.domain.put==='function')return await this.domain.put(type,id,record);if(typeof this.domain.create==='function')return await this.domain.create(type,record);if(typeof this.domain.set==='function')return await this.domain.set(type,id,record);throw new Error('SRA domain store does not expose a supported persistence method.');}
-  package(reference){const ref=String(reference||'').trim();return this.records('EXPORT_PACKAGE').find(p=>p.exportPackageId===ref||p.id===ref||p.financingTransactionId===ref)||null;}
-  opportunity(pkg){return pkg?.opportunityId?(this.domain.get?.('FUNDING_OPPORTUNITY',pkg.opportunityId)||this.records('FUNDING_OPPORTUNITY').find(r=>r.opportunityId===pkg.opportunityId||r.id===pkg.opportunityId)||null):null;}
-  closingRecord(pkg){return pkg?.closingId?(this.domain.get?.('FINANCING_CLOSING',pkg.closingId)||this.records('FINANCING_CLOSING').find(r=>r.closingId===pkg.closingId||r.id===pkg.closingId)||null):null;}
-  disbursement(pkg){return pkg?.disbursementId?(this.domain.get?.('FINANCING_DISBURSEMENT',pkg.disbursementId)||this.records('FINANCING_DISBURSEMENT').find(r=>r.disbursementId===pkg.disbursementId||r.id===pkg.disbursementId)||null):null;}
-  continuationId(pkg){return `AC-FINANCING-${pkg.exportPackageId}`;}
-  latestOutcome(pkg){return this.outcomes.latestOutcome?.(pkg)||this.records('OUTCOME_EVALUATION').find(r=>r.exportPackageId===pkg.exportPackageId)||null;}
-  externalReference(pkg,outcome){const direct=pkg.externalSettlementReference||null;if(direct)return direct;const evidence=outcome?.evidence||[];for(const e of evidence){if(e.externalReference)return e.externalReference;}return null;}
-  servicingContext(pkg,closing,opportunity){return{assetAccountId:closing?.assetAccountId||closing?.settlementInstructions?.assetAccountId||opportunity?.assetAccountId||pkg.assetAccountId||null,ownerId:closing?.borrowerParticipantId||pkg.borrowerParticipantId||pkg.participantId||null,servicerId:closing?.settlementInstructions?.servicerId||'SRA',settlementId:pkg.externalSettlementReference||null,nextReviewDate:closing?.settlementInstructions?.nextReviewDate||null};}
-  followUpId(pkg,reason){return `ACF-${digest(pkg.exportPackageId,reason)}`;}
-  async recordFollowUp(pkg,reason,missingFields=[],nextAction='RESOLVE_RECORDED_CONTEXT'){
-    const id=this.followUpId(pkg,reason),existing=this.records(FOLLOW_UP_TYPE).find(r=>r.id===id)||null,at=now();
-    const record={...(existing||{}),id,followUpId:id,exportPackageId:pkg.exportPackageId,financingTransactionId:pkg.financingTransactionId||null,opportunityId:pkg.opportunityId||null,closingId:pkg.closingId||null,reason,missingFields:[...new Set(missingFields)],nextAction,status:'OPEN',assignedAgentId:'SRA-OPERATIONS-AGENT',createdAt:existing?.createdAt||at,updatedAt:at};
-    return await this.persist(FOLLOW_UP_TYPE,id,record);
-  }
-  async evaluate(reference){
-    const pkg=this.package(reference);if(!pkg)throw new Error('Financing export package was not found.');
-    await this.outcomes.reconcile(pkg.exportPackageId);
-    const outcome=this.outcomes.summary(pkg.exportPackageId);
-    const phase5=this.counterparty.statusForPackage(pkg.exportPackageId);
-    const closing=this.closingRecord(pkg),disbursement=this.disbursement(pkg),opportunity=this.opportunity(pkg);
-    const financingStage=opportunity?normalizeFinancingStage(opportunity):null;
-    const servicingAccount=closing?.servicingAccountId?this.servicing.getAccount(closing.servicingAccountId):null;
-    const base={phase:6,exportPackageId:pkg.exportPackageId,financingTransactionId:pkg.financingTransactionId||null,opportunityId:pkg.opportunityId||null,closingId:pkg.closingId||null,disbursementId:pkg.disbursementId||null,phase4Status:outcome.status,phase5Status:phase5.status,financingStage,closingStatus:closing?.status||null,disbursementStatus:disbursement?.status||null,servicingAccountId:closing?.servicingAccountId||null,servicingState:servicingAccount?.state||null,autonomous:false,nextAction:null,status:null,reason:null};
-    if(phase5.status==='AWAITING_AUTHORITY')return{...base,status:'AWAITING_PRINCIPAL_AUTHORITY',nextAction:'PRINCIPAL_REVIEW_REQUIRED',reason:'A Phase 5 counterparty case requires reserved principal authority.'};
-    if(outcome.status==='FAILED_EXTERNAL_OUTCOME'||phase5.status==='FAILED_EXTERNAL_OUTCOME_BLOCKED')return{...base,status:'BLOCKED_FAILED_EXTERNAL_OUTCOME',nextAction:'RECONCILE_FAILED_EXTERNAL_OUTCOME',reason:'External settlement or transfer evidence records a failed result.'};
-    if(phase5.status==='EXCEPTION_RESOLUTION_ACTIVE')return{...base,status:'BLOCKED_COUNTERPARTY_EXCEPTION',nextAction:'RESOLVE_COUNTERPARTY_EXCEPTION',reason:'A counterparty processing exception remains unresolved.'};
-    if(BLOCKING_PHASE5.has(phase5.status))return{...base,status:'BLOCKED_PHASE5',nextAction:'RESOLVE_PHASE5_STATE',reason:'Phase 5 is not eligible for autonomous continuation.'};
-    if(outcome.status!=='VERIFIED')return{...base,status:'AWAITING_VERIFIED_EXTERNAL_OUTCOME',nextAction:'AWAIT_EXTERNAL_CONFIRMATION',reason:'Autonomous continuation requires verified external transfer or settlement evidence.'};
-    if(closing&&disbursement&&closing.status==='AUTHORIZED'&&['AUTHORIZED','SUBMITTED'].includes(disbursement.status)){
-      const externalReference=this.externalReference(pkg,this.latestOutcome(pkg));
-      if(!externalReference)return{...base,status:'BLOCKED_VERIFIED_REFERENCE_REQUIRED',nextAction:'RESOLVE_EXTERNAL_REFERENCE',reason:'The outcome is verified but no recorded external settlement reference is available.'};
-      return{...base,status:'READY_AUTONOMOUS_CONTINUATION',autonomous:true,nextAction:'RECORD_VERIFIED_SETTLEMENT',externalReference,reason:'Verified external evidence can be translated into the authoritative funded state without granting new settlement authority.'};
-    }
-    if(closing?.status==='FUNDED'&&!closing.servicingAccountId){
-      const context=this.servicingContext(pkg,closing,opportunity),missing=[];if(!context.assetAccountId)missing.push('assetAccountId');if(!context.ownerId)missing.push('ownerId');
-      if(missing.length)return{...base,status:'FOLLOW_UP_REQUIRED',nextAction:'RESOLVE_SERVICING_CONTEXT',missingFields:missing,reason:'Funding is complete but recorded servicing boarding context is incomplete.'};
-      return{...base,status:'READY_AUTONOMOUS_CONTINUATION',autonomous:true,nextAction:'BOARD_TO_SERVICING',servicingContext:context,reason:'Funding is recorded and the required servicing account context is already present.'};
-    }
-    if(closing?.status==='SERVICING'&&servicingAccount&&TERMINAL_SERVICING.has(servicingAccount.state)&&financingStage==='SERVICING')return{...base,status:'READY_AUTONOMOUS_CONTINUATION',autonomous:true,nextAction:'CLOSE_COMPLETED_FINANCING',reason:'The servicing account is already in a terminal completed state.'};
-    if(closing?.status==='SERVICING'||financingStage==='SERVICING')return{...base,status:'SERVICING_ACTIVE',nextAction:'CONTINUE_SERVICING_MONITORING',reason:'The financed position is boarded and active in servicing.'};
-    if(financingStage==='CLOSED')return{...base,status:'CONTINUATION_COMPLETE',nextAction:'NONE',reason:'The financing lifecycle is closed.'};
-    return{...base,status:'CURRENT_NO_AUTONOMOUS_ACTION',nextAction:'NONE',reason:'No safe autonomous continuation action is currently eligible.'};
-  }
-  async saveEvaluation(evaluation){const id=`AC-FINANCING-${evaluation.exportPackageId}`,existing=this.records(CONTINUATION_TYPE).find(r=>r.id===id)||null,at=now(),record={...(existing||{}),id,continuationId:id,...evaluation,evaluatedByAgentId:'SRA-CONTINUATION-AGENT',createdAt:existing?.createdAt||at,updatedAt:at};return await this.persist(CONTINUATION_TYPE,id,record);}
-  async execute(reference,options={}){
-    const actorId=options.agentId||'SRA-CONTINUATION-AGENT';let evaluation=await this.evaluate(reference);const steps=[];
-    for(let i=0;i<4&&evaluation.autonomous;i++){
-      if(evaluation.nextAction==='RECORD_VERIFIED_SETTLEMENT'){
-        const result=await this.closing.recordSettlement(evaluation.closingId,evaluation.disbursementId,{externalReference:evaluation.externalReference},actorId);steps.push({action:'RECORD_VERIFIED_SETTLEMENT',status:'COMPLETED',externalReference:evaluation.externalReference,financedPositionId:result.financedPosition?.positionId||null});
-      }else if(evaluation.nextAction==='BOARD_TO_SERVICING'){
-        const result=await this.closing.boardToServicing(evaluation.closingId,evaluation.servicingContext,actorId);if(evaluation.opportunityId)await this.lifecycle.transition(evaluation.opportunityId,'SERVICING',{source:'PLATINUM_PHASE_6',referenceId:evaluation.closingId,reason:'Funded financing boarded to servicing from recorded servicing context.'},actorId);steps.push({action:'BOARD_TO_SERVICING',status:'COMPLETED',servicingAccountId:result.servicingAccount?.servicingAccountId||null});
-      }else if(evaluation.nextAction==='CLOSE_COMPLETED_FINANCING'){
-        await this.lifecycle.transition(evaluation.opportunityId,'CLOSED',{source:'PLATINUM_PHASE_6',referenceId:evaluation.servicingAccountId,reason:'Servicing account is recorded in a completed terminal state.'},actorId);steps.push({action:'CLOSE_COMPLETED_FINANCING',status:'COMPLETED',servicingAccountId:evaluation.servicingAccountId});
-      }else break;
-      evaluation=await this.evaluate(reference);
-    }
-    if(evaluation.status==='FOLLOW_UP_REQUIRED')await this.recordFollowUp(this.package(reference),evaluation.reason,evaluation.missingFields||[],evaluation.nextAction);
-    const record=await this.saveEvaluation({...evaluation,executedSteps:steps,executionStatus:steps.length?'COMPLETED_SAFE_CONTINUATION':'NO_AUTONOMOUS_EXECUTION'});
-    return{record,steps,summary:this.summary(reference)};
-  }
-  summary(reference){const pkg=this.package(reference);if(!pkg)throw new Error('Financing export package was not found.');const record=this.records(CONTINUATION_TYPE).find(r=>r.id===this.continuationId(pkg))||null;return record?{phase:6,status:record.status,nextAction:record.nextAction,autonomous:Boolean(record.autonomous),executionStatus:record.executionStatus||null,executedStepCount:record.executedSteps?.length||0,updatedAt:record.updatedAt}: {phase:6,status:'NOT_EVALUATED',nextAction:'EVALUATE_CONTINUATION',autonomous:false,executionStatus:null,executedStepCount:0,updatedAt:null};}
-  async runAll(){const results=[];for(const pkg of this.records('EXPORT_PACKAGE').filter(p=>String(p.exportKind||'').toUpperCase()==='FINANCING_DISBURSEMENT'))results.push(await this.execute(pkg.exportPackageId));return{phase:6,processed:results.length,results};}
+export class AutonomousOperationalContinuationService{
+ constructor(domain,options={}){if(!domain)throw new Error('Autonomous operational continuation requires the SRA domain store.');this.domain=domain;this.outcomes=options.outcomes||new ExternalOutcomeReconciliationService(domain);this.counterparty=options.counterparty||new CounterpartyOperationsService(domain);this.servicing=options.servicing||new AssetServicingService(domain);this.closing=options.closing||new FinancingClosingService(domain,this.servicing);this.lifecycle=options.lifecycle||new FinancingLifecycleService(domain);}
+ records(type){return typeof this.domain.list==='function'?this.domain.list(type):[];}
+ async persist(type,id,record){if(typeof this.domain.put==='function')return await this.domain.put(type,id,record);if(typeof this.domain.create==='function')return await this.domain.create(type,record);if(typeof this.domain.set==='function')return await this.domain.set(type,id,record);throw new Error('SRA domain store does not expose a supported persistence method.');}
+ package(reference){const ref=String(reference||'').trim();return this.records('EXPORT_PACKAGE').find(p=>p.exportPackageId===ref||p.id===ref||p.financingTransactionId===ref)||null;}
+ opportunity(pkg){return pkg?.opportunityId?(this.domain.get?.('FUNDING_OPPORTUNITY',pkg.opportunityId)||this.records('FUNDING_OPPORTUNITY').find(r=>r.opportunityId===pkg.opportunityId||r.id===pkg.opportunityId)||null):null;}
+ closingRecord(pkg){return pkg?.closingId?(this.domain.get?.('FINANCING_CLOSING',pkg.closingId)||this.records('FINANCING_CLOSING').find(r=>r.closingId===pkg.closingId||r.id===pkg.closingId)||null):null;}
+ disbursement(pkg){return pkg?.disbursementId?(this.domain.get?.('FINANCING_DISBURSEMENT',pkg.disbursementId)||this.records('FINANCING_DISBURSEMENT').find(r=>r.disbursementId===pkg.disbursementId||r.id===pkg.disbursementId)||null):null;}
+ continuationId(pkg){return`AC-FINANCING-${pkg.exportPackageId}`;}
+ latestOutcome(pkg){return this.outcomes.latestOutcome?.(pkg)||this.records('OUTCOME_EVALUATION').find(r=>r.exportPackageId===pkg.exportPackageId)||null;}
+ externalReference(pkg,outcome){if(pkg.externalSettlementReference)return pkg.externalSettlementReference;for(const evidence of outcome?.evidence||[]){if(evidence.externalReference)return evidence.externalReference;}return null;}
+ servicingContext(pkg,closing,opportunity){return{assetAccountId:closing?.assetAccountId||closing?.settlementInstructions?.assetAccountId||opportunity?.assetAccountId||pkg.assetAccountId||null,ownerId:closing?.borrowerParticipantId||pkg.borrowerParticipantId||pkg.participantId||null,servicerId:closing?.settlementInstructions?.servicerId||'SRA',settlementId:pkg.externalSettlementReference||null,nextReviewDate:closing?.settlementInstructions?.nextReviewDate||null};}
+ followUpId(pkg,reason){return`ACF-${digest(pkg.exportPackageId,reason)}`;}
+ async recordFollowUp(pkg,reason,missingFields=[],nextAction='RESOLVE_RECORDED_CONTEXT'){const id=this.followUpId(pkg,reason),existing=this.records(FOLLOW_UP_TYPE).find(r=>r.id===id)||null,at=now(),record={...(existing||{}),id,followUpId:id,exportPackageId:pkg.exportPackageId,financingTransactionId:pkg.financingTransactionId||null,opportunityId:pkg.opportunityId||null,closingId:pkg.closingId||null,reason,missingFields:[...new Set(missingFields)],nextAction,status:'OPEN',assignedAgentId:'SRA-OPERATIONS-AGENT',createdAt:existing?.createdAt||at,updatedAt:at};return await this.persist(FOLLOW_UP_TYPE,id,record);}
+ async evaluate(reference){
+  const pkg=this.package(reference);if(!pkg)throw new Error('Financing export package was not found.');await this.outcomes.reconcile(pkg.exportPackageId);const outcome=this.outcomes.summary(pkg.exportPackageId),phase5=this.counterparty.statusForPackage(pkg.exportPackageId),closing=this.closingRecord(pkg),disbursement=this.disbursement(pkg),opportunity=this.opportunity(pkg),financingStage=opportunity?normalizeFinancingStage(opportunity):null,servicingAccount=closing?.servicingAccountId?this.servicing.getAccount(closing.servicingAccountId):null;
+  const base={phase:6,exportPackageId:pkg.exportPackageId,financingTransactionId:pkg.financingTransactionId||null,opportunityId:pkg.opportunityId||null,closingId:pkg.closingId||null,disbursementId:pkg.disbursementId||null,phase4Status:outcome.status,phase5Status:phase5.status,financingStage,closingStatus:closing?.status||null,disbursementStatus:disbursement?.status||null,servicingAccountId:closing?.servicingAccountId||null,servicingState:servicingAccount?.state||null,autonomous:false,nextAction:null,status:null,reason:null};
+  if(phase5.status==='AWAITING_AUTHORITY')return{...base,status:'AWAITING_PRINCIPAL_AUTHORITY',nextAction:'PRINCIPAL_REVIEW_REQUIRED',reason:'A Phase 5 counterparty case requires reserved principal authority.'};
+  if(outcome.status==='FAILED_EXTERNAL_OUTCOME'||phase5.status==='FAILED_EXTERNAL_OUTCOME_BLOCKED')return{...base,status:'BLOCKED_FAILED_EXTERNAL_OUTCOME',nextAction:'RECONCILE_FAILED_EXTERNAL_OUTCOME',reason:'External settlement or transfer evidence records a failed result.'};
+  if(phase5.status==='EXCEPTION_RESOLUTION_ACTIVE')return{...base,status:'BLOCKED_COUNTERPARTY_EXCEPTION',nextAction:'RESOLVE_COUNTERPARTY_EXCEPTION',reason:'A counterparty processing exception remains unresolved.'};
+  if(BLOCKING_PHASE5.has(phase5.status))return{...base,status:'BLOCKED_PHASE5',nextAction:'RESOLVE_PHASE5_STATE',reason:'Phase 5 is not eligible for autonomous continuation.'};
+  if(outcome.status!=='VERIFIED')return{...base,status:'AWAITING_VERIFIED_EXTERNAL_OUTCOME',nextAction:'AWAIT_EXTERNAL_CONFIRMATION',reason:'Autonomous continuation requires verified external transfer or settlement evidence.'};
+  if(closing&&disbursement&&closing.status==='AUTHORIZED'&&['AUTHORIZED','SUBMITTED'].includes(disbursement.status)){const externalReference=this.externalReference(pkg,this.latestOutcome(pkg));if(!externalReference)return{...base,status:'BLOCKED_VERIFIED_REFERENCE_REQUIRED',nextAction:'RESOLVE_EXTERNAL_REFERENCE',reason:'The outcome is verified but no recorded external settlement reference is available.'};return{...base,status:'READY_AUTONOMOUS_CONTINUATION',autonomous:true,nextAction:'RECORD_VERIFIED_SETTLEMENT',externalReference,reason:'Verified external evidence can be translated into the authoritative funded state without granting new settlement authority.'};}
+  if(closing?.status==='FUNDED'&&!closing.servicingAccountId){const context=this.servicingContext(pkg,closing,opportunity),missing=[];if(!context.assetAccountId)missing.push('assetAccountId');else if(!this.domain.get?.('ASSET_ACCOUNT',context.assetAccountId)&&!this.records('ASSET_ACCOUNT').find(r=>r.assetAccountId===context.assetAccountId||r.id===context.assetAccountId))missing.push('assetAccountRecord');if(!context.ownerId)missing.push('ownerId');if(missing.length)return{...base,status:'FOLLOW_UP_REQUIRED',nextAction:'RESOLVE_SERVICING_CONTEXT',missingFields:missing,reason:'Funding is complete but recorded servicing boarding context is incomplete.'};return{...base,status:'READY_AUTONOMOUS_CONTINUATION',autonomous:true,nextAction:'BOARD_TO_SERVICING',servicingContext:context,reason:'Funding is recorded and the required servicing account context is already present.'};}
+  if(closing?.status==='SERVICING'&&servicingAccount&&TERMINAL_SERVICING.has(servicingAccount.state))return{...base,status:'FOLLOW_UP_REQUIRED',nextAction:'COMPLETE_FINANCING_CLOSURE',missingFields:[],reason:'Servicing is terminal. The existing closing service does not expose an authoritative servicing-to-closed closing operation, so Phase 6 records closure follow-up instead of directly mutating closing state.'};
+  if(closing?.status==='SERVICING'||financingStage==='SERVICING')return{...base,status:'SERVICING_ACTIVE',nextAction:'CONTINUE_SERVICING_MONITORING',reason:'The financed position is boarded and active in servicing.'};
+  if(financingStage==='CLOSED')return{...base,status:'CONTINUATION_COMPLETE',nextAction:'NONE',reason:'The financing lifecycle is closed.'};
+  return{...base,status:'CURRENT_NO_AUTONOMOUS_ACTION',nextAction:'NONE',reason:'No safe autonomous continuation action is currently eligible.'};
+ }
+ async saveEvaluation(evaluation){const id=`AC-FINANCING-${evaluation.exportPackageId}`,existing=this.records(CONTINUATION_TYPE).find(r=>r.id===id)||null,at=now(),record={...(existing||{}),id,continuationId:id,...evaluation,evaluatedByAgentId:'SRA-CONTINUATION-AGENT',createdAt:existing?.createdAt||at,updatedAt:at};return await this.persist(CONTINUATION_TYPE,id,record);}
+ async execute(reference,options={}){const actorId=options.agentId||'SRA-CONTINUATION-AGENT';let evaluation=await this.evaluate(reference);const steps=[];for(let i=0;i<4&&evaluation.autonomous;i++){if(evaluation.nextAction==='RECORD_VERIFIED_SETTLEMENT'){const result=await this.closing.recordSettlement(evaluation.closingId,evaluation.disbursementId,{externalReference:evaluation.externalReference},actorId);steps.push({action:'RECORD_VERIFIED_SETTLEMENT',status:'COMPLETED',externalReference:evaluation.externalReference,financedPositionId:result.financedPosition?.positionId||null});}else if(evaluation.nextAction==='BOARD_TO_SERVICING'){const result=await this.closing.boardToServicing(evaluation.closingId,evaluation.servicingContext,actorId);if(evaluation.opportunityId)await this.lifecycle.transition(evaluation.opportunityId,'SERVICING',{source:'PLATINUM_PHASE_6',referenceId:evaluation.closingId,reason:'Funded financing boarded to servicing from recorded servicing context.'},actorId);steps.push({action:'BOARD_TO_SERVICING',status:'COMPLETED',servicingAccountId:result.servicingAccount?.servicingAccountId||null});}else break;evaluation=await this.evaluate(reference);}if(evaluation.status==='FOLLOW_UP_REQUIRED')await this.recordFollowUp(this.package(reference),evaluation.reason,evaluation.missingFields||[],evaluation.nextAction);const record=await this.saveEvaluation({...evaluation,executedSteps:steps,executionStatus:steps.length?'COMPLETED_SAFE_CONTINUATION':'NO_AUTONOMOUS_EXECUTION'});return{record,steps,summary:this.summary(reference)};}
+ summary(reference){const pkg=this.package(reference);if(!pkg)throw new Error('Financing export package was not found.');const record=this.records(CONTINUATION_TYPE).find(r=>r.id===this.continuationId(pkg))||null;return record?{phase:6,status:record.status,nextAction:record.nextAction,autonomous:Boolean(record.autonomous),executionStatus:record.executionStatus||null,executedStepCount:record.executedSteps?.length||0,updatedAt:record.updatedAt}:{phase:6,status:'NOT_EVALUATED',nextAction:'EVALUATE_CONTINUATION',autonomous:false,executionStatus:null,executedStepCount:0,updatedAt:null};}
+ async runAll(){const results=[];for(const pkg of this.records('EXPORT_PACKAGE').filter(p=>String(p.exportKind||'').toUpperCase()==='FINANCING_DISBURSEMENT'))results.push(await this.execute(pkg.exportPackageId));return{phase:6,processed:results.length,results};}
 }
 export{CONTINUATION_TYPE as AutonomousContinuationRecordType,FOLLOW_UP_TYPE as AutonomousContinuationFollowUpRecordType};
