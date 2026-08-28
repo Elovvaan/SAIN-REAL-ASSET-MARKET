@@ -2,6 +2,7 @@
   if (window.__sraAdminBootstrapInstalled) return;
   window.__sraAdminBootstrapInstalled = true;
 
+  const PERFORMANCE_RUNTIME = ['/admin/admin-performance-runtime.js', 'data-sra-admin-performance-runtime'];
   const SHELL = ['/admin/admin-suite-shell.js', 'data-sra-admin-suite-shell'];
   const WORKSPACE_FEATURES = {
     operations: [
@@ -53,6 +54,7 @@
   };
 
   const workspaceLoads = new Map();
+  let performanceLoad = null;
   let shellLoad = null;
   let booted = false;
   let refreshTimer = null;
@@ -174,25 +176,36 @@
     if (!featureList.length) return;
     if (workspaceLoads.has(workspaceId)) return workspaceLoads.get(workspaceId);
 
-    const pending = (async () => {
-      for (const [source, marker] of featureList) await loadScript(source, marker);
-      mountWorkspaceFeatures(workspaceId, admin);
-      window.dispatchEvent(new CustomEvent('sra:admin-workspace-features-ready', {
-        detail: { workspaceId, featureCount: featureList.length, loadedAt: new Date().toISOString() },
-      }));
-    })().catch((error) => {
-      workspaceLoads.delete(workspaceId);
-      console.error(`SAIN Administration workspace failed to load: ${workspaceId}`, error);
-      throw error;
-    });
+    const pending = Promise.all(featureList.map(([source, marker]) => loadScript(source, marker)))
+      .then(() => {
+        mountWorkspaceFeatures(workspaceId, admin);
+        window.dispatchEvent(new CustomEvent('sra:admin-workspace-features-ready', {
+          detail: { workspaceId, featureCount: featureList.length, loadedAt: new Date().toISOString() },
+        }));
+      })
+      .catch((error) => {
+        workspaceLoads.delete(workspaceId);
+        console.error(`SAIN Administration workspace failed to load: ${workspaceId}`, error);
+        throw error;
+      });
 
     workspaceLoads.set(workspaceId, pending);
     return pending;
   }
 
+  async function ensurePerformanceRuntime() {
+    if (performanceLoad) return performanceLoad;
+    performanceLoad = loadScript(...PERFORMANCE_RUNTIME).catch((error) => {
+      performanceLoad = null;
+      throw error;
+    });
+    return performanceLoad;
+  }
+
   async function ensureShell() {
     if (shellLoad) return shellLoad;
     shellLoad = (async () => {
+      await ensurePerformanceRuntime();
       const [source, marker] = SHELL;
       await loadScript(source, marker);
       const admin = document.querySelector('#admin-view:not(.hidden)');
