@@ -27,6 +27,47 @@ class FlakyDatabase {
   }
 }
 
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
+}
+
+class ControlledDatabase {
+  constructor() {
+    this.records = new Map();
+    this.putCalls = [];
+    this.auditCalls = [];
+    this.firstPutGate = deferred();
+    this.firstAuditGate = deferred();
+    this.failFirstPut = false;
+    this.delayFirstPut = false;
+    this.delayFirstAudit = false;
+  }
+
+  async putRecord(type, id, record) {
+    const callNumber = this.putCalls.length + 1;
+    this.putCalls.push({ type, id, record: JSON.parse(JSON.stringify(record)) });
+    if (callNumber === 1 && this.delayFirstPut) await this.firstPutGate.promise;
+    if (callNumber === 1 && this.failFirstPut) throw new Error('first write failed');
+    this.records.set(`${type}:${id}`, JSON.parse(JSON.stringify(record)));
+  }
+
+  async audit(event) {
+    const callNumber = this.auditCalls.length + 1;
+    this.auditCalls.push(JSON.parse(JSON.stringify(event)));
+    if (callNumber === 1 && this.delayFirstAudit) await this.firstAuditGate.promise;
+  }
+
+  async listRecords(type) {
+    const prefix = `${type}:`;
+    return [...this.records.entries()]
+      .filter(([key]) => key.startsWith(prefix))
+      .map(([, value]) => JSON.parse(JSON.stringify(value)));
+  }
+}
+
 test('failed put does not leave an unpersisted record in cache and next attempt retries', async () => {
   const database = new FlakyDatabase();
   const domain = new PersistentDomainService(database);
@@ -68,4 +109,51 @@ test('failed overwrite restores the previously persisted cache value', async () 
   await domain.put('ACTION_PLAN', updated.id, updated);
   assert.deepEqual(domain.get('ACTION_PLAN', updated.id), updated);
   assert.deepEqual(database.records.get(`ACTION_PLAN:${updated.id}`), updated);
+});
+
+test('overlapping puts for one key are serialized when the older write fails', async () => {
+  const database = new ControlledDatabase();
+  database.delayFirstPut = true;
+  database.failFirstPut = true;
+  const domain = new PersistentDomainService(database);
+  const older = { id: 'AD-CONTEXT-EXP-2', decisionId: 'AD-CONTEXT-EXP-2', decision: 'BLOCKED' };
+  const newer = { ...older, decision: 'READY' };
+
+  const olderPromise = domain.put('AGENT_DECISION', older.id, older);
+  await Promise.resolve();
+  const newerPromise = domain.put('AGENT_DECISION', newer.id, newer);
+  await Promise.resolve();
+
+  assert.equal(database.putCalls.length, 1);
+  database.firstPutGate.resolve();
+
+  await assert.rejects(olderPromise, /first write failed/);
+  await newerPromise;
+
+  assert.equal(database.putCalls.length, 2);
+  assert.deepEqual(domain.get('AGENT_DECISION', newer.id), newer);
+  assert.deepEqual(database.records.get(`AGENT_DECISION:${newer.id}`), newer);
+});
+
+test('a slow older audit cannot overwrite a newer cache value', async () => {
+  const database = new ControlledDatabase();
+  database.delayFirstAudit = true;
+  const domain = new PersistentDomainService(database);
+  const older = { id: 'AP-CONTEXT-EXP-2', planId: 'AP-CONTEXT-EXP-2', status: 'BLOCKED_CONTEXT_REQUIRED' };
+  const newer = { ...older, status: 'READY' };
+
+  const olderPromise = domain.put('ACTION_PLAN', older.id, older);
+  while (database.auditCalls.length === 0) await Promise.resolve();
+  const newerPromise = domain.put('ACTION_PLAN', newer.id, newer);
+  await Promise.resolve();
+
+  assert.equal(database.putCalls.length, 1);
+  database.firstAuditGate.resolve();
+
+  await olderPromise;
+  await newerPromise;
+
+  assert.equal(database.putCalls.length, 2);
+  assert.deepEqual(domain.get('ACTION_PLAN', newer.id), newer);
+  assert.deepEqual(database.records.get(`ACTION_PLAN:${newer.id}`), newer);
 });
