@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import express from 'express';
 import { OnChainTransferService } from '../services/on-chain-transfer-service.js';
+import { generateOnChainAssetCode, isValidOnChainAssetCode, resolveOnChainAssetCode } from '../services/on-chain-asset-code-service.js';
 import { StellarTransferService } from '../services/stellar-transfer-service.js';
 import { BitcoinTransferService } from '../services/bitcoin-transfer-service.js';
 import { EthereumTransferService } from '../services/ethereum-transfer-service.js';
@@ -81,6 +82,16 @@ export function createOnChainProjectionRouter(service) {
     } catch (error) { return handle(res, error); }
   });
 
+  router.get('/assets/code-preview/:instrumentId', (req, res) => {
+    try {
+      const instrumentId = text(req.params.instrumentId);
+      const instrument = service.domain.get('SRA_INSTRUMENT', instrumentId);
+      if (!instrument) return res.status(404).json({ error: 'Instrument not found.' });
+      const assetCode = resolveOnChainAssetCode({ instrumentId, instrument });
+      return res.json({ instrumentId, assetCode, generated: !text(instrument.assetCode || instrument.symbol || instrument.ticker) });
+    } catch (error) { return handle(res, error); }
+  });
+
   router.get('/assets/:assetId', (req, res) => {
     try {
       const asset = service.getAsset(req.params.assetId);
@@ -109,16 +120,22 @@ export function createOnChainProjectionRouter(service) {
         }
       }
 
-      const id = assetIdFor(instrumentId || requestedAsset, network);
-      const existingById = service.getAsset(id);
-      if (existingById) return res.status(200).json({ created: false, asset: existingById });
-
-      const asset = requestedAsset || text(instrument?.assetCode) || text(instrument?.symbol) || text(instrument?.ticker);
+      const asset = resolveOnChainAssetCode({ instrumentId, instrument, requestedAsset });
       if (!asset) {
-        const error = new Error('Asset code is required before creating this instrument on chain. Enter the network asset code explicitly.');
+        const error = new Error('Asset code could not be generated because the instrument identity is missing.');
         error.code = 'ON_CHAIN_ASSET_CODE_REQUIRED';
         throw error;
       }
+      if (!isValidOnChainAssetCode(asset)) {
+        const error = new Error('Asset code must be 1–12 letters or numbers.');
+        error.code = 'ON_CHAIN_ASSET_CODE_INVALID';
+        throw error;
+      }
+
+      const id = assetIdFor(instrumentId || asset, network);
+      const existingById = service.getAsset(id);
+      if (existingById) return res.status(200).json({ created: false, asset: existingById });
+
       const symbol = text(req.body?.symbol) || asset;
       const existing = service.findAsset({ instrumentId, asset, network });
       if (existing) return res.status(200).json({ created: false, asset: existing });
@@ -142,7 +159,7 @@ export function createOnChainProjectionRouter(service) {
 
       const created = await adapter.createAsset({ asset, symbol });
       const record = await service.recordCreated({ assetId: id, network, asset: created.asset || asset, instrumentId: instrumentId || null, symbol: created.symbol || symbol, assetAddress: created.assetAddress, sourceAccount: created.distributionAddress || null, decimals: created.decimals, transactionId: created.transactionId }, actor);
-      return res.status(201).json({ created: true, asset: record, networkResult: created });
+      return res.status(201).json({ created: true, asset: record, networkResult: created, generatedAssetCode: requestedAsset ? null : generateOnChainAssetCode(instrumentId) });
     } catch (error) { return handle(res, error); }
   });
 
