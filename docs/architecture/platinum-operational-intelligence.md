@@ -45,7 +45,7 @@ Phase 3 does not create an `OUTCOME_EVALUATION` merely because SRA completed an 
 
 Financing package generation now opens a transaction-scoped participation window for the external recipient. The window is not a general SRA account and does not grant access to administration, marketplace, ledger, treasury, servicing, or unrelated financing records.
 
-Access requires both the funding package or financing transaction reference and the participation access code issued with the window. The access code is stored only as a SHA-256 digest in the participation-window record.
+Access requires both the funding package or financing transaction reference and the participation access code issued with the window. The access code is generated once during governed funding-package preparation, returned in the internal `ACTION_RESULT` for controlled delivery with the package, and stored only as a SHA-256 digest in the participation-window record.
 
 The participant can:
 
