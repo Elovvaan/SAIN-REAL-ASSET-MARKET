@@ -47,11 +47,24 @@ async function seed(domain) {
   });
 }
 
+function readySummary(plan) {
+  return {
+    status: String(plan?.status || '').toUpperCase() === 'READY' ? 'READY' : 'BLOCKED_CONTEXT_REQUIRED',
+    expectedCount: plan?.steps?.length || 0,
+    resultCount: 0,
+    completedCount: 0,
+    awaitingAuthorityCount: 0,
+    failedCount: 0,
+    pendingCount: plan?.steps?.length || 0,
+  };
+}
+
 test('operations queue exposes Phase 3 readiness and routes execution through the current Phase 2 plan', async () => {
   const domain = new Domain();
   await seed(domain);
   const calls = [];
   const actionExecution = {
+    summarizePlan: readySummary,
     async executePlan(planId, options) {
       calls.push({ planId, options });
       return { planId, status: 'COMPLETED', completedCount: 4, awaitingAuthorityCount: 0, failedCount: 0, results: [] };
@@ -74,25 +87,85 @@ test('operations queue exposes Phase 3 readiness and routes execution through th
   }]);
 });
 
-test('operations queue reports persisted Phase 3 action results without advancing financing state', async () => {
+test('operations queue compares current plan step count rather than completed result count alone', async () => {
   const domain = new Domain();
   await seed(domain);
-  await domain.put('ACTION_RESULT', 'AR-AP-CONTEXT-EXP-1-FUNDING_SETTLEMENT', {
-    id: 'AR-AP-CONTEXT-EXP-1-FUNDING_SETTLEMENT',
-    resultId: 'AR-AP-CONTEXT-EXP-1-FUNDING_SETTLEMENT',
-    planId: 'AP-CONTEXT-EXP-1',
-    planStepId: 'FUNDING_SETTLEMENT',
-    action: 'INCLUDE_DOCUMENT',
+  const service = new UnifiedMarketOperationsQueueService(domain);
+
+  const context = await service.contextReasoning.recordReasoning('EXP-1', 'SRA-EXPORT-AGENT');
+  const firstStep = context.plan.steps[0];
+  const classification = service.actionExecution.classifyStep(firstStep);
+  const inputFingerprint = service.actionExecution.stepFingerprint({
+    plan: context.plan,
+    step: firstStep,
+    exportPackageId: 'EXP-1',
+    classification,
+  });
+  await domain.put('ACTION_RESULT', `AR-${context.plan.planId}-${firstStep.id}`, {
+    id: `AR-${context.plan.planId}-${firstStep.id}`,
+    resultId: `AR-${context.plan.planId}-${firstStep.id}`,
+    planId: context.plan.planId,
+    planStepId: firstStep.id,
+    action: firstStep.action,
     status: 'COMPLETED',
+    data: {
+      executionClass: classification.executionClass,
+      authorityRequired: false,
+      exportPackageId: 'EXP-1',
+      inputFingerprint,
+    },
   });
 
-  const service = new UnifiedMarketOperationsQueueService(domain, null, null, {
-    actionExecution: { async executePlan() { throw new Error('not used'); } },
+  const refreshedPlan = {
+    ...context.plan,
+    steps: [
+      firstStep,
+      { id: 'NEW_HANDOFF', action: 'INCLUDE_RECIPIENT_PROCESSING_INSTRUCTIONS', status: 'REQUIRED' },
+    ],
+  };
+  await domain.put('ACTION_PLAN', context.plan.planId, refreshedPlan);
+  const summary = service.actionExecution.summarizePlan(refreshedPlan, 'EXP-1');
+
+  assert.equal(summary.status, 'READY');
+  assert.equal(summary.expectedCount, 2);
+  assert.equal(summary.completedCount, 1);
+  assert.equal(summary.pendingCount, 1);
+});
+
+test('operations queue reports only current Phase 3 results without advancing financing state', async () => {
+  const domain = new Domain();
+  await seed(domain);
+  const service = new UnifiedMarketOperationsQueueService(domain);
+  const context = await service.contextReasoning.recordReasoning('EXP-1', 'SRA-EXPORT-AGENT');
+  const step = context.plan.steps[0];
+  const classification = service.actionExecution.classifyStep(step);
+  const inputFingerprint = service.actionExecution.stepFingerprint({
+    plan: context.plan,
+    step,
+    exportPackageId: 'EXP-1',
+    classification,
   });
+  await domain.put('ACTION_RESULT', `AR-${context.plan.planId}-${step.id}`, {
+    id: `AR-${context.plan.planId}-${step.id}`,
+    resultId: `AR-${context.plan.planId}-${step.id}`,
+    planId: context.plan.planId,
+    planStepId: step.id,
+    action: step.action,
+    status: 'COMPLETED',
+    data: {
+      executionClass: classification.executionClass,
+      authorityRequired: false,
+      exportPackageId: 'EXP-1',
+      inputFingerprint,
+    },
+  });
+
   const result = await service.explainPersisted();
   const financing = result.queue.find((entry) => entry.id === 'EXP-1');
 
   assert.equal(financing.actionExecution.resultCount, 1);
   assert.equal(financing.actionExecution.completedCount, 1);
+  assert.ok(financing.actionExecution.pendingCount > 0);
+  assert.equal(financing.actionExecution.status, 'READY');
   assert.equal(domain.get('EXPORT_PACKAGE', 'EXP-1').state, 'READY_FOR_SETTLEMENT_INSTRUCTION');
 });
