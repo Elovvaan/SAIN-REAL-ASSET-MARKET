@@ -3,6 +3,7 @@ import { AgentServiceFeeService } from '../services/agent-service-fee-service.js
 import { AgentServiceFeeBillingService } from '../services/agent-service-fee-billing-service.js';
 import { SraAgentOperatingSystemService } from '../services/sra-agent-operating-system-service.js';
 import { UnifiedMarketOperationsQueueService } from '../services/unified-market-operations-queue-service.js';
+import { CounterpartyOperationsStatusService } from '../services/counterparty-operations-status-service.js';
 
 export async function installAgentWorkforceAdminRoutes({ router, domain, database, requireAdmin }) {
   const workforce = new AgentWorkforceService({ domain, database });
@@ -10,6 +11,7 @@ export async function installAgentWorkforceAdminRoutes({ router, domain, databas
   const serviceFeeBilling = new AgentServiceFeeBillingService(domain);
   const operationsQueue = new UnifiedMarketOperationsQueueService(domain);
   const agentOS = new SraAgentOperatingSystemService(domain, { operationsQueue });
+  const counterpartyOperations = new CounterpartyOperationsStatusService(domain);
   await workforce.initialize();
   await serviceFeeBilling.initialize('SRA_AGENT_OS');
 
@@ -28,6 +30,18 @@ export async function installAgentWorkforceAdminRoutes({ router, domain, databas
     positionId: entry.positionId || null,
     serviceFee: serviceFees.quoteWorkflowStage(entry.stage),
   }));
+
+  router.get('/api/admin/counterparty-operations', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    try { return res.json({ phase: 5, operations: await counterpartyOperations.listActive() }); }
+    catch (error) { return res.status(500).json({ error: error?.message || String(error), code: 'SRA_COUNTERPARTY_OPERATIONS_STATUS_FAILED' }); }
+  });
+
+  router.get('/api/admin/counterparty-operations/:exportPackageId', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    try { return res.json(await counterpartyOperations.forExportPackage(req.params.exportPackageId)); }
+    catch (error) { return res.status(400).json({ error: error?.message || String(error), code: 'SRA_COUNTERPARTY_OPERATION_STATUS_FAILED' }); }
+  });
 
   router.get('/api/admin/agent-workforce/status', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
