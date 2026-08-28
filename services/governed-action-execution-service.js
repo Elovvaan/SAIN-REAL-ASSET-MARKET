@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { AchSettlementPacketService } from './ach-settlement-packet-service.js';
 import { TransactionParticipationGatewayService } from './transaction-participation-gateway-service.js';
 
@@ -7,6 +8,10 @@ function now() {
 
 function sameJson(left, right) {
   return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+}
+
+function fingerprint(value) {
+  return crypto.createHash('sha256').update(JSON.stringify(value ?? null)).digest('hex');
 }
 
 const PREPARATION_ACTIONS = new Set([
@@ -55,26 +60,59 @@ export class GovernedActionExecutionService {
     return this;
   }
 
+  async persistGeneratedDocument({ bytes, documentType, exportPackageId, agentId }) {
+    const documents = this.packetService?.documents;
+    if (!documents || typeof documents.store !== 'function') {
+      throw new Error('Generated document persistence is not available.');
+    }
+    const pkg = this.domain.get('EXPORT_PACKAGE', exportPackageId);
+    const filenameByType = {
+      FUNDING_SETTLEMENT: `SRA-Funding-Package-${exportPackageId}.pdf`,
+      DEALER_PROCESSING_INSTRUCTIONS: `SRA-Dealer-Processing-Instructions-${exportPackageId}.pdf`,
+      SERVICING_PAYMENT_INSTRUCTIONS: `SRA-Servicing-Payment-Instructions-${exportPackageId}.pdf`,
+    };
+    const stored = await documents.store({
+      file: {
+        buffer: bytes,
+        size: bytes.length,
+        mimetype: 'application/pdf',
+        originalname: filenameByType[documentType] || `SRA-${documentType}-${exportPackageId}.pdf`,
+      },
+      documentType: `GENERATED_${documentType}`,
+      uploaderId: agentId || 'SRA-EXPORT-AGENT',
+      retentionPolicy: 'FINANCING_TRANSACTION_RECORD',
+      retentionReferenceId: pkg?.opportunityId || exportPackageId,
+    });
+    if (!stored?.ok || !stored.document?.id) {
+      throw new Error(stored?.error || 'Generated document could not be persisted.');
+    }
+    return stored.document;
+  }
+
   registerDefaultExecutors() {
-    this.register('INCLUDE_DOCUMENT', async ({ step, exportPackageId }) => {
+    this.register('INCLUDE_DOCUMENT', async ({ step, exportPackageId, agentId }) => {
       const documentType = String(step.documentType || '').toUpperCase();
       if (!documentType) throw new Error('INCLUDE_DOCUMENT requires documentType.');
 
       if (documentType === 'FUNDING_SETTLEMENT') {
         const bytes = await this.packetService.renderFundingPackage(exportPackageId);
+        const document = await this.persistGeneratedDocument({ bytes, documentType, exportPackageId, agentId });
         const pkg = this.domain.get('EXPORT_PACKAGE', exportPackageId);
         const participation = await this.participationGateway.createWindow(exportPackageId, {
           recipientName: pkg?.beneficiaryName || null,
-          createdBy: 'SRA-EXPORT-AGENT',
+          createdBy: agentId || 'SRA-EXPORT-AGENT',
         });
         return {
           status: 'COMPLETED',
-          externalReference: `funding-package:${exportPackageId}`,
+          externalReference: document.id,
           data: {
             documentType,
             exportPackageId,
+            documentId: document.id,
+            documentSha256: document.sha256 || null,
             byteLength: bytes.length,
             generated: true,
+            retrievable: true,
             participationWindow: participation.window,
             participationAccessCode: participation.accessCode,
             participationAccessCodeIssued: Boolean(participation.accessCode),
@@ -83,18 +121,36 @@ export class GovernedActionExecutionService {
       }
       if (documentType === 'DEALER_PROCESSING_INSTRUCTIONS') {
         const bytes = await this.packetService.renderDealerProcessingInstructions(exportPackageId);
+        const document = await this.persistGeneratedDocument({ bytes, documentType, exportPackageId, agentId });
         return {
           status: 'COMPLETED',
-          externalReference: `dealer-processing-instructions:${exportPackageId}`,
-          data: { documentType, exportPackageId, byteLength: bytes.length, generated: true },
+          externalReference: document.id,
+          data: {
+            documentType,
+            exportPackageId,
+            documentId: document.id,
+            documentSha256: document.sha256 || null,
+            byteLength: bytes.length,
+            generated: true,
+            retrievable: true,
+          },
         };
       }
       if (documentType === 'SERVICING_PAYMENT_INSTRUCTIONS') {
         const bytes = await this.packetService.renderServicingInstructions(exportPackageId);
+        const document = await this.persistGeneratedDocument({ bytes, documentType, exportPackageId, agentId });
         return {
           status: 'COMPLETED',
-          externalReference: `servicing-payment-instructions:${exportPackageId}`,
-          data: { documentType, exportPackageId, byteLength: bytes.length, generated: true },
+          externalReference: document.id,
+          data: {
+            documentType,
+            exportPackageId,
+            documentId: document.id,
+            documentSha256: document.sha256 || null,
+            byteLength: bytes.length,
+            generated: true,
+            retrievable: true,
+          },
         };
       }
 
@@ -162,6 +218,85 @@ export class GovernedActionExecutionService {
     return { action, executionClass: 'UNMAPPED', authorityRequired: true, reason: 'NO_REGISTERED_EXECUTOR' };
   }
 
+  sourceSnapshot(exportPackageId) {
+    const pkg = exportPackageId ? this.domain.get('EXPORT_PACKAGE', exportPackageId) : null;
+    const closing = pkg?.closingId ? this.domain.get('FINANCING_CLOSING', pkg.closingId) : null;
+    const opportunity = pkg?.opportunityId ? this.domain.get('FUNDING_OPPORTUNITY', pkg.opportunityId) : null;
+    return { pkg, closing, opportunity };
+  }
+
+  stepFingerprint({ plan, step, exportPackageId, classification = null }) {
+    const resolvedClassification = classification || this.classifyStep(step);
+    return fingerprint({
+      planId: plan?.planId || null,
+      sourceDecisionId: plan?.sourceDecisionId || null,
+      step,
+      classification: resolvedClassification,
+      source: this.sourceSnapshot(exportPackageId),
+    });
+  }
+
+  resultIsCurrent({ plan, step, exportPackageId, result = null }) {
+    const existing = result || this.existingResult(plan.planId, step.id);
+    if (!existing) return false;
+    const classification = this.classifyStep(step);
+    const currentFingerprint = this.stepFingerprint({ plan, step, exportPackageId, classification });
+    if (existing.data?.inputFingerprint !== currentFingerprint) return false;
+
+    if (['COMPLETED', 'COMPLETED_POLICY'].includes(existing.status)) {
+      return classification.authorityRequired === false;
+    }
+    if (existing.status === 'AWAITING_AUTHORITY') {
+      return classification.authorityRequired === true
+        && existing.data?.authorityReason === classification.reason
+        && existing.data?.executionClass === classification.executionClass;
+    }
+    return false;
+  }
+
+  summarizePlan(plan, exportPackageId) {
+    if (!plan) return {
+      status: 'READY', expectedCount: 0, resultCount: 0, completedCount: 0,
+      awaitingAuthorityCount: 0, failedCount: 0, pendingCount: 0,
+    };
+    const steps = Array.isArray(plan.steps) ? plan.steps : [];
+    const currentResults = [];
+    let pendingCount = 0;
+    for (const step of steps) {
+      const result = this.existingResult(plan.planId, step.id);
+      if (result && this.resultIsCurrent({ plan, step, exportPackageId, result })) currentResults.push(result);
+      else if (result?.status === 'FAILED') {
+        const classification = this.classifyStep(step);
+        const currentFingerprint = this.stepFingerprint({ plan, step, exportPackageId, classification });
+        if (result.data?.inputFingerprint === currentFingerprint) currentResults.push(result);
+        else pendingCount += 1;
+      } else {
+        pendingCount += 1;
+      }
+    }
+    const completed = currentResults.filter((record) => ['COMPLETED', 'COMPLETED_POLICY'].includes(record.status));
+    const awaiting = currentResults.filter((record) => record.status === 'AWAITING_AUTHORITY');
+    const failed = currentResults.filter((record) => record.status === 'FAILED');
+    const status = String(plan.status || '').toUpperCase() !== 'READY'
+      ? 'BLOCKED_CONTEXT_REQUIRED'
+      : failed.length
+        ? 'FAILED'
+        : awaiting.length
+          ? 'AWAITING_AUTHORITY'
+          : steps.length > 0 && pendingCount === 0 && completed.length === steps.length
+            ? 'COMPLETED'
+            : 'READY';
+    return {
+      status,
+      expectedCount: steps.length,
+      resultCount: currentResults.length,
+      completedCount: completed.length,
+      awaitingAuthorityCount: awaiting.length,
+      failedCount: failed.length,
+      pendingCount,
+    };
+  }
+
   async persistResult(record) {
     const existing = this.existingResult(record.planId, record.planStepId);
     if (existing && sameJson(existing, record)) return existing;
@@ -172,8 +307,9 @@ export class GovernedActionExecutionService {
     const classification = this.classifyStep(step);
     const resultId = this.resultId(plan.planId, step.id);
     const existing = this.existingResult(plan.planId, step.id);
+    const inputFingerprint = this.stepFingerprint({ plan, step, exportPackageId, classification });
 
-    if (existing && ['COMPLETED', 'COMPLETED_POLICY', 'AWAITING_AUTHORITY'].includes(existing.status)) {
+    if (existing && this.resultIsCurrent({ plan, step, exportPackageId, result: existing })) {
       return existing;
     }
 
@@ -194,6 +330,7 @@ export class GovernedActionExecutionService {
           authorityReason: classification.reason,
           sourceDecisionId: decision?.decisionId || plan.sourceDecisionId || null,
           exportPackageId,
+          inputFingerprint,
         },
         error: null,
         completedAt: null,
@@ -219,6 +356,7 @@ export class GovernedActionExecutionService {
           authorityRequired: false,
           sourceDecisionId: decision?.decisionId || plan.sourceDecisionId || null,
           exportPackageId,
+          inputFingerprint,
           ...(outcome?.data || {}),
         },
         error: null,
@@ -241,6 +379,7 @@ export class GovernedActionExecutionService {
           authorityRequired: false,
           sourceDecisionId: decision?.decisionId || plan.sourceDecisionId || null,
           exportPackageId,
+          inputFingerprint,
         },
         error: error?.message || String(error),
         completedAt: now(),
@@ -275,6 +414,7 @@ export class GovernedActionExecutionService {
     const failed = results.filter((result) => result.status === 'FAILED');
     const awaitingAuthority = results.filter((result) => result.status === 'AWAITING_AUTHORITY');
     const completed = results.filter((result) => ['COMPLETED', 'COMPLETED_POLICY'].includes(result.status));
+    const expectedCount = Array.isArray(plan.steps) ? plan.steps.length : 0;
 
     return {
       planId: plan.planId,
@@ -284,10 +424,14 @@ export class GovernedActionExecutionService {
         ? 'FAILED'
         : awaitingAuthority.length
           ? 'AWAITING_AUTHORITY'
-          : 'COMPLETED',
+          : expectedCount > 0 && completed.length === expectedCount
+            ? 'COMPLETED'
+            : 'READY',
+      expectedCount,
       completedCount: completed.length,
       awaitingAuthorityCount: awaitingAuthority.length,
       failedCount: failed.length,
+      pendingCount: Math.max(0, expectedCount - results.length),
       results,
     };
   }
