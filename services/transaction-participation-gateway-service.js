@@ -11,6 +11,10 @@ function clean(value, max = 5000) {
   const text = String(value || '').trim();
   return text ? text.slice(0, max) : null;
 }
+function deterministicEventId(windowId, eventType, idempotencyKey) {
+  if (!idempotencyKey) return null;
+  return `TPE-${crypto.createHash('sha256').update(`${windowId}|${eventType}|${idempotencyKey}`).digest('hex').slice(0, 20).toUpperCase()}`;
+}
 
 export class TransactionParticipationGatewayService {
   constructor(domain) {
@@ -43,7 +47,9 @@ export class TransactionParticipationGatewayService {
   }
 
   async observe(input = {}) {
-    const eventId = id('OE');
+    const eventId = input.eventId || id('OE');
+    const prior = this.records('OPERATIONAL_EVENT').find((record) => record.eventId === eventId || record.id === eventId);
+    if (prior) return prior;
     const record = {
       id: eventId,
       eventId,
@@ -217,7 +223,10 @@ export class TransactionParticipationGatewayService {
   }
 
   async recordEvent(window, eventType, input = {}) {
-    const eventId = id('TPE');
+    const key = clean(input.idempotencyKey, 500);
+    const eventId = deterministicEventId(window.windowId, eventType, key) || id('TPE');
+    const prior = this.records(EVENT_TYPE).find((record) => record.eventId === eventId || record.id === eventId);
+    if (prior) return prior;
     const event = {
       id: eventId,
       eventId,
@@ -232,10 +241,12 @@ export class TransactionParticipationGatewayService {
       summary: clean(input.summary, 1500),
       details: input.details && typeof input.details === 'object' ? input.details : {},
       documentId: input.documentId || null,
+      idempotencyKey: key,
       createdAt: now(),
     };
     await this.persist(EVENT_TYPE, eventId, event);
     await this.observe({
+      eventId: key ? `OE-${crypto.createHash('sha256').update(`${eventId}|OBSERVE`).digest('hex').slice(0, 20).toUpperCase()}` : undefined,
       eventType,
       actorType: event.actorType,
       actorId: event.actorName || event.organization || window.windowId,
@@ -264,6 +275,7 @@ export class TransactionParticipationGatewayService {
       organization: input.organization,
       role: input.role,
       summary: 'External participant confirmed receipt of the funding package.',
+      idempotencyKey: input.idempotencyKey,
     });
     return { event, activity: this.activity(record.windowId) };
   }
@@ -277,6 +289,7 @@ export class TransactionParticipationGatewayService {
       role: input.role,
       summary: clean(input.summary, 1000) || 'External transaction processing contact identified.',
       details: { email: clean(input.email, 320), phone: clean(input.phone, 100) },
+      idempotencyKey: input.idempotencyKey,
     });
     return { event, activity: this.activity(record.windowId) };
   }
@@ -292,6 +305,7 @@ export class TransactionParticipationGatewayService {
       role: input.role,
       summary: question,
       details: { topic: upper(input.topic || 'GENERAL_PROCESSING') },
+      idempotencyKey: input.idempotencyKey,
     });
     return { event, activity: this.activity(record.windowId) };
   }
@@ -307,6 +321,7 @@ export class TransactionParticipationGatewayService {
       role: input.role,
       summary: issue,
       details: { topic: upper(input.topic || 'GENERAL_PROCESSING'), blocking: input.blocking !== false },
+      idempotencyKey: input.idempotencyKey,
     });
     return { event, activity: this.activity(record.windowId) };
   }
@@ -320,6 +335,7 @@ export class TransactionParticipationGatewayService {
       role: input.role,
       summary: clean(input.summary, 1500) || 'External participant confirmed the package was submitted for processing.',
       details: { externalReference: clean(input.externalReference, 500) },
+      idempotencyKey: input.idempotencyKey,
     });
     return { event, activity: this.activity(record.windowId) };
   }
@@ -335,6 +351,7 @@ export class TransactionParticipationGatewayService {
       summary: clean(input.summary, 1500) || `Transaction document uploaded: ${document.originalName || document.id}.`,
       documentId: document.id,
       details: { documentType: document.documentType || null, sha256: document.sha256 || null },
+      idempotencyKey: input.idempotencyKey,
     });
     return { event, activity: this.activity(record.windowId) };
   }
