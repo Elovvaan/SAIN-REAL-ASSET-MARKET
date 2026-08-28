@@ -8,8 +8,8 @@ const bootstrap = await readFile(new URL('../public/admin/admin-bootstrap.js', i
 test('admin performance runtime keeps safe reads hot and deduplicates in-flight requests', () => {
   assert.match(performanceRuntime, /FRESH_TTL_MS = 30_000/);
   assert.match(performanceRuntime, /STALE_TTL_MS = 120_000/);
-  assert.match(performanceRuntime, /inFlight\.has\(key\)/);
-  assert.match(performanceRuntime, /void refreshInBackground\(key, input, init\)/);
+  assert.match(performanceRuntime, /existing\?\.generation === requestGeneration/);
+  assert.match(performanceRuntime, /void fetchFresh\(key, input, init, requestGeneration\)/);
   assert.match(performanceRuntime, /url\.pathname === '\/api\/sane\/operations-queue'/);
   assert.match(performanceRuntime, /url\.pathname === '\/api\/on-chain\/status'/);
 });
@@ -19,6 +19,19 @@ test('admin performance cache excludes session probes and invalidates after chan
   assert.match(performanceRuntime, /sra:admin-mutated/);
   assert.match(performanceRuntime, /sra:admin-refresh/);
   assert.match(performanceRuntime, /sra-admin-session-expired/);
+});
+
+test('explicit workspace refresh bypasses cached workspace data', () => {
+  assert.match(performanceRuntime, /forceNextWorkspaceRead = true/);
+  assert.match(performanceRuntime, /explicitWorkspaceRefresh = forceNextWorkspaceRead && url\.pathname === '\/api\/admin\/workspaces'/);
+  assert.match(performanceRuntime, /return restore\(await fetchFresh\(key, input, init, requestGeneration\)\)/);
+  assert.match(performanceRuntime, /\[data-refresh-workspace\]/);
+});
+
+test('invalidated in-flight reads cannot repopulate the cache', () => {
+  assert.match(performanceRuntime, /generation \+= 1/);
+  assert.match(performanceRuntime, /response\.ok && generation === requestGeneration/);
+  assert.match(performanceRuntime, /inFlight\.set\(key, \{ generation: requestGeneration, promise: pending \}\)/);
 });
 
 test('admin bootstrap installs the performance runtime before the shell and parallelizes feature loading', () => {
