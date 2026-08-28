@@ -85,8 +85,7 @@ export class TransactionParticipationGatewayService {
     const existing = this.windowsForPackage(pkg.exportPackageId)
       .find((record) => record.state === 'OPEN' && (!record.expiresAt || new Date(record.expiresAt) > new Date()));
     if (existing) {
-      if (input.rotateAccessCode) return await this.reissueAccessCode(existing.windowId, { actorName: input.createdBy || 'SRA' });
-      return { window: this.publicWindow(existing, pkg), accessCode: null, existing: true };
+      return await this.reissueAccessCode(existing.windowId, { actorName: input.createdBy || 'SRA' });
     }
 
     const accessCode = crypto.randomBytes(6).toString('hex').toUpperCase();
