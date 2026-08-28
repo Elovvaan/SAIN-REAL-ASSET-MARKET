@@ -2,6 +2,7 @@ import express from 'express';
 import { FinancedPositionDistributionService } from '../services/financed-position-distribution-service.js';
 import { GovernedLoanFinancingService } from '../services/governed-loan-financing-service.js';
 import { AchSettlementPacketService } from '../services/ach-settlement-packet-service.js';
+import { SettlementRouteSelectionService } from '../services/settlement-route-selection-service.js';
 import { normalizeFinancingStage } from '../services/financing-lifecycle-service.js';
 import { financingLetterClosingRequirements } from '../services/financing-letter-closing-requirements.js';
 
@@ -18,8 +19,26 @@ export function createFinancingClosingRouter(service) {
   const loanFinancing = new GovernedLoanFinancingService(service.domain);
   const loanFinancingReady = loanFinancing.initialize();
   const achSettlementPacket = new AchSettlementPacketService(service.domain);
+  const settlementRoutes = new SettlementRouteSelectionService(service.domain);
+  const settlementRoutesReady = settlementRoutes.initialize();
 
-  router.get('/status', (_req, res) => res.json({ ...service.status(), positionDistribution: positionDistribution.status(), loanFinancing: loanFinancing.status() }));
+  router.get('/status', async (_req, res) => { await settlementRoutesReady; return res.json({ ...service.status(), positionDistribution: positionDistribution.status(), loanFinancing: loanFinancing.status(), settlementRoutes: settlementRoutes.status() }); });
+  router.get('/settlement-routes', async (_req, res) => { await settlementRoutesReady; return res.json({ routes: settlementRoutes.availableRoutes() }); });
+  router.get('/exports/:exportPackageId/settlement-route', async (req, res) => { try { await settlementRoutesReady; return res.json(settlementRoutes.current(req.params.exportPackageId)); } catch (error) { return fail(res, error); } });
+  router.post('/exports/:exportPackageId/settlement-route', async (req, res) => {
+    const actor = actorId(req); if (!actor) return res.status(401).json({ error: 'An authenticated financing-operations identity is required.' });
+    try { await settlementRoutesReady; return res.status(201).json(await settlementRoutes.select(req.params.exportPackageId, req.body || {}, actor)); }
+    catch (error) { return fail(res, error); }
+  });
+  router.get('/escrow-settlements/:escrowSettlementId', async (req, res) => {
+    try { await settlementRoutesReady; const detail = settlementRoutes.escrow.detail(req.params.escrowSettlementId); return detail ? res.json(detail) : res.status(404).json({ error: 'Escrow settlement was not found.' }); }
+    catch (error) { return fail(res, error); }
+  });
+  router.post('/escrow-settlements/:escrowSettlementId/transition', async (req, res) => {
+    const actor = actorId(req); if (!actor) return res.status(401).json({ error: 'An authenticated financing-operations identity is required.' });
+    try { await settlementRoutesReady; return res.json(await settlementRoutes.escrow.transition(req.params.escrowSettlementId, req.body || {}, actor)); }
+    catch (error) { return fail(res, error); }
+  });
   router.get('/authorizations', (req, res) => {
     const opportunityId = String(req.query.opportunityId || '').trim();
     if (!opportunityId) return res.status(400).json({ error: 'opportunityId is required.' });
