@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SRA Transaction Participation</title>
+  <style>
+    :root { color-scheme: light; font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f5f7fa; color: #15171a; }
+    main { max-width: 920px; margin: 0 auto; padding: 32px 18px 64px; }
+    header { margin-bottom: 24px; }
+    h1 { margin: 0 0 8px; font-size: clamp(28px, 5vw, 42px); }
+    h2 { margin-top: 0; }
+    p { line-height: 1.55; }
+    .card { background: white; border: 1px solid #dfe3e8; border-radius: 16px; padding: 20px; margin: 16px 0; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+    label { display: grid; gap: 6px; font-weight: 650; font-size: 14px; }
+    input, select, textarea, button { font: inherit; }
+    input, select, textarea { width: 100%; padding: 11px 12px; border: 1px solid #bcc4ce; border-radius: 10px; background: #fff; }
+    textarea { min-height: 110px; resize: vertical; }
+    button { border: 0; border-radius: 10px; padding: 11px 16px; cursor: pointer; background: #17191c; color: white; font-weight: 700; }
+    button.secondary { background: #e8ebef; color: #17191c; }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+    .hidden { display: none; }
+    .status { padding: 10px 12px; border-radius: 10px; background: #eef1f4; margin-top: 12px; }
+    .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+    .summary div { padding: 12px; border-radius: 10px; background: #f7f8fa; }
+    .summary strong { display: block; font-size: 12px; color: #606874; margin-bottom: 4px; text-transform: uppercase; letter-spacing: .05em; }
+    .timeline { display: grid; gap: 10px; }
+    .event { border-left: 3px solid #7b8490; padding: 6px 0 6px 12px; }
+    .event small { color: #69717c; }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Transaction Participation</h1>
+    <p>Use the SRA funding package or transaction reference and participation access code provided with your transaction.</p>
+  </header>
+
+  <section class="card" id="accessCard">
+    <h2>Open transaction</h2>
+    <div class="grid">
+      <label>Funding package / transaction reference
+        <input id="packageReference" autocomplete="off" placeholder="EXP-... or transaction ID">
+      </label>
+      <label>Participation access code
+        <input id="accessCode" autocomplete="off" placeholder="Access code">
+      </label>
+    </div>
+    <div class="actions"><button id="openButton">Open transaction</button></div>
+    <div id="accessStatus" class="status hidden" role="status"></div>
+  </section>
+
+  <div id="workspace" class="hidden">
+    <section class="card">
+      <h2>Transaction summary</h2>
+      <div id="summary" class="summary"></div>
+    </section>
+
+    <section class="card">
+      <h2>Processing contact</h2>
+      <div class="grid">
+        <label>Name<input id="contactName"></label>
+        <label>Organization<input id="organization"></label>
+        <label>Role / department<input id="role"></label>
+        <label>Email<input id="email" type="email"></label>
+        <label>Phone<input id="phone"></label>
+      </div>
+      <div class="actions">
+        <button id="saveContact">Save contact</button>
+        <button id="confirmReceipt" class="secondary">Confirm package received</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Ask for processing clarification</h2>
+      <label>Topic
+        <select id="questionTopic">
+          <option value="GENERAL_PROCESSING">General processing</option>
+          <option value="ACH_PROCESSING">ACH processing</option>
+          <option value="SETTLEMENT_INSTRUCTIONS">Settlement instructions</option>
+          <option value="INSTRUMENT_PROCESSING">Instrument processing</option>
+          <option value="DOCUMENT_REQUIREMENT">Document requirement</option>
+        </select>
+      </label>
+      <label>Question<textarea id="question" placeholder="Tell SRA what needs clarification."></textarea></label>
+      <div class="actions"><button id="sendQuestion">Submit question</button></div>
+    </section>
+
+    <section class="card">
+      <h2>Report a processing issue</h2>
+      <label>Issue<textarea id="issue" placeholder="Describe the processing issue or exception."></textarea></label>
+      <div class="actions"><button id="sendIssue">Report issue</button></div>
+    </section>
+
+    <section class="card">
+      <h2>Upload transaction document</h2>
+      <div class="grid">
+        <label>Document type
+          <select id="documentType">
+            <option value="TRANSACTION_PARTICIPANT_DOCUMENT">Transaction document</option>
+            <option value="SETTLEMENT_INSTRUCTIONS">Settlement instructions</option>
+            <option value="PROCESSING_CONFIRMATION">Processing confirmation</option>
+            <option value="BANK_CONFIRMATION">Bank confirmation</option>
+            <option value="OTHER">Other</option>
+          </select>
+        </label>
+        <label>Document<input id="document" type="file"></label>
+      </div>
+      <div class="actions"><button id="uploadDocument">Upload document</button></div>
+    </section>
+
+    <section class="card">
+      <h2>Confirm processing</h2>
+      <div class="grid">
+        <label>External reference / confirmation number<input id="externalReference"></label>
+      </div>
+      <label>Note<textarea id="processingSummary" placeholder="Optional processing note."></textarea></label>
+      <div class="actions"><button id="confirmProcessing">Confirm submitted for processing</button></div>
+    </section>
+
+    <section class="card">
+      <h2>Transaction activity</h2>
+      <div id="activity" class="timeline"></div>
+    </section>
+
+    <div id="workspaceStatus" class="status hidden" role="status"></div>
+  </div>
+</main>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const state = { packageReference: '', accessCode: '', windowId: '', activity: [] };
+  const show = (el, message) => { el.textContent = message; el.classList.remove('hidden'); };
+  const hide = (el) => el.classList.add('hidden');
+  const contact = () => ({ contactName: $('contactName').value.trim(), organization: $('organization').value.trim(), role: $('role').value.trim() });
+  const credentials = () => ({ packageReference: state.packageReference, accessCode: state.accessCode, windowId: state.windowId });
+  const post = async (path, body) => {
+    const response = await fetch(`/api/participation/transaction${path}`, { headers: { 'content-type': 'application/json' }, method: 'POST', body: JSON.stringify({ ...credentials(), ...body }) });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || 'Request failed.');
+    return data;
+  };
+  const renderActivity = (activity = []) => {
+    state.activity = activity;
+    $('activity').innerHTML = activity.length ? activity.map((event) => `
+      <div class="event"><strong>${escapeHtml(event.summary || event.eventType)}</strong><br><small>${escapeHtml(event.actorName || event.organization || event.actorType || 'SRA')} · ${escapeHtml(event.createdAt || '')}</small></div>
+    `).join('') : '<p>No activity has been recorded yet.</p>';
+  };
+  const escapeHtml = (value) => String(value || '').replace(/[&<>'"]/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[char]));
+  const renderSummary = (windowData) => {
+    const tx = windowData.transaction || {};
+    const amount = tx.amount == null ? '—' : new Intl.NumberFormat('en-US', { style: 'currency', currency: tx.currency || 'USD' }).format(tx.amount);
+    $('summary').innerHTML = [
+      ['Funding package', tx.exportPackageId],
+      ['Transaction', tx.financingTransactionId],
+      ['Recipient / payee', tx.beneficiaryName],
+      ['Authorized amount', amount],
+      ['Current state', tx.state],
+      ['Window expires', windowData.expiresAt],
+    ].map(([label, value]) => `<div><strong>${escapeHtml(label)}</strong>${escapeHtml(value || '—')}</div>`).join('');
+  };
+  const updateActivity = (data, message) => { renderActivity(data.activity || state.activity); show($('workspaceStatus'), message); };
+
+  $('openButton').addEventListener('click', async () => {
+    hide($('accessStatus'));
+    state.packageReference = $('packageReference').value.trim();
+    state.accessCode = $('accessCode').value.trim();
+    if (!state.packageReference || !state.accessCode) return show($('accessStatus'), 'Enter both the transaction reference and participation access code.');
+    try {
+      const data = await post('/access', {});
+      state.windowId = data.window.windowId;
+      renderSummary(data.window);
+      renderActivity(data.activity || []);
+      $('workspace').classList.remove('hidden');
+      show($('accessStatus'), 'Transaction verified.');
+    } catch (error) { show($('accessStatus'), error.message); }
+  });
+
+  $('saveContact').addEventListener('click', async () => {
+    try { const data = await post('/contact', { ...contact(), email: $('email').value.trim(), phone: $('phone').value.trim() }); updateActivity(data, 'Processing contact saved.'); }
+    catch (error) { show($('workspaceStatus'), error.message); }
+  });
+  $('confirmReceipt').addEventListener('click', async () => {
+    try { const data = await post('/receipt', contact()); updateActivity(data, 'Package receipt confirmed.'); }
+    catch (error) { show($('workspaceStatus'), error.message); }
+  });
+  $('sendQuestion').addEventListener('click', async () => {
+    try { const data = await post('/questions', { ...contact(), topic: $('questionTopic').value, question: $('question').value.trim() }); $('question').value = ''; updateActivity(data, 'Processing question submitted to SRA.'); }
+    catch (error) { show($('workspaceStatus'), error.message); }
+  });
+  $('sendIssue').addEventListener('click', async () => {
+    try { const data = await post('/issues', { ...contact(), issue: $('issue').value.trim(), blocking: true }); $('issue').value = ''; updateActivity(data, 'Processing issue reported to SRA.'); }
+    catch (error) { show($('workspaceStatus'), error.message); }
+  });
+  $('confirmProcessing').addEventListener('click', async () => {
+    try { const data = await post('/processing-confirmation', { ...contact(), externalReference: $('externalReference').value.trim(), summary: $('processingSummary').value.trim() }); updateActivity(data, 'Processing confirmation recorded.'); }
+    catch (error) { show($('workspaceStatus'), error.message); }
+  });
+  $('uploadDocument').addEventListener('click', async () => {
+    const file = $('document').files[0];
+    if (!file) return show($('workspaceStatus'), 'Choose a document first.');
+    const form = new FormData();
+    Object.entries({ ...credentials(), ...contact(), documentType: $('documentType').value }).forEach(([key, value]) => form.append(key, value || ''));
+    form.append('document', file);
+    try {
+      const response = await fetch('/api/participation/transaction/documents', { method: 'POST', body: form });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Document upload failed.');
+      $('document').value = '';
+      updateActivity(data, 'Document uploaded and linked to the transaction.');
+    } catch (error) { show($('workspaceStatus'), error.message); }
+  });
+})();
+</script>
+</body>
+</html>
