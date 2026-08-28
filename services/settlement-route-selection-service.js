@@ -77,6 +77,7 @@ export class SettlementRouteSelectionService {
     let selection = existing;
     if (!selection) {
       const timestamp = now();
+      const settlementAsset = input.settlementAsset ? normalize(input.settlementAsset) : null;
       selection = {
         settlementRouteSelectionId: id,
         exportPackageId,
@@ -86,6 +87,7 @@ export class SettlementRouteSelectionService {
         opportunityId: pkg.opportunityId || null,
         instrumentId: pkg.instrumentId || null,
         route,
+        settlementAsset,
         network: route === 'ON_CHAIN_SETTLEMENT' ? (input.network ? normalize(input.network) : null) : null,
         selectedBy: actorId,
         selectedAt: timestamp,
@@ -94,6 +96,7 @@ export class SettlementRouteSelectionService {
       const updatedPackage = {
         ...pkg,
         settlementRoute: route,
+        settlementAsset,
         settlementRouteSelectionId: id,
         settlementRouteSelectedBy: actorId,
         settlementRouteSelectedAt: timestamp,
