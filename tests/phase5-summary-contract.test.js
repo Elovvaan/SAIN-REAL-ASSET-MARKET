@@ -1,0 +1,2 @@
+import assert from 'node:assert/strict';import test from 'node:test';import { CounterpartyOperationsService } from '../services/counterparty-operations-service.js';class D{list(){return[];}}
+test('new package has no invented counterparty activity',()=>{const s=new CounterpartyOperationsService(new D(),{reasoning:{},outcomes:{}});const x=s.statusForPackage('EXP');assert.equal(x.status,'AWAITING_COUNTERPARTY_REQUEST');assert.equal(x.caseCount,0);assert.equal(x.responseCount,0);});

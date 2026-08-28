@@ -27,10 +27,18 @@ SRA executes ready action-plan steps only through explicitly registered existing
 
 SRA consumes transaction-bound outside responses and evidence, including participation-window acknowledgments, processing questions, exception reports, uploaded documents, processing-submission confirmations, external-transfer results, settlement records, and payment receipts.
 
-Phase 4 creates deterministic `OUTCOME_EVALUATION` and `OPERATIONAL_MEMORY` state for each financing export package. Counterparty self-report is evidence, not proof of settlement. `VERIFIED` requires recorded external-transfer or settlement evidence. Blocking exceptions and failed external outcomes are surfaced in the operations queue for reconciliation.
+Phase 4 creates deterministic `OUTCOME_EVALUATION` and `OPERATIONAL_MEMORY` state for each financing export package. Counterparty self-report is evidence, not proof of settlement. `VERIFIED` requires recorded external-transfer or settlement evidence. Blocking exceptions and failed external outcomes are surfaced for reconciliation.
 
-Admin flow: Phase 2 reasoning -> Phase 3 governed execution -> Phase 4 external outcome reconciliation.
+## Phase 5 — Conversational Counterparty Operations and Governed Exception Resolution
+
+SRA can now answer transaction-scoped counterparty processing questions from recorded financing context, current Phase 4 outcome state, and the funding package itself. The participation gateway returns the agent response in the same question or exception interaction and exposes the latest response for the authenticated transaction window.
+
+Each clarification or exception creates deterministic `COUNTERPARTY_OPERATION_CASE` and `COUNTERPARTY_OPERATION_RESPONSE` records. Ordinary ACH, instrument, package, and processing clarification stays inside the operating layer. Requests that change financing amount or terms, authorize settlement or external transfer, issue instruments, transfer ownership, or authorize payment stop at `AWAITING_AUTHORITY` and preserve the current recorded transaction until principal action is recorded.
+
+Phase 5 does not invent missing transaction facts, silently change terms, or treat counterparty statements as verified settlement. Missing authoritative fields remain blocked for recorded-context resolution, and external completion continues to come from Phase 4 reconciliation.
+
+Admin/agent flow: Phase 2 reasoning -> Phase 3 governed execution -> Phase 4 external outcome reconciliation -> Phase 5 counterparty clarification and exception resolution.
 
 ## Next boundary
 
-Phase 5 should use reconciled external state to drive conversational counterparty operations and governed exception resolution: understand the issue, select the correct transaction-grounded response, prepare or deliver clarification through supported channels, and escalate only reserved decisions or authority changes.
+Phase 6 should close the loop with autonomous operational continuation: use verified outcomes and resolved counterparty cases to resume eligible workflows, create follow-up work, establish servicing/closure actions where appropriate, and surface only reserved approvals or unresolved exceptions to the principal.
