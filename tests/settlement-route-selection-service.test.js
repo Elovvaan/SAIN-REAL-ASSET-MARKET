@@ -58,6 +58,18 @@ test('does not default an on-chain settlement to a network', async () => {
   assert.equal(result.selection.network, null);
 });
 
+test('on-chain settlement preserves the chosen stable settlement asset', async () => {
+  const { domain, service } = await fixture();
+  const result = await service.select('EXP-FDB-1', {
+    route: 'ON_CHAIN_SETTLEMENT',
+    settlementAsset: 'SRA_USD',
+    network: 'STELLAR',
+  }, 'ADMIN');
+  assert.equal(result.selection.settlementAsset, 'SRA_USD');
+  assert.equal(result.selection.network, 'STELLAR');
+  assert.equal(domain.get('EXPORT_PACKAGE', 'EXP-FDB-1').settlementAsset, 'SRA_USD');
+});
+
 test('route selection is immutable once chosen', async () => {
   const { service } = await fixture();
   await service.select('EXP-FDB-1', { route: 'DIRECT_SETTLEMENT' }, 'ADMIN');

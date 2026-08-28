@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import express from 'express';
 import { OnChainTransferService } from '../services/on-chain-transfer-service.js';
+import { StableSettlementAssetService } from '../services/stable-settlement-asset-service.js';
 import { generateOnChainAssetCode, isValidOnChainAssetCode, resolveOnChainAssetCode } from '../services/on-chain-asset-code-service.js';
 import { StellarTransferService } from '../services/stellar-transfer-service.js';
 import { BitcoinTransferService } from '../services/bitcoin-transfer-service.js';
@@ -68,11 +69,19 @@ export function createOnChainProjectionRouter(service) {
   ]);
   const transferAdapters = Object.fromEntries(adapters.entries());
   const transfers = new OnChainTransferService({ domain: service.domain, adapters: transferAdapters });
+  const stableSettlementAssets = new StableSettlementAssetService(service.domain);
 
   router.get('/status', async (_req, res) => {
     try {
+      await stableSettlementAssets.ensure();
       const networks = await Promise.all([...adapters.entries()].map(([network, adapter]) => adapterHealth(network, adapter)));
-      return res.json({ service: service.status(), networks, readyNetworks: networks.filter((item) => item.ready).map((item) => item.network), transfer: transfers.status() });
+      return res.json({
+        service: service.status(),
+        networks,
+        readyNetworks: networks.filter((item) => item.ready).map((item) => item.network),
+        transfer: transfers.status(),
+        stableSettlementAssets: stableSettlementAssets.list().map((definition) => stableSettlementAssets.status(definition.assetCode)),
+      });
     } catch (error) { return handle(res, error); }
   });
 
@@ -184,6 +193,58 @@ export function createOnChainProjectionRouter(service) {
       const issuance = await adapter.issueAsset(asset, { amount: req.body.amount });
       const updated = await service.recordIssued(asset.assetId, issuance, actor);
       return res.status(201).json({ asset: updated, issuance });
+    } catch (error) { return handle(res, error); }
+  });
+
+  router.get('/stable-settlement-assets', async (_req, res) => {
+    try {
+      await stableSettlementAssets.ensure();
+      return res.json({ records: stableSettlementAssets.list().map((definition) => stableSettlementAssets.status(definition.assetCode)) });
+    } catch (error) { return handle(res, error); }
+  });
+
+  router.get('/stable-settlement-assets/:assetCode', async (req, res) => {
+    try {
+      await stableSettlementAssets.ensure();
+      const status = stableSettlementAssets.status(req.params.assetCode);
+      return status ? res.json(status) : res.status(404).json({ error: 'Stable settlement asset not found.' });
+    } catch (error) { return handle(res, error); }
+  });
+
+  router.post('/stable-settlement-assets', async (req, res) => {
+    try {
+      const actor = requireActor(req);
+      const definition = await stableSettlementAssets.define(req.body || {}, actor);
+      return res.status(201).json(stableSettlementAssets.status(definition.assetCode));
+    } catch (error) { return handle(res, error); }
+  });
+
+  router.post('/stable-settlement-assets/:assetCode/reserves', async (req, res) => {
+    try {
+      const actor = requireActor(req);
+      return res.status(201).json(await stableSettlementAssets.recordReserve(req.params.assetCode, req.body || {}, actor));
+    } catch (error) { return handle(res, error); }
+  });
+
+  router.post('/stable-settlement-assets/:assetCode/representations', async (req, res) => {
+    try {
+      const actor = requireActor(req);
+      const representation = await stableSettlementAssets.registerRepresentation(req.params.assetCode, req.body || {}, actor);
+      return res.status(201).json({ representation, status: stableSettlementAssets.status(req.params.assetCode) });
+    } catch (error) { return handle(res, error); }
+  });
+
+  router.post('/stable-settlement-assets/:assetCode/issue', async (req, res) => {
+    try {
+      const actor = requireActor(req);
+      return res.status(201).json(await stableSettlementAssets.issue(req.params.assetCode, req.body || {}, actor));
+    } catch (error) { return handle(res, error); }
+  });
+
+  router.post('/stable-settlement-assets/:assetCode/redeem', async (req, res) => {
+    try {
+      const actor = requireActor(req);
+      return res.status(201).json(await stableSettlementAssets.redeem(req.params.assetCode, req.body || {}, actor));
     } catch (error) { return handle(res, error); }
   });
 
