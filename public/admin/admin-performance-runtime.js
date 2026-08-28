@@ -9,11 +9,14 @@
   const FRESH_TTL_MS = 30_000;
   const STALE_TTL_MS = 120_000;
   let generation = 0;
-  let forceNextWorkspaceRead = false;
+
+  function rawUrl(input) {
+    const raw = typeof input === 'string' ? input : input?.url;
+    return new URL(raw, location.origin);
+  }
 
   function normalizeUrl(input) {
-    const raw = typeof input === 'string' ? input : input?.url;
-    const url = new URL(raw, location.origin);
+    const url = rawUrl(input);
     url.searchParams.delete('_');
     return url;
   }
@@ -29,6 +32,11 @@
     if (url.pathname === '/api/sane/operations-queue') return true;
     if (url.pathname === '/api/on-chain/status' || url.pathname === '/api/on-chain/assets') return true;
     return false;
+  }
+
+  function explicitlyFresh(input, init = {}) {
+    const url = rawUrl(input);
+    return url.searchParams.has('_') || init.cache === 'reload';
   }
 
   async function snapshot(response) {
@@ -58,6 +66,11 @@
     cache.clear();
   }
 
+  function invalidateKey(key) {
+    generation += 1;
+    cache.delete(key);
+  }
+
   async function execute(input, init) {
     if (baseClient?.request) return baseClient.request(input, init);
     return nativeFetch(input, init);
@@ -82,22 +95,16 @@
     return pending;
   }
 
-  function forceWorkspaceRefresh() {
-    invalidate();
-    forceNextWorkspaceRead = true;
-  }
-
   async function fastRequest(input, init = {}) {
     const method = methodOf(input, init);
     const url = normalizeUrl(input);
     if (!cacheable(url, method)) return execute(input, init);
 
     const key = keyFor(url);
-    const explicitWorkspaceRefresh = forceNextWorkspaceRead && url.pathname === '/api/admin/workspaces';
-    if (explicitWorkspaceRefresh) {
-      forceNextWorkspaceRead = false;
+    if (explicitlyFresh(input, init)) {
+      invalidateKey(key);
       const requestGeneration = generation;
-      return restore(await fetchFresh(key, input, init, requestGeneration));
+      return restore(await fetchFresh(key, input, { ...init, cache: 'reload' }, requestGeneration));
     }
 
     const value = cache.get(key);
@@ -141,10 +148,6 @@
     }));
   }
 
-  document.addEventListener('click', (event) => {
-    if (event.target?.closest?.('[data-refresh-workspace]')) forceWorkspaceRefresh();
-  }, true);
-
   window.fetch = fastRequest;
   if (baseClient) {
     window.SRAAdminDataClient = Object.freeze({
@@ -162,7 +165,6 @@
 
   window.SRAAdminPerformance = Object.freeze({
     clear: invalidate,
-    forceWorkspaceRefresh,
     status() {
       return {
         cachedReads: cache.size,
@@ -170,7 +172,6 @@
         freshTtlMs: FRESH_TTL_MS,
         staleTtlMs: STALE_TTL_MS,
         generation,
-        forceNextWorkspaceRead,
         dataClientWrapped: Boolean(baseClient),
       };
     },
