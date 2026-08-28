@@ -1,0 +1,3 @@
+import { Router } from 'express';
+import { CounterpartyOperationsStatusService } from '../services/counterparty-operations-status-service.js';
+export function createCounterpartyOperationsAdminRouter(domain){const router=Router(),status=new CounterpartyOperationsStatusService(domain);router.get('/',async(_req,res)=>{try{return res.json({phase:5,operations:await status.listActive()});}catch(error){return res.status(500).json({error:error?.message||String(error)});}});router.get('/:exportPackageId',async(req,res)=>{try{return res.json(await status.forExportPackage(req.params.exportPackageId));}catch(error){return res.status(400).json({error:error?.message||String(error)});}});return router;}
