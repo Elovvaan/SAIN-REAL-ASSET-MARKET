@@ -1,5 +1,4 @@
 import crypto from 'node:crypto';
-import { OperationalIntelligenceService } from './operational-intelligence-service.js';
 
 const WINDOW_TYPE = 'TRANSACTION_PARTICIPATION_WINDOW';
 const EVENT_TYPE = 'TRANSACTION_PARTICIPATION_EVENT';
@@ -14,10 +13,9 @@ function clean(value, max = 5000) {
 }
 
 export class TransactionParticipationGatewayService {
-  constructor(domain, options = {}) {
+  constructor(domain) {
     if (!domain) throw new Error('Transaction participation requires the SRA domain store.');
     this.domain = domain;
-    this.intelligence = options.intelligence || new OperationalIntelligenceService(domain);
   }
 
   records(type) { return typeof this.domain.list === 'function' ? this.domain.list(type) : []; }
@@ -26,6 +24,26 @@ export class TransactionParticipationGatewayService {
     if (typeof this.domain.create === 'function') return await this.domain.create(type, record);
     if (typeof this.domain.set === 'function') return await this.domain.set(type, recordId, record);
     throw new Error('SRA domain store does not expose a supported persistence method.');
+  }
+
+  async observe(input = {}) {
+    const eventId = id('OE');
+    const record = {
+      id: eventId,
+      eventId,
+      eventType: input.eventType,
+      occurredAt: input.occurredAt || now(),
+      source: input.source || 'TRANSACTION_PARTICIPATION_GATEWAY',
+      actorType: input.actorType || null,
+      actorId: input.actorId || null,
+      transactionId: input.transactionId || null,
+      financingTransactionId: input.financingTransactionId || null,
+      exportPackageId: input.exportPackageId || null,
+      payload: input.payload || {},
+      correlationId: input.correlationId || input.financingTransactionId || input.transactionId || eventId,
+    };
+    await this.persist('OPERATIONAL_EVENT', eventId, record);
+    return record;
   }
 
   findPackage(reference) {
@@ -172,9 +190,8 @@ export class TransactionParticipationGatewayService {
       createdAt: now(),
     };
     await this.persist(EVENT_TYPE, eventId, event);
-    await this.intelligence.observe({
+    await this.observe({
       eventType,
-      source: 'TRANSACTION_PARTICIPATION_GATEWAY',
       actorType: event.actorType,
       actorId: event.actorName || event.organization || window.windowId,
       transactionId: window.financingTransactionId || window.exportPackageId,
