@@ -13,6 +13,7 @@
   const ADMIN_READ_CACHE_TTL_MS = 5_000;
   const ADMIN_HIDDEN_CACHE_TTL_MS = 60_000;
   let sessionExpired = false;
+  let readGeneration = 0;
 
   const governedKey = (url, method) => {
     if (method === 'POST' && url.pathname === '/api/admin/platform-asset/bootstrap') return 'NATIVE_PLATFORM_ASSET_BOOTSTRAP';
@@ -25,7 +26,6 @@
     if (url.pathname !== '/api/admin/workspaces') return url;
     const requested = Number(url.searchParams.get('limit') || 0);
     if (!requested || requested > WORKSPACE_RECORD_LIMIT) url.searchParams.set('limit', String(WORKSPACE_RECORD_LIMIT));
-    url.searchParams.delete('_');
     return url;
   };
 
@@ -80,6 +80,11 @@
     return fromSnapshot(value);
   }
 
+  function invalidateReads() {
+    readGeneration += 1;
+    readCache.clear();
+  }
+
   function timeoutFor(isAdminRequest, isSessionProbe, method) {
     if (!isAdminRequest) return 0;
     if (isSessionProbe) return ADMIN_SESSION_TIMEOUT_MS;
@@ -89,7 +94,7 @@
   function markSessionExpired() {
     if (sessionExpired) return;
     sessionExpired = true;
-    readCache.clear();
+    invalidateReads();
     inFlightReads.clear();
     window.__sraAdminSessionExpired = true;
     window.dispatchEvent(new CustomEvent('sra-admin-session-expired'));
@@ -188,7 +193,9 @@
 
   async function request(input, init = {}) {
     const originalUrl = typeof input === 'string' ? input : input?.url;
-    const url = normalizeWorkspaceUrl(new URL(originalUrl, location.origin));
+    const original = new URL(originalUrl, location.origin);
+    const forcedRead = original.searchParams.has('_') || init.cache === 'reload';
+    const url = normalizeWorkspaceUrl(original);
     const method = String(init.method || (typeof input !== 'string' ? input?.method : '') || 'GET').toUpperCase();
     const isMutation = !['GET', 'HEAD', 'OPTIONS'].includes(method);
     const sameOrigin = url.origin === location.origin;
@@ -203,8 +210,9 @@
       : new Request(url.toString(), input);
     const options = { ...init };
     const readKey = `${method}:${url.pathname}${url.search}`;
-    const cacheableRead = isAdminRequest && method === 'GET' && !isSessionProbe && !externalSignal;
+    const cacheableRead = isAdminRequest && method === 'GET' && !isSessionProbe && !externalSignal && !forcedRead;
 
+    if (forcedRead && method === 'GET') invalidateReads();
     if (governed && activeWrites.has(governed)) return fromSnapshot(await activeWrites.get(governed));
 
     const execute = () => performNative(normalizedInput, options, {
@@ -221,16 +229,20 @@
       const maxAge = document.visibilityState === 'visible' ? ADMIN_READ_CACHE_TTL_MS : ADMIN_HIDDEN_CACHE_TTL_MS;
       const cached = cachedResponse(readKey, maxAge);
       if (cached) return cached;
+      const requestGeneration = readGeneration;
       const existing = inFlightReads.get(readKey);
-      if (existing) return fromSnapshot(await existing);
+      if (existing?.generation === requestGeneration) return fromSnapshot(await existing.promise);
       const pending = execute()
         .then(async (value) => {
           const snap = await snapshot(value);
-          if (value.ok) readCache.set(readKey, snap);
+          if (value.ok && readGeneration === requestGeneration) readCache.set(readKey, snap);
           return snap;
         })
-        .finally(() => inFlightReads.delete(readKey));
-      inFlightReads.set(readKey, pending);
+        .finally(() => {
+          const current = inFlightReads.get(readKey);
+          if (current?.promise === pending) inFlightReads.delete(readKey);
+        });
+      inFlightReads.set(readKey, { generation: requestGeneration, promise: pending });
       response = fromSnapshot(await pending);
     } else if (governed) {
       const pending = execute().then(snapshot).finally(() => activeWrites.delete(governed));
@@ -243,7 +255,7 @@
     if (isWorkspaceRead) response = await enrichWorkspaceResponse(response);
 
     if (isAdminRequest && isMutation && response.ok) {
-      readCache.clear();
+      invalidateReads();
       window.dispatchEvent(new CustomEvent('sra-admin-data-changed'));
       window.dispatchEvent(new CustomEvent('sra:admin-mutated', {
         detail: { method, path: url.pathname, mutatedAt: new Date().toISOString() },
@@ -268,7 +280,7 @@
   }
 
   function refresh(source = 'manual') {
-    readCache.clear();
+    invalidateReads();
     window.dispatchEvent(new CustomEvent('sra:admin-refresh', {
       detail: { source, requestedAt: new Date().toISOString() },
     }));
