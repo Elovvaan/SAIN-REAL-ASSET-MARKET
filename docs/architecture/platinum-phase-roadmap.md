@@ -41,7 +41,9 @@ Phase 5 does not invent missing transaction facts, silently change terms, or tre
 
 Phase 6 closes the operating loop after Phases 1–5. It evaluates current Phase 4 external evidence and Phase 5 counterparty/authority state, then resumes only actions that are already authorized by recorded facts.
 
-Safe autonomous continuation includes translating verified outside settlement evidence into the authoritative funded state, boarding funded financing to servicing when all servicing context is already recorded, advancing the financing lifecycle to `SERVICING`, closing the lifecycle only after the linked servicing account is already terminal, and creating deterministic follow-up work when recorded context is incomplete.
+Safe autonomous continuation includes translating verified outside settlement evidence into the authoritative funded state, boarding funded financing to servicing when all servicing context is already recorded, advancing the financing lifecycle to `SERVICING`, and creating deterministic follow-up work when recorded servicing or closure context requires another authoritative operation.
+
+A terminal servicing account is recognized as ready for closing follow-up, but Phase 6 does not directly force a financing closing record to `CLOSED` because the existing closing service does not currently expose that transition.
 
 Phase 6 stops on principal-authority requests, failed external outcomes, unresolved counterparty exceptions, or missing authoritative context. It does not approve financing, change terms, authorize or execute settlement, issue instruments, transfer ownership, authorize payment, or infer missing data.
 
