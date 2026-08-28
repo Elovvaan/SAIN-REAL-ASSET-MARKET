@@ -1,5 +1,6 @@
 import { SraCoinAgentService } from './sra-coin-agent-service.js';
 import { ContextInstructionReasoningService } from './context-instruction-reasoning-service.js';
+import { GovernedActionExecutionService } from './governed-action-execution-service.js';
 
 const TRANSACTION_TYPE = 'SRA_TRANSACTION';
 const INTELLIGENCE_RECORD_TYPES = Object.freeze([
@@ -37,12 +38,13 @@ function item(id, stage, state, participantId, action, explanation, record = {})
 }
 
 export class UnifiedMarketOperationsQueueService {
-  constructor(domain, orderReviewService = null, coreHeartbeat = null) {
+  constructor(domain, orderReviewService = null, coreHeartbeat = null, options = {}) {
     this.domain = domain;
     this.orderReviewService = orderReviewService;
     this.coreHeartbeat = coreHeartbeat;
     this.coinAgents = new SraCoinAgentService(domain);
     this.contextReasoning = new ContextInstructionReasoningService(domain);
+    this.actionExecution = options.actionExecution || new GovernedActionExecutionService(domain, options.actionExecutionOptions || {});
     this.intelligenceHydrated = false;
     this.intelligenceHydrationPromise = null;
   }
@@ -124,6 +126,8 @@ export class UnifiedMarketOperationsQueueService {
         const reasoning = persisted?.reasoning || this.contextReasoning.reasonForExportPackage(pkg.exportPackageId);
         const decisionId = persisted?.decision?.decisionId || `AD-CONTEXT-${pkg.exportPackageId}`;
         const planId = persisted?.plan?.planId || `AP-CONTEXT-${pkg.exportPackageId}`;
+        const plan = persisted?.plan || this.domain.list('ACTION_PLAN').find((record) => record.planId === planId || record.id === planId) || null;
+        const executionSummary = this.actionExecution.summarizePlan(plan, pkg.exportPackageId);
         queue.push({
           ...item(pkg.exportPackageId, 'FINANCING_EXPORT', pkg.state, pkg.borrowerParticipantId || pkg.participantId, 'PREPARE_SETTLEMENT_METHOD', 'Financing export is ready. SRA Export Agent should prepare the selected settlement path: bank rail instructions or the dealer funding package.', pkg),
           agentId: 'SRA-EXPORT-AGENT',
@@ -138,6 +142,19 @@ export class UnifiedMarketOperationsQueueService {
             readyForInstructionGeneration: reasoning.readyForInstructionGeneration,
             decisionId,
             planId,
+          },
+          actionExecution: {
+            phase: 3,
+            executable: reasoning.readyForInstructionGeneration,
+            expectedCount: executionSummary.expectedCount,
+            resultCount: executionSummary.resultCount,
+            completedCount: executionSummary.completedCount,
+            awaitingAuthorityCount: executionSummary.awaitingAuthorityCount,
+            failedCount: executionSummary.failedCount,
+            pendingCount: executionSummary.pendingCount,
+            status: reasoning.readyForInstructionGeneration
+              ? executionSummary.status
+              : 'BLOCKED_CONTEXT_REQUIRED',
           },
         });
       }
@@ -208,6 +225,16 @@ export class UnifiedMarketOperationsQueueService {
       contextRecords.set(pkg.exportPackageId, context);
     }
     return this.build(contextRecords);
+  }
+
+  async executeFinancingPlan(exportPackageId, options = {}) {
+    if (!exportPackageId) throw new Error('exportPackageId is required.');
+    await this.ensureIntelligenceHydrated();
+    const context = await this.contextReasoning.recordReasoning(exportPackageId, 'SRA-EXPORT-AGENT');
+    return await this.actionExecution.executePlan(context.plan.planId, {
+      exportPackageId,
+      agentId: options.agentId || 'SRA-EXPORT-AGENT',
+    });
   }
 
   explainResult(result) {
