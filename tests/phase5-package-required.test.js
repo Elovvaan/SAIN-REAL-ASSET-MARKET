@@ -1,0 +1,2 @@
+import assert from 'node:assert/strict';import test from 'node:test';import { CounterpartyOperationsService } from '../services/counterparty-operations-service.js';class D{list(t){return t==='TRANSACTION_PARTICIPATION_EVENT'?[{id:'E',eventId:'E',eventType:'PROCESSING_CLARIFICATION_REQUESTED'}]:[];}}
+test('refuses an unbound counterparty event',async()=>{const s=new CounterpartyOperationsService(new D(),{reasoning:{},outcomes:{}});await assert.rejects(()=>s.resolveParticipationEvent('E'),/not linked to a funding package/);});
