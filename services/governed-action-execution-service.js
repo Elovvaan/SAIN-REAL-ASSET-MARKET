@@ -1,4 +1,5 @@
 import { AchSettlementPacketService } from './ach-settlement-packet-service.js';
+import { TransactionParticipationGatewayService } from './transaction-participation-gateway-service.js';
 
 function now() {
   return new Date().toISOString();
@@ -32,6 +33,7 @@ export class GovernedActionExecutionService {
     if (!domain) throw new Error('Governed action execution requires the SRA domain store.');
     this.domain = domain;
     this.packetService = options.packetService || new AchSettlementPacketService(domain);
+    this.participationGateway = options.participationGateway || new TransactionParticipationGatewayService(domain);
     this.executors = new Map();
     this.registerDefaultExecutors();
   }
@@ -60,10 +62,23 @@ export class GovernedActionExecutionService {
 
       if (documentType === 'FUNDING_SETTLEMENT') {
         const bytes = await this.packetService.renderFundingPackage(exportPackageId);
+        const pkg = this.domain.get('EXPORT_PACKAGE', exportPackageId);
+        const participation = await this.participationGateway.createWindow(exportPackageId, {
+          recipientName: pkg?.beneficiaryName || null,
+          createdBy: 'SRA-EXPORT-AGENT',
+        });
         return {
           status: 'COMPLETED',
           externalReference: `funding-package:${exportPackageId}`,
-          data: { documentType, exportPackageId, byteLength: bytes.length, generated: true },
+          data: {
+            documentType,
+            exportPackageId,
+            byteLength: bytes.length,
+            generated: true,
+            participationWindow: participation.window,
+            participationAccessCode: participation.accessCode,
+            participationAccessCodeIssued: Boolean(participation.accessCode),
+          },
         };
       }
       if (documentType === 'DEALER_PROCESSING_INSTRUCTIONS') {
