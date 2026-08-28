@@ -23,6 +23,14 @@ For current financing export records, SRA derives required transaction documents
 
 SRA executes ready action-plan steps only through explicitly registered existing services. Safe preparation can run autonomously; reserved authority and unmapped actions stop as `AWAITING_AUTHORITY`. Every step produces a deterministic `ACTION_RESULT`, while external-world success remains separate pending `OUTCOME_EVALUATION` evidence.
 
+## Phase 4 — External Response, Outcome Intake and Reconciliation
+
+SRA consumes transaction-bound outside responses and evidence, including participation-window acknowledgments, processing questions, exception reports, uploaded documents, processing-submission confirmations, external-transfer results, settlement records, and payment receipts.
+
+Phase 4 creates deterministic `OUTCOME_EVALUATION` and `OPERATIONAL_MEMORY` state for each financing export package. Counterparty self-report is evidence, not proof of settlement. `VERIFIED` requires recorded external-transfer or settlement evidence. Blocking exceptions and failed external outcomes are surfaced in the operations queue for reconciliation.
+
+Admin flow: Phase 2 reasoning -> Phase 3 governed execution -> Phase 4 external outcome reconciliation.
+
 ## Next boundary
 
-Phase 4 should build verified external outcome intake and reconciliation on top of Phase 3 results: receipt/acknowledgment, counterparty response, settlement confirmation, exception evidence, and outcome evaluation. It should not infer external completion from internal action execution.
+Phase 5 should use reconciled external state to drive conversational counterparty operations and governed exception resolution: understand the issue, select the correct transaction-grounded response, prepare or deliver clarification through supported channels, and escalate only reserved decisions or authority changes.

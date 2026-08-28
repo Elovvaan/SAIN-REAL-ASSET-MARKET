@@ -1,6 +1,7 @@
 import { SraCoinAgentService } from './sra-coin-agent-service.js';
 import { ContextInstructionReasoningService } from './context-instruction-reasoning-service.js';
 import { GovernedActionExecutionService } from './governed-action-execution-service.js';
+import { ExternalOutcomeReconciliationService } from './external-outcome-reconciliation-service.js';
 
 const TRANSACTION_TYPE = 'SRA_TRANSACTION';
 const INTELLIGENCE_RECORD_TYPES = Object.freeze([
@@ -10,6 +11,8 @@ const INTELLIGENCE_RECORD_TYPES = Object.freeze([
   'ACTION_PLAN',
   'ACTION_RESULT',
   'OUTCOME_EVALUATION',
+  'TRANSACTION_PARTICIPATION_WINDOW',
+  'TRANSACTION_PARTICIPATION_EVENT',
 ]);
 
 function now() { return new Date().toISOString(); }
@@ -45,6 +48,7 @@ export class UnifiedMarketOperationsQueueService {
     this.coinAgents = new SraCoinAgentService(domain);
     this.contextReasoning = new ContextInstructionReasoningService(domain);
     this.actionExecution = options.actionExecution || new GovernedActionExecutionService(domain, options.actionExecutionOptions || {});
+    this.outcomeReconciliation = options.outcomeReconciliation || new ExternalOutcomeReconciliationService(domain);
     this.intelligenceHydrated = false;
     this.intelligenceHydrationPromise = null;
   }
@@ -86,7 +90,7 @@ export class UnifiedMarketOperationsQueueService {
     }
   }
 
-  build(contextRecords = new Map()) {
+  build(contextRecords = new Map(), outcomeRecords = new Map()) {
     const tx = this.transactions();
     const queue = [];
     const exceptions = [];
@@ -128,12 +132,24 @@ export class UnifiedMarketOperationsQueueService {
         const planId = persisted?.plan?.planId || `AP-CONTEXT-${pkg.exportPackageId}`;
         const plan = persisted?.plan || this.domain.list('ACTION_PLAN').find((record) => record.planId === planId || record.id === planId) || null;
         const executionSummary = this.actionExecution.summarizePlan(plan, pkg.exportPackageId);
+        const outcomeSummary = outcomeRecords.get(pkg.exportPackageId) || this.outcomeReconciliation.summary(pkg.exportPackageId);
+        const phase4NeedsAttention = outcomeSummary.attentionRequired;
+        const nextAction = phase4NeedsAttention
+          ? 'REVIEW_EXTERNAL_OUTCOME'
+          : outcomeSummary.awaitingExternalConfirmation
+            ? 'AWAIT_EXTERNAL_CONFIRMATION'
+            : 'PREPARE_SETTLEMENT_METHOD';
+        const explanation = phase4NeedsAttention
+          ? 'External processing evidence reports an exception or failed outcome. SRA should reconcile the outside response before continuing.'
+          : outcomeSummary.awaitingExternalConfirmation
+            ? 'The external participant reported submission for processing. Independent confirmation is still outstanding.'
+            : 'Financing export is ready. SRA Export Agent should prepare the selected settlement path: bank rail instructions or the dealer funding package.';
         queue.push({
-          ...item(pkg.exportPackageId, 'FINANCING_EXPORT', pkg.state, pkg.borrowerParticipantId || pkg.participantId, 'PREPARE_SETTLEMENT_METHOD', 'Financing export is ready. SRA Export Agent should prepare the selected settlement path: bank rail instructions or the dealer funding package.', pkg),
-          agentId: 'SRA-EXPORT-AGENT',
-          agentType: 'EXPORT_AGENT',
+          ...item(pkg.exportPackageId, 'FINANCING_EXPORT', pkg.state, pkg.borrowerParticipantId || pkg.participantId, nextAction, explanation, pkg),
+          agentId: phase4NeedsAttention ? 'SRA-OUTCOME-AGENT' : 'SRA-EXPORT-AGENT',
+          agentType: phase4NeedsAttention ? 'OUTCOME_RECONCILIATION_AGENT' : 'EXPORT_AGENT',
           humanApprovalRequired: true,
-          availableActions: ['PREPARE_BANK_SETTLEMENT_INSTRUCTION', 'GENERATE_DEALER_FUNDING_PACKAGE'],
+          availableActions: ['PREPARE_BANK_SETTLEMENT_INSTRUCTION', 'GENERATE_DEALER_FUNDING_PACKAGE', 'RECONCILE_EXTERNAL_OUTCOME'],
           instructionReasoning: {
             requiredDocuments: reasoning.requiredDocuments,
             unresolvedFields: reasoning.unresolvedFields,
@@ -156,6 +172,7 @@ export class UnifiedMarketOperationsQueueService {
               ? executionSummary.status
               : 'BLOCKED_CONTEXT_REQUIRED',
           },
+          outcomeReconciliation: outcomeSummary,
         });
       }
       if (pkg.state === 'READY_FOR_EXPORT' && !pkg.transferInstructionId) {
@@ -210,7 +227,8 @@ export class UnifiedMarketOperationsQueueService {
       } : null,
       protectedBoundary: [
         'NO_AUTOMATIC_APPROVAL', 'NO_BATCH_STATE_CHANGE', 'NO_SILENT_SETTLEMENT',
-        'NO_SILENT_EXTERNAL_EXECUTION', 'COIN_AGENTS_EXPLAIN_AND_PREPARE_ONLY',
+        'NO_SILENT_EXTERNAL_EXECUTION', 'EXTERNAL_SELF_REPORT_IS_EVIDENCE_NOT_VERIFICATION',
+        'COIN_AGENTS_EXPLAIN_AND_PREPARE_ONLY',
       ],
     };
   }
@@ -218,13 +236,16 @@ export class UnifiedMarketOperationsQueueService {
   async buildPersisted() {
     await this.ensureIntelligenceHydrated();
     const contextRecords = new Map();
+    const outcomeRecords = new Map();
     for (const pkg of this.domain.list('EXPORT_PACKAGE')) {
       if (String(pkg.exportKind || '').toUpperCase() !== 'FINANCING_DISBURSEMENT') continue;
       if (String(pkg.state || '').toUpperCase() !== 'READY_FOR_SETTLEMENT_INSTRUCTION') continue;
       const context = await this.contextReasoning.recordReasoning(pkg.exportPackageId, 'SRA-EXPORT-AGENT');
       contextRecords.set(pkg.exportPackageId, context);
+      await this.outcomeReconciliation.reconcile(pkg.exportPackageId);
+      outcomeRecords.set(pkg.exportPackageId, this.outcomeReconciliation.summary(pkg.exportPackageId));
     }
-    return this.build(contextRecords);
+    return this.build(contextRecords, outcomeRecords);
   }
 
   async executeFinancingPlan(exportPackageId, options = {}) {
@@ -235,6 +256,16 @@ export class UnifiedMarketOperationsQueueService {
       exportPackageId,
       agentId: options.agentId || 'SRA-EXPORT-AGENT',
     });
+  }
+
+  async reconcileFinancingOutcome(exportPackageId) {
+    if (!exportPackageId) throw new Error('exportPackageId is required.');
+    await this.ensureIntelligenceHydrated();
+    const reconciled = await this.outcomeReconciliation.reconcile(exportPackageId);
+    return {
+      ...reconciled,
+      summary: this.outcomeReconciliation.summary(exportPackageId),
+    };
   }
 
   explainResult(result) {
