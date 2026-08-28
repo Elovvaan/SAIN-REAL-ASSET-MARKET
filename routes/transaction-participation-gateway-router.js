@@ -72,6 +72,7 @@ export function createTransactionParticipationGatewayRouter(service, database = 
 
   router.post('/documents', upload.single('document'), async (req, res) => {
     try {
+      await service.ensureHydrated();
       const verified = service.authenticate(credentials(req));
       const documentType = String(req.body?.documentType || 'TRANSACTION_PARTICIPANT_DOCUMENT').toUpperCase();
       const stored = await documents.store({
@@ -79,7 +80,7 @@ export function createTransactionParticipationGatewayRouter(service, database = 
         documentType,
         uploaderId: req.body?.contactName || verified.record.windowId,
         retentionPolicy: 'TRANSACTION_PARTICIPATION_EVIDENCE',
-        retentionReferenceId: verified.pkg.opportunityId || verified.pkg.exportPackageId,
+        retentionReferenceId: verified.pkg.exportPackageId,
       });
       if (!stored.ok) return res.status(400).json({ error: stored.error });
       const result = await service.recordDocument(credentials(req), stored.document, req.body || {});
