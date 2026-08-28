@@ -8,6 +8,8 @@
   const inFlight = new Map();
   const FRESH_TTL_MS = 30_000;
   const STALE_TTL_MS = 120_000;
+  let generation = 0;
+  let forceNextWorkspaceRead = false;
 
   function normalizeUrl(input) {
     const raw = typeof input === 'string' ? input : input?.url;
@@ -52,6 +54,7 @@
   }
 
   function invalidate() {
+    generation += 1;
     cache.clear();
   }
 
@@ -60,17 +63,28 @@
     return nativeFetch(input, init);
   }
 
-  async function refreshInBackground(key, input, init) {
-    if (inFlight.has(key)) return inFlight.get(key);
+  async function fetchFresh(key, input, init, requestGeneration = generation) {
+    const existing = inFlight.get(key);
+    if (existing?.generation === requestGeneration) return existing.promise;
+
     const pending = execute(input, init)
       .then(async (response) => {
         const value = await snapshot(response);
-        if (response.ok) cache.set(key, value);
+        if (response.ok && generation === requestGeneration) cache.set(key, value);
         return value;
       })
-      .finally(() => inFlight.delete(key));
-    inFlight.set(key, pending);
+      .finally(() => {
+        const current = inFlight.get(key);
+        if (current?.promise === pending) inFlight.delete(key);
+      });
+
+    inFlight.set(key, { generation: requestGeneration, promise: pending });
     return pending;
+  }
+
+  function forceWorkspaceRefresh() {
+    invalidate();
+    forceNextWorkspaceRead = true;
   }
 
   async function fastRequest(input, init = {}) {
@@ -79,20 +93,29 @@
     if (!cacheable(url, method)) return execute(input, init);
 
     const key = keyFor(url);
+    const explicitWorkspaceRefresh = forceNextWorkspaceRead && url.pathname === '/api/admin/workspaces';
+    if (explicitWorkspaceRefresh) {
+      forceNextWorkspaceRead = false;
+      const requestGeneration = generation;
+      return restore(await fetchFresh(key, input, init, requestGeneration));
+    }
+
     const value = cache.get(key);
     if (value) {
       const age = Date.now() - value.storedAt;
       if (age <= FRESH_TTL_MS) return restore(value);
       if (age <= STALE_TTL_MS) {
-        void refreshInBackground(key, input, init).catch(() => {});
+        const requestGeneration = generation;
+        void fetchFresh(key, input, init, requestGeneration).catch(() => {});
         return restore(value);
       }
       cache.delete(key);
     }
 
+    const requestGeneration = generation;
     const existing = inFlight.get(key);
-    if (existing) return restore(await existing);
-    return restore(await refreshInBackground(key, input, init));
+    if (existing?.generation === requestGeneration) return restore(await existing.promise);
+    return restore(await fetchFresh(key, input, init, requestGeneration));
   }
 
   async function fastJson(url, init = {}) {
@@ -118,6 +141,10 @@
     }));
   }
 
+  document.addEventListener('click', (event) => {
+    if (event.target?.closest?.('[data-refresh-workspace]')) forceWorkspaceRefresh();
+  }, true);
+
   window.fetch = fastRequest;
   if (baseClient) {
     window.SRAAdminDataClient = Object.freeze({
@@ -135,12 +162,15 @@
 
   window.SRAAdminPerformance = Object.freeze({
     clear: invalidate,
+    forceWorkspaceRefresh,
     status() {
       return {
         cachedReads: cache.size,
         inFlightReads: inFlight.size,
         freshTtlMs: FRESH_TTL_MS,
         staleTtlMs: STALE_TTL_MS,
+        generation,
+        forceNextWorkspaceRead,
         dataClientWrapped: Boolean(baseClient),
       };
     },
