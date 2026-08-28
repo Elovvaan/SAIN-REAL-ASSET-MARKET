@@ -2,6 +2,7 @@
   if (window.__sraAdminPerformanceRuntimeInstalled) return;
   window.__sraAdminPerformanceRuntimeInstalled = true;
 
+  const baseClient = window.SRAAdminDataClient || null;
   const nativeFetch = window.fetch.bind(window);
   const cache = new Map();
   const inFlight = new Map();
@@ -54,9 +55,14 @@
     cache.clear();
   }
 
+  async function execute(input, init) {
+    if (baseClient?.request) return baseClient.request(input, init);
+    return nativeFetch(input, init);
+  }
+
   async function refreshInBackground(key, input, init) {
     if (inFlight.has(key)) return inFlight.get(key);
-    const pending = nativeFetch(input, init)
+    const pending = execute(input, init)
       .then(async (response) => {
         const value = await snapshot(response);
         if (response.ok) cache.set(key, value);
@@ -67,10 +73,10 @@
     return pending;
   }
 
-  async function fastFetch(input, init = {}) {
+  async function fastRequest(input, init = {}) {
     const method = methodOf(input, init);
     const url = normalizeUrl(input);
-    if (!cacheable(url, method)) return nativeFetch(input, init);
+    if (!cacheable(url, method)) return execute(input, init);
 
     const key = keyFor(url);
     const value = cache.get(key);
@@ -89,7 +95,39 @@
     return restore(await refreshInBackground(key, input, init));
   }
 
-  window.fetch = fastFetch;
+  async function fastJson(url, init = {}) {
+    const response = await fastRequest(url, {
+      ...init,
+      headers: { Accept: 'application/json', 'Cache-Control': 'no-cache', ...(init.headers || {}) },
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const error = new Error(payload.error || `Request failed with HTTP ${response.status}.`);
+      error.payload = payload;
+      error.status = response.status;
+      throw error;
+    }
+    return payload;
+  }
+
+  function refresh(source = 'manual') {
+    invalidate();
+    if (baseClient?.refresh) return baseClient.refresh(source);
+    window.dispatchEvent(new CustomEvent('sra:admin-refresh', {
+      detail: { source, requestedAt: new Date().toISOString() },
+    }));
+  }
+
+  window.fetch = fastRequest;
+  if (baseClient) {
+    window.SRAAdminDataClient = Object.freeze({
+      request: fastRequest,
+      json: fastJson,
+      refresh,
+      workspaceLimit: baseClient.workspaceLimit,
+    });
+  }
+
   window.addEventListener('sra:admin-mutated', invalidate);
   window.addEventListener('sra:admin-refresh', invalidate);
   window.addEventListener('sra-admin-session-expired', invalidate);
@@ -103,6 +141,7 @@
         inFlightReads: inFlight.size,
         freshTtlMs: FRESH_TTL_MS,
         staleTtlMs: STALE_TTL_MS,
+        dataClientWrapped: Boolean(baseClient),
       };
     },
   });
