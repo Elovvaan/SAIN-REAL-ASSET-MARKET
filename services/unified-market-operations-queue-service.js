@@ -126,10 +126,8 @@ export class UnifiedMarketOperationsQueueService {
         const reasoning = persisted?.reasoning || this.contextReasoning.reasonForExportPackage(pkg.exportPackageId);
         const decisionId = persisted?.decision?.decisionId || `AD-CONTEXT-${pkg.exportPackageId}`;
         const planId = persisted?.plan?.planId || `AP-CONTEXT-${pkg.exportPackageId}`;
-        const results = this.domain.list('ACTION_RESULT').filter((record) => record.planId === planId);
-        const completedResults = results.filter((record) => ['COMPLETED', 'COMPLETED_POLICY'].includes(record.status));
-        const awaitingAuthorityResults = results.filter((record) => record.status === 'AWAITING_AUTHORITY');
-        const failedResults = results.filter((record) => record.status === 'FAILED');
+        const plan = persisted?.plan || this.domain.list('ACTION_PLAN').find((record) => record.planId === planId || record.id === planId) || null;
+        const executionSummary = this.actionExecution.summarizePlan(plan, pkg.exportPackageId);
         queue.push({
           ...item(pkg.exportPackageId, 'FINANCING_EXPORT', pkg.state, pkg.borrowerParticipantId || pkg.participantId, 'PREPARE_SETTLEMENT_METHOD', 'Financing export is ready. SRA Export Agent should prepare the selected settlement path: bank rail instructions or the dealer funding package.', pkg),
           agentId: 'SRA-EXPORT-AGENT',
@@ -148,19 +146,15 @@ export class UnifiedMarketOperationsQueueService {
           actionExecution: {
             phase: 3,
             executable: reasoning.readyForInstructionGeneration,
-            resultCount: results.length,
-            completedCount: completedResults.length,
-            awaitingAuthorityCount: awaitingAuthorityResults.length,
-            failedCount: failedResults.length,
-            status: failedResults.length
-              ? 'FAILED'
-              : awaitingAuthorityResults.length
-                ? 'AWAITING_AUTHORITY'
-                : results.length && completedResults.length === results.length
-                  ? 'COMPLETED'
-                  : reasoning.readyForInstructionGeneration
-                    ? 'READY'
-                    : 'BLOCKED_CONTEXT_REQUIRED',
+            expectedCount: executionSummary.expectedCount,
+            resultCount: executionSummary.resultCount,
+            completedCount: executionSummary.completedCount,
+            awaitingAuthorityCount: executionSummary.awaitingAuthorityCount,
+            failedCount: executionSummary.failedCount,
+            pendingCount: executionSummary.pendingCount,
+            status: reasoning.readyForInstructionGeneration
+              ? executionSummary.status
+              : 'BLOCKED_CONTEXT_REQUIRED',
           },
         });
       }
