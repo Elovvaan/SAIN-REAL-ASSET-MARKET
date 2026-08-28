@@ -31,14 +31,26 @@ Phase 4 creates deterministic `OUTCOME_EVALUATION` and `OPERATIONAL_MEMORY` stat
 
 ## Phase 5 — Conversational Counterparty Operations and Governed Exception Resolution
 
-SRA can now answer transaction-scoped counterparty processing questions from recorded financing context, current Phase 4 outcome state, and the funding package itself. The participation gateway returns the agent response in the same question or exception interaction and exposes the latest response for the authenticated transaction window.
+SRA answers transaction-scoped counterparty processing questions from recorded financing context, current Phase 4 outcome state, and the funding package itself. Each clarification or exception creates deterministic `COUNTERPARTY_OPERATION_CASE` and `COUNTERPARTY_OPERATION_RESPONSE` records.
 
-Each clarification or exception creates deterministic `COUNTERPARTY_OPERATION_CASE` and `COUNTERPARTY_OPERATION_RESPONSE` records. Ordinary ACH, instrument, package, and processing clarification stays inside the operating layer. Requests that change financing amount or terms, authorize settlement or external transfer, issue instruments, transfer ownership, or authorize payment stop at `AWAITING_AUTHORITY` and preserve the current recorded transaction until principal action is recorded.
+Ordinary ACH, instrument, package, and processing clarification stays inside the operating layer. Requests that change financing amount or terms, authorize settlement or external transfer, issue instruments, transfer ownership, or authorize payment stop at `AWAITING_AUTHORITY` and preserve the current recorded transaction until principal action is recorded.
 
-Phase 5 does not invent missing transaction facts, silently change terms, or treat counterparty statements as verified settlement. Missing authoritative fields remain blocked for recorded-context resolution, and external completion continues to come from Phase 4 reconciliation.
+Phase 5 does not invent missing transaction facts, silently change terms, or treat counterparty statements as verified settlement.
 
-Admin/agent flow: Phase 2 reasoning -> Phase 3 governed execution -> Phase 4 external outcome reconciliation -> Phase 5 counterparty clarification and exception resolution.
+## Phase 6 — Autonomous Operational Continuation
 
-## Next boundary
+Phase 6 closes the operating loop after Phases 1–5. It evaluates current Phase 4 external evidence and Phase 5 counterparty/authority state, then resumes only actions that are already authorized by recorded facts.
 
-Phase 6 should close the loop with autonomous operational continuation: use verified outcomes and resolved counterparty cases to resume eligible workflows, create follow-up work, establish servicing/closure actions where appropriate, and surface only reserved approvals or unresolved exceptions to the principal.
+Safe autonomous continuation includes translating verified outside settlement evidence into the authoritative funded state, boarding funded financing to servicing when all servicing context is already recorded, advancing the financing lifecycle to `SERVICING`, and creating deterministic follow-up work when recorded servicing or closure context requires another authoritative operation.
+
+A terminal servicing account is recognized as ready for closing follow-up, but Phase 6 does not directly force a financing closing record to `CLOSED` because the existing closing service does not currently expose that transition.
+
+Phase 6 stops on principal-authority requests, failed external outcomes, unresolved counterparty exceptions, or missing authoritative context. It does not approve financing, change terms, authorize or execute settlement, issue instruments, transfer ownership, authorize payment, or infer missing data.
+
+Admin/agent flow:
+
+`Phase 1 observe/remember -> Phase 2 reason -> Phase 3 act -> Phase 4 reconcile -> Phase 5 converse/resolve -> Phase 6 continue or escalate -> new operational events -> next reasoning cycle`
+
+## Platinum completion boundary
+
+The six-phase Platinum operating architecture is complete when Phase 6 is deployed and the full loop is exercised through a real transaction test. The FedEx financing transaction is the intended first end-to-end operational test. The test should demonstrate that SRA continues automatically where recorded evidence permits and surfaces only reserved authority or unresolved exception states to the principal.

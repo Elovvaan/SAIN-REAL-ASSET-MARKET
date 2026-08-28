@@ -4,6 +4,7 @@ import { AgentServiceFeeBillingService } from '../services/agent-service-fee-bil
 import { SraAgentOperatingSystemService } from '../services/sra-agent-operating-system-service.js';
 import { UnifiedMarketOperationsQueueService } from '../services/unified-market-operations-queue-service.js';
 import { CounterpartyOperationsStatusService } from '../services/counterparty-operations-status-service.js';
+import { AutonomousOperationalContinuationService } from '../services/autonomous-operational-continuation-service.js';
 
 export async function installAgentWorkforceAdminRoutes({ router, domain, database, requireAdmin }) {
   const workforce = new AgentWorkforceService({ domain, database });
@@ -12,6 +13,7 @@ export async function installAgentWorkforceAdminRoutes({ router, domain, databas
   const operationsQueue = new UnifiedMarketOperationsQueueService(domain);
   const agentOS = new SraAgentOperatingSystemService(domain, { operationsQueue });
   const counterpartyOperations = new CounterpartyOperationsStatusService(domain);
+  const autonomousContinuation = new AutonomousOperationalContinuationService(domain);
   await workforce.initialize();
   await serviceFeeBilling.initialize('SRA_AGENT_OS');
 
@@ -43,12 +45,39 @@ export async function installAgentWorkforceAdminRoutes({ router, domain, databas
     catch (error) { return res.status(400).json({ error: error?.message || String(error), code: 'SRA_COUNTERPARTY_OPERATION_STATUS_FAILED' }); }
   });
 
+  router.get('/api/admin/autonomous-continuation', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    try {
+      const records = domain.list('EXPORT_PACKAGE').filter((pkg) => String(pkg.exportKind || '').toUpperCase() === 'FINANCING_DISBURSEMENT').map((pkg) => ({ exportPackageId: pkg.exportPackageId, ...autonomousContinuation.summary(pkg.exportPackageId) }));
+      return res.json({ phase: 6, records });
+    } catch (error) { return res.status(500).json({ error: error?.message || String(error), code: 'SRA_AUTONOMOUS_CONTINUATION_STATUS_FAILED' }); }
+  });
+
+  router.get('/api/admin/autonomous-continuation/:exportPackageId', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    try { return res.json({ evaluation: await autonomousContinuation.evaluate(req.params.exportPackageId), persisted: autonomousContinuation.summary(req.params.exportPackageId) }); }
+    catch (error) { return res.status(400).json({ error: error?.message || String(error), code: 'SRA_AUTONOMOUS_CONTINUATION_EVALUATION_FAILED' }); }
+  });
+
+  router.post('/api/admin/autonomous-continuation/:exportPackageId/run', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    try { return res.json(await autonomousContinuation.execute(req.params.exportPackageId, { agentId: 'SRA-CONTINUATION-AGENT' })); }
+    catch (error) { return res.status(422).json({ error: error?.message || String(error), code: 'SRA_AUTONOMOUS_CONTINUATION_FAILED' }); }
+  });
+
+  router.post('/api/admin/autonomous-continuation/run', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    try { return res.json(await autonomousContinuation.runAll()); }
+    catch (error) { return res.status(422).json({ error: error?.message || String(error), code: 'SRA_AUTONOMOUS_CONTINUATION_BATCH_FAILED' }); }
+  });
+
   router.get('/api/admin/agent-workforce/status', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
     const queue = await operationsQueue.explainPersisted();
     return res.json({
       workforce: workforce.status(),
       agentOS: agentOS.brief(),
+      platinumPhase6: { service: 'AUTONOMOUS_OPERATIONAL_CONTINUATION', records: domain.list('AUTONOMOUS_CONTINUATION').length, followUps: domain.list('AUTONOMOUS_CONTINUATION_FOLLOW_UP').filter((record) => record.status === 'OPEN').length },
       synchronizedAgents: { createdCount: synchronizedAgents.created.length, existingCount: synchronizedAgents.existing.length, agentCount: synchronizedAgents.agentCount },
       initialRun: { createdCount: initialRun.createdCount, completedCount: initialRun.completedCount, skippedCount: initialRun.skippedCount },
       serviceFeeSchedule: serviceFees.policy(),
@@ -94,12 +123,14 @@ export async function installAgentWorkforceAdminRoutes({ router, domain, databas
       const synchronized = await workforce.synchronizeOperatingAgents(agentOS.registry(), session);
       const queue = await operationsQueue.explainPersisted();
       const run = await workforce.runOperationalQueue(queue, { id: 'SRA_AGENT_OS' });
+      const continuation = await autonomousContinuation.runAll();
       return res.json({
         agentOS: agentOS.brief(),
         synchronizedAgents: { createdCount: synchronized.created.length, existingCount: synchronized.existing.length, agentCount: synchronized.agentCount },
         queue: { state: queue.state, totalAwaitingAction: queue.totalAwaitingAction, totalExceptions: queue.totalExceptions, nextRecommendedAction: queue.nextRecommendedAction },
         serviceRates: queueRates(queue),
         run,
+        continuation,
       });
     } catch (error) { return res.status(422).json({ error: error.message, code: 'SRA_AGENT_WORKFORCE_RUN_FAILED' }); }
   });
