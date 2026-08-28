@@ -157,3 +157,50 @@ test('a slow older audit cannot overwrite a newer cache value', async () => {
   assert.deepEqual(domain.get('ACTION_PLAN', newer.id), newer);
   assert.deepEqual(database.records.get(`ACTION_PLAN:${newer.id}`), newer);
 });
+
+test('atomicPut waits for an in-flight put on the same key and survives the older failure', async () => {
+  const database = new ControlledDatabase();
+  database.delayFirstPut = true;
+  database.failFirstPut = true;
+  const domain = new PersistentDomainService(database);
+  const older = { id: 'AP-CONTEXT-EXP-3', planId: 'AP-CONTEXT-EXP-3', status: 'BLOCKED_CONTEXT_REQUIRED' };
+  const atomic = { ...older, status: 'READY' };
+
+  const olderPromise = domain.put('ACTION_PLAN', older.id, older);
+  await Promise.resolve();
+  const atomicPromise = domain.atomicPut([{ type: 'ACTION_PLAN', id: atomic.id, payload: atomic }]);
+  await Promise.resolve();
+
+  assert.equal(database.putCalls.length, 1);
+  database.firstPutGate.resolve();
+
+  await assert.rejects(olderPromise, /first write failed/);
+  await atomicPromise;
+
+  assert.equal(database.putCalls.length, 2);
+  assert.deepEqual(domain.get('ACTION_PLAN', atomic.id), atomic);
+  assert.deepEqual(database.records.get(`ACTION_PLAN:${atomic.id}`), atomic);
+});
+
+test('put waits for an in-flight atomicPut on the same key and remains the newest value', async () => {
+  const database = new ControlledDatabase();
+  database.delayFirstPut = true;
+  const domain = new PersistentDomainService(database);
+  const atomic = { id: 'AD-CONTEXT-EXP-3', decisionId: 'AD-CONTEXT-EXP-3', decision: 'BLOCKED' };
+  const newer = { ...atomic, decision: 'READY' };
+
+  const atomicPromise = domain.atomicPut([{ type: 'AGENT_DECISION', id: atomic.id, payload: atomic }]);
+  await Promise.resolve();
+  const newerPromise = domain.put('AGENT_DECISION', newer.id, newer);
+  await Promise.resolve();
+
+  assert.equal(database.putCalls.length, 1);
+  database.firstPutGate.resolve();
+
+  await atomicPromise;
+  await newerPromise;
+
+  assert.equal(database.putCalls.length, 2);
+  assert.deepEqual(domain.get('AGENT_DECISION', newer.id), newer);
+  assert.deepEqual(database.records.get(`AGENT_DECISION:${newer.id}`), newer);
+});
