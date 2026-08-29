@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { DataEncryptionService } from './data-encryption-service.js';
 import { TransactionDocumentExtractionService } from './transaction-document-extraction-service.js';
 import { TransactionFactsMappingService } from './transaction-facts-mapping-service.js';
 
@@ -36,12 +37,50 @@ function retentionMetadata({ uploadedAt, retentionPolicy = 'PRIVATE_EVIDENCE', r
 }
 
 export class PrivateDocumentService {
-  constructor({ root = process.env.SRA_PRIVATE_DOCUMENT_ROOT || '/tmp/sra-private-documents', database = null, extractionService = null } = {}) {
+  constructor({ root = process.env.SRA_PRIVATE_DOCUMENT_ROOT || '/tmp/sra-private-documents', database = null, extractionService = null, encryptionService = null } = {}) {
     this.root = root;
     this.database = database;
     this.extractionService = extractionService || new TransactionDocumentExtractionService();
+    this.encryption = encryptionService || new DataEncryptionService();
     this.records = new Map();
     this.ready = false;
+  }
+
+  bodyContext(documentId) { return `PRIVATE_DOCUMENT_BODY:${documentId}`; }
+  protectBody(documentId, content) { return this.encryption.configured() ? this.encryption.encrypt(content, { context: this.bodyContext(documentId) }) : Buffer.from(content); }
+  unprotectBody(documentId, content) { return this.encryption.isEncrypted(content) ? this.encryption.decrypt(content, { context: this.bodyContext(documentId) }) : Buffer.from(content); }
+
+  async migrateDatabaseBodies() {
+    if (!this.database?.pool || !this.encryption.configured()) return { migrated: 0 };
+    const result = await this.database.pool.query('SELECT document_id, content FROM sra_private_document_bodies ORDER BY created_at');
+    let migrated = 0;
+    for (const row of result.rows) {
+      if (this.encryption.isEncrypted(row.content)) continue;
+      const protectedBody = this.protectBody(row.document_id, row.content);
+      const protection = this.encryption.protectionMetadata();
+      const client = await this.database.pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query('UPDATE sra_private_document_bodies SET content = $2, updated_at = NOW() WHERE document_id = $1', [row.document_id, protectedBody]);
+        await client.query(
+          `UPDATE sra_private_documents
+           SET payload = jsonb_set(payload, '{bodyProtection}', $2::jsonb, true), updated_at = NOW()
+           WHERE document_id = $1`,
+          [row.document_id, JSON.stringify(protection)]
+        );
+        await client.query('COMMIT');
+        migrated += 1;
+      } catch (error) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw error;
+      } finally {
+        client.release();
+      }
+    }
+    if (migrated && this.database?.audit) {
+      await this.database.audit({ eventType: 'PRIVATE_DOCUMENT_BODIES_ENCRYPTED', objectType: 'PRIVATE_DOCUMENT_STORAGE', objectId: this.encryption.status().activeKeyId, payload: { migrated, protection: this.encryption.protectionMetadata() } });
+    }
+    return { migrated };
   }
 
   async initialize() {
@@ -68,6 +107,7 @@ export class PrivateDocumentService {
         SET payload = payload - 'contentBase64', updated_at = NOW()
         WHERE payload ? 'contentBase64'
       `);
+      await this.migrateDatabaseBodies();
       const result = await this.database.pool.query("SELECT payload - 'contentBase64' AS payload FROM sra_private_documents ORDER BY created_at");
       result.rows.forEach((row) => this.records.set(row.payload.id, row.payload));
     } else if (this.database) {
@@ -95,9 +135,10 @@ export class PrivateDocumentService {
     await this.initialize();
     const id = createId();
     const digest = crypto.createHash('sha256').update(file.buffer).digest('hex');
+    const protectedBody = this.protectBody(id, file.buffer);
     const storedName = `${id}${safeExtension(file.originalname)}`;
     const storagePath = path.join(this.root, storedName);
-    await fs.writeFile(storagePath, file.buffer, { flag: 'wx' });
+    await fs.writeFile(storagePath, protectedBody, { flag: 'wx' });
     const uploadedAt = new Date().toISOString();
     let extraction = { status: extractableMimeTypes.has(String(file.mimetype || '').toLowerCase()) ? 'PENDING' : 'NOT_APPLICABLE', documentId: id, sha256: digest, facts: null };
     if (extractableMimeTypes.has(String(file.mimetype || '').toLowerCase())) {
@@ -118,6 +159,7 @@ export class PrivateDocumentService {
       size: file.size, sha256: digest, storageClass: 'PRIVATE_EVIDENCE',
       accessState: 'RESTRICTED', uploaderId, uploadedAt,
       reviewState: 'SUBMITTED', public: false, storagePath,
+      bodyProtection: this.encryption.protectionMetadata(),
       extraction,
       ...retentionMetadata({ uploadedAt, retentionPolicy, retentionReferenceId }),
     };
@@ -128,7 +170,7 @@ export class PrivateDocumentService {
         await client.query(
           `INSERT INTO sra_private_document_bodies (document_id, content) VALUES ($1, $2)
            ON CONFLICT (document_id) DO UPDATE SET content = EXCLUDED.content, updated_at = NOW()`,
-          [id, file.buffer]
+          [id, protectedBody]
         );
         const persisted = { ...record };
         delete persisted.storagePath;
@@ -171,6 +213,7 @@ export class PrivateDocumentService {
           extractionStatus: extraction.status,
           extractedTransactionType: extraction.facts?.transactionType || null,
           transactionFactsMapped: Boolean(mapping?.mapped),
+          bodyProtection: record.bodyProtection,
         }
       });
     }
@@ -184,9 +227,21 @@ export class PrivateDocumentService {
     if (!record) return null;
     if (this.database?.pool) {
       const result = await this.database.pool.query('SELECT content FROM sra_private_document_bodies WHERE document_id = $1', [id]);
-      if (result.rows[0]?.content) return result.rows[0].content;
+      if (result.rows[0]?.content) {
+        const stored = result.rows[0].content;
+        if (!this.encryption.isEncrypted(stored) && this.encryption.configured()) {
+          const protectedBody = this.protectBody(id, stored);
+          await this.database.pool.query('UPDATE sra_private_document_bodies SET content = $2, updated_at = NOW() WHERE document_id = $1', [id, protectedBody]);
+          return Buffer.from(stored);
+        }
+        return this.unprotectBody(id, stored);
+      }
     }
-    try { return await fs.readFile(record.storagePath); } catch { return null; }
+    try {
+      const stored = await fs.readFile(record.storagePath);
+      if (!this.encryption.isEncrypted(stored) && this.encryption.configured()) await fs.writeFile(record.storagePath, this.protectBody(id, stored));
+      return this.unprotectBody(id, stored);
+    } catch { return null; }
   }
 
   async markUsed(id, actorId = null) {
