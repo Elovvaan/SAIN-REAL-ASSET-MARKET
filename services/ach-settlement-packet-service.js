@@ -81,13 +81,8 @@ function documentType(record) {
 
 function documentPriority(record) {
   const value = String(documentType(record) || '').toUpperCase();
-  if (/PURCHASE_AGREEMENT|BUYER_ORDER|SALES_CONTRACT|RETAIL_INSTALLMENT|LOAN_AGREEMENT|PROMISSORY_NOTE|CONTRACT/.test(value)) return 10;
-  if (/CREDIT_APPLICATION|APPLICATION/.test(value)) return 20;
-  if (/ODOMETER/.test(value)) return 30;
-  if (/TITLE|REGISTRATION/.test(value)) return 40;
-  if (/INSURANCE/.test(value)) return 50;
-  if (/AUTHORIZATION|CONSENT|SIGNATURE/.test(value)) return 60;
-  if (/CHECKLIST|FUNDING_REQUIREMENT/.test(value)) return 70;
+  if (/PURCHASE_AGREEMENT|ACQUISITION_AGREEMENT|ASSET_PURCHASE|SALES_CONTRACT|LOAN_AGREEMENT|PROMISSORY_NOTE|SECURITY_AGREEMENT|GUARANTY|ASSIGNMENT|CONSENT|CONTRACT/.test(value)) return 10;
+  if (/AUTHORIZATION|SIGNATURE|CLOSING/.test(value)) return 20;
   return 100;
 }
 
@@ -96,6 +91,14 @@ function instruction(doc, number, body) {
   doc.font('Helvetica-Bold').fontSize(9).fillColor('#000000').text(`${number}.`, 54, y, { width: 20 });
   doc.font('Helvetica').fontSize(9).fillColor('#000000').text(body, 76, y, { width: 482, lineGap: 1.5 });
   doc.moveDown(0.55);
+}
+
+function settlementMethodLabel(value) {
+  const method = String(value || '').trim().toUpperCase();
+  if (method === 'ACH' || method === 'ACH_CREDIT') return 'ACH Credit';
+  if (method === 'FEDWIRE') return 'Fedwire';
+  if (method === 'BANK_WIRE' || method === 'WIRE') return 'Bank Wire';
+  return method ? method.replaceAll('_', ' ') : 'Settlement';
 }
 
 export class AchSettlementPacketService {
@@ -127,6 +130,14 @@ export class AchSettlementPacketService {
     const asset = relatedAssetId ? this.domain.get('ASSET_ACCOUNT', relatedAssetId) : null;
     const assetMeta = asset?.metadata || asset?.details || {};
     const opportunityMeta = opportunity?.metadata || {};
+    const recipientName = first(profile.payeeName, pkg.beneficiaryName, closing?.beneficiaryName);
+    const settlementMethod = first(
+      pkg.selectedRail,
+      pkg.preferredRail,
+      pkg.settlementMethod,
+      closing?.settlementMethod,
+      profile.settlementMethod,
+    );
 
     return {
       pkg,
@@ -142,7 +153,11 @@ export class AchSettlementPacketService {
         opportunity?.applicantDisplayName,
         participantId,
       ),
-      dealershipName: first(profile.payeeName, pkg.beneficiaryName, closing?.beneficiaryName),
+      recipientName,
+      beneficiaryName: recipientName,
+      dealershipName: recipientName,
+      settlementMethod,
+      settlementMethodLabel: settlementMethodLabel(settlementMethod),
       vehicleYear: first(profile.vehicleYear, assetMeta.year, opportunityMeta.vehicleYear, opportunity?.vehicleYear),
       vehicleMake: first(profile.vehicleMake, assetMeta.make, opportunityMeta.vehicleMake, opportunity?.vehicleMake),
       vehicleModel: first(
@@ -150,7 +165,6 @@ export class AchSettlementPacketService {
         assetMeta.model,
         opportunityMeta.vehicleModel,
         opportunity?.vehicleModel,
-        opportunity?.title,
       ),
       vin: first(
         profile.vin,
@@ -163,8 +177,15 @@ export class AchSettlementPacketService {
       ),
       agreementNumber: first(profile.agreementNumber, evidence.agreementNumber),
       sourceDocumentId: first(profile.sourceDocumentId, evidence.documentReference),
-      sourceDocumentSha256: first(profile.sourceDocumentSha256, evidence.documentSha256),
+      sourceDocumentSha256: first(profile.sourceDocumentSha256, evidence.documentHash, evidence.documentSha256),
       purchasePrice: first(profile.purchasePrice, pkg.amount),
+      transactionPurpose: first(
+        profile.paymentPurpose,
+        profile.transactionPurpose,
+        opportunity?.purpose,
+        opportunity?.description,
+        'Transaction settlement',
+      ),
     };
   }
 
@@ -238,13 +259,11 @@ export class AchSettlementPacketService {
   }
 
   linkedDocumentIds(data) {
-    const opportunity = data.opportunity || {};
-    const evidenceRecords = this.domain.list('FUNDING_OPPORTUNITY_EVIDENCE')
-      .filter((record) => record.opportunityId === opportunity.opportunityId);
+    const pkgInstructions = data.pkg?.settlementInstructions || {};
+    const closingInstructions = data.closing?.settlementInstructions || {};
     return unique([
-      ...(Array.isArray(opportunity.supportingDocumentIds) ? opportunity.supportingDocumentIds : []),
-      ...evidenceRecords.map((record) => record.documentId),
-      data.sourceDocumentId,
+      ...(Array.isArray(pkgInstructions.packageDocumentIds) ? pkgInstructions.packageDocumentIds : []),
+      ...(Array.isArray(closingInstructions.packageDocumentIds) ? closingInstructions.packageDocumentIds : []),
       data.evidence?.documentReference,
     ]);
   }
@@ -264,7 +283,7 @@ export class AchSettlementPacketService {
     });
   }
 
-  async renderCover(data, sourceDocuments) {
+  async renderCover(data, packageDocuments) {
     const { pkg, closing } = data;
     const chunks = [];
     const doc = new PDFKitDocument({
@@ -280,35 +299,35 @@ export class AchSettlementPacketService {
 
     drawPlatformLogo(doc);
     doc.font('Helvetica-Bold').fontSize(16).text('FUNDING / SETTLEMENT PACKAGE', { align: 'center' });
-    doc.font('Helvetica').fontSize(10).text('Document 1 of 3 - Transaction Documents and Settlement', { align: 'center' });
+    doc.font('Helvetica').fontSize(10).text('Transaction Closing and Settlement Documents', { align: 'center' });
     doc.moveDown(0.8);
     rule(doc);
 
     line(doc, 'SRA Transaction ID', pkg.financingTransactionId || pkg.exportPackageId);
     line(doc, 'Funding Package Reference', pkg.exportPackageId);
     line(doc, 'Package Date', dateLabel(new Date().toISOString()));
-    line(doc, 'Settlement Method', 'ACH Credit');
+    line(doc, 'Settlement Method', data.settlementMethodLabel);
 
     section(doc, 'Transaction Summary');
     line(doc, 'Purchaser / Obligated Party', data.purchaserName);
-    line(doc, 'Dealer / Payee', data.dealershipName);
+    line(doc, 'Beneficiary / Payee', data.recipientName);
     const vehicle = [data.vehicleYear, data.vehicleMake, data.vehicleModel].filter(Boolean).join(' ');
     if (vehicle || data.vin) {
       line(doc, 'Vehicle', vehicle || null);
       line(doc, 'VIN', data.vin);
     }
     line(doc, 'Agreement / Contract No.', data.agreementNumber);
-    line(doc, 'Purchase Price', money(data.purchasePrice, pkg.currency || 'USD'));
+    line(doc, 'Transaction Amount', money(data.purchasePrice, pkg.currency || 'USD'));
     line(doc, 'Authorized Settlement Amount', money(pkg.amount, pkg.currency || 'USD'));
     line(doc, 'Financing Closing Reference', closing?.closingId || pkg.closingId || null);
 
     section(doc, 'Package Document Manifest');
-    if (!sourceDocuments.length) {
+    if (!packageDocuments.length) {
       doc.font('Helvetica').fontSize(9).text(
-        'No linked source documents are currently recorded for this funding opportunity.',
+        'No external transaction document is enclosed. Underwriting and supporting evidence remain retained in the SRA transaction record.',
       );
     } else {
-      sourceDocuments.forEach((record, index) => {
+      packageDocuments.forEach((record, index) => {
         doc.font('Helvetica-Bold').fontSize(9).text(
           `${index + 1}. ${text(documentType(record)) || 'Transaction Document'}`,
         );
@@ -339,7 +358,7 @@ export class AchSettlementPacketService {
 
     doc.moveDown(0.7);
     doc.font('Helvetica').fontSize(7.5).fillColor('#555555').text(
-      `Generated from SRA financing and transaction-document records for export package ${pkg.exportPackageId}.`,
+      `Generated from SRA financing and closing records for export package ${pkg.exportPackageId}. Supporting underwriting evidence is retained in the transaction record and is not automatically reproduced in this recipient package.`,
       { align: 'center' },
     );
     doc.end();
@@ -354,7 +373,7 @@ export class AchSettlementPacketService {
     const doc = new PDFKitDocument({
       size: 'LETTER',
       margins: { top: 42, bottom: 42, left: 54, right: 54 },
-      info: { Title: `SRA Dealer Processing Instructions ${exportPackageId}` },
+      info: { Title: `SRA Recipient Processing Instructions ${exportPackageId}` },
     });
     doc.on('data', (chunk) => chunks.push(chunk));
     const done = new Promise((resolve, reject) => {
@@ -363,31 +382,31 @@ export class AchSettlementPacketService {
     });
 
     drawPlatformLogo(doc);
-    doc.font('Helvetica-Bold').fontSize(16).text('DEALER PROCESSING INSTRUCTIONS', { align: 'center' });
-    doc.font('Helvetica').fontSize(10).text('Document 2 of 3 - Recipient Processing Steps', { align: 'center' });
+    doc.font('Helvetica-Bold').fontSize(16).text('RECIPIENT PROCESSING INSTRUCTIONS', { align: 'center' });
+    doc.font('Helvetica').fontSize(10).text('Transaction Settlement Processing Steps', { align: 'center' });
     doc.moveDown(0.8);
     rule(doc);
 
     line(doc, 'SRA Transaction ID', pkg.financingTransactionId || pkg.exportPackageId);
     line(doc, 'Funding Package Reference', pkg.exportPackageId);
     line(doc, 'Financing Closing Reference', closing?.closingId || pkg.closingId || null);
-    line(doc, 'Dealer / Payee', data.dealershipName);
+    line(doc, 'Beneficiary / Payee', data.recipientName);
     line(doc, 'Authorized Settlement Amount', money(pkg.amount, pkg.currency || 'USD'));
-    line(doc, 'Settlement Method', 'ACH Credit');
+    line(doc, 'Settlement Method', data.settlementMethodLabel);
 
     section(doc, 'Processing Procedure');
-    instruction(doc, 1, 'Review the funding package and verify the transaction identifiers, purchaser / obligated party, dealer / payee, asset information, purchase documentation, and authorized settlement amount.');
-    instruction(doc, 2, 'Route the package to the dealership\'s authorized finance, accounting, treasury, receivables, or settlement-processing function.');
-    instruction(doc, 3, 'Complete the Destination Banking Information on the ACH Settlement Execution / Dealership Completion Page within the dealership\'s controlled financial-processing environment. Sensitive banking information does not need to be returned to SRA solely for re-entry.');
-    instruction(doc, 4, 'Process the authorized settlement amount using the settlement method identified in the package and the dealership\'s established financial-processing procedure.');
-    instruction(doc, 5, 'Upon processing, record the ACH / bank confirmation reference, ACH trace / network reference, execution date, and actual settled amount on the Dealership Completion Page.');
+    instruction(doc, 1, 'Review the funding package and verify the transaction identifiers, purchaser / obligated party, beneficiary / payee, applicable transaction agreement, and authorized settlement amount.');
+    instruction(doc, 2, 'Route the package to the recipient\'s authorized finance, accounting, treasury, receivables, or settlement-processing function.');
+    instruction(doc, 3, 'Complete the destination banking information on the Settlement Execution / Recipient Completion Page within the recipient\'s controlled financial-processing environment. Sensitive banking information does not need to be returned to SRA solely for re-entry.');
+    instruction(doc, 4, 'Process the authorized settlement amount using the settlement method identified in the package and the recipient\'s established financial-processing procedure.');
+    instruction(doc, 5, 'Upon processing, record the bank confirmation or network reference, execution date, and actual settled amount on the Recipient Completion Page.');
     instruction(doc, 6, 'Reconcile the resulting settlement to the SRA Transaction ID and Funding Package Reference shown above.');
     instruction(doc, 7, 'If the transaction cannot be processed as presented, identify the specific processing exception or additional information required and reference the SRA Transaction ID and Funding Package Reference in the response.');
 
     section(doc, 'Processing Control');
     line(doc, 'Remittance / Payment Reference', pkg.exportPackageId);
     line(doc, 'Agreement / Contract No.', data.agreementNumber);
-    line(doc, 'Settlement Completion Record', 'ACH Settlement Execution / Dealership Completion Page');
+    line(doc, 'Settlement Completion Record', 'Settlement Execution / Recipient Completion Page');
 
     doc.moveDown(0.8);
     doc.font('Helvetica').fontSize(7.5).fillColor('#555555').text(
@@ -406,7 +425,7 @@ export class AchSettlementPacketService {
     const doc = new PDFKitDocument({
       size: 'LETTER',
       margins: { top: 42, bottom: 42, left: 54, right: 54 },
-      info: { Title: `SRA ACH Settlement Execution ${exportPackageId}` },
+      info: { Title: `SRA Settlement Execution ${exportPackageId}` },
     });
     doc.on('data', (chunk) => chunks.push(chunk));
     const done = new Promise((resolve, reject) => {
@@ -415,45 +434,48 @@ export class AchSettlementPacketService {
     });
 
     drawPlatformLogo(doc);
-    doc.font('Helvetica-Bold').fontSize(16).text('ACH SETTLEMENT EXECUTION', { align: 'center' });
-    doc.font('Helvetica').fontSize(10).text('Dealership Completion Page - Funding / Settlement Record', { align: 'center' });
+    doc.font('Helvetica-Bold').fontSize(16).text('SETTLEMENT EXECUTION', { align: 'center' });
+    doc.font('Helvetica').fontSize(10).text('Recipient Completion Page - Funding / Settlement Record', { align: 'center' });
     doc.moveDown(0.8);
     rule(doc);
 
     line(doc, 'SRA Transaction ID', pkg.financingTransactionId || pkg.exportPackageId);
     line(doc, 'Settlement Reference', pkg.exportPackageId);
     line(doc, 'Packet Date', dateLabel(new Date().toISOString()));
-    line(doc, 'Requested Settlement', 'ACH Credit');
+    line(doc, 'Settlement Method', data.settlementMethodLabel);
 
     section(doc, 'Transaction Information - Prepared by SRA');
     line(doc, 'Purchaser / Obligated Party', data.purchaserName);
-    line(doc, 'Dealership / Payee', data.dealershipName);
+    line(doc, 'Beneficiary / Payee', data.recipientName);
     const vehicle = [data.vehicleYear, data.vehicleMake, data.vehicleModel].filter(Boolean).join(' ');
-    line(doc, 'Vehicle', vehicle || null);
-    line(doc, 'VIN', data.vin);
+    if (vehicle || data.vin) {
+      line(doc, 'Vehicle', vehicle || null);
+      line(doc, 'VIN', data.vin);
+    }
     line(doc, 'Agreement / Contract No.', data.agreementNumber);
-    line(doc, 'Purchase Amount', money(data.purchasePrice, pkg.currency || 'USD'));
+    line(doc, 'Transaction Amount', money(data.purchasePrice, pkg.currency || 'USD'));
     line(doc, 'Authorized Settlement Amount', money(pkg.amount, pkg.currency || 'USD'));
-    line(doc, 'Payment Purpose', 'Vehicle purchase settlement');
+    line(doc, 'Payment Purpose', data.transactionPurpose);
     line(doc, 'Remittance / Payment Reference', pkg.exportPackageId);
 
-    section(doc, 'Supporting Transaction Documents - Prepared by SRA');
-    line(doc, 'Executed Purchase Agreement', first(data.sourceDocumentId, evidence.documentReference));
-    line(doc, 'Agreement SHA-256', first(data.sourceDocumentSha256, evidence.documentSha256));
+    section(doc, 'Operative Transaction Documentation - Prepared by SRA');
+    line(doc, 'Document Reference', evidence.documentReference || null);
+    line(doc, 'Document Type', evidence.documentType || null);
+    line(doc, 'Document SHA-256', first(evidence.documentHash, evidence.documentSha256, data.sourceDocumentSha256));
     line(doc, 'Signature / Execution Evidence', evidence.signatureEvidenceReference || null);
     line(doc, 'Audit / Consent Evidence', first(evidence.auditTrailReference, evidence.consentEvidenceReference));
     line(doc, 'Financing Closing Reference', closing?.closingId || pkg.closingId || null);
 
-    section(doc, 'Destination Banking Information - Dealership Completes');
+    section(doc, 'Destination Banking Information - Recipient Completes');
     line(doc, 'Business / Legal Account Name', null);
     line(doc, 'Bank Name', null);
-    line(doc, 'Routing Number', null);
+    line(doc, 'Routing / Bank Identifier', null);
     line(doc, 'Account Number', null);
-    line(doc, 'Account Type', '[  ] Checking     [  ] Savings');
+    line(doc, 'Account Type', '[  ] Checking     [  ] Savings     [  ] Other');
 
     section(doc, 'Settlement Confirmation');
-    line(doc, 'ACH / Bank Confirmation Reference', null);
-    line(doc, 'ACH Trace / Network Reference', null);
+    line(doc, 'Bank / Network Confirmation Reference', null);
+    line(doc, 'Trace / Network Reference', null);
     line(doc, 'Execution Date', null);
     line(doc, 'Settled Amount', null);
 
@@ -482,7 +504,7 @@ export class AchSettlementPacketService {
 
     drawPlatformLogo(doc);
     doc.font('Helvetica-Bold').fontSize(16).text('SERVICING & PAYMENT INSTRUCTIONS', { align: 'center' });
-    doc.font('Helvetica').fontSize(10).text('Document 3 of 3 - Post-Settlement Obligation Servicing', { align: 'center' });
+    doc.font('Helvetica').fontSize(10).text('Post-Settlement Obligation Servicing', { align: 'center' });
     doc.moveDown(0.8);
     rule(doc);
 
@@ -565,30 +587,42 @@ export class AchSettlementPacketService {
     pages.forEach((page) => output.addPage(page));
   }
 
+  async validateFundingPackage(bytes, expectedMinimumPages) {
+    if (!Buffer.isBuffer(bytes) || bytes.length < 5 || bytes.subarray(0, 4).toString() !== '%PDF') {
+      throw new Error('Generated funding package is not a valid PDF payload.');
+    }
+    const validation = await PDFLibDocument.load(bytes);
+    if (validation.getPageCount() < expectedMinimumPages) {
+      throw new Error('Generated funding package did not contain the expected settlement pages.');
+    }
+    return true;
+  }
+
   async renderFundingPackage(exportPackageId) {
     const data = this.source(exportPackageId);
-    const sourceDocuments = await this.linkedDocuments(data);
-    const coverBytes = await this.renderCover(data, sourceDocuments);
-    const dealerInstructionsBytes = await this.renderDealerProcessingInstructions(exportPackageId);
+    const packageDocuments = await this.linkedDocuments(data);
+    const coverBytes = await this.renderCover(data, packageDocuments);
+    const recipientInstructionsBytes = await this.renderDealerProcessingInstructions(exportPackageId);
     const settlementBytes = await this.renderSettlementPage(exportPackageId);
     const servicingBytes = await this.renderServicingInstructions(exportPackageId);
 
     const output = await PDFLibDocument.create();
     output.setTitle(`SRA Funding Package ${exportPackageId}`);
-    output.setSubject('Three-document transaction funding, recipient processing, settlement, and servicing package');
+    output.setSubject('Transaction funding, recipient processing, settlement, and servicing package');
 
     await this.appendPdf(output, coverBytes);
 
-    for (const record of sourceDocuments) {
+    for (const record of packageDocuments) {
       await this.appendSourceDocument(output, record);
     }
 
-    await this.appendPdf(output, dealerInstructionsBytes);
+    await this.appendPdf(output, recipientInstructionsBytes);
     await this.appendPdf(output, settlementBytes);
     await this.appendPdf(output, servicingBytes);
 
-    const bytes = await output.save();
-    return Buffer.from(bytes);
+    const bytes = Buffer.from(await output.save());
+    await this.validateFundingPackage(bytes, 4);
+    return bytes;
   }
 
   async render(exportPackageId) {

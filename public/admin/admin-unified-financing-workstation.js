@@ -50,7 +50,7 @@
     const achHref = `/api/financing-closing/exports/${encoded}/ach-settlement-packet`;
     const fundingHref = `/api/financing-closing/exports/${encoded}/funding-package`;
     const buttonStyle = 'display:inline-block;padding:9px 12px;border:1px solid #4a4a4a;border-radius:8px;color:#f5f5f5;text-decoration:none';
-    return `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"><a href="${esc(achHref)}" style="${buttonStyle}" target="_blank" rel="noopener">Download ACH Settlement Packet</a><a href="${esc(fundingHref)}" style="${buttonStyle}" target="_blank" rel="noopener">Download Funding Package</a></div>`;
+    return `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"><a href="${esc(achHref)}" style="${buttonStyle}" target="_blank" rel="noopener">Download Settlement Packet</a><a href="${esc(fundingHref)}" style="${buttonStyle}" target="_blank" rel="noopener">Download Funding Package</a></div>`;
   }
 
   function recordCards(records, emptyText) {
@@ -147,6 +147,11 @@
     }
   }
 
+  async function refreshFinancing(force = true) {
+    if (activeTab() !== 'Financing') return;
+    await renderTab(force);
+  }
+
   function mount(root = workspace()) {
     if (!root || mounted) return;
     mounted = true;
@@ -157,8 +162,14 @@
     window.addEventListener('sra:admin-workspace-synchronized', (event) => {
       if (event.detail?.workspaceId === 'operations') void renderTab(true);
     });
+    window.addEventListener('sra:admin-refresh', (event) => {
+      if (event.detail?.source === 'FINANCING_AWAITING_ACTION' && activeTab() === 'Financing') {
+        void refreshFinancing(true);
+      }
+    });
     if (root.classList.contains('active')) void renderTab(false);
   }
 
+  window.refreshAdminFinancingWorkstation = refreshFinancing;
   window.mountAdminUnifiedFinancingWorkstation = mount;
 })();

@@ -31,6 +31,13 @@ test('closing and funding actions remain inside the Financing workspace', () => 
   assert.match(awaitingActions, /api\/financing-closing\/closings/);
 });
 
+test('successful financing actions refresh the active Financing workflow without another tab click', () => {
+  assert.match(awaitingActions, /sra:admin-refresh/);
+  assert.match(workstation, /event\.detail\?\.source === 'FINANCING_AWAITING_ACTION'/);
+  assert.match(workstation, /refreshAdminFinancingWorkstation/);
+  assert.match(workstation, /activeTab\(\) === 'Financing'/);
+});
+
 test('admin data client carries the administrator session through financing operations', () => {
   assert.match(dataClient, /ADMIN_OPERATION_PREFIXES/);
   assert.match(dataClient, /'\/api\/financing-closing'/);
