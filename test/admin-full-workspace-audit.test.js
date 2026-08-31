@@ -94,7 +94,10 @@ test('workspace opened during the shared initial request is rendered when that r
 });
 
 test('successful admin mutations synchronize through the consolidated data client and bootstrap', () => {
-  assert.match(client, /url\.pathname\.startsWith\('\/api\/admin\/'\)/);
+  assert.match(client, /ADMIN_OPERATION_PREFIXES/);
+  assert.match(client, /'\/api\/admin\/'/);
+  assert.match(client, /'\/api\/financing-closing'/);
+  assert.match(client, /isAdminOperationPath\(url\.pathname\)/);
   assert.match(client, /!\['GET', 'HEAD', 'OPTIONS'\]\.includes\(method\)/);
   assert.match(client, /sra:admin-mutated/);
   assert.match(bootstrap, /sra:admin-mutated/);

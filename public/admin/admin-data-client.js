@@ -6,6 +6,18 @@
   const inFlightReads = new Map();
   const readCache = new Map();
   const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+  const ADMIN_OPERATION_PREFIXES = [
+    '/api/admin/',
+    '/api/funding',
+    '/api/funding-operations',
+    '/api/funding-verification',
+    '/api/funding-value',
+    '/api/funding-model',
+    '/api/funding-instrument',
+    '/api/funding-marketplace',
+    '/api/financing-closing',
+    '/api/sane/intelligence',
+  ];
   const WORKSPACE_RECORD_LIMIT = 100;
   const ADMIN_SESSION_TIMEOUT_MS = 15_000;
   const ADMIN_READ_TIMEOUT_MS = 60_000;
@@ -21,6 +33,8 @@
     if (method === 'POST' && url.pathname === '/api/admin/listing-publication-batch/approve') return 'LISTING_PUBLICATION_BATCH';
     return null;
   };
+
+  const isAdminOperationPath = (pathname) => ADMIN_OPERATION_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(prefix));
 
   const normalizeWorkspaceUrl = (url) => {
     if (url.pathname !== '/api/admin/workspaces') return url;
@@ -199,9 +213,9 @@
     const method = String(init.method || (typeof input !== 'string' ? input?.method : '') || 'GET').toUpperCase();
     const isMutation = !['GET', 'HEAD', 'OPTIONS'].includes(method);
     const sameOrigin = url.origin === location.origin;
-    const isAdminRequest = sameOrigin && url.pathname.startsWith('/api/admin/');
-    const isSessionProbe = isAdminRequest && (url.pathname === '/api/admin/session' || url.pathname === '/api/admin/bootstrap-status');
-    const isWorkspaceRead = isAdminRequest && method === 'GET' && url.pathname === '/api/admin/workspaces';
+    const isAdminRequest = sameOrigin && isAdminOperationPath(url.pathname);
+    const isSessionProbe = sameOrigin && (url.pathname === '/api/admin/session' || url.pathname === '/api/admin/bootstrap-status');
+    const isWorkspaceRead = sameOrigin && method === 'GET' && url.pathname === '/api/admin/workspaces';
     const governed = sameOrigin ? governedKey(url, method) : null;
     const externalSignal = init.signal;
     const timeoutMs = timeoutFor(isAdminRequest, isSessionProbe, method);
