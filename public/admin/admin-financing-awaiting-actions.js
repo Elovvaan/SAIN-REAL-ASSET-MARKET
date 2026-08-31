@@ -14,7 +14,8 @@
   async function request(url, options = {}) {
     const response = await fetch(url, {
       ...options,
-      cache: 'no-store',
+      credentials: 'include',
+      cache: options.cache || 'no-store',
       headers: { Accept: 'application/json', ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(options.headers || {}) },
     });
     const payload = await response.json().catch(() => ({}));
@@ -26,8 +27,11 @@
     return document.querySelector('[data-workspace="operations"]');
   }
 
-  function awaitingActive(root) {
-    return root?.dataset.activeTab === 'Awaiting Actions';
+  function activeMode(root) {
+    const tab = root?.dataset.activeTab;
+    if (tab === 'Awaiting Actions') return 'AWAITING';
+    if (tab === 'Financing') return 'FINANCING';
+    return null;
   }
 
   function financingStage(record = {}) {
@@ -44,9 +48,25 @@
     const style = document.createElement('style');
     style.id = 'admin-financing-awaiting-actions-style';
     style.textContent = `
-      .financing-awaiting{display:grid;gap:12px}.financing-awaiting-card{border:1px solid #292929;border-radius:14px;padding:16px;background:#080808}.financing-awaiting-card header{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.financing-awaiting-card header strong{font-size:15px}.financing-awaiting-card header em{font-style:normal;color:#d6a92f;font-size:11px;font-weight:800}.financing-awaiting-meta{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:12px}.financing-awaiting-meta div{border:1px solid #242424;border-radius:10px;padding:10px}.financing-awaiting-meta span{display:block;color:#999;font-size:9px;text-transform:uppercase}.financing-awaiting-meta b{display:block;margin-top:4px;word-break:break-word}.financing-awaiting-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:12px}.financing-awaiting-actions input,.financing-awaiting-actions select,.financing-awaiting-actions button,.financing-awaiting-card>button{width:100%;box-sizing:border-box}.financing-awaiting-message{margin-top:10px;color:#aaa;font-size:12px}.financing-awaiting-error{color:#d98b8b}.financing-awaiting-empty{border:1px dashed #4a3c19;border-radius:14px;padding:24px;color:#aaa}.financing-closing-conditions{margin-top:14px;border-top:1px solid #242424;padding-top:12px}.financing-closing-conditions h4{margin:0 0 8px;font-size:12px}.financing-condition{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;border:1px solid #242424;border-radius:10px;padding:10px;margin-top:7px}.financing-condition small{display:block;color:#999;margin-top:3px}.financing-condition-actions{display:flex;gap:6px}.financing-condition-actions button{width:auto}.financing-add-condition{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;margin-top:8px}@media(max-width:900px){.financing-awaiting-meta,.financing-awaiting-actions,.financing-condition,.financing-add-condition{grid-template-columns:1fr}.financing-condition-actions{flex-wrap:wrap}}
+      .financing-awaiting{display:grid;gap:12px}.financing-awaiting-card{border:1px solid #292929;border-radius:14px;padding:16px;background:#080808}.financing-awaiting-card header{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.financing-awaiting-card header strong{font-size:15px}.financing-awaiting-card header em{font-style:normal;color:#d6a92f;font-size:11px;font-weight:800}.financing-awaiting-meta{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:12px}.financing-awaiting-meta div{border:1px solid #242424;border-radius:10px;padding:10px}.financing-awaiting-meta span{display:block;color:#999;font-size:9px;text-transform:uppercase}.financing-awaiting-meta b{display:block;margin-top:4px;word-break:break-word}.financing-awaiting-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:12px}.financing-awaiting-actions input,.financing-awaiting-actions select,.financing-awaiting-actions button,.financing-awaiting-card>button{width:100%;box-sizing:border-box}.financing-awaiting-message{margin-top:10px;color:#aaa;font-size:12px}.financing-awaiting-error{color:#d98b8b}.financing-awaiting-empty{border:1px dashed #4a3c19;border-radius:14px;padding:24px;color:#aaa}.financing-closing-conditions{margin-top:14px;border-top:1px solid #242424;padding-top:12px}.financing-closing-conditions h4{margin:0 0 8px;font-size:12px}.financing-condition{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;border:1px solid #242424;border-radius:10px;padding:10px;margin-top:7px}.financing-condition small{display:block;color:#999;margin-top:3px}.financing-condition-actions{display:flex;gap:6px}.financing-condition-actions button{width:auto}.financing-add-condition{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;margin-top:8px}.financing-continuous-actions{margin-top:16px;padding:18px;border:1px solid #292929;border-radius:16px;background:rgba(255,255,255,.02)}.financing-continuous-actions>header{margin-bottom:12px}.financing-continuous-actions>header h3{margin:2px 0 0}.financing-continuous-actions>header p{margin:4px 0 0;color:#999;font-size:12px}@media(max-width:900px){.financing-awaiting-meta,.financing-awaiting-actions,.financing-condition,.financing-add-condition{grid-template-columns:1fr}.financing-condition-actions{flex-wrap:wrap}}
     `;
     document.head.append(style);
+  }
+
+  function actionHost(root) {
+    const mode = activeMode(root);
+    const recordsRoot = root?.querySelector('.admin-workspace-records');
+    if (!mode || !recordsRoot) return null;
+    if (mode === 'AWAITING') return recordsRoot;
+    let shell = recordsRoot.querySelector('[data-financing-continuous-actions]');
+    if (!shell) {
+      shell = document.createElement('section');
+      shell.className = 'financing-continuous-actions';
+      shell.dataset.financingContinuousActions = 'true';
+      shell.innerHTML = '<header><p class="eyebrow">CLOSING & FUNDING</p><h3>Continue this financing workflow</h3><p>Closing, ready-to-fund, and funding authorization stay inside Financing.</p></header><div data-financing-continuous-actions-body></div>';
+      recordsRoot.append(shell);
+    }
+    return shell.querySelector('[data-financing-continuous-actions-body]');
   }
 
   function closingForOpportunity(closings, opportunityId) {
@@ -107,11 +127,12 @@
 
   async function load() {
     const root = operationsRoot();
-    if (!root || !awaitingActive(root)) return;
+    const mode = activeMode(root);
+    if (!root || !mode) return;
     ensureStyles();
-    const recordsRoot = root.querySelector('.admin-workspace-records');
-    if (!recordsRoot) return;
-    recordsRoot.innerHTML = '<div class="financing-awaiting-empty">Loading financing actions…</div>';
+    const host = actionHost(root);
+    if (!host) return;
+    host.innerHTML = '<div class="financing-awaiting-empty">Loading financing actions…</div>';
     try {
       const [opportunitiesPayload, closingsPayload] = await Promise.all([
         request('/api/funding/opportunities'),
@@ -130,9 +151,9 @@
         const financing = closing.opportunityId ? await authorizationForOpportunity(closing.opportunityId) : null;
         cards.push(actionCard({ opportunityId: closing.opportunityId || closing.financingTransactionId, title: 'Financing closing', financingStage: closing.status, requestedAmount: closing.approvedAmount }, closingDetails.get(closing.closingId), financing));
       }
-      recordsRoot.innerHTML = cards.length ? `<div class="financing-awaiting">${cards.join('')}</div>` : '<div class="financing-awaiting-empty">No financing closing or funding authorization action is currently waiting.</div>';
+      host.innerHTML = cards.length ? `<div class="financing-awaiting">${cards.join('')}</div>` : '<div class="financing-awaiting-empty">No financing closing or funding authorization action is currently waiting.</div>';
     } catch (error) {
-      recordsRoot.innerHTML = `<div class="financing-awaiting-empty financing-awaiting-error">${esc(error.message)}</div>`;
+      host.innerHTML = `<div class="financing-awaiting-empty financing-awaiting-error">${esc(error.message)}</div>`;
     }
   }
 
@@ -179,15 +200,18 @@
     if (!root || root.dataset.financingAwaitingActionsBound === 'true') return;
     root.dataset.financingAwaitingActionsBound = 'true';
     root.addEventListener('click', (event) => {
-      const tab = event.target.closest('[data-admin-tab="Awaiting Actions"]');
+      const tab = event.target.closest('[data-admin-tab="Awaiting Actions"],[data-admin-tab="Financing"]');
       if (tab) setTimeout(() => void load(), 0);
       const button = event.target.closest('[data-record-financing-authorization],[data-open-financing-closing],[data-add-financing-condition],[data-satisfy-financing-condition],[data-waive-financing-condition],[data-ready-financing-closing],[data-authorize-financing-closing]');
       if (button) { event.preventDefault(); void act(button); }
     });
-    window.addEventListener('sra:admin-workspace-synchronized', (event) => {
-      if (event.detail?.workspaceId === 'operations' && awaitingActive(root)) void load();
+    window.addEventListener('sra:admin-financing-rendered', () => {
+      if (activeMode(root) === 'FINANCING') void load();
     });
-    if (awaitingActive(root)) void load();
+    window.addEventListener('sra:admin-workspace-synchronized', (event) => {
+      if (event.detail?.workspaceId === 'operations' && activeMode(root)) void load();
+    });
+    if (activeMode(root)) void load();
   }
 
   window.mountAdminFinancingAwaitingActions = mount;
