@@ -2,6 +2,8 @@
   let mounted = false;
   let workspaceCache = null;
   let workspaceCacheAt = 0;
+  let operationsQueueCache = null;
+  let operationsQueueCacheAt = 0;
 
   const esc = (value) => String(value ?? '')
     .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
@@ -13,8 +15,8 @@
   async function request(url, options = {}) {
     const response = await fetch(url, {
       ...options,
-      credentials: 'same-origin',
-      cache: 'no-store',
+      credentials: 'include',
+      cache: options.cache || 'no-store',
       headers: { Accept: 'application/json', ...(options.headers || {}) },
     });
     const payload = await response.json().catch(() => ({}));
@@ -58,9 +60,18 @@
 
   async function loadWorkspaceRecords(force = false) {
     if (!force && workspaceCache && Date.now() - workspaceCacheAt < 15000) return workspaceCache;
-    workspaceCache = await request(`/api/admin/workspaces?limit=100&_=${Date.now()}`);
+    const suffix = force ? `&_=${Date.now()}` : '';
+    workspaceCache = await request(`/api/admin/workspaces?limit=100${suffix}`);
     workspaceCacheAt = Date.now();
     return workspaceCache;
+  }
+
+  async function loadOperationsQueue(force = false) {
+    if (!force && operationsQueueCache && Date.now() - operationsQueueCacheAt < 15000) return operationsQueueCache;
+    const suffix = force ? `?_=${Date.now()}` : '';
+    operationsQueueCache = await request(`/api/sane/operations-queue${suffix}`);
+    operationsQueueCacheAt = Date.now();
+    return operationsQueueCache;
   }
 
   async function ensureFundingRenderer() {
@@ -93,6 +104,7 @@
     await ensureFundingRenderer();
     if (typeof window.renderParticipantFundingOperations !== 'function') throw new Error('Funding Operations renderer is unavailable.');
     await window.renderParticipantFundingOperations(root);
+    window.dispatchEvent(new CustomEvent('sra:admin-financing-rendered', { detail: { workspaceId: 'operations', renderedAt: new Date().toISOString() } }));
   }
 
   async function renderTab(force = false) {
@@ -109,7 +121,7 @@
         return;
       }
       if (['Overview', 'Awaiting Actions', 'Exceptions'].includes(tab)) {
-        const data = await request(`/api/sane/operations-queue?_=${Date.now()}`);
+        const data = await loadOperationsQueue(force);
         if (tab === 'Overview') {
           root.innerHTML = overviewMarkup(data);
           root.querySelector('[data-open-financing]')?.addEventListener('click', () => workspace()?.querySelector('[data-admin-tab="Financing"]')?.click());
