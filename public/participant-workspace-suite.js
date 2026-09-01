@@ -9,6 +9,7 @@
     ['activity', ['≋', 'Transactions']],
     ['assets', ['◇', 'SRA Coin']],
     ['pools', ['⬡', 'Market Pools']],
+    ['events', ['◉', 'Event Market']],
     ['participants', ['◌', 'Account']]
   ]);
   const ORDER = [...LABELS.keys()];
@@ -34,6 +35,7 @@
     activity: ['Transactions', 'RECORDED'],
     assets: ['SRA Coin', 'AT PAR'],
     pools: ['Market Pools', 'PRODUCTIVE'],
+    events: ['Event Market', 'LIVE EVENTS'],
     participants: ['Account', 'ACTIVE']
   };
 
@@ -211,6 +213,7 @@
     if (view === 'instruments') return instrumentMarkup();
     if (view === 'funding-operations') return financingMarkup();
     if (view === 'pools') return simpleMarkup('Market Pools', 'Productive basket capability is loading.', [['Productive baskets', 'Governed bundles of approved assets.'], ['Reference markets', 'Maintained as a separate informational lane.']]);
+    if (view === 'events') return simpleMarkup('Event Market', 'Evidence-controlled event markets are loading.', [['Yes / No contracts', 'Outcome positions settle at zero or one SRA/USD.'], ['Resolution', 'Published sources and rules control settlement.']]);
     if (view === 'participants') return simpleMarkup('Account', 'Your Universal Account and capability states are loading.', [['Identity', 'One identity and one Universal Account.'], ['Capabilities', 'Operating tiers follow the capability records on this account.']]);
     return '';
   }
@@ -345,6 +348,7 @@
     if (view === 'instruments') return ['Create Instrument', `<div class="participant-action-ticket"><div class="ticket-stat"><span>Current operating tier</span><strong>${esc(String(window.accessState?.session?.activeCapacity || 'UNIVERSAL').replaceAll('_',' '))}</strong></div><div class="ticket-stat"><span>Representation rule</span><strong>1 SRA = 1 USD recognized value</strong></div><button type="button" data-participant-prompt="Review what instrument formation paths are currently available to my account.">Review formation paths</button><button type="button" data-participant-prompt="What recognized value and authority records do I need before creating an instrument?">Explain prerequisites</button></div>`];
     if (view === 'funding-operations') return ['Request Financing', `<div class="participant-action-ticket"><div class="ticket-stat"><span>Workflow</span><strong>Verified Value → Model → Instrument → Market → Settlement</strong></div><button type="button" data-participant-prompt="Explain my current financing state and the next available action.">Explain financing state</button></div>`];
     if (view === 'pools') return ['Market Pools', `<div class="participant-action-ticket"><div class="ticket-stat"><span>Market</span><strong>PRODUCTIVE BASKETS</strong></div><button type="button" data-participant-prompt="Explain how productive asset baskets form, close, perform, and distribute value.">Explain market pools</button></div>`];
+    if (view === 'events') return ['Event Market', `<div class="participant-action-ticket"><div class="ticket-stat"><span>Contract</span><strong>YES / NO · $1 SETTLEMENT</strong></div><button type="button" data-participant-prompt="Explain the open event markets, their resolution rules, and my maximum exposure.">Explain event markets</button></div>`];
     if (view === 'participants') return ['Account', `<div class="participant-action-ticket"><div class="ticket-stat"><span>Universal account</span><strong>${esc(window.accessState?.session?.universalAccountId || 'Linked')}</strong></div><button type="button" data-participant-prompt="Explain my current capabilities and operating tier.">Explain my capabilities</button></div>`];
     return ['What are you trying to accomplish?', ''];
   }
@@ -398,6 +402,9 @@
       else root.innerHTML = financingMarkup();
     } else if (view === 'pools') {
       if (typeof window.renderHybridLiquidityWorkspace === 'function') void window.renderHybridLiquidityWorkspace(root);
+      else root.innerHTML = staticMarkup(view);
+    } else if (view === 'events') {
+      if (typeof window.renderEventMarketWorkspace === 'function') void window.renderEventMarketWorkspace(root);
       else root.innerHTML = staticMarkup(view);
     } else if (view === 'participants') {
       if (typeof window.renderCapabilities === 'function') {

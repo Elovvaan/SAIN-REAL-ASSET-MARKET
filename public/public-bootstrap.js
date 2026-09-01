@@ -29,6 +29,7 @@
     '/participant-instrument-info.js',
     '/funding-intake-identity-evidence.js',
     '/hybrid-liquidity-market.js',
+    '/event-market.js',
     '/participant-workspace-bootstrap.js',
     '/sain-operations-intelligence.js',
   ];

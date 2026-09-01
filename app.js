@@ -35,6 +35,7 @@ import { createFinancialHistoryRouter } from './routes/financial-history-router.
 import { createAssetRelationshipRouter } from './routes/asset-relationship-router.js';
 import { createDirectValueAccountRouter } from './routes/direct-value-account-router.js';
 import { createProductiveBasketRouter } from './routes/productive-basket-router.js';
+import { createEventMarketRouter } from './routes/event-market-router.js';
 import { AccessService } from './services/access-service.js';
 import { CreativeFinanceService } from './services/creative-finance-service.js';
 import { ValueIntelligenceService } from './services/value-intelligence-service.js';
@@ -66,6 +67,7 @@ import { FinancialHistoryService } from './services/financial-history-service.js
 import { AssetRelationshipLedgerService } from './services/asset-relationship-ledger-service.js';
 import { DirectValueAccountService } from './services/direct-value-account-service.js';
 import { ProductiveBasketService } from './services/productive-basket-service.js';
+import { EventMarketService } from './services/event-market-service.js';
 import { DatabaseService } from './services/database-service.js';
 import { PersistentDomainService, RECORD_TYPES } from './services/persistent-domain-service.js';
 import { PersistentMarketplaceService } from './services/persistent-marketplace-service.js';
@@ -128,6 +130,7 @@ export async function createApp(options = {}) {
   const assetRelationshipLedgerService = new AssetRelationshipLedgerService(persistentDomain);
   const directValueAccountService = new DirectValueAccountService(persistentDomain); await directValueAccountService.initialize();
   const productiveBasketService = new ProductiveBasketService(persistentDomain, directValueAccountService);
+  const eventMarketService = new EventMarketService(persistentDomain, directValueAccountService);
   const edxConnectionService = new EdxConnectionService(persistentDomain);
   const edxPermissionService = new EdxPermissionService(persistentDomain);
   const edxExtractionService = new EdxExtractionService(persistentDomain, edxPermissionService);
@@ -181,6 +184,7 @@ export async function createApp(options = {}) {
   app.use('/api/asset-relationships', createAssetRelationshipRouter(assetRelationshipLedgerService, accessService));
   app.use('/api/direct-accounts', createDirectValueAccountRouter(directValueAccountService, accessService));
   app.use('/api/productive-baskets', createProductiveBasketRouter(productiveBasketService, directValueAccountService, accessService));
+  app.use('/api/event-markets', createEventMarketRouter(eventMarketService, directValueAccountService, accessService));
   app.use('/api/onboarding', onboardingRouter);
   app.use('/api/custody', createCustodyRouter());
   app.use('/api/sane', createSaneRouter(undefined, saneEdxOperationsService, sraAgentService));
@@ -211,6 +215,7 @@ export async function createApp(options = {}) {
     assetRelationshipLedgerService,
     directValueAccountService,
     productiveBasketService,
+    eventMarketService,
     authoritativeAssetRegistryService,
     sraAgentService,
   };

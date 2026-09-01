@@ -131,7 +131,7 @@
       bindBaskets(root, baskets);
       bindOrders(root, markets);
     } catch (error) {
-      root.innerHTML = `<div class="empty-view"><h2>Predictions / Liquidity unavailable</h2><p>${esc(error.message)}</p></div>`;
+      root.innerHTML = `<div class="empty-view"><h2>Market Pools unavailable</h2><p>${esc(error.message)}</p></div>`;
     }
   }
 
