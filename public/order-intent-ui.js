@@ -89,8 +89,10 @@
   }
 
   const observer = new MutationObserver(enhance);
-  window.addEventListener('DOMContentLoaded', () => {
+  const initialize = () => {
     observer.observe(document.body, { childList: true, subtree: true });
     setTimeout(enhance, 500);
-  });
+  };
+  if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', initialize, { once:true });
+  else initialize();
 })();

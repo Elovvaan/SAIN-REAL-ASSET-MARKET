@@ -393,8 +393,19 @@
     if (!root) return;
     document.body.classList.add('workspace-open');
     setFrame(view);
+    renderAction(view);
+    if (window.SRAPublicFeatures?.requires(view) && !window.SRAPublicFeatures.isReady(view)) {
+      root.innerHTML = '<div class="loading-state">Opening this workspace…</div>';
+      void window.SRAPublicFeatures.ensure(view).catch((error) => {
+        if (activeView === view) root.innerHTML = `<div class="empty-view"><h2>Workspace unavailable</h2><p>${esc(error.message)}</p></div>`;
+      });
+      return;
+    }
     if (view === 'home-projects') void renderHome(root);
-    else if (view === 'marketplace') void renderMarketplace(root);
+    else if (view === 'marketplace') {
+      if (typeof window.renderTransactionMarketSection === 'function') void window.renderTransactionMarketSection();
+      else void renderMarketplace(root);
+    }
     else if (view === 'positions') void renderPositions(root);
     else if (view === 'custody') void renderAssetVault(root);
     else if (view === 'activity') void renderTransactions(root);
@@ -416,7 +427,6 @@
       } else root.innerHTML = staticMarkup(view);
     } else root.innerHTML = staticMarkup(view);
     bindSuiteLinks(root);
-    renderAction(view);
   }
 
   function openView(view) { renderOwnedView(view); }
@@ -463,6 +473,9 @@
   function initialize() { sync(); }
   window.addEventListener('sra:access-state-changed', sync);
   window.addEventListener('sra:participant-data-mutated', () => { participantMirror = null; participantMirrorRequest = null; if (signedIn()) renderOwnedView(activeView); });
+  window.addEventListener('sra:public-workspace-features-ready', (event) => {
+    if (signedIn() && event.detail?.view === activeView) renderOwnedView(activeView);
+  });
   if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', initialize, { once: true });
   else initialize();
 })();

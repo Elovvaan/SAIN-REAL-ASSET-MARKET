@@ -122,8 +122,10 @@
 
   ensureStyle();
   const observer = new MutationObserver(enhanceVault);
-  window.addEventListener('DOMContentLoaded', () => {
+  const initialize = () => {
     observer.observe(document.body, { childList: true, subtree: true });
     setTimeout(enhanceVault, 200);
-  });
+  };
+  if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', initialize, { once:true });
+  else initialize();
 })();

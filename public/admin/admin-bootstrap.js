@@ -18,6 +18,7 @@
     ],
     settlement: [
       ['/admin/admin-settlement-execution-controls.js', 'data-sra-admin-settlement-execution-controls'],
+      ['/admin/admin-treasury-prime-connection-test.js', 'data-sra-admin-treasury-prime-connection-test'],
     ],
     treasury: [
       ['/admin/admin-treasury-workstation.js', 'data-sra-admin-treasury-workstation'],
@@ -125,7 +126,9 @@
       return;
     }
     if (workspaceId === 'settlement') {
-      window.mountAdminSettlementExecutionControls?.(admin.querySelector('[data-workspace="settlement"]'));
+      const settlement = admin.querySelector('[data-workspace="settlement"]');
+      window.mountAdminSettlementExecutionControls?.(settlement);
+      window.mountAdminTreasuryPrimeConnectionTest?.(settlement);
       return;
     }
     if (workspaceId === 'treasury') {
