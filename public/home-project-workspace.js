@@ -2,6 +2,11 @@
   const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
   const state = { projects: [], activeProjectId: null, workspace: null, activeTab: 'overview' };
 
+  function participantHomeOwnsPresentation() {
+    return document.body.classList.contains('participant-suite-ready')
+      || document.querySelector('.nav-list')?.dataset.participantNav === 'true';
+  }
+
   function esc(value) {
     return String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#039;');
   }
@@ -229,21 +234,26 @@
     renderWorkspace();
   }
 
-  async function activate() {
+  async function activate({ forcePresentation = false } = {}) {
+    if (!forcePresentation && participantHomeOwnsPresentation()) return false;
     try {
       await loadProjects();
+      if (!forcePresentation && participantHomeOwnsPresentation()) return false;
       renderList();
+      return true;
     } catch (error) {
+      if (!forcePresentation && participantHomeOwnsPresentation()) return false;
       root().innerHTML = `<section class="empty-home-projects"><h3>Home Projects could not load</h3><p>${esc(error.message)}</p></section>`;
+      return false;
     }
   }
 
   document.addEventListener('click', event => {
     const nav = event.target.closest('.nav-item[data-view="home-projects"]');
-    if (!nav) return;
+    if (!nav || participantHomeOwnsPresentation()) return;
     document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
     nav.classList.add('active');
-    activate();
+    void activate();
   }, true);
 
   window.SRAHomeProjects = { activate, openWorkspace };

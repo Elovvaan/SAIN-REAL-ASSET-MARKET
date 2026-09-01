@@ -442,6 +442,7 @@
     if (!mounted) {
       mounted = true;
       document.body.classList.add('participant-suite-ready');
+      document.body.dataset.publicPresentationOwner = 'participant-workspace-suite';
       renderOwnedView(activeView);
     }
   }
@@ -451,6 +452,7 @@
     participantMirror = null;
     participantMirrorRequest = null;
     document.body.classList.remove('participant-suite-ready');
+    delete document.body.dataset.publicPresentationOwner;
     document.querySelector('.nav-list')?.removeAttribute('data-participant-nav');
   }
 
