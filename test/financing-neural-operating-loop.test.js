@@ -19,6 +19,23 @@ class Domain {
   async lifecycle(event) { this.lifecycleEvents.push(structuredClone(event)); return event; }
 }
 
+class LazyDomain extends Domain {
+  constructor(seed = {}) {
+    super();
+    this.backing = structuredClone(seed);
+    this.hydratedTypes = [];
+  }
+  async hydrate(types = []) {
+    for (const type of types) {
+      this.hydratedTypes.push(type);
+      for (const record of this.backing[type] || []) {
+        const id = record.id || record.opportunityId || record.exportPackageId || record.paymentReceiptId || record.settlementRecordId;
+        this.records.set(this.key(type, id), structuredClone(record));
+      }
+    }
+  }
+}
+
 function extractedDocument(overrides = {}) {
   return {
     id: 'DOC-1',
@@ -174,4 +191,38 @@ test('successful transfer evidence with no amount preserves unknown amount inste
   assert.equal(reconciled.outcome.settlementConclusion.settledAmount, null);
   assert.equal(reconciled.outcome.settlementConclusion.amountMatches, null);
   assert.equal(reconciled.outcome.settlementConclusion.conclusionStatus, 'SETTLEMENT_COMPLETE');
+});
+
+test('legacy package without financing transaction id does not absorb unrelated anonymous interactions', async () => {
+  const domain = new Domain({
+    EXPORT_PACKAGE: [{
+      id: 'EXP-LEGACY', exportPackageId: 'EXP-LEGACY', amount: 500, currency: 'USD', beneficiaryName: 'Legacy Payee', state: 'READY_FOR_SETTLEMENT_INSTRUCTION',
+    }],
+    EXTERNAL_INTERACTION_EVENT: [{
+      id: 'EXT-GLOBAL', eventId: 'EXT-GLOBAL', interactionType: 'UNRELATED_PAGE_VIEW', channel: 'PUBLIC', actorType: 'EXTERNAL_ANONYMOUS', objectId: 'OTHER-OBJECT', occurredAt: '2026-09-01T13:00:00.000Z',
+    }],
+  });
+
+  const service = new ExternalOutcomeReconciliationService(domain);
+  const reconciled = await service.reconcile('EXP-LEGACY');
+  assert.equal(reconciled.outcome.observed.externalInteractionCount, 0);
+  assert.equal(reconciled.outcome.status, 'AWAITING_EXTERNAL_ACTIVITY');
+  assert.equal(reconciled.outcome.evidence.some((entry) => entry.id === 'EXT-GLOBAL'), false);
+});
+
+test('reconciliation hydrates external interaction evidence before evaluating persistent records', async () => {
+  const domain = new LazyDomain({
+    EXPORT_PACKAGE: [{
+      id: 'EXP-HYDRATE', exportPackageId: 'EXP-HYDRATE', financingTransactionId: 'FIN-HYDRATE', instrumentId: 'INS-HYDRATE', amount: 750, currency: 'USD', beneficiaryName: 'Hydrated Payee', state: 'READY_FOR_SETTLEMENT_INSTRUCTION',
+    }],
+    EXTERNAL_INTERACTION_EVENT: [{
+      id: 'EXT-HYDRATE', eventId: 'EXT-HYDRATE', transactionId: 'FIN-HYDRATE', objectId: 'INS-HYDRATE', interactionType: 'INSTRUMENT_VERIFICATION_OPENED', channel: 'PUBLIC_VERIFICATION', actorType: 'EXTERNAL_ANONYMOUS', outcome: 'SUCCESS', occurredAt: '2026-09-01T14:00:00.000Z',
+    }],
+  });
+
+  const service = new ExternalOutcomeReconciliationService(domain);
+  const reconciled = await service.reconcile('EXP-HYDRATE');
+  assert.ok(domain.hydratedTypes.includes('EXTERNAL_INTERACTION_EVENT'));
+  assert.equal(reconciled.outcome.observed.externalInteractionCount, 1);
+  assert.equal(reconciled.outcome.status, 'EXTERNAL_ACTIVITY_RECORDED');
 });
