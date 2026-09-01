@@ -131,7 +131,9 @@ export class FinancingIntelligenceService {
     const unresolved = unresolvedFields(summary, facts);
     const stage = normalizeFinancingStage(opportunity);
     const recommendation = conflicts.length || unresolved.length ? 'REVIEW_EVIDENCE' : 'READY_FOR_ADMIN_DECISION';
-    const recommendedAmount = money(first(summary.documentedAmount, summary.requestedAmount));
+    const recommendedAmount = summary.requestedAmount && summary.documentedAmount
+      ? Math.min(summary.requestedAmount, summary.documentedAmount)
+      : money(first(summary.requestedAmount, summary.documentedAmount));
     const evidenceRefs = facts.map(sourceRef).filter((ref) => ref.documentId || ref.sha256);
     const sourceFingerprint = crypto.createHash('sha256').update(JSON.stringify({
       opportunityId,
