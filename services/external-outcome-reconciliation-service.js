@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 function now() { return new Date().toISOString(); }
 function fingerprint(value) { return crypto.createHash('sha256').update(JSON.stringify(value ?? null)).digest('hex'); }
 function first(...values) { for (const value of values) if (value !== null && value !== undefined && String(value).trim() !== '') return value; return null; }
-function amount(value) { const n = Number(value); return Number.isFinite(n) && n >= 0 ? Number(n.toFixed(2)) : null; }
+function amount(value) { if (value === null || value === undefined || String(value).trim() === '') return null; const n = Number(value); return Number.isFinite(n) && n >= 0 ? Number(n.toFixed(2)) : null; }
 function text(value) { return value === null || value === undefined ? null : String(value).trim() || null; }
 
 const PARTICIPATION_EVENT_TYPE = 'TRANSACTION_PARTICIPATION_EVENT';
@@ -200,6 +200,8 @@ export class ExternalOutcomeReconciliationService {
       if (amountMatches === false) issues.push(`expected $${expectedAmount.toFixed(2)} but recorded $${settledAmount.toFixed(2)}`);
       if (beneficiaryMatches === false) issues.push(`expected beneficiary ${expectedBeneficiary} but recorded ${observedBeneficiary}`);
       narrative = `Settlement conclusion requires review because ${issues.join('; ')}. Do not treat the financing settlement as complete until the exception is resolved.`;
+    } else if (status === 'AWAITING_EXTERNAL_CONFIRMATION') {
+      narrative = 'External participant reported submission for processing; independent external confirmation is still required.';
     } else {
       narrative = 'External activity is recorded, but independent settlement confirmation is not yet sufficient to conclude that the financing settlement is complete.';
     }
@@ -233,11 +235,14 @@ export class ExternalOutcomeReconciliationService {
 
   buildOutcome(pkg) {
     const snapshot = this.evidenceSnapshot(pkg);
-    const status = this.determineStatus(snapshot);
+    const evidenceStatus = this.determineStatus(snapshot);
     const actionResults = this.actionResultsForPackage(pkg);
     const fundingResult = actionResults.find((record) => record.planStepId === 'FUNDING_SETTLEMENT') || null;
     const evidence = this.evidenceRefs(snapshot);
-    const settlementConclusion = this.settlementConclusion(pkg, snapshot, status);
+    const settlementConclusion = this.settlementConclusion(pkg, snapshot, evidenceStatus);
+    const status = evidenceStatus === 'VERIFIED' && settlementConclusion.conclusionStatus === 'EXCEPTION'
+      ? 'EXCEPTION_REPORTED'
+      : evidenceStatus;
     const sourceFingerprint = fingerprint({
       exportPackage: {
         exportPackageId: pkg.exportPackageId,
@@ -248,6 +253,7 @@ export class ExternalOutcomeReconciliationService {
         beneficiaryName: pkg.beneficiaryName || null,
       },
       evidence,
+      status,
       settlementConclusion: {
         conclusionStatus: settlementConclusion.conclusionStatus,
         settledAmount: settlementConclusion.settledAmount,
@@ -262,6 +268,7 @@ export class ExternalOutcomeReconciliationService {
       outcomeId: this.outcomeId(pkg),
       target: 'FINANCING_EXTERNAL_PROCESSING_OUTCOME',
       status,
+      evidenceStatus,
       transactionId: pkg.financingTransactionId || pkg.exportPackageId,
       financingTransactionId: pkg.financingTransactionId || null,
       exportPackageId: pkg.exportPackageId,
@@ -306,6 +313,7 @@ export class ExternalOutcomeReconciliationService {
       facts: {
         exportPackageId: outcome.exportPackageId,
         status: outcome.status,
+        evidenceStatus: outcome.evidenceStatus || outcome.status,
         observed: outcome.observed,
         settlementConclusion: outcome.settlementConclusion || null,
         sourceFingerprint: outcome.sourceFingerprint,
@@ -339,6 +347,7 @@ export class ExternalOutcomeReconciliationService {
     return {
       phase: 4,
       status: outcome.status,
+      evidenceStatus: outcome.evidenceStatus || outcome.status,
       outcomeId: outcome.outcomeId,
       evidenceCount: outcome.evidence?.length || 0,
       observed: outcome.observed,
