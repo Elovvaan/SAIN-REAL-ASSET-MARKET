@@ -55,7 +55,7 @@
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(),10000);
     try {
-      const response = await fetch(url,{...options,cache:'no-store',signal:controller.signal,headers:{Accept:'application/json','Cache-Control':'no-cache',...(options.headers||{})}});
+      const response = await fetch(url,{cache:'default',...options,signal:controller.signal,headers:{Accept:'application/json',...(options.headers||{})}});
       const payload = await response.json().catch(() => ({}));
       if(!response.ok) throw new Error(payload.error || `Request failed with ${response.status}.`);
       return payload;
@@ -289,7 +289,7 @@
   async function loadWorkspaceData(force=false){
     if(state.loading && !force) return state.loading;
     state.lastError = null;
-    const request = requestJson(`/api/admin/workspaces?limit=1000&_=${Date.now()}`)
+    const request = requestJson('/api/admin/workspaces?limit=100', force ? { cache:'reload' } : {})
       .then(data => { state.workspaceData = data; return data; })
       .catch(error => { state.lastError = error.message; throw error; })
       .finally(() => { if(state.loading === request) state.loading = null; });
@@ -297,6 +297,10 @@
     return request;
   }
   async function refreshWorkspace(id){
+    if(id==='dashboard'){
+      window.dispatchEvent(new CustomEvent('sra:admin-dashboard-refresh'));
+      return;
+    }
     const node = recordsBody(id);
     if(node) node.innerHTML = loadingState();
     try { await loadWorkspaceData(true); } catch {}
@@ -321,7 +325,7 @@
     const hash = `#admin-${id}`;
     if(location.hash!==hash) history.replaceState(null,'',hash);
     renderWorkspace(id);
-    if(!state.workspaceData){
+    if(id!=='dashboard' && !state.workspaceData){
       const pending = loadWorkspaceData(false);
       void pending.catch(()=>{}).finally(() => {
         const active = activeWorkspaceId();

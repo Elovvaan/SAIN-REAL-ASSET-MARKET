@@ -52,6 +52,75 @@ function workspaceStatus(records, requiredKeys) {
   const recordCount = requiredKeys.reduce((sum, key) => sum + (records[key]?.length || 0), 0);
   return { state: missingSources.length ? 'MISCONFIGURED' : 'AVAILABLE', recordCount, missingSources };
 }
+function stateCounts(records = []) {
+  const counts = {};
+  for (const record of records) counts[stateOf(record)] = (counts[stateOf(record)] || 0) + 1;
+  return counts;
+}
+function compactMarketDashboard(domain) {
+  const eventMarkets = domain.list(RECORD_TYPES.EVENT_MARKET);
+  const eventSignals = domain.list(RECORD_TYPES.EVENT_MARKET_SIGNAL);
+  const eventPositions = domain.list(RECORD_TYPES.EVENT_POSITION);
+  const eventExecutions = domain.list(RECORD_TYPES.EVENT_EXECUTION);
+  const eventSettlements = domain.list(RECORD_TYPES.EVENT_SETTLEMENT);
+  const baskets = domain.list(RECORD_TYPES.PRODUCTIVE_BASKET);
+  const admissions = domain.list(RECORD_TYPES.BASKET_ASSET_ADMISSION);
+  const contributions = domain.list(RECORD_TYPES.BASKET_CONTRIBUTION);
+  const basketPositions = domain.list(RECORD_TYPES.BASKET_PARTICIPATION_POSITION);
+  const performance = domain.list(RECORD_TYPES.BASKET_PERFORMANCE_EVENT);
+  const distributions = domain.list(RECORD_TYPES.BASKET_DISTRIBUTION);
+  const signalsByMarket = new Map();
+  for (const signal of eventSignals) {
+    const current = signalsByMarket.get(signal.eventMarketId) || [];
+    current.push(signal);
+    signalsByMarket.set(signal.eventMarketId, current);
+  }
+  const eventItems = sortNewest(eventMarkets).slice(0, 12).map((market) => {
+    const signals = sortNewest(signalsByMarket.get(market.eventMarketId) || []).slice(0, 24).reverse();
+    const latest = signals.at(-1) || null;
+    return {
+      eventMarketId: market.eventMarketId, shortName: market.shortName, question: market.question,
+      category: market.category, state: market.state, scheduledCloseAt: market.scheduledCloseAt,
+      yesPrice: latest?.yesPrice ?? null, noPrice: latest?.noPrice ?? null, observedAt: latest?.observedAt ?? null,
+      signalSource: latest?.sourceName ?? null,
+      series: signals.map((signal) => ({ yesPrice: signal.yesPrice, observedAt: signal.observedAt })),
+      openInterest: eventPositions.filter((item) => item.eventMarketId === market.eventMarketId && stateOf(item) === 'OPEN').reduce((sum, item) => sum + Number(item.quantity || 0), 0),
+      volume: eventExecutions.filter((item) => item.eventMarketId === market.eventMarketId).reduce((sum, item) => sum + Number(item.quantity || 0), 0)
+    };
+  });
+  const basketItems = sortNewest(baskets).slice(0, 12).map((basket) => {
+    const basketAdmissions = admissions.filter((item) => item.basketId === basket.basketId);
+    const basketContributions = contributions.filter((item) => item.basketId === basket.basketId);
+    const basketPerformance = sortNewest(performance.filter((item) => item.basketId === basket.basketId));
+    const basketDistributions = distributions.filter((item) => item.basketId === basket.basketId);
+    const recognizedValue = basketContributions.reduce((sum, item) => sum + Number(item.recognizedValue || 0), 0);
+    const distributable = basketPerformance.reduce((sum, item) => sum + Number(item.distributableValue || 0), 0);
+    const distributed = basketDistributions.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    return {
+      basketId: basket.basketId, name: basket.name, symbol: basket.unitSymbol, model: basket.model, state: basket.state,
+      recognizedValue, minimumCloseValue: Number(basket.minimumCloseValue || 0),
+      positionCount: basketPositions.filter((item) => item.basketId === basket.basketId && stateOf(item) === 'ACTIVE').length,
+      pendingAdmissions: basketAdmissions.filter((item) => ['SUBMITTED','PENDING','UNDER_REVIEW'].includes(stateOf(item))).length,
+      undistributedValue: Math.max(0, Number((distributable - distributed).toFixed(8))),
+      latestPerformanceAt: basketPerformance[0]?.recordedAt || null
+    };
+  });
+  const workflow = [];
+  for (const market of eventItems) {
+    const action = market.state === 'DRAFT' ? 'Review market' : market.state === 'REVIEWED' ? 'List on venue' : market.state === 'RESOLVED' ? 'Settle positions' : ['OPEN','SUSPENDED','CLOSED'].includes(market.state) ? 'Monitor or resolve' : null;
+    if (action) workflow.push({ kind:'EVENT', id:market.eventMarketId, title:market.shortName || market.question, state:market.state, action });
+  }
+  for (const basket of basketItems) {
+    if (basket.pendingAdmissions) workflow.push({ kind:'BASKET', id:basket.basketId, title:basket.name || basket.basketId, state:basket.state, action:`Review ${basket.pendingAdmissions} admission${basket.pendingAdmissions === 1 ? '' : 's'}` });
+    else if (basket.state === 'FORMATION' && basket.recognizedValue >= basket.minimumCloseValue) workflow.push({ kind:'BASKET', id:basket.basketId, title:basket.name || basket.basketId, state:basket.state, action:'Close formation' });
+    else if (basket.state === 'ACTIVE' && basket.undistributedValue > 0) workflow.push({ kind:'BASKET', id:basket.basketId, title:basket.name || basket.basketId, state:basket.state, action:'Review distribution' });
+  }
+  return {
+    eventMarkets: { counts:stateCounts(eventMarkets), total:eventMarkets.length, signalCount:eventSignals.length, settlementCount:eventSettlements.length, items:eventItems },
+    productiveBaskets: { counts:stateCounts(baskets), total:baskets.length, admissionCount:admissions.length, contributionCount:contributions.length, items:basketItems },
+    workflow: workflow.slice(0, 20)
+  };
+}
 
 export async function createPrivateAdminRouter({ database, domain, coinbasePublicMarket = null, nativePlatformAsset = null }) {
   const access = new AccessService({ database });
@@ -173,6 +242,25 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
   const treasuryAdministration = await installTreasuryAdminRoutes({ router, domain, requireAdmin, database });
   const treasuryTransferReadiness = await installTreasuryTransferReadinessRoutes({ router, domain, requireAdmin, database });
   const agentWorkforceAdministration = await installAgentWorkforceAdminRoutes({ router, domain, database, requireAdmin });
+
+  router.get('/api/admin/dashboard', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    const market = compactMarketDashboard(domain);
+    return res.json({
+      generatedAt: new Date().toISOString(),
+      administrator: { id: session.id, displayName: session.displayName },
+      statuses: {
+        treasury: { state:'AVAILABLE', recordCount:count(domain, RECORD_TYPES.LEDGER_ENTRY) + count(domain, RECORD_TYPES.TREASURY_PAYMENT_ORDER) },
+        marketplace: { state:'AVAILABLE', recordCount:count(domain, RECORD_TYPES.MARKETPLACE_LISTING) },
+        nativeAsset: { state:nativePlatformAsset ? 'AVAILABLE' : 'UNAVAILABLE', recordCount:count(domain, RECORD_TYPES.SRA_INSTRUMENT) },
+        coinPositions: { state:'AVAILABLE', recordCount:count(domain, RECORD_TYPES.COIN_POSITION) },
+        settlement: { state:'AVAILABLE', recordCount:count(domain, RECORD_TYPES.SRA_SETTLEMENT) + count(domain, RECORD_TYPES.SETTLEMENT_RAIL_INSTRUCTION) },
+        system: { state:'AVAILABLE', recordCount:count(domain, RECORD_TYPES.LIFECYCLE_EVENT) },
+        operations: { state:'AVAILABLE', recordCount:count(domain, RECORD_TYPES.SRA_TRANSACTION) + market.eventMarkets.total + market.productiveBaskets.total }
+      },
+      market
+    });
+  });
 
   router.get('/api/admin/workspaces', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;

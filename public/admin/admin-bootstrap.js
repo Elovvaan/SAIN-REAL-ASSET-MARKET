@@ -5,6 +5,9 @@
   const PERFORMANCE_RUNTIME = ['/admin/admin-performance-runtime.js', 'data-sra-admin-performance-runtime'];
   const SHELL = ['/admin/admin-suite-shell.js', 'data-sra-admin-suite-shell'];
   const WORKSPACE_FEATURES = {
+    dashboard: [
+      ['/admin/admin-market-dashboard.js', 'data-sra-admin-market-dashboard'],
+    ],
     operations: [
       ['/admin/admin-unified-financing-workstation.js', 'data-sra-admin-unified-financing-workstation'],
       ['/admin/admin-financing-evidence.js', 'data-sra-admin-financing-evidence'],
@@ -110,6 +113,10 @@
 
   function mountWorkspaceFeatures(workspaceId, admin) {
     if (!admin) return;
+    if (workspaceId === 'dashboard') {
+      window.mountAdminMarketDashboard?.(admin.querySelector('[data-workspace="dashboard"]'));
+      return;
+    }
     if (workspaceId === 'operations') {
       const operations = admin.querySelector('[data-workspace="operations"]');
       window.mountAdminUnifiedFinancingWorkstation?.(operations);
