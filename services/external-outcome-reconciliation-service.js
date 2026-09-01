@@ -2,8 +2,12 @@ import crypto from 'node:crypto';
 
 function now() { return new Date().toISOString(); }
 function fingerprint(value) { return crypto.createHash('sha256').update(JSON.stringify(value ?? null)).digest('hex'); }
+function first(...values) { for (const value of values) if (value !== null && value !== undefined && String(value).trim() !== '') return value; return null; }
+function amount(value) { const n = Number(value); return Number.isFinite(n) && n >= 0 ? Number(n.toFixed(2)) : null; }
+function text(value) { return value === null || value === undefined ? null : String(value).trim() || null; }
 
 const PARTICIPATION_EVENT_TYPE = 'TRANSACTION_PARTICIPATION_EVENT';
+const EXTERNAL_INTERACTION_EVENT_TYPE = 'EXTERNAL_INTERACTION_EVENT';
 const OUTCOME_TYPE = 'OUTCOME_EVALUATION';
 const MEMORY_TYPE = 'OPERATIONAL_MEMORY';
 
@@ -47,6 +51,16 @@ export class ExternalOutcomeReconciliationService {
     );
   }
 
+  externalInteractions(pkg) {
+    return this.records(EXTERNAL_INTERACTION_EVENT_TYPE).filter((event) =>
+      event.exportPackageId === pkg.exportPackageId ||
+      event.transactionId === pkg.financingTransactionId ||
+      event.financingTransactionId === pkg.financingTransactionId ||
+      event.objectId === pkg.exportPackageId ||
+      (pkg.instrumentId && event.objectId === pkg.instrumentId)
+    );
+  }
+
   externalTransferResults(pkg) {
     return this.records('SRA_TRANSACTION').filter((record) =>
       record.transactionType === 'EXTERNAL_TRANSFER_RESULT' &&
@@ -72,6 +86,7 @@ export class ExternalOutcomeReconciliationService {
 
   evidenceSnapshot(pkg) {
     const participation = this.participationEvents(pkg);
+    const externalInteractions = this.externalInteractions(pkg);
     const transferResults = this.externalTransferResults(pkg);
     const settlement = this.settlementEvidence(pkg);
 
@@ -92,6 +107,7 @@ export class ExternalOutcomeReconciliationService {
       exceptions,
       documents,
       questions,
+      externalInteractions,
       transferResults,
       settlement,
       successfulTransfer,
@@ -106,7 +122,7 @@ export class ExternalOutcomeReconciliationService {
     if (snapshot.confirmedSettlement || snapshot.successfulTransfer) return 'VERIFIED';
     if (snapshot.exceptions.some((event) => event.details?.blocking !== false)) return 'EXCEPTION_REPORTED';
     if (snapshot.submitted.length) return 'AWAITING_EXTERNAL_CONFIRMATION';
-    if (snapshot.receipt.length || snapshot.documents.length || snapshot.questions.length) return 'EXTERNAL_ACTIVITY_RECORDED';
+    if (snapshot.receipt.length || snapshot.documents.length || snapshot.questions.length || snapshot.externalInteractions.length) return 'EXTERNAL_ACTIVITY_RECORDED';
     return 'AWAITING_EXTERNAL_ACTIVITY';
   }
 
@@ -123,17 +139,89 @@ export class ExternalOutcomeReconciliationService {
       eventType: event.eventType,
       createdAt: event.createdAt || null,
       documentId: event.documentId || null,
-    })).concat(snapshot.transferResults.map((record) => ({
+    })).concat(snapshot.externalInteractions.map((event) => ({
+      type: EXTERNAL_INTERACTION_EVENT_TYPE,
+      id: event.eventId || event.id,
+      interactionType: event.interactionType || event.eventType || null,
+      channel: event.channel || null,
+      actorType: event.actorType || null,
+      outcome: event.outcome || event.status || null,
+      createdAt: event.createdAt || event.occurredAt || null,
+    }))).concat(snapshot.transferResults.map((record) => ({
       type: 'EXTERNAL_TRANSFER_RESULT',
       id: record.transferResultId || record.transactionId || record.id,
       result: record.result || record.state || null,
       externalReference: record.externalReference || null,
+      amount: amount(first(record.amount, record.settledAmount, record.receivedAmount)),
+      occurredAt: first(record.settledAt, record.completedAt, record.updatedAt, record.createdAt),
     }))).concat(snapshot.settlement.map((record) => ({
       type: record.settlementRecordId ? 'SRA_SETTLEMENT_RECORD' : 'PAYMENT_RECEIPT',
       id: record.settlementRecordId || record.paymentReceiptId || record.id,
       status: record.status || record.state || record.result || null,
       externalReference: record.externalReference || record.reference || null,
+      amount: amount(first(record.amount, record.settledAmount, record.receivedAmount)),
+      occurredAt: first(record.settledAt, record.receivedAt, record.completedAt, record.updatedAt, record.createdAt),
     })));
+  }
+
+  settlementConclusion(pkg, snapshot, status) {
+    const source = snapshot.confirmedSettlement || snapshot.successfulTransfer || snapshot.failedSettlement || snapshot.failedTransfer || null;
+    const expectedAmount = amount(pkg.amount);
+    const settledAmount = source ? amount(first(source.settledAmount, source.amount, source.receivedAmount, source.valueAmount)) : null;
+    const settlementReference = source ? text(first(source.collectionReference, source.settlementReference, source.externalReference, source.reference, source.traceNumber, source.transactionHash)) : null;
+    const settlementDate = source ? text(first(source.settledAt, source.receivedAt, source.completedAt, source.processedAt, source.updatedAt, source.createdAt)) : null;
+    const observedBeneficiary = source ? text(first(source.beneficiaryName, source.payeeName, source.recipientName, source.accountName)) : null;
+    const expectedBeneficiary = text(pkg.beneficiaryName);
+    const amountMatches = expectedAmount !== null && settledAmount !== null ? expectedAmount === settledAmount : null;
+    const beneficiaryMatches = expectedBeneficiary && observedBeneficiary
+      ? expectedBeneficiary.toUpperCase() === observedBeneficiary.toUpperCase()
+      : null;
+    const mismatch = amountMatches === false || beneficiaryMatches === false;
+    const failed = status === 'FAILED_EXTERNAL_OUTCOME';
+    const verified = status === 'VERIFIED';
+    const conclusionStatus = failed || mismatch
+      ? 'EXCEPTION'
+      : verified
+        ? 'SETTLEMENT_COMPLETE'
+        : 'PENDING_EXTERNAL_CONFIRMATION';
+    const nextLifecycleAction = conclusionStatus === 'SETTLEMENT_COMPLETE'
+      ? 'PREPARE_SERVICING_HANDOFF'
+      : conclusionStatus === 'EXCEPTION'
+        ? 'REVIEW_SETTLEMENT_EXCEPTION'
+        : 'AWAIT_EXTERNAL_CONFIRMATION';
+
+    let narrative;
+    if (conclusionStatus === 'SETTLEMENT_COMPLETE') {
+      const amountText = settledAmount !== null ? `$${settledAmount.toFixed(2)}` : expectedAmount !== null ? `$${expectedAmount.toFixed(2)}` : 'the authorized amount';
+      narrative = `Recorded external evidence verifies settlement of ${amountText}${expectedBeneficiary ? ` to ${expectedBeneficiary}` : ''}${settlementReference ? ` under reference ${settlementReference}` : ''}. The financing settlement outcome is reconciled and ready for the servicing handoff.`;
+    } else if (conclusionStatus === 'EXCEPTION') {
+      const issues = [];
+      if (failed) issues.push('the external result is failed or returned');
+      if (amountMatches === false) issues.push(`expected $${expectedAmount.toFixed(2)} but recorded $${settledAmount.toFixed(2)}`);
+      if (beneficiaryMatches === false) issues.push(`expected beneficiary ${expectedBeneficiary} but recorded ${observedBeneficiary}`);
+      narrative = `Settlement conclusion requires review because ${issues.join('; ')}. Do not treat the financing settlement as complete until the exception is resolved.`;
+    } else {
+      narrative = 'External activity is recorded, but independent settlement confirmation is not yet sufficient to conclude that the financing settlement is complete.';
+    }
+
+    return {
+      conclusionStatus,
+      expectedAmount,
+      settledAmount,
+      currency: pkg.currency || 'USD',
+      expectedBeneficiary,
+      observedBeneficiary,
+      amountMatches,
+      beneficiaryMatches,
+      settlementReference,
+      settlementDate,
+      sourceEvidenceType: source ? (source.settlementRecordId ? 'SRA_SETTLEMENT_RECORD' : source.paymentReceiptId ? 'PAYMENT_RECEIPT' : 'EXTERNAL_TRANSFER_RESULT') : null,
+      sourceEvidenceId: source ? first(source.settlementRecordId, source.paymentReceiptId, source.transferResultId, source.transactionId, source.id) : null,
+      nextLifecycleAction,
+      narrative,
+      preparedByAgentId: 'SRA-OUTCOME-AGENT',
+      preparedAt: now(),
+    };
   }
 
   outcomeId(pkg) { return `OX-FINANCING-${pkg.exportPackageId}`; }
@@ -149,6 +237,7 @@ export class ExternalOutcomeReconciliationService {
     const actionResults = this.actionResultsForPackage(pkg);
     const fundingResult = actionResults.find((record) => record.planStepId === 'FUNDING_SETTLEMENT') || null;
     const evidence = this.evidenceRefs(snapshot);
+    const settlementConclusion = this.settlementConclusion(pkg, snapshot, status);
     const sourceFingerprint = fingerprint({
       exportPackage: {
         exportPackageId: pkg.exportPackageId,
@@ -159,6 +248,13 @@ export class ExternalOutcomeReconciliationService {
         beneficiaryName: pkg.beneficiaryName || null,
       },
       evidence,
+      settlementConclusion: {
+        conclusionStatus: settlementConclusion.conclusionStatus,
+        settledAmount: settlementConclusion.settledAmount,
+        settlementReference: settlementConclusion.settlementReference,
+        settlementDate: settlementConclusion.settlementDate,
+        observedBeneficiary: settlementConclusion.observedBeneficiary,
+      },
     });
 
     return {
@@ -181,20 +277,16 @@ export class ExternalOutcomeReconciliationService {
         processingExceptionCount: snapshot.exceptions.length,
         uploadedDocumentCount: snapshot.documents.length,
         clarificationRequestCount: snapshot.questions.length,
+        externalInteractionCount: snapshot.externalInteractions.length,
         verifiedExternalTransfer: Boolean(snapshot.successfulTransfer),
         verifiedSettlement: Boolean(snapshot.confirmedSettlement),
         failedExternalTransfer: Boolean(snapshot.failedTransfer),
         failedSettlement: Boolean(snapshot.failedSettlement),
       },
       evidence,
+      settlementConclusion,
       sourceFingerprint,
-      notes: status === 'VERIFIED'
-        ? 'External outcome verified from recorded settlement or transfer evidence.'
-        : status === 'AWAITING_EXTERNAL_CONFIRMATION'
-          ? 'External participant reported submission for processing; independent external confirmation is still required.'
-          : status === 'EXCEPTION_REPORTED'
-            ? 'A blocking external processing exception has been reported.'
-            : null,
+      notes: settlementConclusion.narrative,
       evaluatedByAgentId: 'SRA-OUTCOME-AGENT',
       evaluatedAt: now(),
       updatedAt: now(),
@@ -210,11 +302,12 @@ export class ExternalOutcomeReconciliationService {
       subjectType: 'FINANCING_TRANSACTION',
       subjectId: outcome.financingTransactionId || outcome.exportPackageId,
       memoryType: 'EXTERNAL_OUTCOME_STATE',
-      summary: `External outcome state is ${outcome.status}.`,
+      summary: outcome.settlementConclusion?.narrative || `External outcome state is ${outcome.status}.`,
       facts: {
         exportPackageId: outcome.exportPackageId,
         status: outcome.status,
         observed: outcome.observed,
+        settlementConclusion: outcome.settlementConclusion || null,
         sourceFingerprint: outcome.sourceFingerprint,
       },
       transactionId: outcome.transactionId,
@@ -249,9 +342,10 @@ export class ExternalOutcomeReconciliationService {
       outcomeId: outcome.outcomeId,
       evidenceCount: outcome.evidence?.length || 0,
       observed: outcome.observed,
-      verified: outcome.status === 'VERIFIED',
-      attentionRequired: ['EXCEPTION_REPORTED', 'FAILED_EXTERNAL_OUTCOME'].includes(outcome.status),
-      awaitingExternalConfirmation: outcome.status === 'AWAITING_EXTERNAL_CONFIRMATION',
+      settlementConclusion: outcome.settlementConclusion || null,
+      verified: outcome.status === 'VERIFIED' && outcome.settlementConclusion?.conclusionStatus === 'SETTLEMENT_COMPLETE',
+      attentionRequired: ['EXCEPTION_REPORTED', 'FAILED_EXTERNAL_OUTCOME'].includes(outcome.status) || outcome.settlementConclusion?.conclusionStatus === 'EXCEPTION',
+      awaitingExternalConfirmation: outcome.settlementConclusion?.conclusionStatus === 'PENDING_EXTERNAL_CONFIRMATION',
     };
   }
 }
