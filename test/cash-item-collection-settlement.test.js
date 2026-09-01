@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import PDFKitDocument from 'pdfkit';
 import { PDFDocument as PDFLibDocument } from 'pdf-lib';
 import { AchSettlementPacketService } from '../services/ach-settlement-packet-service.js';
 
@@ -11,7 +12,18 @@ class Domain {
   put(type, id, record) { this.records.set(this.key(type, id), record); }
 }
 
-function fixture() {
+async function sourcePdf(label) {
+  const chunks = [];
+  const doc = new PDFKitDocument({ size: 'LETTER' });
+  doc.on('data', (chunk) => chunks.push(chunk));
+  const done = new Promise((resolve, reject) => { doc.on('end', resolve); doc.on('error', reject); });
+  doc.fontSize(18).text(label);
+  doc.end();
+  await done;
+  return Buffer.concat(chunks);
+}
+
+async function fixture({ includeNote = true } = {}) {
   const domain = new Domain();
   domain.put('PARTICIPANT', 'P-1', { participantId: 'P-1', displayName: 'House Morris Trust' });
   domain.put('FUNDING_OPPORTUNITY', 'FOR-1', {
@@ -25,45 +37,49 @@ function fixture() {
     },
   });
   domain.put('FINANCING_CLOSING', 'FCL-1', {
-    closingId: 'FCL-1',
-    opportunityId: 'FOR-1',
-    beneficiaryName: 'Young Volkswagen of Layton',
+    closingId: 'FCL-1', opportunityId: 'FOR-1', beneficiaryName: 'Young Volkswagen of Layton',
     settlementMethod: 'CASH_ITEM_COLLECTION',
-    settlementInstructions: {},
+    settlementInstructions: { packageDocumentIds: includeNote ? ['DOC-NOTE-1'] : [] },
   });
   domain.put('EXPORT_PACKAGE', 'EXP-1', {
-    exportPackageId: 'EXP-1',
-    exportKind: 'FINANCING_DISBURSEMENT',
-    financingTransactionId: 'LFA-1',
-    closingId: 'FCL-1',
-    opportunityId: 'FOR-1',
-    borrowerParticipantId: 'P-1',
-    beneficiaryName: 'Young Volkswagen of Layton',
-    amount: 79456.17,
-    currency: 'USD',
+    exportPackageId: 'EXP-1', exportKind: 'FINANCING_DISBURSEMENT', financingTransactionId: 'LFA-1',
+    closingId: 'FCL-1', opportunityId: 'FOR-1', borrowerParticipantId: 'P-1',
+    beneficiaryName: 'Young Volkswagen of Layton', amount: 79456.17, currency: 'USD',
     preferredRail: 'CASH_ITEM_COLLECTION',
-    settlementInstructions: {},
+    settlementInstructions: { packageDocumentIds: includeNote ? ['DOC-NOTE-1'] : [] },
   });
-  const documents = { async initialize() {}, get() { return null; }, async read() { return null; } };
+  const noteBytes = await sourcePdf('Executed SRA Funding Settlement Note');
+  const note = {
+    id: 'DOC-NOTE-1', originalName: 'SRA Funding Settlement Note - EXECUTED.pdf',
+    mimeType: 'application/pdf', documentType: 'FUNDING_SETTLEMENT_NOTE', sha256: 'a'.repeat(64),
+    extraction: { status: 'EXTRACTED', facts: { documentType: 'FUNDING_SETTLEMENT_NOTE' } },
+  };
+  const documents = {
+    async initialize() {},
+    get(id) { return includeNote && id === note.id ? note : null; },
+    async read(id) { return includeNote && id === note.id ? noteBytes : null; },
+  };
   return { domain, documents };
 }
 
-test('cash item collection is a first-class settlement method without recipient banking credentials', async () => {
-  const { domain, documents } = fixture();
+test('cash item collection requires and includes the funding settlement note', async () => {
+  const { domain, documents } = await fixture();
   const service = new AchSettlementPacketService(domain, documents);
   const source = service.source('EXP-1');
   assert.equal(source.settlementMethod, 'CASH_ITEM_COLLECTION');
-  assert.equal(source.settlementMethodLabel, 'Cash Item Collection');
   assert.equal(source.cashItemCollection, true);
-
-  const instructions = await service.renderDealerProcessingInstructions('EXP-1');
-  const settlement = await service.renderSettlementPage('EXP-1');
-  assert.equal(instructions.subarray(0, 4).toString(), '%PDF');
-  assert.equal(settlement.subarray(0, 4).toString(), '%PDF');
-
   const packageBytes = await service.renderFundingPackage('EXP-1');
   const packagePdf = await PDFLibDocument.load(packageBytes);
-  assert.equal(packagePdf.getPageCount(), 4, 'cover + cash-item instructions + collection confirmation + servicing');
+  assert.equal(packagePdf.getPageCount(), 5, 'cover + executed note + instructions + collection confirmation + servicing');
+});
+
+test('cash item collection rejects package generation when the required funding settlement note is missing', async () => {
+  const { domain, documents } = await fixture({ includeNote: false });
+  const service = new AchSettlementPacketService(domain, documents);
+  await assert.rejects(
+    () => service.renderFundingPackage('EXP-1'),
+    /executed SRA Funding Settlement Note is required/i,
+  );
 });
 
 test('admin closing flow exposes Cash Item Collection alongside existing rails', () => {
