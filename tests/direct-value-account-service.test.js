@@ -45,48 +45,16 @@ test('confirmed external deposits retain their original asset and cannot be cred
   assert.equal(second.position.available, 12.5);
 });
 
-test('completed conversion atomically debits SRA/USD and credits the selected public asset', async () => {
+test('recorded conversion cannot complete from a typed execution reference', async () => {
   const { service } = await fixture();
   const funding = await service.creditAuthorizedFunding({ financingTransactionId: 'LFA-1', universalAccountId: 'UA-1' }, 'ADMIN');
-  const result = await service.convert({
+  await assert.rejects(() => service.convert({
     directValueAccountId: funding.account.directValueAccountId,
     fromAssetId: 'SRA-USD', fromNetwork: 'NATIVE', fromAmount: 10000,
     toAssetId: 'BITCOIN-BTC', toNetwork: 'BITCOIN', toSymbol: 'BTC', toAmount: 0.125,
     executionReference: 'EXCHANGE-1', custodyReference: 'BTC-VAULT-1', pricingSource: 'EXECUTED_QUOTE',
-  }, 'P-1');
-  assert.equal(result.sourcePosition.available, 20000);
-  assert.equal(result.targetPosition.available, 0.125);
-  assert.equal(result.conversion.state, 'COMPLETED');
-  await assert.rejects(() => service.convert({
-    directValueAccountId: funding.account.directValueAccountId, fromAssetId: 'SRA-USD', fromAmount: 25000,
-    toNetwork: 'ETHEREUM', toSymbol: 'ETH', toAmount: 10, executionReference: 'EXCHANGE-2',
-  }, 'P-1'), /insufficient/);
-});
-
-test('one BTC exchange debits the executed SRA/USD quote and credits exactly one Bitcoin', async () => {
-  const { service } = await fixture(100000);
-  const funding = await service.creditAuthorizedFunding({ financingTransactionId: 'LFA-1', universalAccountId: 'UA-BTC-1' }, 'ADMIN');
-  const result = await service.convert({
-    directValueAccountId: funding.account.directValueAccountId,
-    fromAssetId: 'SRA-USD',
-    fromNetwork: 'NATIVE',
-    fromAmount: 77900,
-    toAssetId: 'BITCOIN-BTC',
-    toNetwork: 'BITCOIN',
-    toSymbol: 'BTC',
-    toAmount: 1,
-    executionReference: 'TEST-BTC-USD-2026-09-01',
-    custodyReference: 'TEST-BTC-VAULT-1',
-    pricingSource: 'BTC_USD_REFERENCE_QUOTE',
-  }, 'P-1');
-
-  assert.equal(result.conversion.state, 'COMPLETED');
-  assert.equal(result.conversion.fromAmount, 77900);
-  assert.equal(result.conversion.toAmount, 1);
-  assert.equal(result.sourcePosition.available, 22100);
-  assert.equal(result.targetPosition.available, 1);
-  assert.equal(result.targetPosition.canonicalAssetId, 'BITCOIN-BTC');
-  assert.equal(result.targetPosition.network, 'BITCOIN');
+  }, 'P-1'), /verified native-asset exchange quote/i);
+  assert.equal(service.getPosition(funding.account.directValueAccountId, 'SRA-USD').available, 30000);
 });
 
 test('confirmed public-rail movement cannot duplicate native SRA/USD', async () => {

@@ -66,6 +66,28 @@ export class XrplTransferService {
     }
   }
 
+  async confirm(transactionId) {
+    const hash = text(transactionId);
+    if (!hash) throw new Error('transactionId is required.');
+    const { client } = await this.ensure();
+    try {
+      const response = await client.request({ command: 'tx', transaction: hash });
+      const result = response?.result || {};
+      const transactionResult = result?.meta?.TransactionResult || result?.meta?.transaction_result || null;
+      const validated = Boolean(result.validated);
+      return {
+        state: validated ? (transactionResult === 'tesSUCCESS' ? 'CONFIRMED' : 'FAILED') : 'PENDING',
+        transactionId: hash,
+        validated,
+        ledgerIndex: result.ledger_index ?? null,
+        transactionResult,
+      };
+    } catch (error) {
+      if (error?.data?.error === 'txnNotFound') return { state: 'PENDING', transactionId: hash, validated: false };
+      throw error;
+    }
+  }
+
   async send(input = {}) {
     if (upper(input.asset) !== NATIVE_ASSET) throw new Error('XRPL adapter currently transfers native XRP only.');
     const destinationAddress = text(input.destinationAddress);

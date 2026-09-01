@@ -11,7 +11,7 @@ function fail(res, error) {
   return res.status(status).json({ error: message });
 }
 
-export function createDirectValueAccountRouter(service, accessService) {
+export function createDirectValueAccountRouter(service, accessService, nativeAssetExchange = null) {
   const router = Router();
   async function session(req) { return accessService.getSession(readCookie(req, 'sra_session')); }
   async function requireSession(req, res) {
@@ -66,6 +66,47 @@ export function createDirectValueAccountRouter(service, accessService) {
     try {
       const current = await requireAdmin(req, res); if (!current) return;
       return res.status(201).json(await service.convert(req.body || {}, current.id));
+    } catch (error) { return fail(res, error); }
+  });
+
+  router.get('/admin/native-exchanges/supported-assets', async (req, res) => {
+    try {
+      const current = await requireAdmin(req, res); if (!current) return;
+      if (!nativeAssetExchange) return res.status(503).json({ error: 'Native-asset exchange service is unavailable.' });
+      return res.json({ assets: nativeAssetExchange.supportedAssets() });
+    } catch (error) { return fail(res, error); }
+  });
+
+  router.post('/admin/native-exchange-quotes', async (req, res) => {
+    try {
+      const current = await requireAdmin(req, res); if (!current) return;
+      if (!nativeAssetExchange) return res.status(503).json({ error: 'Native-asset exchange service is unavailable.' });
+      return res.status(201).json(await nativeAssetExchange.quote(req.body || {}, current.id));
+    } catch (error) { return fail(res, error); }
+  });
+
+  router.post('/admin/native-exchanges', async (req, res) => {
+    try {
+      const current = await requireAdmin(req, res); if (!current) return;
+      if (!nativeAssetExchange) return res.status(503).json({ error: 'Native-asset exchange service is unavailable.' });
+      return res.status(201).json(await nativeAssetExchange.execute(req.body || {}, current.id));
+    } catch (error) { return fail(res, error); }
+  });
+
+  router.get('/admin/native-exchanges/:exchangeId', async (req, res) => {
+    try {
+      const current = await requireAdmin(req, res); if (!current) return;
+      if (!nativeAssetExchange) return res.status(503).json({ error: 'Native-asset exchange service is unavailable.' });
+      const exchange = nativeAssetExchange.getExchange(req.params.exchangeId);
+      return exchange ? res.json(exchange) : res.status(404).json({ error: 'Native-asset exchange not found.' });
+    } catch (error) { return fail(res, error); }
+  });
+
+  router.post('/admin/native-exchanges/:exchangeId/reconcile', async (req, res) => {
+    try {
+      const current = await requireAdmin(req, res); if (!current) return;
+      if (!nativeAssetExchange) return res.status(503).json({ error: 'Native-asset exchange service is unavailable.' });
+      return res.json(await nativeAssetExchange.reconcile(req.params.exchangeId, current.id));
     } catch (error) { return fail(res, error); }
   });
 

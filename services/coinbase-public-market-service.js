@@ -1,7 +1,7 @@
 import WebSocket from 'ws';
 
 const DEFAULT_ENDPOINT = 'wss://advanced-trade-ws.coinbase.com';
-const DEFAULT_PRODUCTS = ['BTC-USD'];
+const DEFAULT_PRODUCTS = ['BTC-USD', 'XLM-USD', 'XRP-USD'];
 const CONNECTOR_ID = 'COINBASE_PUBLIC_MARKET_TRADES';
 
 function now() { return new Date().toISOString(); }

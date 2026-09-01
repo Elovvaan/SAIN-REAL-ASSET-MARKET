@@ -66,6 +66,10 @@ import { FinancialRecordService } from './services/financial-record-service.js';
 import { FinancialHistoryService } from './services/financial-history-service.js';
 import { AssetRelationshipLedgerService } from './services/asset-relationship-ledger-service.js';
 import { DirectValueAccountService } from './services/direct-value-account-service.js';
+import { NativeAssetExchangeService } from './services/native-asset-exchange-service.js';
+import { OnChainTransferService } from './services/on-chain-transfer-service.js';
+import { StellarTransferService } from './services/stellar-transfer-service.js';
+import { XrplTransferService } from './services/xrpl-transfer-service.js';
 import { ProductiveBasketService } from './services/productive-basket-service.js';
 import { EventMarketService } from './services/event-market-service.js';
 import { DatabaseService } from './services/database-service.js';
@@ -129,6 +133,14 @@ export async function createApp(options = {}) {
   const financialHistoryService = new FinancialHistoryService(persistentDomain);
   const assetRelationshipLedgerService = new AssetRelationshipLedgerService(persistentDomain);
   const directValueAccountService = new DirectValueAccountService(persistentDomain); await directValueAccountService.initialize();
+  const nativeExchangeTransfers = new OnChainTransferService({
+    domain: persistentDomain,
+    adapters: {
+      STELLAR: new StellarTransferService({ domain: persistentDomain }),
+      XRPL: new XrplTransferService(),
+    },
+  });
+  const nativeAssetExchangeService = new NativeAssetExchangeService({ domain: persistentDomain, directAccounts: directValueAccountService, transfers: nativeExchangeTransfers });
   const productiveBasketService = new ProductiveBasketService(persistentDomain, directValueAccountService);
   const eventMarketService = new EventMarketService(persistentDomain, directValueAccountService);
   const edxConnectionService = new EdxConnectionService(persistentDomain);
@@ -182,7 +194,7 @@ export async function createApp(options = {}) {
   app.use('/api/financial-records', createFinancialRecordRouter(financialRecordService));
   app.use('/api/financial-history', createFinancialHistoryRouter(financialHistoryService, accessService));
   app.use('/api/asset-relationships', createAssetRelationshipRouter(assetRelationshipLedgerService, accessService));
-  app.use('/api/direct-accounts', createDirectValueAccountRouter(directValueAccountService, accessService));
+  app.use('/api/direct-accounts', createDirectValueAccountRouter(directValueAccountService, accessService, nativeAssetExchangeService));
   app.use('/api/productive-baskets', createProductiveBasketRouter(productiveBasketService, directValueAccountService, accessService));
   app.use('/api/event-markets', createEventMarketRouter(eventMarketService, directValueAccountService, accessService));
   app.use('/api/onboarding', onboardingRouter);
@@ -214,6 +226,7 @@ export async function createApp(options = {}) {
     financialHistoryService,
     assetRelationshipLedgerService,
     directValueAccountService,
+    nativeAssetExchangeService,
     productiveBasketService,
     eventMarketService,
     authoritativeAssetRegistryService,

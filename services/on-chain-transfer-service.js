@@ -125,6 +125,30 @@ export class OnChainTransferService {
       throw error;
     }
   }
+
+  async reconcile(id, actorId = null) {
+    await this.ensure();
+    const existing = this.get(id);
+    if (!existing) throw new Error('On-chain transfer not found.');
+    if (['CONFIRMED', 'FAILED'].includes(existing.state)) return existing;
+    const adapter = this.adapterFor(existing.network);
+    if (typeof adapter.confirm !== 'function') {
+      const error = new Error(`On-chain adapter for ${existing.network} cannot reconcile submitted transactions.`);
+      error.code = 'ON_CHAIN_RECONCILIATION_UNSUPPORTED';
+      throw error;
+    }
+    const confirmation = await adapter.confirm(existing.transactionId);
+    const state = String(confirmation?.state || 'SUBMITTED').toUpperCase();
+    const updated = {
+      ...existing,
+      state,
+      confirmation,
+      confirmedAt: state === 'CONFIRMED' ? now() : existing.confirmedAt,
+      updatedAt: now(),
+    };
+    await this.domain.put(TYPE, id, updated, { actorId, eventType: `ON_CHAIN_TRANSFER_${state}` });
+    return updated;
+  }
 }
 
 export { TYPE as ON_CHAIN_TRANSFER_RECORD_TYPE };

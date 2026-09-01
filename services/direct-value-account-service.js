@@ -249,41 +249,9 @@ export class DirectValueAccountService {
   }
 
   async convert(input = {}, actorId = null) {
-    const account = this.domain.get(RECORD_TYPES.DIRECT_VALUE_ACCOUNT, text(input.directValueAccountId));
-    if (!account) throw new Error('Direct Value Account not found.');
-    if (!text(input.executionReference)) throw new Error('A completed external or internal executionReference is required.');
-    const fromAssetId = upper(input.fromAssetId);
-    const toNetwork = upper(input.toNetwork || 'NATIVE');
-    const toAsset = await this.defineExternalAsset({ ...input, network: toNetwork, symbol: input.toSymbol, canonicalAssetId: input.toAssetId }, actorId);
-    const fromAmount = quantity(input.fromAmount, 'fromAmount');
-    const toAmount = quantity(input.toAmount, 'toAmount');
-    const fromNetwork = upper(input.fromNetwork || 'NATIVE');
-    const source = this.getPosition(account.directValueAccountId, fromAssetId, fromNetwork);
-    if (!source || source.available < fromAmount) throw new Error('Available source-asset balance is insufficient.');
-    const existing = this.domain.list(RECORD_TYPES.ASSET_CONVERSION).find((item) => item.executionReference === text(input.executionReference));
-    if (existing) return { created: false, conversion: existing };
-    const target = this.getPosition(account.directValueAccountId, toAsset.canonicalAssetId, toNetwork);
-    const conversionId = uid('AVX');
-    const convertedAt = timestamp();
-    const sourcePosition = { ...source, available: Number((source.available - fromAmount).toFixed(8)), total: Number((source.total - fromAmount).toFixed(8)), updatedAt: convertedAt };
-    const targetId = positionId(account.directValueAccountId, toAsset.canonicalAssetId, toNetwork);
-    const targetPosition = {
-      id: targetId, positionId: targetId, directValueAccountId: account.directValueAccountId, canonicalAssetId: toAsset.canonicalAssetId, network: toNetwork,
-      available: Number((Number(target?.available || 0) + toAmount).toFixed(8)), restricted: Number(target?.restricted || 0), total: Number((Number(target?.total || 0) + toAmount).toFixed(8)),
-      custodyModel: text(input.custodyModel) || 'SRA_RECORDED_EXTERNAL_CUSTODY', custodyReference: text(input.custodyReference) || null, state: 'ACTIVE', createdAt: target?.createdAt || convertedAt, updatedAt: convertedAt,
-    };
-    const conversion = {
-      id: conversionId, conversionId, directValueAccountId: account.directValueAccountId, fromAssetId, fromNetwork, fromAmount,
-      toAssetId: toAsset.canonicalAssetId, toNetwork, toAmount, executedRate: Number((toAmount / fromAmount).toFixed(12)), executionReference: text(input.executionReference),
-      pricingSource: text(input.pricingSource) || null, state: 'COMPLETED', executedBy: actorId, executedAt: convertedAt, createdAt: convertedAt,
-    };
-    await this.domain.atomicPut([
-      { type: RECORD_TYPES.ACCOUNT_ASSET_POSITION, id: source.positionId, payload: sourcePosition, actorId, eventType: 'ASSET_CONVERSION_SOURCE_DEBITED' },
-      { type: RECORD_TYPES.ACCOUNT_ASSET_POSITION, id: targetId, payload: targetPosition, actorId, eventType: 'ASSET_CONVERSION_TARGET_CREDITED' },
-      { type: RECORD_TYPES.ASSET_CONVERSION, id: conversionId, payload: conversion, actorId, eventType: 'ASSET_CONVERSION_COMPLETED' },
-    ]);
-    await this.recordMovement({ kind: 'ASSET_CONVERSION', directValueAccountId: account.directValueAccountId, canonicalAssetId: fromAssetId, network: fromNetwork, direction: 'DEBIT', amount: fromAmount, counterAssetId: toAsset.canonicalAssetId, counterAmount: toAmount, executionReference: conversion.executionReference, state: 'COMPLETED' }, actorId, 'ASSET_CONVERSION_COMPLETED');
-    return { created: true, conversion, sourcePosition, targetPosition };
+    const error = new Error('Recorded conversions are disabled. Use a verified native-asset exchange quote and confirmed blockchain execution.');
+    error.code = 'VERIFIED_NATIVE_ASSET_EXCHANGE_REQUIRED';
+    throw error;
   }
 
   async recordRepayment(input = {}, actorId = null) {
