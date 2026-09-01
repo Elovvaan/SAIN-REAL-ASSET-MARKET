@@ -1,3 +1,5 @@
+import { FinancingIntelligenceService } from './financing-intelligence-service.js';
+
 function present(value) {
   return value !== null && value !== undefined && String(value).trim() !== '';
 }
@@ -28,6 +30,7 @@ function agreementIdentifier(facts = {}, current = null) {
 export class TransactionFactsMappingService {
   constructor(domain) {
     this.domain = domain;
+    this.financingIntelligence = new FinancingIntelligenceService(domain);
   }
 
   async applyToOpportunity(opportunityId, document, actorId = null) {
@@ -146,6 +149,14 @@ export class TransactionFactsMappingService {
         relatedAssetIds: assetUpdates.map((item) => item.assetId || item.id).filter(Boolean),
       },
     });
-    return { opportunity: updated, mapped: true, transactionProfile: updated.transactionProfile, assets: assetUpdates };
+
+    const reasoning = await this.financingIntelligence.refresh(opportunityId, 'SRA-UNDERWRITING-AGENT');
+    return {
+      opportunity: reasoning.opportunity,
+      mapped: true,
+      transactionProfile: reasoning.opportunity.transactionProfile,
+      assets: assetUpdates,
+      neuralUnderwriting: reasoning.analysis,
+    };
   }
 }
