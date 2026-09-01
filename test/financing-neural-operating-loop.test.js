@@ -138,7 +138,7 @@ test('external outcome reconciliation writes a structured settlement conclusion'
   assert.equal(summary.attentionRequired, false);
 });
 
-test('settlement conclusion detects amount mismatch and refuses a complete conclusion', async () => {
+test('settlement conclusion promotes amount mismatch to top-level exception status', async () => {
   const domain = new Domain({
     EXPORT_PACKAGE: [{
       id: 'EXP-2', exportPackageId: 'EXP-2', financingTransactionId: 'FIN-2', amount: 1000, currency: 'USD', beneficiaryName: 'Dealer LLC', state: 'READY_FOR_SETTLEMENT_INSTRUCTION',
@@ -150,9 +150,28 @@ test('settlement conclusion detects amount mismatch and refuses a complete concl
 
   const service = new ExternalOutcomeReconciliationService(domain);
   const reconciled = await service.reconcile('EXP-2');
-  assert.equal(reconciled.outcome.status, 'VERIFIED');
+  assert.equal(reconciled.outcome.evidenceStatus, 'VERIFIED');
+  assert.equal(reconciled.outcome.status, 'EXCEPTION_REPORTED');
   assert.equal(reconciled.outcome.settlementConclusion.conclusionStatus, 'EXCEPTION');
   assert.equal(reconciled.outcome.settlementConclusion.amountMatches, false);
   assert.equal(service.summary('EXP-2').verified, false);
   assert.equal(service.summary('EXP-2').attentionRequired, true);
+});
+
+test('successful transfer evidence with no amount preserves unknown amount instead of inventing zero', async () => {
+  const domain = new Domain({
+    EXPORT_PACKAGE: [{
+      id: 'EXP-3', exportPackageId: 'EXP-3', financingTransactionId: 'FIN-3', amount: 2500, currency: 'USD', beneficiaryName: 'Dealer LLC', state: 'READY_FOR_SETTLEMENT_INSTRUCTION',
+    }],
+    SRA_TRANSACTION: [{
+      id: 'TR-3', transactionId: 'FIN-3', transactionType: 'EXTERNAL_TRANSFER_RESULT', exportPackageId: 'EXP-3', result: 'COMPLETED', externalReference: 'BANK-REF-3',
+    }],
+  });
+
+  const service = new ExternalOutcomeReconciliationService(domain);
+  const reconciled = await service.reconcile('EXP-3');
+  assert.equal(reconciled.outcome.status, 'VERIFIED');
+  assert.equal(reconciled.outcome.settlementConclusion.settledAmount, null);
+  assert.equal(reconciled.outcome.settlementConclusion.amountMatches, null);
+  assert.equal(reconciled.outcome.settlementConclusion.conclusionStatus, 'SETTLEMENT_COMPLETE');
 });
