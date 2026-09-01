@@ -8,7 +8,7 @@
     ['custody', ['▣', 'Asset Vault']],
     ['activity', ['≋', 'Transactions']],
     ['assets', ['◇', 'SRA Coin']],
-    ['pools', ['⬡', 'Predictions / Liquidity']],
+    ['pools', ['⬡', 'Market Pools']],
     ['participants', ['◌', 'Account']]
   ]);
   const ORDER = [...LABELS.keys()];
@@ -33,7 +33,7 @@
     custody: ['Asset Vault', 'CONTROLLED'],
     activity: ['Transactions', 'RECORDED'],
     assets: ['SRA Coin', 'AT PAR'],
-    pools: ['Predictions / Liquidity', 'REFERENCE'],
+    pools: ['Market Pools', 'PRODUCTIVE'],
     participants: ['Account', 'ACTIVE']
   };
 
@@ -210,7 +210,7 @@
   function staticMarkup(view) {
     if (view === 'instruments') return instrumentMarkup();
     if (view === 'funding-operations') return financingMarkup();
-    if (view === 'pools') return simpleMarkup('Predictions / Liquidity', 'Reference-market capability is loading.', [['Reference markets', 'Approved reference markets only.'], ['Execution boundary', 'Reference information is separate from executed market activity.']]);
+    if (view === 'pools') return simpleMarkup('Market Pools', 'Productive basket capability is loading.', [['Productive baskets', 'Governed bundles of approved assets.'], ['Reference markets', 'Maintained as a separate informational lane.']]);
     if (view === 'participants') return simpleMarkup('Account', 'Your Universal Account and capability states are loading.', [['Identity', 'One identity and one Universal Account.'], ['Capabilities', 'Operating tiers follow the capability records on this account.']]);
     return '';
   }
@@ -344,7 +344,7 @@
     if (view === 'marketplace') return ['Marketplace', `<div class="participant-action-ticket"><div class="ticket-stat"><span>Market</span><strong>LIVE SRA/USD</strong></div><button type="button" data-participant-prompt="Show me opportunities I can participate in.">Find opportunities</button><button type="button" data-participant-prompt="Explain what is currently LIVE in the marketplace.">Explain market</button></div>`];
     if (view === 'instruments') return ['Create Instrument', `<div class="participant-action-ticket"><div class="ticket-stat"><span>Current operating tier</span><strong>${esc(String(window.accessState?.session?.activeCapacity || 'UNIVERSAL').replaceAll('_',' '))}</strong></div><div class="ticket-stat"><span>Representation rule</span><strong>1 SRA = 1 USD recognized value</strong></div><button type="button" data-participant-prompt="Review what instrument formation paths are currently available to my account.">Review formation paths</button><button type="button" data-participant-prompt="What recognized value and authority records do I need before creating an instrument?">Explain prerequisites</button></div>`];
     if (view === 'funding-operations') return ['Request Financing', `<div class="participant-action-ticket"><div class="ticket-stat"><span>Workflow</span><strong>Verified Value → Model → Instrument → Market → Settlement</strong></div><button type="button" data-participant-prompt="Explain my current financing state and the next available action.">Explain financing state</button></div>`];
-    if (view === 'pools') return ['Predictions / Liquidity', `<div class="participant-action-ticket"><div class="ticket-stat"><span>Boundary</span><strong>REFERENCE ONLY</strong></div><button type="button" data-participant-prompt="Explain the currently approved SRA reference markets.">Explain reference markets</button></div>`];
+    if (view === 'pools') return ['Market Pools', `<div class="participant-action-ticket"><div class="ticket-stat"><span>Market</span><strong>PRODUCTIVE BASKETS</strong></div><button type="button" data-participant-prompt="Explain how productive asset baskets form, close, perform, and distribute value.">Explain market pools</button></div>`];
     if (view === 'participants') return ['Account', `<div class="participant-action-ticket"><div class="ticket-stat"><span>Universal account</span><strong>${esc(window.accessState?.session?.universalAccountId || 'Linked')}</strong></div><button type="button" data-participant-prompt="Explain my current capabilities and operating tier.">Explain my capabilities</button></div>`];
     return ['What are you trying to accomplish?', ''];
   }

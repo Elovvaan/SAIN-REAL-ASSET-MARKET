@@ -84,14 +84,51 @@
     }));
   }
 
+  function basketCard(basket) {
+    const progress = Math.max(0, Math.min(100, Number(basket.targetProgress || 0)));
+    return `<article class="project-row context-card" data-productive-basket="${esc(basket.basketId)}"><div class="project-main"><div class="project-title"><div class="project-symbol">▦</div><div><h3>${esc(basket.name)}</h3><p>${esc(String(basket.model || '').replaceAll('_',' '))} · ${esc(basket.unitSymbol)} participation units</p></div></div><div class="project-signal"><strong>${esc(basket.state)}</strong><span>${basket.state === 'FORMATION' ? `${progress}% formed` : `${Number(basket.participantCount || 0)} participants`}</span></div></div><div class="project-gain-row"><div><span>Recognized composition</span><strong>${money.format(Number(basket.recognizedValue || 0))}</strong><small>Target ${money.format(Number(basket.targetRecognizedValue || 0))}</small></div><div><span>Current verified value</span><strong>${money.format(Number(basket.currentVerifiedValue || 0))}</strong><small>Evidence-recorded performance</small></div><div><span>Produced / distributed</span><strong>${money.format(Number(basket.distributableProduced || 0))}</strong><small>${money.format(Number(basket.totalDistributed || 0))} distributed</small></div></div><div class="project-meta"><span class="badge">${Number(basket.composition?.approvedAssets || 0)} APPROVED ASSETS</span><span class="badge">NO SILENT CONVERSION</span><span class="badge">${esc(String(basket.reconstitutionPolicy || '').replaceAll('_',' '))}</span></div>${basket.state === 'FORMATION' ? `<div style="margin-top:12px"><button class="primary-button" data-open-basket="${esc(basket.basketId)}">Participate with approved asset</button></div>` : ''}<div data-basket-panel></div></article>`;
+  }
+
+  function bindBaskets(root, baskets) {
+    const byId = new Map(baskets.map((basket) => [basket.basketId, basket]));
+    root.querySelectorAll('[data-open-basket]').forEach((button) => button.addEventListener('click', async () => {
+      const basket = byId.get(button.dataset.openBasket);
+      const panel = button.closest('[data-productive-basket]')?.querySelector('[data-basket-panel]');
+      if (!basket || !panel) return;
+      panel.innerHTML = '<div class="loading-state">Reading approved composition and account assets…</div>';
+      try {
+        const [detail, account] = await Promise.all([requestJson(`/api/productive-baskets/${encodeURIComponent(basket.basketId)}`), requestJson('/api/direct-accounts/me')]);
+        const approved = (detail.admissions || []).filter((item) => item.state === 'APPROVED');
+        const positions = account.positions || [];
+        const eligible = approved.flatMap((admission) => positions.filter((position) => position.canonicalAssetId === admission.canonicalAssetId && position.network === admission.network && Number(position.available) > 0).map((position) => ({ admission, position })));
+        panel.innerHTML = `<section class="panel contextual-panel" style="margin-top:12px"><div class="panel-header"><div><p class="eyebrow">ORIGINAL-ASSET PARTICIPATION</p><h3>Enter ${esc(basket.name)}</h3><p>The selected asset is restricted in your Direct Value Account. It is not silently sold or converted.</p></div></div>${eligible.length ? `<div class="form-grid"><div class="form-field"><label>Approved account asset</label><select data-basket-asset>${eligible.map((item, index) => `<option value="${index}">${esc(item.position.symbol)} · ${Number(item.position.available).toLocaleString()} available · ${money.format(Number(item.admission.recognitionRate))} recognized/unit</option>`).join('')}</select></div><div class="form-field"><label>Amount</label><input data-basket-amount type="number" min="0.00000001" step="any" placeholder="0"></div></div><div style="margin-top:10px"><button class="primary-button" data-basket-contribute>Confirm participation</button></div><div data-basket-result style="margin-top:10px"></div>` : '<div class="transaction-empty"><strong>No eligible account asset.</strong><span>An approved native, external, or customer-created asset must be available in your Direct Value Account.</span></div>'}</section>`;
+        if (!eligible.length) return;
+        panel.querySelector('[data-basket-contribute]').addEventListener('click', async () => {
+          const result = panel.querySelector('[data-basket-result]');
+          const selected = eligible[Number(panel.querySelector('[data-basket-asset]').value)];
+          const amount = Number(panel.querySelector('[data-basket-amount]').value || 0);
+          result.textContent = 'Recording participation…';
+          try {
+            const created = await requestJson(`/api/productive-baskets/${encodeURIComponent(basket.basketId)}/contributions`, { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ canonicalAssetId:selected.position.canonicalAssetId, network:selected.position.network, amount }) });
+            result.innerHTML = `<strong>${Number(created.position.units).toLocaleString()} ${esc(created.position.unitSymbol)} units issued.</strong><div>${money.format(Number(created.contribution.recognizedValue))} recognized participation value.</div>`;
+          } catch (error) { result.textContent = error.message; }
+        });
+      } catch (error) { panel.innerHTML = `<div class="transaction-empty"><strong>Participation unavailable.</strong><span>${esc(error.message)}</span></div>`; }
+    }));
+  }
+
   async function render(root) {
     if (!root) return;
-    root.innerHTML = '<div class="loading-state">Reading approved hybrid markets…</div>';
+    root.innerHTML = '<div class="loading-state">Reading productive baskets and approved markets…</div>';
     try {
-      const payload = await requestJson('/api/sane/hybrid-liquidity/markets');
+      const [basketPayload, payload] = await Promise.all([requestJson('/api/productive-baskets'), requestJson('/api/sane/hybrid-liquidity/markets')]);
+      const baskets = Array.isArray(basketPayload.baskets) ? basketPayload.baskets : [];
       const markets = Array.isArray(payload.markets) ? payload.markets : [];
       const status = payload.status || {};
-      root.innerHTML = `<section class="metric-grid compact"><article class="metric-card"><span>Approved hybrid markets</span><strong>${markets.length}</strong><small>Verified-instrument market definitions</small></article><article class="metric-card"><span>Spot order handoffs</span><strong>${Number(status.spotOrderAvailableMarkets || 0)}</strong><small>Use the existing Marketplace Engine</small></article><article class="metric-card"><span>Boundary</span><strong>${esc(String(status.boundary || 'REFERENCE_ONLY').replaceAll('_',' '))}</strong><small>Reference modes remain non-executable</small></article></section><section class="panel contextual-panel"><div class="panel-header"><div><p class="eyebrow">HYBRID LIQUIDITY LAYER</p><h2>Predictions / Liquidity</h2><p>Reference markets remain reference-only. An approved SPOT market can hand off to the existing governed order workflow only when the same instrument has a LIVE marketplace listing.</p></div><span class="badge open">CONNECTED</span></div><div class="project-list">${markets.length ? markets.map(card).join('') : '<div class="transaction-empty"><strong>No approved hybrid markets yet.</strong><span>Administration can define one around a verified SRA instrument.</span></div>'}</div></section>`;
+      const active = baskets.filter((item) => item.state === 'ACTIVE').length;
+      const value = baskets.reduce((sum, item) => sum + Number(item.currentVerifiedValue || 0), 0);
+      root.innerHTML = `<section class="metric-grid compact"><article class="metric-card"><span>Productive baskets</span><strong>${baskets.length}</strong><small>${active} active · governed formation</small></article><article class="metric-card"><span>Verified basket value</span><strong>${money.format(value)}</strong><small>Across forming and active compositions</small></article><article class="metric-card"><span>Distribution rule</span><strong>PRO RATA</strong><small>Actual recorded productive value</small></article></section><section class="panel contextual-panel"><div class="panel-header"><div><p class="eyebrow">PRODUCTIVE ASSET MARKET</p><h2>Asset baskets and participation pools</h2><p>Approved native, external, and customer-created assets can form governed bundles. Once closed, productive value is recorded and distributed against participation units.</p></div><span class="badge open">LIVE</span></div><div class="project-list">${baskets.length ? baskets.map(basketCard).join('') : '<div class="transaction-empty"><strong>No productive baskets are forming yet.</strong><span>Market Professional and Institutional tiers can establish the first governed composition.</span></div>'}</div></section><section class="panel contextual-panel"><div class="panel-header"><div><p class="eyebrow">REFERENCE AND SPOT LAYER</p><h2>Hybrid reference markets</h2><p>These remain distinct from productive baskets. Reference observations are non-executable; approved spot definitions use the existing marketplace order workflow.</p></div><span class="badge">SEPARATE LANE</span></div><div class="project-list">${markets.length ? markets.map(card).join('') : '<div class="transaction-empty"><strong>No approved hybrid markets yet.</strong></div>'}</div></section>`;
+      bindBaskets(root, baskets);
       bindOrders(root, markets);
     } catch (error) {
       root.innerHTML = `<div class="empty-view"><h2>Predictions / Liquidity unavailable</h2><p>${esc(error.message)}</p></div>`;
