@@ -29,6 +29,15 @@ The monetary lifecycle is separate from the financing lifecycle and from the gen
 
 The initial canonical code is `SRA_USD`, denominated in USD with a unit value of 1 and a `FULL_RESERVE` reserve policy.
 
+That initial full-reserve definition remains an available settlement product;
+it is not the Direct Value Account's native authorized-transaction asset. The
+native account asset is `SRA-USD`, and its issuance authority is a posted SRA
+funding authorization rather than a recycled treasury or participant balance.
+When native `SRA-USD` moves to a public rail, the Direct Value Account service
+reduces or locks the native position and records the registered rail
+representation so the same units cannot be counted twice. See
+`direct-multi-asset-account-and-native-funding.md`.
+
 ### Definition
 
 A definition establishes the stable settlement asset identity, denomination, unit value, reserve policy, settlement purpose, and lifecycle state.

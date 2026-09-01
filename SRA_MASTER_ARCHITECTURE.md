@@ -380,6 +380,25 @@ Approved settlement-availability and completed-settlement states may be projecte
 
 ------------------------------------------------------------------------
 
+# Direct Value Account Layer
+
+Every identified participant may hold a participant-owned, multi-asset Direct
+Value Account. Authorized financing may credit native SRA/USD directly to the
+account without consuming participant assets or institutional treasury funds.
+External assets retain their original asset and network identities. Registered
+public-rail representations, confirmed custody movements, and executed
+conversions map back to one canonical asset registry and cannot duplicate
+account value.
+
+Participant assets, authorized origination, and SRA institutional receipts are
+separate domains. Repayments support SRA operation and growth; they do not fund
+later originations. Authorized forgiveness is an obligation-release state after
+reconciliation, with a separate information-reporting determination.
+
+See `docs/architecture/direct-multi-asset-account-and-native-funding.md`.
+
+------------------------------------------------------------------------
+
 # Guiding Principles
 
 1.  Verified Value is the parent philosophy.

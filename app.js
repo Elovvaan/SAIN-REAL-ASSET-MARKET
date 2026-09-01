@@ -33,6 +33,7 @@ import { createObservationLayerRouter } from './routes/observation-layer-router.
 import { createFinancialRecordRouter } from './routes/financial-record-router.js';
 import { createFinancialHistoryRouter } from './routes/financial-history-router.js';
 import { createAssetRelationshipRouter } from './routes/asset-relationship-router.js';
+import { createDirectValueAccountRouter } from './routes/direct-value-account-router.js';
 import { AccessService } from './services/access-service.js';
 import { CreativeFinanceService } from './services/creative-finance-service.js';
 import { ValueIntelligenceService } from './services/value-intelligence-service.js';
@@ -62,6 +63,7 @@ import { ObservationLayerService } from './services/observation-layer-service.js
 import { FinancialRecordService } from './services/financial-record-service.js';
 import { FinancialHistoryService } from './services/financial-history-service.js';
 import { AssetRelationshipLedgerService } from './services/asset-relationship-ledger-service.js';
+import { DirectValueAccountService } from './services/direct-value-account-service.js';
 import { DatabaseService } from './services/database-service.js';
 import { PersistentDomainService, RECORD_TYPES } from './services/persistent-domain-service.js';
 import { PersistentMarketplaceService } from './services/persistent-marketplace-service.js';
@@ -122,6 +124,7 @@ export async function createApp(options = {}) {
   const financialRecordService = new FinancialRecordService(persistentDomain);
   const financialHistoryService = new FinancialHistoryService(persistentDomain);
   const assetRelationshipLedgerService = new AssetRelationshipLedgerService(persistentDomain);
+  const directValueAccountService = new DirectValueAccountService(persistentDomain); await directValueAccountService.initialize();
   const edxConnectionService = new EdxConnectionService(persistentDomain);
   const edxPermissionService = new EdxPermissionService(persistentDomain);
   const edxExtractionService = new EdxExtractionService(persistentDomain, edxPermissionService);
@@ -173,6 +176,7 @@ export async function createApp(options = {}) {
   app.use('/api/financial-records', createFinancialRecordRouter(financialRecordService));
   app.use('/api/financial-history', createFinancialHistoryRouter(financialHistoryService, accessService));
   app.use('/api/asset-relationships', createAssetRelationshipRouter(assetRelationshipLedgerService, accessService));
+  app.use('/api/direct-accounts', createDirectValueAccountRouter(directValueAccountService, accessService));
   app.use('/api/onboarding', onboardingRouter);
   app.use('/api/custody', createCustodyRouter());
   app.use('/api/sane', createSaneRouter(undefined, saneEdxOperationsService, sraAgentService));
@@ -201,6 +205,7 @@ export async function createApp(options = {}) {
     financialRecordService,
     financialHistoryService,
     assetRelationshipLedgerService,
+    directValueAccountService,
     authoritativeAssetRegistryService,
     sraAgentService,
   };

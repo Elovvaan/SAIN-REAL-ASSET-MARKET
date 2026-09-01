@@ -27,6 +27,14 @@
     </article>`).join('');
   }
 
+  function assetPositionRows(positions = []) {
+    if (!positions.length) return '<div class="transaction-empty"><strong>No direct asset positions yet.</strong><span>Authorized native funding and confirmed external deposits will appear here.</span></div>';
+    return positions.map((item) => `<article class="transaction-row">
+      <div class="transaction-row-main"><span class="transaction-kind">${esc(item.network || 'NATIVE')}</span><strong>${esc(item.canonicalAssetId)}</strong><small>${esc(String(item.custodyModel || 'RECORDED POSITION').replaceAll('_', ' '))}</small></div>
+      <div class="transaction-row-state"><strong>${Number(item.available || 0).toLocaleString(undefined, { maximumFractionDigits: 8 })}</strong><span class="badge">${Number(item.restricted || 0).toLocaleString(undefined, { maximumFractionDigits: 8 })} restricted</span></div>
+    </article>`).join('');
+  }
+
   function loading() {
     const root = document.querySelector('#view-root');
     if (!root) return;
@@ -37,7 +45,7 @@
     root.innerHTML = '<section class="asset-vault-view"><div class="loading-state">Loading your recorded Asset Vault activity…</div></section>';
   }
 
-  function render(vault) {
+  function render(vault, direct = null) {
     const root = document.querySelector('#view-root');
     if (!root) return;
     document.querySelector('#context-status').textContent = 'OWNER CONTROLLED';
@@ -78,6 +86,16 @@
       </section>
 
       <section class="asset-vault-ledger">
+        <div class="transaction-section-title"><div><p class="eyebrow">DIRECT MULTI-ASSET ACCOUNT</p><h2>Native and external asset positions</h2></div><span class="badge">${esc(direct?.account?.accountModel || 'DIRECT MULTI ASSET')}</span></div>
+        <div class="transaction-list">${assetPositionRows(direct?.positions || [])}</div>
+        <div class="asset-vault-control-grid">
+          <article><span>Participant assets</span><strong>PARTICIPANT OWNED</strong><p>Positions remain attributed to this account and do not fund origination.</p></article>
+          <article><span>Origination</span><strong>INDEPENDENT</strong><p>New funding value arises from an authorized SRA transaction.</p></article>
+          <article><span>Repayments</span><strong>INSTITUTIONAL GROWTH</strong><p>Received repayments support SRA operations and expansion.</p></article>
+        </div>
+      </section>
+
+      <section class="asset-vault-ledger">
         <div class="transaction-section-title"><div><p class="eyebrow">ACCOUNT LEDGER</p><h2>Participant-linked activity</h2></div><span class="badge">LIVE READ MODEL</span></div>
         <div class="transaction-list">${activityRows(vault.transactions)}</div>
       </section>
@@ -88,10 +106,14 @@
     if (!window.accessState?.session) return;
     loading();
     try {
-      const response = await fetch('/api/access/vault', { headers: { Accept: 'application/json' } });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || 'Asset Vault lookup failed.');
-      render(payload.vault);
+      const [vaultResponse, directResponse] = await Promise.all([
+        fetch('/api/access/vault', { headers: { Accept: 'application/json' } }),
+        fetch('/api/direct-accounts/me', { headers: { Accept: 'application/json' } }),
+      ]);
+      const [payload, direct] = await Promise.all([vaultResponse.json(), directResponse.json()]);
+      if (!vaultResponse.ok) throw new Error(payload.error || 'Asset Vault lookup failed.');
+      if (!directResponse.ok) throw new Error(direct.error || 'Direct Value Account lookup failed.');
+      render(payload.vault, direct);
     } catch (error) {
       const root = document.querySelector('#view-root');
       document.querySelector('#context-status').textContent = 'UNAVAILABLE';
