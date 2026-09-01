@@ -13,6 +13,7 @@ const INTELLIGENCE_RECORD_TYPES = Object.freeze([
   'OUTCOME_EVALUATION',
   'TRANSACTION_PARTICIPATION_WINDOW',
   'TRANSACTION_PARTICIPATION_EVENT',
+  'EXTERNAL_INTERACTION_EVENT',
 ]);
 
 function now() { return new Date().toISOString(); }
@@ -134,22 +135,27 @@ export class UnifiedMarketOperationsQueueService {
         const executionSummary = this.actionExecution.summarizePlan(plan, pkg.exportPackageId);
         const outcomeSummary = outcomeRecords.get(pkg.exportPackageId) || this.outcomeReconciliation.summary(pkg.exportPackageId);
         const phase4NeedsAttention = outcomeSummary.attentionRequired;
+        const settlementComplete = outcomeSummary.verified;
         const nextAction = phase4NeedsAttention
           ? 'REVIEW_EXTERNAL_OUTCOME'
-          : outcomeSummary.awaitingExternalConfirmation
-            ? 'AWAIT_EXTERNAL_CONFIRMATION'
-            : 'PREPARE_SETTLEMENT_METHOD';
+          : settlementComplete
+            ? 'PREPARE_SERVICING_HANDOFF'
+            : outcomeSummary.awaitingExternalConfirmation
+              ? 'AWAIT_EXTERNAL_CONFIRMATION'
+              : 'PREPARE_SETTLEMENT_METHOD';
         const explanation = phase4NeedsAttention
-          ? 'External processing evidence reports an exception or failed outcome. SRA should reconcile the outside response before continuing.'
-          : outcomeSummary.awaitingExternalConfirmation
-            ? 'The external participant reported submission for processing. Independent confirmation is still outstanding.'
-            : 'Financing export is ready. SRA Export Agent should prepare the selected settlement path: bank rail instructions or the dealer funding package.';
+          ? outcomeSummary.settlementConclusion?.narrative || 'External processing evidence reports an exception or failed outcome. SRA should reconcile the outside response before continuing.'
+          : settlementComplete
+            ? outcomeSummary.settlementConclusion?.narrative || 'Settlement evidence is reconciled. The financing can now be prepared for the servicing handoff.'
+            : outcomeSummary.awaitingExternalConfirmation
+              ? 'The external participant reported submission for processing. Independent confirmation is still outstanding.'
+              : 'Financing export is ready. SRA Export Agent should prepare the selected settlement path: bank rail instructions or the dealer funding package.';
         queue.push({
           ...item(pkg.exportPackageId, 'FINANCING_EXPORT', pkg.state, pkg.borrowerParticipantId || pkg.participantId, nextAction, explanation, pkg),
-          agentId: phase4NeedsAttention ? 'SRA-OUTCOME-AGENT' : 'SRA-EXPORT-AGENT',
-          agentType: phase4NeedsAttention ? 'OUTCOME_RECONCILIATION_AGENT' : 'EXPORT_AGENT',
+          agentId: phase4NeedsAttention || settlementComplete ? 'SRA-OUTCOME-AGENT' : 'SRA-EXPORT-AGENT',
+          agentType: phase4NeedsAttention || settlementComplete ? 'OUTCOME_RECONCILIATION_AGENT' : 'EXPORT_AGENT',
           humanApprovalRequired: true,
-          availableActions: ['PREPARE_BANK_SETTLEMENT_INSTRUCTION', 'GENERATE_DEALER_FUNDING_PACKAGE', 'RECONCILE_EXTERNAL_OUTCOME'],
+          availableActions: ['PREPARE_BANK_SETTLEMENT_INSTRUCTION', 'GENERATE_DEALER_FUNDING_PACKAGE', 'RECONCILE_EXTERNAL_OUTCOME', 'PREPARE_SERVICING_HANDOFF'],
           instructionReasoning: {
             requiredDocuments: reasoning.requiredDocuments,
             unresolvedFields: reasoning.unresolvedFields,
