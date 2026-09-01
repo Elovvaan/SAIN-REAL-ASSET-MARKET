@@ -3,6 +3,7 @@ import express from 'express';
 import multer from 'multer';
 import { PrivateDocumentService } from '../services/private-document-service.js';
 import { FinancingLifecycleService, normalizeFinancingStage } from '../services/financing-lifecycle-service.js';
+import { FinancingIntelligenceService } from '../services/financing-intelligence-service.js';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024, files: 10 } });
 const STAFF_ROLES = new Set(['PLATFORM_ADMIN','OPERATIONS_ADMIN','FUNDING_OPERATIONS','FUNDING_ANALYST','VERIFICATION_REVIEWER','INSTRUMENT_REVIEWER','ISSUANCE_REVIEWER','MARKETPLACE_OPERATOR','SETTLEMENT_OPERATOR','AUDITOR']);
@@ -162,6 +163,7 @@ export function createFundingOpportunityRouter(service, documentService = null) 
   const router = express.Router();
   const privateDocuments = documentService || new PrivateDocumentService({ database: service?.domain?.database || null });
   const lifecycleService = new FinancingLifecycleService(service.domain);
+  const financingIntelligence = new FinancingIntelligenceService(service.domain);
 
   router.get('/status', (_req, res) => res.json(service.status()));
 
@@ -222,26 +224,35 @@ export function createFundingOpportunityRouter(service, documentService = null) 
       const record = service.get(req.params.opportunityId);
       if (!record) return res.status(404).json({ error: 'Funding opportunity was not found.' });
       if (String(record.status || '').toUpperCase() === 'WITHDRAWN') return res.status(409).json({ error: 'A withdrawn opportunity cannot be underwritten.' });
-      const current = await lifecycleService.ensure(req.params.opportunityId, actorId(req));
+      let current = await lifecycleService.ensure(req.params.opportunityId, actorId(req));
       if (current.financingStage !== 'UNDERWRITING') return res.status(409).json({ error: `Underwriting is not available from ${current.financingStage}.` });
-      const recommendedAmount = Number(req.body?.recommendedAmount ?? current.requestedAmount);
+      const prepared = await financingIntelligence.refresh(current.opportunityId, 'SRA-UNDERWRITING-AGENT');
+      current = prepared.opportunity;
+      const recommendedAmount = Number(req.body?.recommendedAmount ?? prepared.analysis?.recommendedAmount ?? current.requestedAmount);
       if (!Number.isFinite(recommendedAmount) || recommendedAmount <= 0 || recommendedAmount > Number(current.requestedAmount || 0)) {
         return res.status(400).json({ error: 'Recommended amount must be greater than zero and cannot exceed the requested amount.' });
       }
+      const suppliedConclusion = String(req.body?.conclusion || '').trim();
+      const conclusion = suppliedConclusion || prepared.analysis?.conclusion || null;
+      if (!conclusion) return res.status(409).json({ error: 'Underwriting conclusion is not available from the recorded evidence.' });
       const timestamp = new Date().toISOString();
       const updated = {
         ...current,
         underwriting: {
           recommendedAmount,
-          conclusion: String(req.body?.conclusion || '').trim() || null,
+          conclusion,
+          conclusionSource: suppliedConclusion ? 'ADMIN_INPUT' : 'SRA_NEURAL_PREPARATION',
+          preparedByAgentId: prepared.analysis?.agentId || null,
+          preparationFingerprint: prepared.analysis?.sourceFingerprint || null,
           completedBy: actorId(req),
           completedAt: timestamp,
         },
         updatedAt: timestamp,
       };
       await service.domain.put('FUNDING_OPPORTUNITY', current.opportunityId, updated, { actorId: actorId(req), eventType: 'FINANCING_UNDERWRITING_COMPLETED' });
-      const advanced = await lifecycleService.transition(current.opportunityId, 'DECISION', { source: 'ADMIN_UNIFIED_OPERATIONS' }, actorId(req));
-      return res.json({ opportunity: advanced });
+      const advanced = await lifecycleService.transition(current.opportunityId, 'DECISION', { source: 'ADMIN_UNIFIED_OPERATIONS', referenceId: prepared.analysis?.sourceFingerprint || null }, actorId(req));
+      await financingIntelligence.refresh(current.opportunityId, 'SRA-UNDERWRITING-AGENT');
+      return res.json({ opportunity: service.get(current.opportunityId) || advanced });
     } catch (error) {
       return handle(res, error);
     }
@@ -253,16 +264,21 @@ export function createFundingOpportunityRouter(service, documentService = null) 
       const record = service.get(req.params.opportunityId);
       if (!record) return res.status(404).json({ error: 'Funding opportunity was not found.' });
       if (String(record.status || '').toUpperCase() === 'WITHDRAWN') return res.status(409).json({ error: 'A withdrawn opportunity cannot receive a credit decision.' });
-      const current = await lifecycleService.ensure(req.params.opportunityId, actorId(req));
+      let current = await lifecycleService.ensure(req.params.opportunityId, actorId(req));
       if (current.financingStage !== 'DECISION') return res.status(409).json({ error: `Credit decision is not available from ${current.financingStage}.` });
+      const prepared = await financingIntelligence.refresh(current.opportunityId, 'SRA-UNDERWRITING-AGENT');
+      current = prepared.opportunity;
       const decision = String(req.body?.decision || '').trim().toUpperCase();
       if (!['APPROVE', 'DECLINE'].includes(decision)) return res.status(400).json({ error: 'Decision must be APPROVE or DECLINE.' });
       const approvedAmount = decision === 'APPROVE'
-        ? Number(req.body?.approvedAmount ?? current.underwriting?.recommendedAmount ?? current.requestedAmount)
+        ? Number(req.body?.approvedAmount ?? current.underwriting?.recommendedAmount ?? prepared.analysis?.recommendedAmount ?? current.requestedAmount)
         : 0;
       if (decision === 'APPROVE' && (!Number.isFinite(approvedAmount) || approvedAmount <= 0 || approvedAmount > Number(current.requestedAmount || 0))) {
         return res.status(400).json({ error: 'Approved amount must be greater than zero and cannot exceed the requested amount.' });
       }
+      const suppliedRationale = String(req.body?.rationale || '').trim();
+      const rationale = suppliedRationale || current.decisionPreparation?.rationale || prepared.analysis?.decisionRationale || null;
+      if (!rationale) return res.status(409).json({ error: 'Decision rationale is not available from the recorded evidence.' });
       const timestamp = new Date().toISOString();
       const facility = isLineOfCredit(current) ? facilityFor(current) : null;
       const updated = {
@@ -270,7 +286,10 @@ export function createFundingOpportunityRouter(service, documentService = null) 
         creditDecision: {
           decision,
           approvedAmount,
-          rationale: String(req.body?.rationale || '').trim() || null,
+          rationale,
+          rationaleSource: suppliedRationale ? 'ADMIN_INPUT' : 'SRA_NEURAL_PREPARATION',
+          preparedByAgentId: prepared.analysis?.agentId || null,
+          preparationFingerprint: prepared.analysis?.sourceFingerprint || null,
           decidedBy: actorId(req),
           decidedAt: timestamp,
         },
@@ -287,7 +306,7 @@ export function createFundingOpportunityRouter(service, documentService = null) 
         updatedAt: timestamp,
       };
       await service.domain.put('FUNDING_OPPORTUNITY', current.opportunityId, updated, { actorId: actorId(req), eventType: `FINANCING_CREDIT_DECISION_${decision}` });
-      const advanced = await lifecycleService.transition(current.opportunityId, decision === 'APPROVE' ? 'CLOSING' : 'CLOSED', { source: 'ADMIN_UNIFIED_OPERATIONS' }, actorId(req));
+      const advanced = await lifecycleService.transition(current.opportunityId, decision === 'APPROVE' ? 'CLOSING' : 'CLOSED', { source: 'ADMIN_UNIFIED_OPERATIONS', referenceId: prepared.analysis?.sourceFingerprint || null }, actorId(req));
       return res.json({ opportunity: advanced });
     } catch (error) {
       return handle(res, error);
@@ -461,7 +480,13 @@ export function createFundingOpportunityRouter(service, documentService = null) 
       const advanced = lifecycle.financingStage === 'APPLICATION'
         ? await lifecycleService.transition(opportunity.opportunityId, 'UNDERWRITING', { source: 'EVIDENCE_INGESTION' }, actorId(req))
         : lifecycle;
-      return res.status(201).json({ records, retentionPolicy: 'FINANCING_APPLICATION_EVIDENCE', financingStage: advanced.financingStage });
+      const reasoning = await financingIntelligence.refresh(opportunity.opportunityId, 'SRA-UNDERWRITING-AGENT');
+      return res.status(201).json({
+        records,
+        retentionPolicy: 'FINANCING_APPLICATION_EVIDENCE',
+        financingStage: (service.get(opportunity.opportunityId) || advanced).financingStage,
+        neuralUnderwriting: reasoning.analysis,
+      });
     } catch (error) {
       return handle(res, error);
     }
