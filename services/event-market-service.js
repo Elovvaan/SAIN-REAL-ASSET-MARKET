@@ -19,12 +19,13 @@ export class EventMarketService {
   get(id) { return this.domain.get(RECORD_TYPES.EVENT_MARKET, id); }
   contracts(id) { return this.domain.list(RECORD_TYPES.EVENT_CONTRACT).filter((x) => x.eventMarketId === id); }
   positions(id) { return this.domain.list(RECORD_TYPES.EVENT_POSITION).filter((x) => x.eventMarketId === id); }
+  signals(id) { return this.domain.list(RECORD_TYPES.EVENT_MARKET_SIGNAL).filter((x)=>x.eventMarketId===id).sort((a,b)=>String(a.observedAt).localeCompare(String(b.observedAt))); }
   resolution(id) { return this.domain.list(RECORD_TYPES.EVENT_RESOLUTION).find((x) => x.eventMarketId === id && x.state === 'FINAL') || null; }
   list(filters={}) { return this.domain.list(RECORD_TYPES.EVENT_MARKET).filter((x) => !filters.state || x.state === upper(filters.state)).filter((x) => !filters.category || x.category === upper(filters.category)).sort((a,b) => String(a.scheduledCloseAt).localeCompare(String(b.scheduledCloseAt))).map((x) => this.summary(x.eventMarketId)); }
   summary(id) {
     const market=this.get(id); if (!market) return null;
     const contracts=this.contracts(id); const positions=this.positions(id); const executions=this.domain.list(RECORD_TYPES.EVENT_EXECUTION).filter((x) => x.eventMarketId === id);
-    return { ...market, contracts, resolution:this.resolution(id), volume:Number(executions.reduce((s,x)=>s+Number(x.quantity||0),0).toFixed(8)), openInterest:Number(positions.filter((x)=>x.state==='OPEN').reduce((s,x)=>s+Number(x.quantity||0),0).toFixed(8)), participantCount:new Set(positions.map((x)=>x.participantId)).size };
+    return { ...market, contracts, signals:this.signals(id).slice(-240), resolution:this.resolution(id), volume:Number(executions.reduce((s,x)=>s+Number(x.quantity||0),0).toFixed(8)), openInterest:Number(positions.filter((x)=>x.state==='OPEN').reduce((s,x)=>s+Number(x.quantity||0),0).toFixed(8)), participantCount:new Set(positions.map((x)=>x.participantId)).size };
   }
   detail(id) { const market=this.summary(id); return market ? { market, suspensions:this.domain.list(RECORD_TYPES.EVENT_SUSPENSION).filter((x)=>x.eventMarketId===id) } : null; }
   participantPositions(participantId) { return this.domain.list(RECORD_TYPES.EVENT_POSITION).filter((x)=>x.participantId===participantId).map((x)=>({ ...x, market:this.summary(x.eventMarketId) })); }
@@ -60,7 +61,15 @@ export class EventMarketService {
     if (yesPrice>=1 || noPrice>=1 || Math.abs(yesPrice+noPrice-1)>0.02) throw new Error('YES and NO prices must be below $1 and approximately complementary.');
     const at=now(); const changes=[{type:RECORD_TYPES.EVENT_MARKET,id,payload:{...market,state:'OPEN',venueId:upper(input.venueId),venueMarketId:text(input.venueMarketId),listingReference:text(input.listingReference),listedAt:at,listedBy:actor.participantId,updatedAt:at},actorId:actor.participantId,eventType:'EVENT_MARKET_LISTED'}];
     for (const c of this.contracts(id)) changes.push({type:RECORD_TYPES.EVENT_CONTRACT,id:c.contractId,payload:{...c,state:'OPEN',currentPrice:c.outcome==='YES'?yesPrice:noPrice,venueContractId:text(input[`${c.outcome.toLowerCase()}VenueContractId`])||null,updatedAt:at},actorId:actor.participantId,eventType:'EVENT_CONTRACT_LISTED'});
+    const signalId=uid('EMS'); changes.push({type:RECORD_TYPES.EVENT_MARKET_SIGNAL,id:signalId,payload:{id:signalId,signalId,eventMarketId:id,yesPrice,noPrice,volume:0,sourceType:'MARKET_VENUE',sourceName:upper(input.venueId),sourceReference:text(input.listingReference),eventStatus:'SCHEDULED',observedAt:at,receivedAt:at,state:'OBSERVED'},actorId:actor.participantId,eventType:'EVENT_MARKET_SIGNAL_OBSERVED'});
     await this.domain.atomicPut(changes); return this.summary(id);
+  }
+
+  async recordSignal(id,input={},actor={}) {
+    requireTier(actor,OPERATE,'Event market signal ingestion'); const market=this.get(id); if(!market||!['OPEN','SUSPENDED','CLOSED'].includes(market.state)) throw new Error('An observable event market was not found.');
+    requireFields(input,['sourceType','sourceName','sourceReference']); const yesPrice=positive(input.yesPrice,'yesPrice'),noPrice=positive(input.noPrice,'noPrice'); if(yesPrice>=1||noPrice>=1||Math.abs(yesPrice+noPrice-1)>0.02) throw new Error('YES and NO prices must be below $1 and approximately complementary.');
+    const observedAt=text(input.observedAt)||now(),receivedAt=now(),signalId=uid('EMS'); const signal={id:signalId,signalId,eventMarketId:id,yesPrice,noPrice,volume:Number(Number(input.volume||0).toFixed(8)),score:text(input.score)||null,eventClock:text(input.eventClock)||null,eventStatus:upper(input.eventStatus||'UNKNOWN'),sourceType:upper(input.sourceType),sourceName:text(input.sourceName),sourceReference:text(input.sourceReference),observedAt,receivedAt,latencyMs:Math.max(0,new Date(receivedAt).getTime()-new Date(observedAt).getTime()),state:'OBSERVED'};
+    const changes=[{type:RECORD_TYPES.EVENT_MARKET_SIGNAL,id:signalId,payload:signal,actorId:actor.participantId,eventType:'EVENT_MARKET_SIGNAL_OBSERVED'}]; for(const c of this.contracts(id)) changes.push({type:RECORD_TYPES.EVENT_CONTRACT,id:c.contractId,payload:{...c,currentPrice:c.outcome==='YES'?yesPrice:noPrice,updatedAt:receivedAt},actorId:actor.participantId,eventType:'EVENT_CONTRACT_PRICE_OBSERVED'}); await this.domain.atomicPut(changes); return {signal,market:this.summary(id)};
   }
 
   async buy(id,input={},actor={}) {

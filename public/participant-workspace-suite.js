@@ -231,12 +231,14 @@
   async function renderHome(root) {
     root.innerHTML = '<div class="loading-state">Reading your current platform state…</div>';
     try {
-      const data = await getParticipantMirror();
+      const [data, eventPayload] = await Promise.all([getParticipantMirror(), requestJson('/api/event-markets').catch(() => ({ markets: [] }))]);
       if (activeView !== 'home-projects') return;
       const participantSra = data.coin.participant.reduce((sum, item) => sum + participantSpendableSra(item), 0);
       const pendingTransactions = number(data.vault.pendingTransactionCount);
       const pendingPositions = data.positions.filter((item) => /PENDING|AWAITING|AUTHORIZED|REVIEW|READY/.test(String(item.state || '').toUpperCase())).length;
+      const marketPulse = typeof window.sraEventMarketHomeMarkup === 'function' ? window.sraEventMarketHomeMarkup(eventPayload.markets || []) : '';
       root.innerHTML = `<section class="participant-journey">
+        ${marketPulse}
         <div class="participant-home-summary">
           <article><span>Recorded vault balance</span><strong>${data.errors.vault ? 'Unavailable' : moneyCents.format(number(data.vault.recordedBalance))}</strong></article>
           <article><span>Your available SRA</span><strong>${data.errors.coin ? 'Unavailable' : `${qty(participantSra)} SRA`}</strong></article>
@@ -253,6 +255,7 @@
           ${card('Create an Instrument', 'Create within the tier and capacity approved for your account.', 'instruments')}
           ${card('Financing', 'Prepare financing from an approved instrument.', 'funding-operations')}
           ${card('Marketplace', 'Browse published LIVE SRA/USD products only.', 'marketplace')}
+          ${card('Event Market', 'Follow live market movement and governed YES / NO event contracts.', 'events')}
           ${card('Asset Vault', 'Review participant-linked balance and transaction activity.', 'custody')}
           ${card('SRA Coin', 'Separate your linked SRA from the network-wide representation state.', 'assets')}
         </div></section>
