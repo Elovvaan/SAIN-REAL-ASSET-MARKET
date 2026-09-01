@@ -10,6 +10,17 @@ const PARTICIPATION_EVENT_TYPE = 'TRANSACTION_PARTICIPATION_EVENT';
 const EXTERNAL_INTERACTION_EVENT_TYPE = 'EXTERNAL_INTERACTION_EVENT';
 const OUTCOME_TYPE = 'OUTCOME_EVALUATION';
 const MEMORY_TYPE = 'OPERATIONAL_MEMORY';
+const RECONCILIATION_HYDRATION_TYPES = Object.freeze([
+  'EXPORT_PACKAGE',
+  'ACTION_RESULT',
+  PARTICIPATION_EVENT_TYPE,
+  EXTERNAL_INTERACTION_EVENT_TYPE,
+  'SRA_TRANSACTION',
+  'SRA_SETTLEMENT_RECORD',
+  'PAYMENT_RECEIPT',
+  OUTCOME_TYPE,
+  MEMORY_TYPE,
+]);
 
 const POSITIVE_EXTERNAL_RESULTS = new Set(['COMPLETED', 'SUCCESS', 'SUCCEEDED', 'SETTLED', 'CONFIRMED', 'RECEIVED']);
 const NEGATIVE_EXTERNAL_RESULTS = new Set(['FAILED', 'REJECTED', 'RETURNED', 'CANCELLED']);
@@ -18,9 +29,25 @@ export class ExternalOutcomeReconciliationService {
   constructor(domain) {
     if (!domain) throw new Error('External outcome reconciliation requires the SRA domain store.');
     this.domain = domain;
+    this.hydrated = false;
+    this.hydrationPromise = null;
   }
 
   records(type) { return typeof this.domain.list === 'function' ? this.domain.list(type) : []; }
+
+  async ensureHydrated() {
+    if (this.hydrated) return;
+    if (typeof this.domain.hydrate !== 'function') {
+      this.hydrated = true;
+      return;
+    }
+    if (!this.hydrationPromise) {
+      this.hydrationPromise = Promise.resolve(this.domain.hydrate(RECONCILIATION_HYDRATION_TYPES))
+        .then(() => { this.hydrated = true; })
+        .finally(() => { this.hydrationPromise = null; });
+    }
+    await this.hydrationPromise;
+  }
 
   async persist(type, id, record) {
     if (typeof this.domain.put === 'function') return await this.domain.put(type, id, record);
@@ -53,10 +80,12 @@ export class ExternalOutcomeReconciliationService {
 
   externalInteractions(pkg) {
     return this.records(EXTERNAL_INTERACTION_EVENT_TYPE).filter((event) =>
-      event.exportPackageId === pkg.exportPackageId ||
-      event.transactionId === pkg.financingTransactionId ||
-      event.financingTransactionId === pkg.financingTransactionId ||
-      event.objectId === pkg.exportPackageId ||
+      (pkg.exportPackageId && event.exportPackageId === pkg.exportPackageId) ||
+      (pkg.financingTransactionId && (
+        event.transactionId === pkg.financingTransactionId ||
+        event.financingTransactionId === pkg.financingTransactionId
+      )) ||
+      (pkg.exportPackageId && event.objectId === pkg.exportPackageId) ||
       (pkg.instrumentId && event.objectId === pkg.instrumentId)
     );
   }
@@ -328,6 +357,7 @@ export class ExternalOutcomeReconciliationService {
   }
 
   async reconcile(reference) {
+    await this.ensureHydrated();
     const pkg = this.findPackage(reference);
     if (!pkg) throw new Error('Financing export package was not found.');
     const next = this.buildOutcome(pkg);
