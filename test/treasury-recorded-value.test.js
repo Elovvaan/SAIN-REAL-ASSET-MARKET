@@ -19,7 +19,7 @@ test('treasury posts only balanced administrator-approved journals', async () =>
   const domain = new Domain();
   const service = new TreasuryLedgerService(domain);
   await service.initialize();
-  assert.equal(service.summary().accountCount, 4);
+  assert.equal(service.summary().accountCount, 5);
   assert.throws(() => service.preview({ memo: 'bad', lines: [
     { accountId: 'TRSY-1000-CASH-USD', side: 'DEBIT', amount: 100 },
     { accountId: 'TRSY-3000-PLATFORM-CAPITAL', side: 'CREDIT', amount: 90 }

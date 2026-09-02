@@ -92,6 +92,8 @@ export class StellarTransferService {
     return { server: this.server, issuer: this.issuer, distributor: this.distributor };
   }
 
+  distributionAddress() { return this.ensure().distributor.publicKey(); }
+
   async health() {
     const configuration = this.status();
     if (!configuration.configured) return { ...configuration, reachable: false };
@@ -359,6 +361,26 @@ export class StellarTransferService {
       if (error?.response?.status === 404) return { state: 'PENDING', transactionId: hash };
       throw error;
     }
+  }
+
+  async verifyIncomingUsdcPayment(transactionId, expected = {}) {
+    const { server, distributor } = this.ensure();
+    const hash = text(transactionId);
+    if (!hash) throw new Error('transactionId is required.');
+    const confirmation = await this.confirm(hash);
+    if (confirmation.state !== 'CONFIRMED') return { verified:false, reason:`TRANSACTION_${confirmation.state}`, transactionId:hash };
+    const destination = text(expected.destinationAddress || distributor.publicKey());
+    if (destination !== distributor.publicKey()) return { verified:false, reason:'DESTINATION_NOT_SRA_DISTRIBUTION_ACCOUNT', transactionId:hash };
+    const page = await server.payments().forTransaction(hash).call();
+    const payment = (page.records || []).find((record) => record.type === 'payment'
+      && record.to === destination
+      && record.asset_code === STELLAR_USDC.asset
+      && record.asset_issuer === STELLAR_USDC.issuerAddress
+      && (!text(expected.amount) || Number(record.amount) === Number(expected.amount)));
+    if (!payment) return { verified:false, reason:'EXPECTED_CIRCLE_USDC_PAYMENT_NOT_FOUND', transactionId:hash, ledger:confirmation.ledger };
+    return { verified:true, state:'CONFIRMED', transactionId:hash, ledger:confirmation.ledger,
+      sourceAddress:payment.from, destinationAddress:payment.to, amount:text(payment.amount),
+      asset:STELLAR_USDC.asset, issuerAddress:STELLAR_USDC.issuerAddress };
   }
 
   async send(input = {}) {

@@ -4,6 +4,7 @@ import { RECORD_TYPES } from './persistent-domain-service.js';
 const PROFILE_ID = 'SRA_PLATFORM_TREASURY';
 const DEFAULT_ACCOUNTS = Object.freeze([
   { accountId: 'TRSY-1000-CASH-USD', code: '1000', name: 'Treasury Cash — USD', category: 'ASSET', normalSide: 'DEBIT', currency: 'USD' },
+  { accountId: 'TRSY-1020-USDC-STELLAR', code: '1020', name: 'Treasury USDC — Stellar (USD equivalent)', category: 'ASSET', normalSide: 'DEBIT', currency: 'USD' },
   { accountId: 'TRSY-1100-RECOGNIZED-VALUE', code: '1100', name: 'Recognized Recorded Value', category: 'ASSET', normalSide: 'DEBIT', currency: 'USD' },
   { accountId: 'TRSY-2000-SRA-REPRESENTED', code: '2000', name: 'SRA Coin Represented at Par', category: 'LIABILITY', normalSide: 'CREDIT', currency: 'USD' },
   { accountId: 'TRSY-3000-PLATFORM-CAPITAL', code: '3000', name: 'Platform Contributed Capital', category: 'EQUITY', normalSide: 'CREDIT', currency: 'USD' }
@@ -132,7 +133,7 @@ export class TreasuryLedgerService {
     const totalCredits = Number(journals.reduce((sum, item) => sum + Number(item.totalCredits || 0), 0).toFixed(8));
     const byAccount = Object.fromEntries(accounts.map((item) => [item.accountId, Number(item.balance || 0)]));
     return {
-      treasuryProfileId: PROFILE_ID, state: 'ACTIVE', accountingBasis: 'DOUBLE_ENTRY', functionalCurrency: 'USD', accountCount: accounts.length, journalCount: journals.length, totalDebits, totalCredits, balanced: totalDebits === totalCredits, cashBalanceUsd: Number(byAccount['TRSY-1000-CASH-USD'] || 0), recognizedValueBalanceUsd: Number(byAccount['TRSY-1100-RECOGNIZED-VALUE'] || 0), sraRepresentedAtParUsd: Number(byAccount['TRSY-2000-SRA-REPRESENTED'] || 0), capitalBalanceUsd: Number(byAccount['TRSY-3000-PLATFORM-CAPITAL'] || 0), accounts, recentJournals: journals.slice(0, 20), parReference: { asset: 'SRA Coin', market: 'SRA/USD', rate: 1, unit: 'USD_PER_SRA' }
+      treasuryProfileId: PROFILE_ID, state: 'ACTIVE', accountingBasis: 'DOUBLE_ENTRY', functionalCurrency: 'USD', accountCount: accounts.length, journalCount: journals.length, totalDebits, totalCredits, balanced: totalDebits === totalCredits, cashBalanceUsd: Number(byAccount['TRSY-1000-CASH-USD'] || 0), stellarUsdcUsdEquivalent: Number(byAccount['TRSY-1020-USDC-STELLAR'] || 0), recognizedValueBalanceUsd: Number(byAccount['TRSY-1100-RECOGNIZED-VALUE'] || 0), sraRepresentedAtParUsd: Number(byAccount['TRSY-2000-SRA-REPRESENTED'] || 0), capitalBalanceUsd: Number(byAccount['TRSY-3000-PLATFORM-CAPITAL'] || 0), accounts, recentJournals: journals.slice(0, 20), parReference: { asset: 'SRA Coin', market: 'SRA/USD', rate: 1, unit: 'USD_PER_SRA' }
     };
   }
 }

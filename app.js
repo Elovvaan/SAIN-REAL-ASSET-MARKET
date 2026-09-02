@@ -56,6 +56,8 @@ import { InstitutionParticipationService } from './services/institution-particip
 import { SettlementRailGatewayService } from './services/settlement-rail-gateway-service.js';
 import { StellarUsdcSettlementService } from './services/stellar-usdc-settlement-service.js';
 import { StellarSep24ClientService } from './services/stellar-sep24-client-service.js';
+import { TreasuryUsdcConversionService } from './services/treasury-usdc-conversion-service.js';
+import { TreasuryLedgerService } from './services/treasury-ledger-service.js';
 import { FinancingClosingService } from './services/financing-closing-service.js';
 import { TreasuryBankConnectorService } from './services/treasury-bank-connector-service.js';
 import { PlatformEconomicsService } from './services/platform-economics-service.js';
@@ -170,6 +172,8 @@ export async function createApp(options = {}) {
   const stellarSep24ClientService = new StellarSep24ClientService({ stellar:stellarUsdcAdapter });
   const stellarUsdcSettlementService = new StellarUsdcSettlementService({ domain:persistentDomain, gateway:settlementRailGatewayService, closingService:financingClosingSettlementService, stellar:stellarUsdcAdapter, sep24:stellarSep24ClientService });
   const platformTreasuryService = new PlatformTreasuryService(persistentDomain, platformLedgerService);
+  const treasuryLedgerService = new TreasuryLedgerService(persistentDomain); await treasuryLedgerService.initialize();
+  const treasuryUsdcConversionService = new TreasuryUsdcConversionService({ domain:persistentDomain, treasury:treasuryLedgerService, stellar:stellarUsdcAdapter, sep24:stellarSep24ClientService });
   const financialStatementsService = new FinancialStatementsService(persistentDomain, platformLedgerService);
   const sraAgentService = new SraAgentService({
     persistentDomain,
@@ -195,7 +199,7 @@ export async function createApp(options = {}) {
   app.use('/api/ledger', createPlatformLedgerRouter(platformLedgerService));
   app.use('/api/institution-billing', createInstitutionalBillingRouter(institutionalBillingService));
   app.use('/api/servicing', createAssetServicingRouter(assetServicingService));
-  app.use('/api/platform-treasury', createPlatformTreasuryRouter(platformTreasuryService));
+  app.use('/api/platform-treasury', createPlatformTreasuryRouter(platformTreasuryService, treasuryUsdcConversionService));
   app.use('/api/financial-statements', createFinancialStatementsRouter(financialStatementsService));
   app.use('/api/observations', createObservationLayerRouter(observationLayerService));
   app.use('/api/financial-records', createFinancialRecordRouter(financialRecordService));
