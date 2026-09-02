@@ -114,8 +114,10 @@
       requestJson('/api/funding-marketplace-settlement/reviews'),
       requestJson('/api/funding-marketplace-settlement/authorizations'),
       requestJson('/api/funding-marketplace-settlement/confirmations'),
+      requestJson('/api/admin/marketplace-investor-lineage'),
     ]).then((results) => {
-      const [listingResult, readinessResult, publicationResult, windowsResult, commitmentsResult, allocationReviewsResult, positionsResult, settlementPreparationsResult, settlementReviewsResult, settlementAuthorizationsResult, settlementConfirmationsResult] = results;
+      const [listingResult, readinessResult, publicationResult, windowsResult, commitmentsResult, allocationReviewsResult, positionsResult, settlementPreparationsResult, settlementReviewsResult, settlementAuthorizationsResult, settlementConfirmationsResult, workspaceResult] = results;
+      const workspaceRecords = fulfilled(workspaceResult, {}) || {};
       const next = derive({
         listings: fulfilled(listingResult, []),
         readiness: fulfilled(readinessResult, {}),
@@ -128,8 +130,9 @@
         settlementReviews: records(fulfilled(settlementReviewsResult, {})),
         settlementAuthorizations: records(fulfilled(settlementAuthorizationsResult, {})),
         settlementConfirmations: records(fulfilled(settlementConfirmationsResult, {})),
+        sourceRecords: workspaceRecords,
         errors: {
-          listings: failure(listingResult), readiness: failure(readinessResult), publication: failure(publicationResult), windows: failure(windowsResult), commitments: failure(commitmentsResult), allocations: failure(allocationReviewsResult) || failure(positionsResult), settlement: failure(settlementPreparationsResult) || failure(settlementReviewsResult) || failure(settlementAuthorizationsResult) || failure(settlementConfirmationsResult),
+          listings: failure(listingResult), readiness: failure(readinessResult), publication: failure(publicationResult), windows: failure(windowsResult), commitments: failure(commitmentsResult), allocations: failure(allocationReviewsResult) || failure(positionsResult), settlement: failure(settlementPreparationsResult) || failure(settlementReviewsResult) || failure(settlementAuthorizationsResult) || failure(settlementConfirmationsResult), lineage: failure(workspaceResult),
         },
       });
       state.set(workspace,{ data:next, loading:null });
@@ -165,6 +168,7 @@
   }
 
   function stageRecords(tab, data) {
+    if (tab === 'Investor Funding Flow') return [];
     if (tab === 'Prepared') return data.prepared.map((record) => [record,'LISTING']);
     if (tab === 'Ready') return data.ready.map((record) => [record,'READY LISTING']);
     if (tab === 'Published') return data.published.map((record) => [record,'LIVE LISTING']);
@@ -181,9 +185,58 @@
     return [];
   }
 
+  const idOf = (record, keys) => keys.map((key) => record?.[key]).find(Boolean) || null;
+  const findBy = (items, keys, values) => (items || []).find((record) => keys.some((key) => values.filter(Boolean).includes(record?.[key]))) || null;
+  const stateLabel = (complete, active, waiting) => complete ? 'COMPLETE' : active ? 'ACTIVE' : waiting;
+
+  function fundingChain(listing, data) {
+    const source = data.sourceRecords || {};
+    const instrument = findBy(source.instruments,['instrumentId','id'],[listing.instrumentId]);
+    const coinPositionId = listing.coinPositionId || instrument?.coinPositionId || null;
+    const coinPosition = findBy(source.coinPositions,['coinPositionId','positionId','id'],[coinPositionId]);
+    const opportunityId = listing.opportunityId || instrument?.opportunityId || coinPosition?.opportunityId || null;
+    const opportunity = findBy(source.fundingOpportunities,['opportunityId','id'],[opportunityId]);
+    const financedPosition = findBy(source.financedPositions,['positionId','instrumentId','financingTransactionId'],[listing.positionId,listing.instrumentId,instrument?.financingTransactionId]);
+    const commitments = data.commitments.filter((record) => record.listingId === listing.listingId);
+    const investorPositions = data.positions.filter((record) => record.listingId === listing.listingId);
+    const settlementPreparations = data.settlementPreparations.filter((record) => record.listingId === listing.listingId || investorPositions.some((position) => position.positionId === record.positionId));
+    const authorizations = data.settlementAuthorizations.filter((record) => settlementPreparations.some((preparation) => preparation.settlementPreparationId === record.settlementPreparationId) || investorPositions.some((position) => position.positionId === record.positionId));
+    const confirmations = data.settlementConfirmations.filter((record) => authorizations.some((authorization) => authorization.settlementAuthorizationId === record.settlementAuthorizationId));
+    const verified = confirmations.filter((record) => ['VERIFIED','CONSUMED'].includes(text(record.status)));
+    const ownership = (source.ownershipRecognitions || []).filter((record) => investorPositions.some((position) => [record.positionId,record.objectId,record.marketplacePositionId].includes(position.positionId)) || record.listingId === listing.listingId);
+    const servicingId = financedPosition?.servicingAccountId || instrument?.servicingAccountId || null;
+    const servicing = findBy(source.servicingAccounts,['servicingAccountId','id'],[servicingId]);
+    const servicingEvents = (source.servicingEvents || []).filter((record) => record.servicingAccountId === servicing?.servicingAccountId);
+    return { listing,instrument,coinPosition,opportunity,financedPosition,commitments,investorPositions,settlementPreparations,authorizations,verified,ownership,servicing,servicingEvents };
+  }
+
+  function stageBox(number, label, state, detail) {
+    return `<div style="border:1px solid #292929;border-radius:11px;padding:11px;background:#090909;min-width:0"><span style="display:block;color:#9a9a9a;font-size:9px;text-transform:uppercase">Stage ${number}</span><strong style="display:block;margin-top:4px">${esc(label)}</strong><b style="display:block;color:${state==='COMPLETE'?'#69d17d':state==='ACTIVE'?'#d6a92f':'#9a9a9a'};font-size:12px;margin-top:7px">${esc(state)}</b><small style="display:block;color:#9a9a9a;margin-top:5px">${esc(detail)}</small></div>`;
+  }
+
+  function renderFundingFlow(root, data) {
+    const chains = data.listings.map((listing) => fundingChain(listing,data));
+    if (!chains.length) {
+      root.innerHTML = empty('No investor funding chains', 'An approved obligation and its prepared marketplace listing will begin this flow.');
+      return;
+    }
+    root.innerHTML = `<div class="admin-record-list">${chains.map((chain) => {
+      const obligationComplete = Boolean(chain.instrument);
+      const assetComplete = Boolean(chain.coinPosition || chain.financedPosition);
+      const listed = isLiveListing(chain.listing);
+      const committed = chain.commitments.some((record) => text(record.status)==='CONFIRMED');
+      const funded = chain.verified.length > 0;
+      const owned = chain.ownership.length > 0 || chain.investorPositions.some((record) => text(record.ownershipStatus)==='RECOGNIZED');
+      const serviced = Boolean(chain.servicing);
+      const collateral = chain.opportunity?.collateral?.description || chain.opportunity?.assetDescription || chain.instrument?.collateralDescription || chain.instrument?.purpose || 'See governing transaction package';
+      return `<article class="admin-record-card"><header><strong>${esc(chain.listing.title || chain.listing.listingId)}</strong><em>${esc(listed?'OPEN TO INVESTOR FUNDING':recordState(chain.listing))}</em></header><div class="admin-record-grid">${field('Opportunity',idOf(chain.opportunity,['opportunityId','id']) || chain.listing.opportunityId || 'Linked through instrument')}${field('Obligation',idOf(chain.instrument,['instrumentId','id']) || chain.listing.instrumentId || 'Not linked')}${field('Source Coin Position',idOf(chain.coinPosition,['coinPositionId','positionId','id']) || chain.listing.coinPositionId || 'Not linked')}${field('Collateral',collateral)}${field('Offered amount',`${qty(chain.listing.quantity)} ${chain.listing.unit || 'SRA'}`)}${field('Investor commitments',String(chain.commitments.length))}${field('Verified funding',money(chain.verified.reduce((sum,record)=>sum+num(record.amount),0)))}${field('Servicing',chain.servicing?.servicingAccountId || 'Not boarded')}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:8px;margin-top:12px">${stageBox(1,'Approved obligation',stateLabel(obligationComplete,false,'WAITING'),obligationComplete?'Instrument linked':'Link issued instrument')}${stageBox(2,'Position & collateral',stateLabel(assetComplete,obligationComplete,'WAITING'),assetComplete?'Economic position linked':'Link Coin Position')}${stageBox(3,'Investor offering',stateLabel(listed,isPreparedListing(chain.listing)||isReadyListing(chain.listing),'WAITING'),listed?'Published for review':'Complete governed publication')}${stageBox(4,'Commitment',stateLabel(committed,chain.commitments.length>0,'WAITING'),committed?'Investor commitment confirmed':chain.commitments.length?'Investor reviewing':'Awaiting investor')}${stageBox(5,'Verified funding',stateLabel(funded,chain.settlementPreparations.length>0,'WAITING'),funded?'Settlement evidence verified':chain.settlementPreparations.length?'Settlement in progress':'Awaiting committed capital')}${stageBox(6,'Ownership',stateLabel(owned,funded,'WAITING'),owned?'Investor rights recognized':funded?'Recognition pending':'Follows verified funding')}${stageBox(7,'Servicing & distributions',stateLabel(serviced,owned,'WAITING'),serviced?`${chain.servicingEvents.length} servicing event(s)`:owned?'Board to servicing':'Follows ownership')}</div><p style="color:#9a9a9a;margin:12px 0 0">The investor receives the rights defined by the governing instrument and participation records. On-chain representation records transferability; it does not replace those terms.</p></article>`;
+    }).join('')}</div>`;
+  }
+
   function renderRecords(workspace, data) {
     const root = recordsHost(workspace); if (!root) return;
     const tab = workspace.dataset.activeTab || 'Prepared';
+    if (tab === 'Investor Funding Flow') { renderFundingFlow(root,data); return; }
     const items = stageRecords(tab,data);
     if (!items.length) {
       const copies = {

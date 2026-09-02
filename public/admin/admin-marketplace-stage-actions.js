@@ -95,7 +95,9 @@
     try {
       const d=await data();
       const tab=workspace.dataset.activeTab||'Prepared';
-      if(tab==='Prepared')renderPrepared(root,d);else if(tab==='Ready')renderReady(root,d);else if(tab==='Published')renderPublished(root,d);else if(tab==='Orders')renderOrders(root,d);else if(tab==='Reservations')renderReservations(root,d);else if(tab==='Allocations')renderAllocations(root,d);else if(tab==='Settlement')renderSettlement(root,d);else renderHistorical(root,d);
+      if(tab==='Investor Funding Flow') {
+        root.innerHTML='<header><strong>Investor Funding Controls</strong><em>GOVERNED</em></header><p>The flow view reconciles existing records. State-changing controls remain in Prepared, Published, Orders, Reservations, Allocations, and Settlement.</p>';
+      } else if(tab==='Prepared')renderPrepared(root,d);else if(tab==='Ready')renderReady(root,d);else if(tab==='Published')renderPublished(root,d);else if(tab==='Orders')renderOrders(root,d);else if(tab==='Reservations')renderReservations(root,d);else if(tab==='Allocations')renderAllocations(root,d);else if(tab==='Settlement')renderSettlement(root,d);else renderHistorical(root,d);
       bind(workspace,root,d);
     } catch(error) { root.innerHTML=`<header><strong>Marketplace Stage Actions</strong><em>UNAVAILABLE</em></header><p>${esc(error.message)}</p>`; }
   }

@@ -155,9 +155,9 @@
       return;
     }
     if (workspaceId === 'marketplace') {
-      const market = admin.querySelector('[data-workspace="marketplace"]');
-      window.mountAdminMarketplaceLifecycleWorkstation?.(market);
-      window.mountAdminMarketplaceStageActions?.(market);
+      const marketplaceWorkspace = admin.querySelector('[data-workspace="marketplace"]');
+      window.mountAdminMarketplaceLifecycleWorkstation?.(admin.querySelector('[data-workspace="marketplace"]'));
+      window.mountAdminMarketplaceStageActions?.(marketplaceWorkspace);
       return;
     }
     if (workspaceId === 'users') {

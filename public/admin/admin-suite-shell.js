@@ -19,7 +19,7 @@
     operations:['Overview','Awaiting Actions','Exceptions','Settlement Queue','Exports','Imports','Transaction Router','Audit Trail','Operation History'],
     treasury:['Overview','Commercial Instruments','Cash Position','Available Financing','Funding Capacity','Journal Entries','Treasury Wallets','Ledger','Treasury Reports'],
     'native-asset':['Current Asset','Approval Status','Listing','Marketplace Status','Export Status','Ownership','Recognitions','Asset History','Publishing','Governance'],
-    marketplace:['Prepared','Ready','Published','Orders','Reservations','Allocations','Settlement','Historical Listings'],
+    marketplace:['Investor Funding Flow','Prepared','Ready','Published','Orders','Reservations','Allocations','Settlement','Historical Listings'],
     instruments:['Overview','Pending Review','Approved','Published','History'],
     records:['Recognitions','Observations','Financial Records','Evidence','Origin Records','Trace','Audit'],
     'coin-positions':['Current Supply','Represented Value','Legacy Corrections','Coin Intelligence','Mint History','XRPL Exchange','Retirements','Adjustments'],
@@ -183,6 +183,7 @@
       return nativeInstrument;
     }
     if(id==='marketplace'){
+      if(tab==='Investor Funding Flow') return combined(r.fundingOpportunities,r.instruments,r.coinPositions,r.financedPositions,r.marketplaceListings,r.marketplaceCommitments,r.marketplacePositions,r.marketplaceSettlementPreparations,r.marketplaceSettlementAuthorizations,r.ownershipRecognitions,r.servicingAccounts,r.servicingEvents);
       if(tab==='Prepared') return byState(r.marketplaceListings,['PREPARED']);
       if(tab==='Ready') return byState(r.marketplaceListings,['READY','READY_FOR_PUBLICATION_APPROVAL']);
       if(tab==='Published') return byState(r.marketplaceListings,['PUBLISHED','ACTIVE','LISTED']);

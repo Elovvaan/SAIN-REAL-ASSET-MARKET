@@ -302,6 +302,34 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
     });
   });
 
+  router.get('/api/admin/marketplace-investor-lineage', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    const listings = domain.list(RECORD_TYPES.MARKETPLACE_LISTING);
+    const instrumentIds = new Set(listings.map((record) => record.instrumentId).filter(Boolean));
+    const instruments = domain.list(RECORD_TYPES.SRA_INSTRUMENT).filter((record) => instrumentIds.has(record.instrumentId || record.id));
+    const coinPositionIds = new Set([...listings.map((record) => record.coinPositionId), ...instruments.map((record) => record.coinPositionId)].filter(Boolean));
+    const opportunityIds = new Set([...listings.map((record) => record.opportunityId), ...instruments.map((record) => record.opportunityId)].filter(Boolean));
+    const financedPositions = domain.list('FINANCED_POSITION').filter((record) => instrumentIds.has(record.instrumentId) || listings.some((listing) => listing.positionId === record.positionId));
+    for (const record of financedPositions) {
+      if (record.opportunityId) opportunityIds.add(record.opportunityId);
+      if (record.coinPositionId) coinPositionIds.add(record.coinPositionId);
+    }
+    const servicingIds = new Set(financedPositions.map((record) => record.servicingAccountId).filter(Boolean));
+    const marketplacePositionIds = new Set(domain.list(RECORD_TYPES.FUNDING_MARKETPLACE_POSITION).filter((record) => listings.some((listing) => listing.listingId === record.listingId)).map((record) => record.positionId).filter(Boolean));
+    const servicingAccounts = domain.list(RECORD_TYPES.ASSET_SERVICING_ACCOUNT).filter((record) => servicingIds.has(record.servicingAccountId || record.id));
+    return res.json({
+      generatedAt: new Date().toISOString(),
+      fundingOpportunities: domain.list(RECORD_TYPES.FUNDING_OPPORTUNITY).filter((record) => opportunityIds.has(record.opportunityId || record.id)),
+      instruments,
+      coinPositions: domain.list(RECORD_TYPES.COIN_POSITION).filter((record) => coinPositionIds.has(record.coinPositionId || record.positionId || record.id) || instrumentIds.has(record.instrumentId)),
+      financedPositions,
+      ownershipRecognitions: domain.list(RECORD_TYPES.OWNERSHIP_RECOGNITION).filter((record) => marketplacePositionIds.has(record.positionId || record.objectId || record.marketplacePositionId) || listings.some((listing) => listing.listingId === record.listingId)),
+      servicingAccounts,
+      servicingObligations: domain.list(RECORD_TYPES.ASSET_SERVICING_OBLIGATION).filter((record) => servicingIds.has(record.servicingAccountId)),
+      servicingEvents: domain.list(RECORD_TYPES.ASSET_SERVICING_EVENT).filter((record) => servicingIds.has(record.servicingAccountId)),
+    });
+  });
+
   router.get('/api/admin/workspaces', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
     const limit = req.query.limit;
