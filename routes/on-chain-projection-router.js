@@ -58,7 +58,7 @@ export function createOnChainProjectionRouter(service) {
   const stellar = new StellarTransferService({ domain: service.domain });
   const bitcoin = new BitcoinTransferService();
   const ethereum = new EthereumTransferService();
-  const xrpl = new XrplTransferService();
+  const xrpl = new XrplTransferService({ domain: service.domain });
   const solana = new SolanaTransferService();
   const adapters = new Map([
     ['STELLAR', stellar],
@@ -193,6 +193,31 @@ export function createOnChainProjectionRouter(service) {
       const issuance = await adapter.issueAsset(asset, { amount: req.body.amount });
       const updated = await service.recordIssued(asset.assetId, issuance, actor);
       return res.status(201).json({ asset: updated, issuance });
+    } catch (error) { return handle(res, error); }
+  });
+
+  router.post('/assets/:assetId/markets/offers', async (req, res) => {
+    try {
+      const actor = requireActor(req);
+      const asset = service.getAsset(req.params.assetId);
+      if (!asset) throw new Error('On-chain asset not found.');
+      const adapter = adapters.get(upper(asset.network));
+      if (!adapter || typeof adapter.createOffer !== 'function') {
+        const error = new Error(`Market offers are not available for ${asset.network}.`);
+        error.code = 'ON_CHAIN_MARKET_OFFER_UNSUPPORTED';
+        throw error;
+      }
+      const health = await adapterHealth(upper(asset.network), adapter);
+      if (!health.issuanceReady) {
+        const error = new Error(`${asset.network} issuance accounts are not ready for market offers. ${health.issuerError || health.error || ''}`.trim());
+        error.code = 'ON_CHAIN_NETWORK_NOT_READY';
+        throw error;
+      }
+      const offer = await adapter.createOffer(asset, req.body || {});
+      const offerId = `OCMO-${offer.transactionId}`;
+      const record = { id: offerId, offerId, assetId: asset.assetId, instrumentId: asset.instrumentId || null, ...offer, createdBy: actor, createdAt: new Date().toISOString() };
+      await service.domain.put('ON_CHAIN_MARKET_OFFER', offerId, record, { actorId: actor, eventType: `ON_CHAIN_MARKET_OFFER_${offer.state}` });
+      return res.status(201).json(record);
     } catch (error) { return handle(res, error); }
   });
 
