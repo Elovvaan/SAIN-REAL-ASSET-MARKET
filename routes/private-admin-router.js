@@ -57,6 +57,46 @@ function stateCounts(records = []) {
   for (const record of records) counts[stateOf(record)] = (counts[stateOf(record)] || 0) + 1;
   return counts;
 }
+
+const ADMIN_WORKSPACE_SOURCES = Object.freeze({
+  dashboard: ['instruments','marketplaceListings','transactions','exportPackages','settlementInstructions','treasuryExceptions','lifecycleEvents'],
+  operations: ['transactions','fundingInstructions','exportPackages','settlementInstructions','treasuryPaymentOrders','treasuryExceptions','marketplaceSettlementPreparations','marketplaceSettlementReviews','marketplaceSettlementAuthorizations','lifecycleEvents'],
+  treasury: ['instruments','transactions','treasuryProfiles','ledgerAccounts','ledgerEntries','accountingPeriods','treasuryBankConnections','treasuryPaymentOrders','treasuryStatements','treasuryWallets','treasuryCryptoActivity','treasuryForecasts','treasuryExceptions','financialStatementSnapshots'],
+  nativeAsset: ['instruments','marketplaceListings','recognitions','ownershipRecognitions','exportPackages','lifecycleEvents'],
+  marketplace: ['marketplaceListings','marketplaceCommitmentWindows','marketplaceCommitments','marketplacePositions','marketplaceAllocations','marketplaceSettlementPreparations','marketplaceSettlementReviews','marketplaceSettlementAuthorizations','transactions','settlements','lifecycleEvents'],
+  instruments: ['instruments','protectionInstruments','lifecycleEvents'],
+  records: ['recognitions','ownershipRecognitions','observations','verifiedValueRecords','financialRecords','financialRecordAccounts','financialHistory','evidencePackages','assetRelationships','lifecycleEvents'],
+  coinPositions: ['coinAccounts','coinPositions','recognitions','observations','lifecycleEvents'],
+  transactions: ['transactions','fundingInstructions','paymentReceipts','settlements','settlementRecords','lifecycleEvents'],
+  settlement: ['exportPackages','settlementInstructions','settlementAdapters','settlements','settlementRecords','paymentReceipts','lifecycleEvents'],
+  agent: ['transactions','settlementInstructions','treasuryExceptions','lifecycleEvents'],
+  connections: ['settlementAdapters','treasuryBankConnections','treasuryWallets','connectorDefinitions','enterpriseConnections','extractionRequests','extractionResults','outboundEvents','lifecycleEvents'],
+  users: ['users','participants','lifecycleEvents'],
+  system: ['treasuryExceptions','outboundEvents','lifecycleEvents'],
+});
+
+const ADMIN_RECORD_TYPES = Object.freeze({
+  participants:RECORD_TYPES.PARTICIPANT, assetAccounts:RECORD_TYPES.ASSET_ACCOUNT, projectAccounts:RECORD_TYPES.PROJECT_ACCOUNT,
+  instruments:RECORD_TYPES.SRA_INSTRUMENT, protectionInstruments:RECORD_TYPES.PROTECTION_INSTRUMENT, marketplaceListings:RECORD_TYPES.MARKETPLACE_LISTING,
+  marketplaceCommitmentWindows:RECORD_TYPES.FUNDING_MARKETPLACE_COMMITMENT_WINDOW, marketplaceCommitments:RECORD_TYPES.FUNDING_MARKETPLACE_COMMITMENT,
+  marketplacePositions:RECORD_TYPES.FUNDING_MARKETPLACE_POSITION, marketplaceAllocations:RECORD_TYPES.FUNDING_MARKETPLACE_ALLOCATION_REVIEW,
+  marketplaceSettlementPreparations:RECORD_TYPES.FUNDING_MARKETPLACE_SETTLEMENT_PREPARATION, marketplaceSettlementReviews:RECORD_TYPES.FUNDING_MARKETPLACE_SETTLEMENT_REVIEW,
+  marketplaceSettlementAuthorizations:RECORD_TYPES.FUNDING_MARKETPLACE_SETTLEMENT_AUTHORIZATION, recognitions:RECORD_TYPES.RECOGNITION_ASSESSMENT,
+  ownershipRecognitions:RECORD_TYPES.OWNERSHIP_RECOGNITION, observations:RECORD_TYPES.MARKET_OBSERVATION, verifiedValueRecords:RECORD_TYPES.VERIFIED_VALUE_RECORD,
+  financialRecords:RECORD_TYPES.FINANCIAL_RECORD, financialRecordAccounts:RECORD_TYPES.FINANCIAL_RECORD_ACCOUNT, financialHistory:RECORD_TYPES.FINANCIAL_HISTORY_RECORD,
+  evidencePackages:RECORD_TYPES.EVIDENCE_PACKAGE, assetRelationships:RECORD_TYPES.ASSET_RELATIONSHIP, coinPositions:RECORD_TYPES.COIN_POSITION,
+  coinAccounts:RECORD_TYPES.COIN_ACCOUNT, transactions:RECORD_TYPES.SRA_TRANSACTION, fundingInstructions:RECORD_TYPES.FUNDING_INSTRUCTION,
+  paymentReceipts:RECORD_TYPES.PAYMENT_RECEIPT, exportPackages:RECORD_TYPES.EXPORT_PACKAGE, settlementInstructions:RECORD_TYPES.SETTLEMENT_RAIL_INSTRUCTION,
+  settlementAdapters:RECORD_TYPES.SETTLEMENT_RAIL_ADAPTER, settlements:RECORD_TYPES.SRA_SETTLEMENT, settlementRecords:RECORD_TYPES.SRA_SETTLEMENT_RECORD,
+  treasuryProfiles:RECORD_TYPES.PLATFORM_TREASURY_PROFILE, treasuryForecasts:RECORD_TYPES.PLATFORM_TREASURY_FORECAST,
+  treasuryExceptions:RECORD_TYPES.PLATFORM_TREASURY_EXCEPTION, treasuryBankConnections:RECORD_TYPES.TREASURY_BANK_CONNECTION,
+  treasuryPaymentOrders:RECORD_TYPES.TREASURY_PAYMENT_ORDER, treasuryStatements:RECORD_TYPES.TREASURY_STATEMENT,
+  treasuryWallets:RECORD_TYPES.TREASURY_CRYPTO_WALLET, treasuryCryptoActivity:RECORD_TYPES.TREASURY_CRYPTO_ACTIVITY,
+  ledgerAccounts:RECORD_TYPES.LEDGER_ACCOUNT, ledgerEntries:RECORD_TYPES.LEDGER_ENTRY, accountingPeriods:RECORD_TYPES.ACCOUNTING_PERIOD,
+  financialStatementSnapshots:RECORD_TYPES.FINANCIAL_STATEMENT_SNAPSHOT, connectorDefinitions:RECORD_TYPES.EDX_CONNECTOR_DEFINITION,
+  enterpriseConnections:RECORD_TYPES.EDX_ENTERPRISE_CONNECTION, extractionRequests:RECORD_TYPES.EDX_EXTRACTION_REQUEST,
+  extractionResults:RECORD_TYPES.EDX_EXTRACTION_RESULT, outboundEvents:RECORD_TYPES.EDX_OUTBOUND_EVENT, lifecycleEvents:RECORD_TYPES.LIFECYCLE_EVENT,
+});
 function compactMarketDashboard(domain) {
   const eventMarkets = domain.list(RECORD_TYPES.EVENT_MARKET);
   const eventSignals = domain.list(RECORD_TYPES.EVENT_MARKET_SIGNAL);
@@ -265,83 +305,23 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
   router.get('/api/admin/workspaces', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
     const limit = req.query.limit;
-    const users = (await persistedUsers()).map((user) => ({ id: user.id, displayName: user.displayName, email: user.email, capacities: user.capacities || [], state: user.state || 'ACTIVE', createdAt: user.createdAt || null }));
-    const records = {
-      participants: list(domain, RECORD_TYPES.PARTICIPANT, limit),
-      assetAccounts: list(domain, RECORD_TYPES.ASSET_ACCOUNT, limit),
-      projectAccounts: list(domain, RECORD_TYPES.PROJECT_ACCOUNT, limit),
-      instruments: list(domain, RECORD_TYPES.SRA_INSTRUMENT, limit),
-      protectionInstruments: list(domain, RECORD_TYPES.PROTECTION_INSTRUMENT, limit),
-      marketplaceListings: list(domain, RECORD_TYPES.MARKETPLACE_LISTING, limit),
-      marketplaceCommitmentWindows: list(domain, RECORD_TYPES.FUNDING_MARKETPLACE_COMMITMENT_WINDOW, limit),
-      marketplaceCommitments: list(domain, RECORD_TYPES.FUNDING_MARKETPLACE_COMMITMENT, limit),
-      marketplacePositions: list(domain, RECORD_TYPES.FUNDING_MARKETPLACE_POSITION, limit),
-      marketplaceAllocations: list(domain, RECORD_TYPES.FUNDING_MARKETPLACE_ALLOCATION_REVIEW, limit),
-      marketplaceSettlementPreparations: list(domain, RECORD_TYPES.FUNDING_MARKETPLACE_SETTLEMENT_PREPARATION, limit),
-      marketplaceSettlementReviews: list(domain, RECORD_TYPES.FUNDING_MARKETPLACE_SETTLEMENT_REVIEW, limit),
-      marketplaceSettlementAuthorizations: list(domain, RECORD_TYPES.FUNDING_MARKETPLACE_SETTLEMENT_AUTHORIZATION, limit),
-      recognitions: list(domain, RECORD_TYPES.RECOGNITION_ASSESSMENT, limit),
-      ownershipRecognitions: list(domain, RECORD_TYPES.OWNERSHIP_RECOGNITION, limit),
-      observations: list(domain, RECORD_TYPES.MARKET_OBSERVATION, limit),
-      verifiedValueRecords: list(domain, RECORD_TYPES.VERIFIED_VALUE_RECORD, limit),
-      financialRecords: list(domain, RECORD_TYPES.FINANCIAL_RECORD, limit),
-      financialRecordAccounts: list(domain, RECORD_TYPES.FINANCIAL_RECORD_ACCOUNT, limit),
-      financialHistory: list(domain, RECORD_TYPES.FINANCIAL_HISTORY_RECORD, limit),
-      evidencePackages: list(domain, RECORD_TYPES.EVIDENCE_PACKAGE, limit),
-      assetRelationships: list(domain, RECORD_TYPES.ASSET_RELATIONSHIP, limit),
-      coinPositions: list(domain, RECORD_TYPES.COIN_POSITION, limit),
-      coinAccounts: list(domain, RECORD_TYPES.COIN_ACCOUNT, limit),
-      transactions: list(domain, RECORD_TYPES.SRA_TRANSACTION, limit),
-      fundingInstructions: list(domain, RECORD_TYPES.FUNDING_INSTRUCTION, limit),
-      paymentReceipts: list(domain, RECORD_TYPES.PAYMENT_RECEIPT, limit),
-      exportPackages: list(domain, RECORD_TYPES.EXPORT_PACKAGE, limit),
-      settlementInstructions: list(domain, RECORD_TYPES.SETTLEMENT_RAIL_INSTRUCTION, limit),
-      settlementAdapters: list(domain, RECORD_TYPES.SETTLEMENT_RAIL_ADAPTER, limit),
-      settlements: list(domain, RECORD_TYPES.SRA_SETTLEMENT, limit),
-      settlementRecords: list(domain, RECORD_TYPES.SRA_SETTLEMENT_RECORD, limit),
-      treasuryProfiles: list(domain, RECORD_TYPES.PLATFORM_TREASURY_PROFILE, limit),
-      treasuryForecasts: list(domain, RECORD_TYPES.PLATFORM_TREASURY_FORECAST, limit),
-      treasuryExceptions: list(domain, RECORD_TYPES.PLATFORM_TREASURY_EXCEPTION, limit),
-      treasuryBankConnections: list(domain, RECORD_TYPES.TREASURY_BANK_CONNECTION, limit),
-      treasuryPaymentOrders: list(domain, RECORD_TYPES.TREASURY_PAYMENT_ORDER, limit),
-      treasuryStatements: list(domain, RECORD_TYPES.TREASURY_STATEMENT, limit),
-      treasuryWallets: list(domain, RECORD_TYPES.TREASURY_CRYPTO_WALLET, limit),
-      treasuryCryptoActivity: list(domain, RECORD_TYPES.TREASURY_CRYPTO_ACTIVITY, limit),
-      ledgerAccounts: list(domain, RECORD_TYPES.LEDGER_ACCOUNT, limit),
-      ledgerEntries: list(domain, RECORD_TYPES.LEDGER_ENTRY, limit),
-      accountingPeriods: list(domain, RECORD_TYPES.ACCOUNTING_PERIOD, limit),
-      financialStatementSnapshots: list(domain, RECORD_TYPES.FINANCIAL_STATEMENT_SNAPSHOT, limit),
-      connectorDefinitions: list(domain, RECORD_TYPES.EDX_CONNECTOR_DEFINITION, limit),
-      enterpriseConnections: list(domain, RECORD_TYPES.EDX_ENTERPRISE_CONNECTION, limit),
-      extractionRequests: list(domain, RECORD_TYPES.EDX_EXTRACTION_REQUEST, limit),
-      extractionResults: list(domain, RECORD_TYPES.EDX_EXTRACTION_RESULT, limit),
-      outboundEvents: list(domain, RECORD_TYPES.EDX_OUTBOUND_EVENT, limit),
-      lifecycleEvents: list(domain, RECORD_TYPES.LIFECYCLE_EVENT, limit),
-      users
-    };
+    const requestedWorkspace = String(req.query.workspace || '').trim();
+    if (requestedWorkspace && !ADMIN_WORKSPACE_SOURCES[requestedWorkspace]) return res.status(400).json({ error:'Unknown administration workspace.' });
+    const requestedKeys = requestedWorkspace ? new Set(ADMIN_WORKSPACE_SOURCES[requestedWorkspace]) : new Set([...Object.keys(ADMIN_RECORD_TYPES),'users']);
+    const records = {};
+    for (const key of requestedKeys) {
+      if (key === 'users') {
+        records.users = (await persistedUsers()).map((user) => ({ id:user.id, displayName:user.displayName, email:user.email, capacities:user.capacities || [], state:user.state || 'ACTIVE', createdAt:user.createdAt || null }));
+      } else if (ADMIN_RECORD_TYPES[key]) records[key] = list(domain, ADMIN_RECORD_TYPES[key], limit);
+    }
     const counts = Object.fromEntries(Object.entries(records).map(([key, value]) => [key, value.length]));
     const states = Object.fromEntries(Object.entries(records).filter(([, value]) => Array.isArray(value)).map(([key, value]) => {
       const byState = {};
       for (const record of value) byState[stateOf(record)] = (byState[stateOf(record)] || 0) + 1;
       return [key, byState];
     }));
-    const workspaceSources = {
-      dashboard: ['instruments','marketplaceListings','transactions','exportPackages','settlementInstructions','treasuryExceptions','lifecycleEvents'],
-      operations: ['transactions','fundingInstructions','exportPackages','settlementInstructions','treasuryPaymentOrders','lifecycleEvents'],
-      treasury: ['treasuryProfiles','ledgerAccounts','ledgerEntries','treasuryBankConnections','treasuryPaymentOrders','treasuryStatements','treasuryWallets','treasuryCryptoActivity','treasuryForecasts','treasuryExceptions','financialStatementSnapshots'],
-      nativeAsset: ['instruments','marketplaceListings','ownershipRecognitions','exportPackages','lifecycleEvents'],
-      marketplace: ['marketplaceListings','marketplaceCommitmentWindows','marketplaceCommitments','marketplacePositions','marketplaceAllocations','marketplaceSettlementPreparations','marketplaceSettlementReviews','marketplaceSettlementAuthorizations'],
-      instruments: ['instruments','protectionInstruments','lifecycleEvents'],
-      records: ['recognitions','ownershipRecognitions','observations','verifiedValueRecords','financialRecords','financialRecordAccounts','financialHistory','evidencePackages','assetRelationships','lifecycleEvents'],
-      coinPositions: ['coinAccounts','coinPositions','recognitions','observations','lifecycleEvents'],
-      transactions: ['transactions','fundingInstructions','paymentReceipts','lifecycleEvents'],
-      settlement: ['exportPackages','settlementInstructions','settlementAdapters','settlements','settlementRecords','paymentReceipts','lifecycleEvents'],
-      agent: ['lifecycleEvents'],
-      connections: ['settlementAdapters','treasuryBankConnections','treasuryWallets','connectorDefinitions','enterpriseConnections','extractionRequests','extractionResults','outboundEvents','lifecycleEvents'],
-      users: ['users','participants'],
-      system: ['treasuryExceptions','outboundEvents','lifecycleEvents']
-    };
-    const workspaces = Object.fromEntries(Object.entries(workspaceSources).map(([key, required]) => [key, workspaceStatus(records, required)]));
+    const statusEntries = requestedWorkspace ? [[requestedWorkspace, ADMIN_WORKSPACE_SOURCES[requestedWorkspace]]] : Object.entries(ADMIN_WORKSPACE_SOURCES);
+    const workspaces = Object.fromEntries(statusEntries.map(([key, required]) => [key, workspaceStatus(records, required)]));
     return res.json({ generatedAt: new Date().toISOString(), administrator: { id: session.id, displayName: session.displayName }, counts, states, workspaces, records });
   });
 
