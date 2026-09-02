@@ -30,7 +30,7 @@
   async function load() {
     const [status, workspace] = await Promise.all([
       request('/api/admin/platform-asset'),
-      request('/api/admin/workspaces?limit=100'),
+      request('/api/admin/workspaces?workspace=nativeAsset&limit=100'),
     ]);
     return { status, records: workspace?.records || {} };
   }
