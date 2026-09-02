@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { DETERMINATION_RECORD_TYPES } from './determination-engine-service.js';
+import { OpportunityInstrumentRepresentationService } from './opportunity-instrument-representation-service.js';
 
 const TYPES = Object.freeze({
   OPPORTUNITY: 'FUNDING_OPPORTUNITY', SRA_INSTRUMENT: 'SRA_INSTRUMENT', ISSUANCE_REQUEST: 'FUNDING_INSTRUMENT_ISSUANCE_REQUEST',
@@ -40,8 +41,12 @@ function economicBasis(instrument, request = null, vvr = null) {
 }
 
 export class FundingInstrumentIssuanceService {
-  constructor(persistentDomain) { this.domain = persistentDomain; }
-  async initialize() { await this.domain.hydrate([...Object.values(TYPES), DETERMINATION_RECORD_TYPES.VERIFIED_VALUE]); return this.status(); }
+  constructor(persistentDomain) { this.domain = persistentDomain; this.opportunityRepresentations = new OpportunityInstrumentRepresentationService(persistentDomain); }
+  async initialize() {
+    await this.domain.hydrate([...Object.values(TYPES), DETERMINATION_RECORD_TYPES.VERIFIED_VALUE]);
+    await this.opportunityRepresentations.reconcile();
+    return this.status();
+  }
   status() { return { service: 'SRA Funding Engine Phase 7', purpose: 'CONTROLLED_INSTRUMENT_ISSUANCE', issuanceReviews: this.domain.list(TYPES.ISSUANCE_REVIEW).length, authorizations: this.domain.list(TYPES.ISSUANCE_AUTHORIZATION).length, issuanceTransactions: this.domain.list(TYPES.SRA_TRANSACTION).filter((r) => r.transactionType === 'INSTRUMENT_ISSUANCE').length }; }
   getRequest(requestId) { return this.domain.get(TYPES.ISSUANCE_REQUEST, requestId); }
   getReview(reviewId) { return this.domain.get(TYPES.ISSUANCE_REVIEW, reviewId); }
@@ -137,7 +142,8 @@ export class FundingInstrumentIssuanceService {
     ];
     if (opportunity) changes.push({ type: TYPES.OPPORTUNITY, id: opportunity.opportunityId, payload: { ...opportunity, status: 'INSTRUMENT_ISSUED', fundingPhase: 'MARKETPLACE_PREPARATION', issuanceTransactionId: transaction.transactionId, canonicalVerifiedValueRecordId: instrument.canonicalVerifiedValueRecordId || opportunity.canonicalVerifiedValueRecordId || null, economicBasis: basis, updatedAt: issuedAt, history: [...(opportunity.history || []), { from: opportunity.status, to: 'INSTRUMENT_ISSUED', at: issuedAt, actorId, note: instrument.instrumentFamily }] }, actorId, eventType: 'FUNDING_OPPORTUNITY_INSTRUMENT_ISSUED' });
     await this.domain.atomicPut(changes);
-    return { instrument: issuedInstrument, transaction };
+    const representation = await this.opportunityRepresentations.ensureForInstrument(instrument.instrumentId, actorId);
+    return { instrument: representation.instrument || issuedInstrument, transaction, representation };
   }
 }
 
