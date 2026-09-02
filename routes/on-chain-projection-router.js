@@ -40,19 +40,30 @@ function sourceClass(domain, position) {
 }
 function eligibleSourcePositions(domain) {
   const instruments = domain.list('SRA_INSTRUMENT');
-  return domain.list('COIN_POSITION').filter((position) => {
+  const approvals = domain.list('INSTRUMENT_REPRESENTATION_APPROVAL');
+  const linkedInstrument = (position) => {
     const positionId = positionIdOf(position);
-    const instrument = instruments.find((item) => item.coinPositionId === positionId || item.instrumentId === position.instrumentId) || null;
+    const direct = instruments.find((item) => item.coinPositionId === positionId || item.instrumentId === position.instrumentId);
+    if (direct) return direct;
+    const approval = approvals.find((item) => (item.linkedCoinPositionIds || []).includes(positionId));
+    return approval ? instruments.find((item) => item.instrumentId === approval.instrumentId) || null : null;
+  };
+  return domain.list('COIN_POSITION').filter((position) => {
+    const instrument = linkedInstrument(position);
     return isSraPosition(position, instrument) && !['RETIRED','FROZEN','EXTERNALLY_TRANSFERRED'].includes(String(position.state || '').toUpperCase());
   }).map((position) => {
     const positionId = positionIdOf(position);
-    const instrument = instruments.find((item) => item.coinPositionId === positionId || item.instrumentId === position.instrumentId) || null;
+    const instrument = linkedInstrument(position);
     return { positionId, coinPositionId:positionId, instrumentId:instrument?.instrumentId || position.instrumentId || null, sourceClass:sourceClass(domain, position), quantity:Number(position.quantity || 0), availableQuantity:positionAvailable(position), reservedQuantity:Number(position.reservedQuantity || 0), externalizedQuantity:Number(position.externalizedQuantity || 0), financialRecordId:position.financialRecordId || null, recognitionId:position.recognitionId || null, observationId:position.observationId || null, state:position.state };
   }).filter((position) => position.positionId && position.availableQuantity > 0).sort((left,right) => right.availableQuantity-left.availableQuantity);
 }
 function resolveIssuanceSource(domain, asset, requestedPositionId) {
   let sourcePositionId = text(requestedPositionId || asset.sourcePositionId || asset.coinPositionId);
-  if (!sourcePositionId && asset.instrumentId) sourcePositionId = text(domain.get('SRA_INSTRUMENT', asset.instrumentId)?.coinPositionId);
+  if (!sourcePositionId && asset.instrumentId) {
+    const instrument = domain.get('SRA_INSTRUMENT', asset.instrumentId);
+    const approval = domain.get('INSTRUMENT_REPRESENTATION_APPROVAL', `IRA-${asset.instrumentId}`);
+    sourcePositionId = text(instrument?.coinPositionId || approval?.linkedCoinPositionIds?.[0]);
+  }
   if (!sourcePositionId) throw new Error('sourcePositionId is required so on-chain issuance remains linked to available SRA Coin Position supply.');
   const position = domain.get('COIN_POSITION', sourcePositionId);
   if (!position) throw new Error('Source SRA Coin Position was not found.');
