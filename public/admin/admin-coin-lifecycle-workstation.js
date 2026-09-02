@@ -9,8 +9,8 @@
   const usd = (value) => `$${num(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const terminalTabs = new Set(['Legacy Corrections', 'XRPL Exchange']);
 
-  async function requestJson(url) {
-    const response = await fetch(url, { cache:'no-store', headers:{ Accept:'application/json', 'Cache-Control':'no-cache' } });
+  async function requestJson(url,options={}) {
+    const response = await fetch(url, { cache:'no-store', ...options, headers:{ Accept:'application/json', 'Cache-Control':'no-cache', ...(options.headers||{}) } });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || `Request failed with ${response.status}.`);
     return payload;
@@ -44,12 +44,19 @@
     return `<header><strong>Coin Intelligence</strong><em>STAGE 3</em></header><div style="display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;margin-top:12px">${card('Representation coverage',`${num(r.representationCoveragePct).toFixed(1)}%`)}${card('Root positions',numberText(r.activeRootPositionCount))}${card('Derivative slices',numberText(r.derivativePositionCount))}${card('Needs reconciliation',numberText(r.mismatchCount))}${card('Restricted roots',numberText(r.restrictedRootPositionCount))}${card('Source types',numberText(Object.keys(mix).length))}</div><p style="color:#9a9a9a;margin:14px 0 0"><strong style="color:#f5f5f5">Source mix:</strong> ${esc(sources)}</p><p style="color:#9a9a9a;margin:8px 0 0">Intelligence is computed over the complete domain rather than the Administration workspace display cap.</p>`;
   }
   function historyMarkup(data) { const h=data.history||{}, c=data.counts||{}; return `<header><strong>Representation / Mint History</strong><em>STAGE 4</em></header><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:12px">${card('Representation events',numberText(h.representationEventCount))}${card('Coin positions',numberText(c.coinPositionCount))}${card('Financial records',numberText(c.financialRecordCount))}</div><p style="color:#9a9a9a;margin:14px 0 0">Every supply increase should trace through Coin Position → Financial Record → recognized recorded value → source lineage. Segmentation events do not count as minting.</p>`; }
+  function linkageMarkup(data) {
+    const instruments=data.instruments||[], positions=data.positions||[];
+    const selectable=positions.filter(item=>item.rootPosition&&!item.restricted&&['ACTIVE','REPRESENTED','AVAILABLE','RECORDED'].includes(item.state));
+    if(!instruments.length)return '<header><strong>Instrument Linkage</strong><em>REGISTRATION</em></header><p style="color:#9a9a9a;margin:14px 0 0">No approved instruments are available for Coin Position registration.</p>';
+    return `<header><strong>Instrument Linkage</strong><em>REGISTRATION</em></header><p style="color:#9a9a9a;line-height:1.5">Register an existing SRA Coin Position as the authorized source position for an approved instrument. This action records lineage only; it does not mint, issue, reserve, transfer, or change any balance or Verified Value.</p><div class="admin-record-list" style="margin-top:14px">${instruments.map(instrument=>{const linked=instrument.coinPositionId;const options=selectable.filter(position=>!position.instrumentId||position.instrumentId===instrument.instrumentId).map(position=>`<option value="${esc(position.coinPositionId)}" ${linked===position.coinPositionId?'selected':''}>${esc(position.coinPositionId)} · ${esc(qty(position.availableQuantity))} SRA available · ${esc(position.ownerId||'owner recorded')}</option>`).join('');return `<article class="admin-record-card" style="margin:0" data-linkage-card="${esc(instrument.instrumentId)}"><header><strong>${esc(instrument.instrumentId)}</strong><em>${linked?'LINKED':instrument.representationApproved?'READY TO LINK':'APPROVAL REQUIRED'}</em></header><div class="admin-record-grid"><div><span>Instrument</span><strong>${esc(instrument.instrumentType)}</strong></div><div><span>Authorized quantity</span><strong>${esc(qty(instrument.authorizedQuantity))} SRA</strong></div><div><span>Financial record</span><strong>${esc(instrument.financialRecordId||'—')}</strong></div><div><span>Collateral / asset</span><strong>${esc(instrument.collateralId||'Recorded in package')}</strong></div><div><span>Representation approval</span><strong>${instrument.representationApproved?'APPROVED':'REQUIRED'}</strong></div><div><span>Registered Coin Position</span><strong>${esc(linked||'Not linked')}</strong></div></div>${linked?'<p style="color:#9a9a9a;margin:12px 0 0">This relationship is registered and is available to the instrument’s Issue Supply step.</p>':`<div class="admin-record-grid" style="margin-top:12px"><label><span>Eligible source Coin Position</span><select data-link-position ${instrument.representationApproved?'':'disabled'}>${options||'<option value="">No eligible Coin Position available</option>'}</select></label></div><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px"><button data-link-instrument="${esc(instrument.instrumentId)}" ${instrument.representationApproved&&options?'':'disabled'}>Link Coin Position</button><span data-link-result style="color:#d6a92f;font-size:12px"></span></div>`}</article>`;}).join('')}</div>`;
+  }
   function adjustmentsMarkup(data) { const h=data.history||{}, r=data.reconciliation||{}; return `<header><strong>Adjustments</strong><em>STAGE 5</em></header><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:12px">${card('Recorded adjustment events',numberText(h.adjustmentEventCount))}${card('Active root positions',numberText(r.activeRootPositionCount))}${card('Write controls','NOT ENABLED','Aggregate reconciliation required first')}</div><p style="color:#9a9a9a;margin:14px 0 0">This stage remains read-only until an adjustment atomically persists before/after quantity and reconciles the owning Coin Account aggregate.</p>`; }
   function retirementsMarkup(data) { const h=data.history||{}, s=data.supply||{}; return `<header><strong>Retirements</strong><em>STAGE 6</em></header><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:12px">${card('Retired quantity',`${qty(s.retiredSra)} SRA`)}${card('Retirement events',numberText(h.retirementEventCount))}${card('Write controls','NOT ENABLED','Atomic supply reduction required')}</div><p style="color:#9a9a9a;margin:14px 0 0">Retirement closes represented supply only when the Coin Position and Coin Account issuance aggregate can be reduced atomically with an audit trail.</p>`; }
   function markup(tab,data) {
     if(tab==='Current Supply') return currentSupplyMarkup(data);
     if(tab==='Represented Value') return representedValueMarkup(data);
     if(tab==='Coin Intelligence') return intelligenceMarkup(data);
+    if(tab==='Instrument Linkage') return linkageMarkup(data);
     if(tab==='Mint History') return historyMarkup(data);
     if(tab==='Adjustments') return adjustmentsMarkup(data);
     if(tab==='Retirements') return retirementsMarkup(data);
@@ -61,9 +68,18 @@
     const node=panel(workspace); if(!node)return;
     node.innerHTML='<header><strong>Coin Position Lifecycle</strong><em>LOADING</em></header><p style="color:#9a9a9a">Reconciling the complete persistent Coin Position domain…</p>';
     try {
-      const data=await requestJson(`/api/admin/coin-position-lifecycle?_=${Date.now()}`);
+      const data=tab==='Instrument Linkage'
+        ? await requestJson(`/api/admin/instrument-coin-position-linkages?_=${Date.now()}`)
+        : await requestJson(`/api/admin/coin-position-lifecycle?_=${Date.now()}`);
       if(!node.isConnected||workspace.dataset.activeTab!==tab)return;
       node.innerHTML=markup(tab,data);
+      node.querySelectorAll('[data-link-instrument]').forEach(button=>button.addEventListener('click',async()=>{
+        const row=button.closest('[data-linkage-card]');const coinPositionId=row?.querySelector('[data-link-position]')?.value;const result=row?.querySelector('[data-link-result]');
+        if(!coinPositionId){if(result)result.textContent='Select an eligible Coin Position.';return;}
+        if(!confirm(`Register ${coinPositionId} as the source position for ${button.dataset.linkInstrument}?`))return;
+        button.disabled=true;if(result)result.textContent='Registering instrument linkage…';
+        try{await requestJson(`/api/admin/instruments/${encodeURIComponent(button.dataset.linkInstrument)}/coin-position-linkage`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approval:'LINK',coinPositionId})});if(result)result.textContent='Coin Position linked and lifecycle event recorded.';window.SRAAdminDataClient?.refresh?.('instrument-coin-position-linked');await refresh(workspace);}catch(error){if(result)result.textContent=error.message;button.disabled=false;}
+      }));
     } catch(error) { node.innerHTML=`<header><strong>Coin Position Lifecycle</strong><em>UNAVAILABLE</em></header><p style="color:#d6a92f">${esc(error.message)}</p>`; }
   }
   function mount(workspace) {

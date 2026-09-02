@@ -44,9 +44,10 @@ test('admin bootstrap loads workstation controls and instrument UI calls dedicat
 
 test('on-chain admin UI preserves the ordered instrument lifecycle before asset execution', () => {
   const ui=fs.readFileSync(new URL('../public/admin/admin-on-chain-issuance-controls.js',import.meta.url),'utf8');
-  assert.match(ui,/Instrument approval → representation approval → network readiness → asset identity → issue supply → transfer/);
-  assert.match(ui,/STEP 3 · NETWORK READINESS/);
-  assert.match(ui,/STEP 4 · ASSET IDENTITY/);
+  assert.match(ui,/Instrument approval → representation approval → Coin Position linkage → network readiness → asset identity → issue supply → transfer/);
+  assert.match(ui,/STEP 3 · COIN POSITION LINKAGE/);
+  assert.match(ui,/STEP 4 · NETWORK READINESS/);
+  assert.match(ui,/STEP 5 · ASSET IDENTITY/);
   assert.match(ui,/Complete Representation Approval/);
   assert.match(ui,/Each stage must complete before the next stage becomes actionable/);
 

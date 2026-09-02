@@ -186,6 +186,13 @@ export function createOnChainProjectionRouter(service) {
           error.code = 'ON_CHAIN_APPROVAL_REQUIRED';
           throw error;
         }
+        const linkedCoinPositionId = text(instrument.coinPositionId || approval.linkedCoinPositionIds?.[0]);
+        const linkedCoinPosition = linkedCoinPositionId ? service.domain.get('COIN_POSITION', linkedCoinPositionId) : null;
+        if (!linkedCoinPosition || ![linkedCoinPosition.instrumentId, linkedCoinPosition.linkedInstrumentId].includes(instrumentId)) {
+          const error = new Error('Register an SRA Coin Position to this instrument before creating its on-chain asset identity.');
+          error.code = 'INSTRUMENT_COIN_POSITION_LINKAGE_REQUIRED';
+          throw error;
+        }
       }
 
       const asset = resolveOnChainAssetCode({ instrumentId, instrument, requestedAsset });

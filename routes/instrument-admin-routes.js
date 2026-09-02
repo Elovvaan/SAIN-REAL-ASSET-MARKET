@@ -1,5 +1,6 @@
 import { InstrumentApprovalService } from '../services/instrument-approval-service.js';
 import { InstrumentRepresentationApprovalService, INSTRUMENT_REPRESENTATION_APPROVAL_TYPE } from '../services/instrument-representation-approval-service.js';
+import { InstrumentCoinPositionLinkageService } from '../services/instrument-coin-position-linkage-service.js';
 
 const PENDING_STATES = new Set(['DRAFT', 'PENDING', 'PENDING_REVIEW', 'IN_REVIEW', 'REVIEW_REQUIRED', 'AWAITING_APPROVAL']);
 const REPRESENTATION_STATES = new Set(['APPROVED', 'ISSUED', 'ACTIVE', 'RECORDED']);
@@ -23,6 +24,26 @@ export async function installInstrumentAdminRoutes({ router, domain, requireAdmi
   await domain.hydrate?.([INSTRUMENT_REPRESENTATION_APPROVAL_TYPE]);
   const approvals = new InstrumentApprovalService(domain);
   const representations = new InstrumentRepresentationApprovalService(domain);
+  const linkages = new InstrumentCoinPositionLinkageService(domain);
+
+  router.get('/api/admin/instrument-coin-position-linkages', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    return res.json(linkages.read());
+  });
+
+  router.post('/api/admin/instruments/:instrumentId/coin-position-linkage', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    if (String(req.body?.approval || '').toUpperCase() !== 'LINK') {
+      return res.status(409).json({ error: 'Explicit administrator Coin Position linkage approval is required.', requiredApproval: 'LINK' });
+    }
+    try {
+      const result = await linkages.link(req.params.instrumentId, String(req.body?.coinPositionId || '').trim(), session.id);
+      if (database?.audit) await database.audit({ actorId: session.id, eventType: 'INSTRUMENT_COIN_POSITION_LINKED', objectType: 'SRA_INSTRUMENT', objectId: req.params.instrumentId, payload: { changed: result.changed, coinPositionId: result.coinPosition?.coinPositionId } });
+      return res.status(result.changed ? 201 : 200).json(result);
+    } catch (error) {
+      return res.status(422).json({ error: error.message, code: error.code || 'INSTRUMENT_COIN_POSITION_LINKAGE_FAILED', assessment: error.assessment || null });
+    }
+  });
 
   router.get('/api/admin/instruments/approval-status', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
@@ -77,5 +98,5 @@ export async function installInstrumentAdminRoutes({ router, domain, requireAdmi
     }
   });
 
-  return { approvals, representations };
+  return { approvals, representations, linkages };
 }

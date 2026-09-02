@@ -22,7 +22,7 @@
     marketplace:['Investor Funding Flow','Prepared','Ready','Published','Orders','Reservations','Allocations','Settlement','Historical Listings'],
     instruments:['Overview','Pending Review','Approved','Published','History'],
     records:['Recognitions','Observations','Financial Records','Evidence','Origin Records','Trace','Audit'],
-    'coin-positions':['Current Supply','Represented Value','Legacy Corrections','Coin Intelligence','Mint History','XRPL Exchange','Retirements','Adjustments'],
+    'coin-positions':['Current Supply','Represented Value','Legacy Corrections','Coin Intelligence','Instrument Linkage','Mint History','XRPL Exchange','Retirements','Adjustments'],
     transactions:['All','Pending','Completed','Failed','Exported','Imported','Settlement','Search'],
     settlement:['Export Packages','Settlement Instructions','External Confirmation','Destination Verification','Export History','Settlement Logs','Workflow'],
     agent:['Conversation','Workforce','Suggested Actions','Workflow Approvals','Incomplete Workflows','Explain Record','Trace Instrument','Platform Questions','Diagnostics'],
@@ -213,6 +213,7 @@
       if(tab==='Current Supply'||tab==='Represented Value') return combined(r.coinAccounts,r.coinPositions);
       if(tab==='Legacy Corrections') return contains(r.coinPositions,/CORRECT|LEGACY/i);
       if(tab==='Coin Intelligence') return combined(r.coinPositions,r.observations,r.recognitions);
+      if(tab==='Instrument Linkage') return combined(r.instruments,r.coinPositions,r.lifecycleEvents.filter(item=>/INSTRUMENT_COIN_POSITION_LINKED/i.test(JSON.stringify(item))));
       if(tab==='Mint History') return contains(r.lifecycleEvents,/MINT/i);
       if(tab==='Retirements') return contains(r.lifecycleEvents,/RETIR/i);
       if(tab==='Adjustments') return contains(r.lifecycleEvents,/ADJUST|CORRECT/i);
