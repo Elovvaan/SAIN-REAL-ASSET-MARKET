@@ -94,6 +94,7 @@ export async function installTreasuryAdminRoutes({ router, domain, requireAdmin,
   await ensureInstrumentTreasuryAccounts(domain);
   await ensureCanonicalPlatformFundingInstrument(domain);
   const fundingInstrumentDeposits = new PlatformFundingInstrumentDepositService(domain, treasury);
+  await fundingInstrumentDeposits.ensureCoinPosition();
 
   router.get('/api/admin/treasury', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
