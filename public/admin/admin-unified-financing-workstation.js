@@ -61,7 +61,7 @@
   async function loadWorkspaceRecords(force = false) {
     if (!force && workspaceCache && Date.now() - workspaceCacheAt < 15000) return workspaceCache;
     const suffix = force ? `&_=${Date.now()}` : '';
-    workspaceCache = await request(`/api/admin/workspaces?limit=100${suffix}`);
+    workspaceCache = await request(`/api/admin/workspaces?workspace=operations&limit=100${suffix}`);
     workspaceCacheAt = Date.now();
     return workspaceCache;
   }
