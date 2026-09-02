@@ -111,7 +111,12 @@
     return (status?.networks || []).filter((item) => item?.ready && (item.capabilities || []).includes('CREATE_ASSET')).map((item) => `<option value="${esc(item.network)}">${esc(item.network)}</option>`).join('');
   }
 
-  function onChainCard(item, assets, status) {
+  function sourceOptions(sources, instrumentId) {
+    const eligible = sources.filter((source) => source.instrumentId === instrumentId);
+    return eligible.map((source) => `<option value="${esc(source.positionId)}">${esc(source.positionId)} · ${esc(source.availableQuantity)} SRA available</option>`).join('');
+  }
+
+  function onChainCard(item, assets, status, sources) {
     const instrument = item.instrument || {};
     const id = instrumentId(instrument);
     const authorized = authorizedAmount(instrument);
@@ -122,6 +127,7 @@
     const lifecycle = lifecycleSteps(item, networkReady, asset, issued);
     const storedAssetCode = String(instrument.assetCode || instrument.symbol || instrument.ticker || '').trim().toUpperCase();
     const existingAssetCode = storedAssetCode || generatedAssetCode(id);
+    const eligibleSources = sources.filter((source) => source.instrumentId === id);
     const assetCodeSource = storedAssetCode ? 'Stored on the instrument.' : 'Generated automatically from the SRA instrument ID. You may edit it before creation.';
 
     if (!item.representationApproved) {
@@ -137,7 +143,7 @@
     }
 
     return `<article class="admin-record-card" data-asset-card="${esc(asset.assetId)}"><header><strong>${esc(id)}</strong><em>${issued ? 'STEP 6 · TRANSFER' : 'STEP 5 · ISSUE SUPPLY'}</em></header><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:12px 0">${lifecycle}</div><div class="admin-record-grid"><div><span>Network</span><strong>${esc(asset.network)}</strong></div><div><span>Asset address</span><strong>${esc(asset.assetAddress)}</strong></div><div><span>Network decimals</span><strong>${esc(asset.decimals)}</strong></div><div><span>Issued supply</span><strong>${esc(asset.issuedSupply ?? '0')}</strong></div><div><span>Asset identity transaction</span><strong>${esc(asset.createdTransactionId || 'Not applicable / not broadcast')}</strong></div><div><span>Last issue transaction</span><strong>${esc(asset.lastIssueTransactionId || '—')}</strong></div></div>
-      <section style="margin-top:16px;border-top:1px solid #292929;padding-top:16px"><strong>Step 5 · Issue Supply</strong><p style="color:#9a9a9a;font-size:12px;line-height:1.45">Issue units to the platform distribution account. The network adapter handles the required trustline and signed issuance transaction.</p><div class="admin-record-grid" style="margin-top:10px"><label><span>Amount</span><input data-issue-amount type="text" inputmode="decimal" autocomplete="off" placeholder="Amount"></label></div><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px"><button data-issue-asset="${esc(asset.assetId)}">Issue Supply</button><span data-issue-result style="color:#d6a92f;font-size:12px"></span></div></section>
+      <section style="margin-top:16px;border-top:1px solid #292929;padding-top:16px"><strong>Step 5 · Issue Supply</strong><p style="color:#9a9a9a;font-size:12px;line-height:1.45">Issue units from the linked SRA Coin Position to the platform distribution account. The network adapter handles the required trustline and signed issuance transaction.</p><div class="admin-record-grid" style="margin-top:10px"><label><span>Source Coin Position</span><select data-issue-source>${sourceOptions(sources,id) || '<option value="">No linked SRA Coin Position available</option>'}</select></label><label><span>Amount</span><input data-issue-amount type="text" inputmode="decimal" autocomplete="off" placeholder="Amount"></label></div><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px"><button data-issue-asset="${esc(asset.assetId)}" data-issue-network="${esc(asset.network)}" ${eligibleSources.length ? '' : 'disabled'}>Issue Supply</button><span data-issue-result style="color:#d6a92f;font-size:12px">${eligibleSources.length ? '' : 'No linked SRA Coin Position is available.'}</span></div></section>
       <section style="margin-top:16px;border-top:1px solid #292929;padding-top:16px"><strong>Step 6 · Transfer On Chain</strong><p style="color:#9a9a9a;font-size:12px;line-height:1.45">Send issued units from the platform distribution account to a destination address.</p><div class="admin-record-grid" style="margin-top:10px"><label><span>Amount</span><input data-transfer-amount type="text" inputmode="decimal" autocomplete="off" placeholder="Amount"></label><label><span>Destination address</span><input data-transfer-destination type="text" autocomplete="off" placeholder="Destination wallet"></label></div><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px"><button data-transfer-asset="${esc(asset.assetId)}" data-transfer-symbol="${esc(asset.asset)}" data-transfer-network="${esc(asset.network)}" ${issued ? '' : 'disabled'}>Send On Chain</button><span data-transfer-result style="color:#d6a92f;font-size:12px">${issued ? '' : 'Issue supply first.'}</span></div></section>
     </article>`;
   }
@@ -193,13 +199,16 @@
     card.querySelectorAll('[data-issue-asset]').forEach((button) => button.addEventListener('click', async () => {
       const row = button.closest('[data-asset-card]');
       const amount = row?.querySelector('[data-issue-amount]')?.value?.trim();
+      const sourcePositionId = row?.querySelector('[data-issue-source]')?.value?.trim();
       const result = row?.querySelector('[data-issue-result]');
       if (!amount) { if (result) result.textContent = 'Enter amount.'; return; }
+      if (!sourcePositionId) { if (result) result.textContent = 'Select the linked source Coin Position.'; return; }
+      if (!confirm(`Issue ${amount} units from ${sourcePositionId} onto ${button.dataset.issueNetwork}?`)) return;
       button.disabled = true;
       if (result) result.textContent = 'Building, signing, broadcasting, and confirming issuance…';
       try {
         const response = await request(`/api/on-chain/assets/${encodeURIComponent(button.dataset.issueAsset)}/issue`, {
-          method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ amount }),
+          method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ amount, sourcePositionId }),
         });
         if (result) result.textContent = `Issued · ${response.issuance?.transactionId || 'transaction recorded'}`;
         window.SRAAdminDataClient?.refresh?.('on-chain-issued');
@@ -247,16 +256,18 @@
 
   async function renderOnChain(workspace, card) {
     card.innerHTML = '<header><strong>On-Chain</strong><em>CHECKING</em></header><p>Loading instrument lifecycle and network state…</p>';
-    const [approvalStatus, status, assetsResult] = await Promise.all([
+    const [approvalStatus, status, assetsResult, sourcesResult] = await Promise.all([
       request(`/api/admin/instruments/approval-status?_=${Date.now()}`),
       request('/api/on-chain/status'),
       request('/api/on-chain/assets'),
+      request('/api/on-chain/source-positions'),
     ]);
     if (!active(workspace) || activeTab(workspace) !== 'On-Chain') return;
     const eligible = approvalStatus.representationReady || [];
     const assets = assetsResult.records || [];
+    const sources = sourcesResult.records || [];
     const ready = (status.networks || []).some((item) => item.ready && (item.capabilities || []).includes('CREATE_ASSET'));
-    card.innerHTML = `<header><strong>On-Chain</strong><em>${ready ? 'NETWORK READY' : 'NETWORK NOT READY'}</em></header><p style="color:#9a9a9a;line-height:1.5">Instrument approval → representation approval → network readiness → asset identity → issue supply → transfer. SRA generates the network asset code from the instrument identity when one has not already been assigned.</p><div style="display:grid;gap:10px">${eligible.length ? eligible.map((item) => onChainCard(item, assets, status)).join('') : '<p>No approved instruments are currently available.</p>'}</div>`;
+    card.innerHTML = `<header><strong>On-Chain</strong><em>${ready ? 'NETWORK READY' : 'NETWORK NOT READY'}</em></header><p style="color:#9a9a9a;line-height:1.5">Instrument approval → representation approval → network readiness → asset identity → issue supply → transfer. SRA generates the network asset code from the instrument identity when one has not already been assigned.</p><div style="display:grid;gap:10px">${eligible.length ? eligible.map((item) => onChainCard(item, assets, status, sources)).join('') : '<p>No approved instruments are currently available.</p>'}</div>`;
     bindOnChain(workspace, card);
   }
 
