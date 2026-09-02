@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { InstrumentCoinPositionLinkageService } from '../services/instrument-coin-position-linkage-service.js';
 
 class Domain {
-  constructor(records={}) { this.records=new Map(Object.entries(records).flatMap(([type,rows])=>rows.map(row=>{const id=type==='SRA_INSTRUMENT'?row.instrumentId:type==='COIN_POSITION'?row.coinPositionId:row.approvalId||row.id;return [`${type}:${id}`,[type,row]];}))); }
+  constructor(records={}) { this.records=new Map(Object.entries(records).flatMap(([type,rows])=>rows.map(row=>{const id=type==='SRA_INSTRUMENT'?row.instrumentId:['COIN_POSITION','SRA_COIN_POSITION'].includes(type)?row.coinPositionId:row.approvalId||row.id;return [`${type}:${id}`,[type,row]];}))); }
   get(type,id){return structuredClone(this.records.get(`${type}:${id}`)?.[1]||null);}
   list(type){return [...this.records.values()].filter(([recordType])=>recordType===type).map(([,row])=>structuredClone(row));}
   async atomicPut(changes){for(const change of changes)this.records.set(`${change.type}:${change.id}`,[change.type,structuredClone(change.payload)]);return changes.map(change=>change.payload);}
@@ -57,4 +57,14 @@ test('existing complete linkage remains idempotent after available supply change
   const result=await service.link('INS-1','CP-1','ADMIN-1');
   assert.equal(result.changed,false);
   assert.equal(result.assessment.alreadyLinked,true);
+});
+
+test('discovers and links positions stored in the SRA_COIN_POSITION record class',async()=>{
+  const {domain,service}=fixture();
+  const position=domain.get('COIN_POSITION','CP-1');
+  domain.records.delete('COIN_POSITION:CP-1');
+  domain.records.set('SRA_COIN_POSITION:CP-1',['SRA_COIN_POSITION',position]);
+  assert.equal(service.read().positions[0].recordType,'SRA_COIN_POSITION');
+  await service.link('INS-1','CP-1','ADMIN-1');
+  assert.equal(domain.get('SRA_COIN_POSITION','CP-1').instrumentId,'INS-1');
 });

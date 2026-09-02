@@ -20,6 +20,19 @@ function assetIdFor(asset, network) {
   return `OCA-${digest}`;
 }
 function positionIdOf(record) { return record?.coinPositionId || record?.positionId || record?.id || null; }
+function allCoinPositions(domain) {
+  const records = new Map();
+  for (const type of ['COIN_POSITION', 'SRA_COIN_POSITION']) {
+    for (const position of domain.list(type)) {
+      const id = positionIdOf(position);
+      if (id && !records.has(id)) records.set(id, position);
+    }
+  }
+  return [...records.values()];
+}
+function coinPositionById(domain, positionId) {
+  return domain.get('COIN_POSITION', positionId) || domain.get('SRA_COIN_POSITION', positionId) || null;
+}
 function positionAvailable(record) {
   const total = Number(record?.availableQuantity ?? record?.quantityAvailable ?? record?.quantity ?? record?.balance ?? 0);
   const reserved = Number(record?.reservedQuantity || 0);
@@ -48,7 +61,7 @@ function eligibleSourcePositions(domain) {
     const approval = approvals.find((item) => (item.linkedCoinPositionIds || []).includes(positionId));
     return approval ? instruments.find((item) => item.instrumentId === approval.instrumentId) || null : null;
   };
-  return domain.list('COIN_POSITION').filter((position) => {
+  return allCoinPositions(domain).filter((position) => {
     const instrument = linkedInstrument(position);
     return isSraPosition(position, instrument) && !['RETIRED','FROZEN','EXTERNALLY_TRANSFERRED'].includes(String(position.state || '').toUpperCase());
   }).map((position) => {
@@ -65,7 +78,7 @@ function resolveIssuanceSource(domain, asset, requestedPositionId) {
     sourcePositionId = text(instrument?.coinPositionId || approval?.linkedCoinPositionIds?.[0]);
   }
   if (!sourcePositionId) throw new Error('sourcePositionId is required so on-chain issuance remains linked to available SRA Coin Position supply.');
-  const position = domain.get('COIN_POSITION', sourcePositionId);
+  const position = coinPositionById(domain, sourcePositionId);
   if (!position) throw new Error('Source SRA Coin Position was not found.');
   const instrument = asset.instrumentId ? domain.get('SRA_INSTRUMENT', asset.instrumentId) : domain.list('SRA_INSTRUMENT').find((item) => item.coinPositionId === sourcePositionId) || null;
   if (!isSraPosition(position, instrument)) throw new Error('Source Coin Position must use the canonical SRA or SRA/USD denomination.');
@@ -187,7 +200,7 @@ export function createOnChainProjectionRouter(service) {
           throw error;
         }
         const linkedCoinPositionId = text(instrument.coinPositionId || approval.linkedCoinPositionIds?.[0]);
-        const linkedCoinPosition = linkedCoinPositionId ? service.domain.get('COIN_POSITION', linkedCoinPositionId) : null;
+        const linkedCoinPosition = linkedCoinPositionId ? coinPositionById(service.domain, linkedCoinPositionId) : null;
         if (!linkedCoinPosition || ![linkedCoinPosition.instrumentId, linkedCoinPosition.linkedInstrumentId].includes(instrumentId)) {
           const error = new Error('Register an SRA Coin Position to this instrument before creating its on-chain asset identity.');
           error.code = 'INSTRUMENT_COIN_POSITION_LINKAGE_REQUIRED';

@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 
 const INSTRUMENT_TYPE = 'SRA_INSTRUMENT';
 const POSITION_TYPE = 'COIN_POSITION';
+const POSITION_TYPES = [POSITION_TYPE, 'SRA_COIN_POSITION'];
 const APPROVAL_TYPE = 'INSTRUMENT_REPRESENTATION_APPROVAL';
 const EVENT_TYPE = 'LIFECYCLE_EVENT';
 const INSTRUMENT_STATES = new Set(['APPROVED', 'ISSUED', 'ACTIVE', 'RECORDED', 'DEPOSITED_RECOGNIZED_USD']);
@@ -42,6 +43,25 @@ function instrumentPositionId(instrument) {
   return instrument?.coinPositionId || instrument?.sourcePositionId || null;
 }
 
+function findPosition(domain, coinPositionId) {
+  for (const recordType of POSITION_TYPES) {
+    const position = domain.get(recordType, coinPositionId);
+    if (position) return { position, recordType };
+  }
+  return { position: null, recordType: POSITION_TYPE };
+}
+
+function uniquePositions(domain) {
+  const positions = new Map();
+  for (const recordType of POSITION_TYPES) {
+    for (const position of domain.list(recordType)) {
+      const coinPositionId = positionIdOf(position);
+      if (coinPositionId && !positions.has(coinPositionId)) positions.set(coinPositionId, { position, recordType });
+    }
+  }
+  return [...positions.values()];
+}
+
 function linkageEvent({ instrumentId, coinPositionId, actorId, linkedAt, instrument, position }) {
   const id = `LE-${crypto.randomUUID().split('-')[0].toUpperCase()}`;
   return {
@@ -69,12 +89,13 @@ export class InstrumentCoinPositionLinkageService {
 
   evaluate(instrumentId, coinPositionId) {
     const instrument = this.domain.get(INSTRUMENT_TYPE, instrumentId);
-    const position = this.domain.get(POSITION_TYPE, coinPositionId);
+    const located = findPosition(this.domain, coinPositionId);
+    const position = located.position;
     const approval = this.domain.get(APPROVAL_TYPE, approvalId(instrumentId));
     const blockers = [];
     if (!instrument) blockers.push('INSTRUMENT_NOT_FOUND');
     if (!position) blockers.push('COIN_POSITION_NOT_FOUND');
-    if (!instrument || !position) return { eligible: false, instrumentId, coinPositionId, blockers, instrument, position, approval };
+    if (!instrument || !position) return { eligible: false, instrumentId, coinPositionId, blockers, instrument, position, positionRecordType: located.recordType, approval };
 
     if (!INSTRUMENT_STATES.has(upper(instrument.state || instrument.status))) blockers.push('INSTRUMENT_NOT_APPROVED');
     if (approval?.state !== 'APPROVED') blockers.push('REPRESENTATION_APPROVAL_REQUIRED');
@@ -106,6 +127,7 @@ export class InstrumentCoinPositionLinkageService {
       availableQuantity: available,
       instrument,
       position,
+      positionRecordType: located.recordType,
       approval,
     };
   }
@@ -128,8 +150,9 @@ export class InstrumentCoinPositionLinkageService {
           representationApproved: approval?.state === 'APPROVED',
         };
       });
-    const positions = this.domain.list(POSITION_TYPE).map((position) => ({
+    const positions = uniquePositions(this.domain).map(({ position, recordType }) => ({
       coinPositionId: positionIdOf(position),
+      recordType,
       state: upper(position.state || position.status),
       symbol: upper(position.symbol || position.assetCode || 'SRA'),
       quantity: number(position.quantity),
@@ -179,7 +202,7 @@ export class InstrumentCoinPositionLinkageService {
 
     await this.domain.atomicPut([
       { type: INSTRUMENT_TYPE, id: instrumentId, payload: instrument, actorId, eventType: 'INSTRUMENT_COIN_POSITION_LINKED' },
-      { type: POSITION_TYPE, id: coinPositionId, payload: coinPosition, actorId, eventType: 'INSTRUMENT_COIN_POSITION_LINKED' },
+      { type: assessment.positionRecordType, id: coinPositionId, payload: coinPosition, actorId, eventType: 'INSTRUMENT_COIN_POSITION_LINKED' },
       { type: APPROVAL_TYPE, id: approval.approvalId || approval.id, payload: approval, actorId, eventType: 'INSTRUMENT_COIN_POSITION_LINKED' },
       { type: EVENT_TYPE, id: event.id, payload: event, actorId, eventType: 'INSTRUMENT_COIN_POSITION_LINKED' },
     ]);
