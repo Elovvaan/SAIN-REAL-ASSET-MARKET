@@ -7,7 +7,9 @@ const ui = fs.readFileSync(new URL('../public/admin/admin-xrpl-exchange-workstat
 
 test('on-chain issuance requires and validates available SRA Coin Position supply', () => {
   assert.match(router, /sourcePositionId is required/);
-  assert.match(router, /Source Coin Position must be denominated in SRA/);
+  assert.match(router, /position\?\.denomination\?\.symbol/);
+  assert.match(router, /\['SRA','SRAUSD'\]/);
+  assert.match(router, /Source Coin Position must use the canonical SRA or SRA\/USD denomination/);
   assert.match(router, /Issuance amount exceeds the source Coin Position/);
   assert.match(router, /ON_CHAIN_ISSUANCE_SOURCE/);
   assert.match(router, /COIN_POSITION_EXTERNALIZED_ON_CHAIN/);
