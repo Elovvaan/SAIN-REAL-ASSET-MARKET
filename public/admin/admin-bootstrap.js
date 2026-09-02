@@ -34,6 +34,7 @@
     'coin-positions': [
       ['/admin/admin-coin-representation-integrity.js', 'data-sra-admin-coin-representation-integrity'],
       ['/admin/admin-coin-lifecycle-workstation.js', 'data-sra-admin-coin-lifecycle-workstation'],
+      ['/admin/admin-xrpl-exchange-workstation.js', 'data-sra-admin-xrpl-exchange-workstation'],
     ],
     marketplace: [
       ['/admin/admin-marketplace-lifecycle-workstation.js', 'data-sra-admin-marketplace-lifecycle-workstation'],
@@ -147,9 +148,10 @@
       return;
     }
     if (workspaceId === 'coin-positions') {
-      const coin = admin.querySelector('[data-workspace="coin-positions"]');
-      window.mountAdminCoinRepresentationIntegrityControls?.(coin);
-      window.mountAdminCoinLifecycleWorkstation?.(coin);
+      const coinWorkspace = admin.querySelector('[data-workspace="coin-positions"]');
+      window.mountAdminCoinRepresentationIntegrityControls?.(coinWorkspace);
+      window.mountAdminCoinLifecycleWorkstation?.(coinWorkspace);
+      window.mountAdminXrplExchangeWorkstation?.(coinWorkspace);
       return;
     }
     if (workspaceId === 'marketplace') {

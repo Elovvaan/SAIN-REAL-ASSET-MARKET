@@ -22,7 +22,7 @@
     marketplace:['Prepared','Ready','Published','Orders','Reservations','Allocations','Settlement','Historical Listings'],
     instruments:['Overview','Pending Review','Approved','Published','History'],
     records:['Recognitions','Observations','Financial Records','Evidence','Origin Records','Trace','Audit'],
-    'coin-positions':['Current Supply','Represented Value','Legacy Corrections','Coin Intelligence','Mint History','Retirements','Adjustments'],
+    'coin-positions':['Current Supply','Represented Value','Legacy Corrections','Coin Intelligence','Mint History','XRPL Exchange','Retirements','Adjustments'],
     transactions:['All','Pending','Completed','Failed','Exported','Imported','Settlement','Search'],
     settlement:['Export Packages','Settlement Instructions','External Confirmation','Destination Verification','Export History','Settlement Logs','Workflow'],
     agent:['Conversation','Suggested Actions','Workflow Approvals','Incomplete Workflows','Explain Record','Trace Instrument','Platform Questions','Diagnostics'],

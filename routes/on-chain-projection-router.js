@@ -221,6 +221,17 @@ export function createOnChainProjectionRouter(service) {
     } catch (error) { return handle(res, error); }
   });
 
+  router.get('/assets/:assetId/markets/offers', (req, res) => {
+    try {
+      const asset = service.getAsset(req.params.assetId);
+      if (!asset) throw new Error('On-chain asset not found.');
+      const records = service.domain.list('ON_CHAIN_MARKET_OFFER')
+        .filter((record) => record.assetId === asset.assetId)
+        .sort((left, right) => String(right.createdAt || '').localeCompare(String(left.createdAt || '')));
+      return res.json({ records });
+    } catch (error) { return handle(res, error); }
+  });
+
   router.get('/stable-settlement-assets', async (_req, res) => {
     try {
       await stableSettlementAssets.ensure();

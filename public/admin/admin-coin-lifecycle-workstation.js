@@ -7,7 +7,7 @@
   const num = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
   const qty = (value) => num(value).toLocaleString(undefined, { maximumFractionDigits: 8 });
   const usd = (value) => `$${num(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  const terminalTabs = new Set(['Legacy Corrections']);
+  const terminalTabs = new Set(['Legacy Corrections', 'XRPL Exchange']);
 
   async function requestJson(url) {
     const response = await fetch(url, { cache:'no-store', headers:{ Accept:'application/json', 'Cache-Control':'no-cache' } });
