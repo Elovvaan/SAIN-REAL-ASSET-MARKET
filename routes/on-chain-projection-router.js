@@ -362,6 +362,92 @@ export function createOnChainProjectionRouter(service) {
     } catch (error) { return handle(res, error); }
   });
 
+  router.post('/assets/:assetId/markets/offers/:offerId/reconcile', async (req, res) => {
+    try {
+      const actor = requireActor(req);
+      const asset = service.getAsset(req.params.assetId);
+      if (!asset) throw new Error('On-chain asset not found.');
+      const offer = service.domain.get('ON_CHAIN_MARKET_OFFER', req.params.offerId);
+      if (!offer || offer.assetId !== asset.assetId) throw new Error('On-chain market offer not found.');
+      const adapter = adapters.get(upper(asset.network));
+      if (!adapter || typeof adapter.reconcileOffer !== 'function') {
+        const error = new Error(`Market offer reconciliation is not available for ${asset.network}.`);
+        error.code = 'ON_CHAIN_MARKET_RECONCILIATION_UNSUPPORTED';
+        throw error;
+      }
+      const reconciliation = await adapter.reconcileOffer(asset, offer);
+      const updated = { ...offer, ...reconciliation, updatedAt:new Date().toISOString(), updatedBy:actor };
+      await service.domain.put('ON_CHAIN_MARKET_OFFER', offer.offerId, updated, { actorId:actor, eventType:`ON_CHAIN_MARKET_OFFER_${updated.marketState}` });
+      return res.json(updated);
+    } catch (error) { return handle(res, error); }
+  });
+
+  router.post('/assets/:assetId/markets/offers/:offerId/cancel', async (req, res) => {
+    try {
+      const actor = requireActor(req);
+      const asset = service.getAsset(req.params.assetId);
+      if (!asset) throw new Error('On-chain asset not found.');
+      const offer = service.domain.get('ON_CHAIN_MARKET_OFFER', req.params.offerId);
+      if (!offer || offer.assetId !== asset.assetId) throw new Error('On-chain market offer not found.');
+      const adapter = adapters.get(upper(asset.network));
+      if (!adapter || typeof adapter.cancelOffer !== 'function') {
+        const error = new Error(`Market offer cancellation is not available for ${asset.network}.`);
+        error.code = 'ON_CHAIN_MARKET_CANCELLATION_UNSUPPORTED';
+        throw error;
+      }
+      const cancellation = await adapter.cancelOffer(asset, offer);
+      if (cancellation?.cancelConfirmation?.state !== 'CONFIRMED') {
+        const error = new Error(`${asset.network} market offer cancellation was not confirmed.`);
+        error.code = 'ON_CHAIN_MARKET_CANCELLATION_NOT_CONFIRMED';
+        error.transactionId = cancellation?.cancelTransactionId || null;
+        throw error;
+      }
+      const updated = { ...offer, ...cancellation, updatedAt:new Date().toISOString(), updatedBy:actor };
+      await service.domain.put('ON_CHAIN_MARKET_OFFER', offer.offerId, updated, { actorId:actor, eventType:'ON_CHAIN_MARKET_OFFER_CANCELLED' });
+      return res.json(updated);
+    } catch (error) { return handle(res, error); }
+  });
+
+  router.post('/assets/:assetId/markets/offers/:offerId/replace', async (req, res) => {
+    try {
+      const actor = requireActor(req);
+      const asset = service.getAsset(req.params.assetId);
+      if (!asset) throw new Error('On-chain asset not found.');
+      const offer = service.domain.get('ON_CHAIN_MARKET_OFFER', req.params.offerId);
+      if (!offer || offer.assetId !== asset.assetId) throw new Error('On-chain market offer not found.');
+      const adapter = adapters.get(upper(asset.network));
+      if (!adapter || typeof adapter.cancelOffer !== 'function' || typeof adapter.createOffer !== 'function') {
+        const error = new Error(`Market offer replacement is not available for ${asset.network}.`);
+        error.code = 'ON_CHAIN_MARKET_REPLACEMENT_UNSUPPORTED';
+        throw error;
+      }
+      const sellAmount = Number(req.body?.sellAmount);
+      const buyAmountNative = Number(req.body?.buyAmountNative);
+      if (!Number.isFinite(sellAmount) || sellAmount <= 0 || !Number.isFinite(buyAmountNative) || buyAmountNative <= 0) throw new Error('Replacement sell and requested amounts must be greater than zero.');
+      if (sellAmount > Number(asset.issuedSupply || 0)) throw new Error(`Replacement offer exceeds the recorded issued supply of ${asset.issuedSupply || 0}.`);
+      const cancellation = await adapter.cancelOffer(asset, offer);
+      if (cancellation?.cancelConfirmation?.state !== 'CONFIRMED') {
+        const error = new Error(`${asset.network} market offer cancellation was not confirmed, so no replacement was submitted.`);
+        error.code = 'ON_CHAIN_MARKET_CANCELLATION_NOT_CONFIRMED';
+        error.transactionId = cancellation?.cancelTransactionId || null;
+        throw error;
+      }
+      const cancelled = { ...offer, ...cancellation, updatedAt:new Date().toISOString(), updatedBy:actor };
+      await service.domain.put('ON_CHAIN_MARKET_OFFER', offer.offerId, cancelled, { actorId:actor, eventType:'ON_CHAIN_MARKET_OFFER_CANCELLED_FOR_REPLACEMENT' });
+      const replacement = await adapter.createOffer(asset, req.body || {});
+      if (replacement?.state !== 'CONFIRMED' || replacement?.confirmation?.state !== 'CONFIRMED') {
+        const error = new Error(`${asset.network} replacement offer was not confirmed. The original offer remains cancelled.`);
+        error.code = 'ON_CHAIN_MARKET_REPLACEMENT_NOT_CONFIRMED';
+        error.transactionId = replacement?.transactionId || null;
+        throw error;
+      }
+      const replacementOfferId = `OCMO-${replacement.transactionId}`;
+      const replacementRecord = { id:replacementOfferId, offerId:replacementOfferId, assetId:asset.assetId, instrumentId:asset.instrumentId || null, ...replacement, replacesOfferId:offer.offerId, createdBy:actor, createdAt:new Date().toISOString() };
+      await service.domain.put('ON_CHAIN_MARKET_OFFER', replacementOfferId, replacementRecord, { actorId:actor, eventType:'ON_CHAIN_MARKET_OFFER_REPLACED' });
+      return res.status(201).json({ cancelled, replacement:replacementRecord });
+    } catch (error) { return handle(res, error); }
+  });
+
   router.get('/stable-settlement-assets', async (_req, res) => {
     try {
       await stableSettlementAssets.ensure();

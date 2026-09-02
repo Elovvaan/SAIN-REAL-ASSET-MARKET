@@ -1,4 +1,4 @@
-import { Client, Wallet, isValidClassicAddress, xrpToDrops } from 'xrpl';
+import { Client, Wallet, dropsToXrp, isValidClassicAddress, xrpToDrops } from 'xrpl';
 
 const NETWORK = 'XRPL';
 const NATIVE_ASSET = 'XRP';
@@ -32,6 +32,10 @@ function transactionOutcome(result, transactionId) {
   const state = validated && transactionResult === 'tesSUCCESS' ? 'CONFIRMED' : 'FAILED';
   return { state, transactionId, validated, ledgerIndex: result?.result?.ledger_index ?? null, transactionResult };
 }
+function issuedValue(value) { return Number(value?.value || 0); }
+function xrpValue(value) { return typeof value === 'string' ? Number(dropsToXrp(value)) : 0; }
+function affectedNodes(meta) { return meta?.AffectedNodes || meta?.affected_nodes || []; }
+function nodeBody(wrapper) { return wrapper?.CreatedNode || wrapper?.ModifiedNode || wrapper?.DeletedNode || null; }
 
 export class XrplTransferService {
   constructor(options = {}) {
@@ -308,10 +312,74 @@ export class XrplTransferService {
       side: 'SELL_SRA_ASSET_FOR_XRP',
       sellAmount,
       buyAmountXrp,
+      offerSequence: submitted.result?.result?.tx_json?.Sequence ?? submitted.result?.result?.Sequence ?? null,
+      offerOwnerAddress: distributor.address,
       transactionId: submitted.transactionId,
       confirmation: submitted.confirmation,
       state: submitted.confirmation.state,
     };
+  }
+
+  async offerIdentity(record, offer) {
+    const { client, distributor } = await this.ensureIssuance();
+    const response = await client.request({ command: 'tx', transaction: text(offer.transactionId), binary: false });
+    const result = response?.result || {};
+    const transaction = result.tx_json || result.tx || result;
+    const sequence = Number(offer.offerSequence || transaction.Sequence);
+    if (!Number.isInteger(sequence) || sequence <= 0) throw new Error('XRPL offer sequence could not be resolved from the confirmed transaction.');
+    const created = affectedNodes(result.meta).map((wrapper) => ({ wrapper, node:nodeBody(wrapper) }))
+      .find(({ wrapper, node }) => wrapper.CreatedNode && node?.LedgerEntryType === 'Offer' && Number(node?.NewFields?.Sequence) === sequence);
+    return { client, distributor, sequence, ledgerEntryIndex:offer.offerLedgerIndex || created?.node?.LedgerIndex || null, createdLedgerIndex:offer.confirmation?.ledgerIndex || result.ledger_index || null };
+  }
+
+  async openOffers(client, address) {
+    const records = [];
+    let marker;
+    do {
+      const response = await client.request({ command:'account_offers', account:address, ledger_index:'validated', limit:400, ...(marker ? { marker } : {}) });
+      records.push(...(response?.result?.offers || []));
+      marker = response?.result?.marker;
+    } while (marker && records.length < 4000);
+    return records;
+  }
+
+  async reconcileOffer(record, offer) {
+    const identity = await this.offerIdentity(record, offer);
+    const asset = this.issuedAsset(record);
+    const open = (await this.openOffers(identity.client, identity.distributor.address)).find((candidate) => Number(candidate.seq) === identity.sequence);
+    const originalSell = Number(offer.sellAmount || 0);
+    const originalBuy = Number(offer.buyAmountXrp || 0);
+    const priorState = upper(offer.marketState || offer.state);
+    const previouslyCancelled = !open && priorState === 'CANCELLED';
+    const remainingSell = open ? issuedValue(open.taker_gets) : (previouslyCancelled ? Number(offer.remainingSellAmount || 0) : 0);
+    const remainingBuy = open ? xrpValue(open.taker_pays) : (previouslyCancelled ? Number(offer.remainingBuyAmountXrp || 0) : 0);
+    const filledSell = previouslyCancelled ? Number(offer.filledSellAmount || 0) : Math.max(0, originalSell - remainingSell);
+    const xrpReceived = previouslyCancelled ? Number(offer.xrpReceived || 0) : Math.max(0, originalBuy - remainingBuy);
+    const marketState = open ? (filledSell > 0 ? 'PARTIALLY_FILLED' : 'OPEN') : (priorState === 'CANCELLED' ? 'CANCELLED' : 'FILLED');
+    return {
+      offerSequence:identity.sequence,
+      offerLedgerIndex:identity.ledgerEntryIndex,
+      offerOwnerAddress:identity.distributor.address,
+      issuedCurrency:asset.currency,
+      marketState,
+      state:marketState,
+      originalSellAmount:String(originalSell),
+      originalBuyAmountXrp:String(originalBuy),
+      filledSellAmount:String(filledSell),
+      xrpReceived:String(xrpReceived),
+      remainingSellAmount:String(remainingSell),
+      remainingBuyAmountXrp:String(remainingBuy),
+      lastReconciledLedger:open?.ledger_index || null,
+      reconciledAt:new Date().toISOString(),
+    };
+  }
+
+  async cancelOffer(record, offer) {
+    const current = await this.reconcileOffer(record, offer);
+    if (!['OPEN','PARTIALLY_FILLED'].includes(current.marketState)) throw new Error(`XRPL offer is ${current.marketState} and cannot be cancelled.`);
+    const { distributor } = await this.ensureIssuance();
+    const submitted = await this.submit({ TransactionType:'OfferCancel', Account:distributor.address, OfferSequence:current.offerSequence }, distributor);
+    return { ...current, marketState:'CANCELLED', state:'CANCELLED', cancelTransactionId:submitted.transactionId, cancelConfirmation:submitted.confirmation, cancelledAt:new Date().toISOString() };
   }
 }
 

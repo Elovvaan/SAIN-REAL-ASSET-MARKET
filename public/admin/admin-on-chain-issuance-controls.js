@@ -82,9 +82,10 @@
     return `<div style="border:1px solid #292929;border-radius:10px;padding:10px 12px;background:#090909"><span style="display:block;color:#9a9a9a;font-size:10px;text-transform:uppercase">${esc(label)}</span><strong style="display:block;margin-top:4px">${esc(state)}</strong>${detail ? `<small style="display:block;color:#777;margin-top:4px;line-height:1.4">${esc(detail)}</small>` : ''}</div>`;
   }
 
-  function lifecycleSteps(item, networkReady, asset, issued) {
+  function lifecycleSteps(item, networkReady, asset, issued, offers = []) {
     const workflow = item.workflow || {};
     const linked = Boolean(item.assessment?.linkedCoinPositionIds?.length || item.instrument?.coinPositionId);
+    const marketState = offers[0]?.marketState || (offers.length ? 'SUBMITTED' : (issued ? 'READY' : 'WAITING'));
     return [
       step('1 · Instrument approval', workflow.instrumentApproval || 'COMPLETE', 'Instrument must be approved before representation work begins.'),
       step('2 · Representation approval', item.representationApproved ? 'COMPLETE' : (workflow.representationApproval || 'REQUIRED'), 'Authorizes this instrument for on-chain representation preparation.'),
@@ -93,7 +94,7 @@
       step('5 · Asset identity', asset ? 'COMPLETE' : (linked && networkReady && item.representationApproved ? 'READY' : 'WAITING'), 'Register the asset code + issuer identity on the selected network.'),
       step('6 · Issue supply', issued ? 'COMPLETE' : (asset ? 'READY' : 'WAITING'), 'Issue the approved amount to the platform distribution account.'),
       step('7 · Transfer', issued ? 'READY' : 'WAITING', 'Transfer issued units from the distribution account to a destination address.'),
-      step('8 · Live market', issued ? 'READY' : 'WAITING', 'Offer issued units for the selected network native asset.'),
+      step('8 · Live market', marketState, 'Offer issued units and monitor execution on the selected network market.'),
     ].join('');
   }
 
@@ -119,9 +120,9 @@
     return eligible.map((source) => `<option value="${esc(source.positionId)}">${esc(source.positionId)} · ${esc(source.availableQuantity)} SRA available</option>`).join('');
   }
 
-  function offerHistory(offers, nativeAsset) {
+  function offerHistory(offers, nativeAsset, network) {
     if (!offers.length) return `<p style="color:#777;font-size:12px;margin:10px 0 0">No live-market offers have been submitted for this asset.</p>`;
-    return `<div class="admin-record-list" style="margin-top:10px">${offers.slice(0,10).map((offer)=>`<article class="admin-record-card" style="margin:0"><header><strong>${esc(offer.sellAmount)} ${esc(offer.market?.split('/')[0] || 'SRA')} → ${esc(offer.buyAmountXlm || offer.buyAmountXrp || '—')} ${esc(nativeAsset)}</strong><em>${esc(offer.state || 'UNKNOWN')}</em></header><div class="admin-record-grid"><div><span>Transaction</span><strong>${esc(offer.transactionId || '—')}</strong></div><div><span>Ledger</span><strong>${esc(offer.confirmation?.ledger ?? offer.confirmation?.ledgerIndex ?? '—')}</strong></div></div></article>`).join('')}</div>`;
+    return `<div class="admin-record-list" style="margin-top:10px">${offers.slice(0,10).map((offer)=>{const state=offer.marketState || (offer.state === 'CONFIRMED' ? 'SUBMITTED' : offer.state || 'UNKNOWN');const manageable=network === 'XRPL' && ['SUBMITTED','OPEN','PARTIALLY_FILLED'].includes(state);return `<article class="admin-record-card" data-offer-card="${esc(offer.offerId)}" style="margin:0"><header><strong>${esc(offer.sellAmount)} ${esc(offer.market?.split('/')[0] || 'SRA')} → ${esc(offer.buyAmountXlm || offer.buyAmountXrp || '—')} ${esc(nativeAsset)}</strong><em>${esc(state)}</em></header><div class="admin-record-grid"><div><span>Filled asset</span><strong>${esc(offer.filledSellAmount ?? 'Refresh status')}</strong></div><div><span>Remaining asset</span><strong>${esc(offer.remainingSellAmount ?? 'Refresh status')}</strong></div><div><span>${esc(nativeAsset)} received</span><strong>${esc(offer.xrpReceived ?? 'Refresh status')}</strong></div><div><span>Remaining ${esc(nativeAsset)}</span><strong>${esc(offer.remainingBuyAmountXrp ?? 'Refresh status')}</strong></div><div><span>Transaction</span><strong>${esc(offer.transactionId || '—')}</strong></div><div><span>Ledger</span><strong>${esc(offer.confirmation?.ledger ?? offer.confirmation?.ledgerIndex ?? '—')}</strong></div><div><span>Offer sequence</span><strong>${esc(offer.offerSequence || 'Resolved on refresh')}</strong></div><div><span>Last reconciled</span><strong>${esc(offer.reconciledAt || 'Not yet')}</strong></div></div>${network === 'XRPL' ? `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px"><button data-reconcile-offer="${esc(offer.offerId)}">Refresh Status</button><button data-cancel-offer="${esc(offer.offerId)}" ${manageable ? '' : 'disabled'}>Cancel Offer</button><button data-replace-offer="${esc(offer.offerId)}" ${manageable ? '' : 'disabled'}>Replace Using Entered Amounts</button><span data-offer-action-result style="color:#d6a92f;font-size:12px"></span></div>` : ''}</article>`;}).join('')}</div>`;
   }
 
   function onChainCard(item, assets, status, sources, offersByAsset) {
@@ -132,7 +133,6 @@
     const options = networkOptions(status);
     const networkReady = Boolean(options);
     const issued = Number(asset?.issuedSupply || 0) > 0;
-    const lifecycle = lifecycleSteps(item, networkReady, asset, issued);
     const storedAssetCode = String(instrument.assetCode || instrument.symbol || instrument.ticker || '').trim().toUpperCase();
     const existingAssetCode = storedAssetCode || generatedAssetCode(id);
     const eligibleSources = sources.filter((source) => source.instrumentId === id);
@@ -140,6 +140,8 @@
     const linked = Boolean(item.assessment?.linkedCoinPositionIds?.length || instrument.coinPositionId);
     const nativeAsset = asset?.network === 'XRPL' ? 'XRP' : 'XLM';
     const offers = asset ? (offersByAsset.get(asset.assetId) || []) : [];
+    const lifecycle = lifecycleSteps(item, networkReady, asset, issued, offers);
+    const marketState = offers[0]?.marketState || (offers.length ? 'OFFER SUBMITTED' : null);
 
     if (!item.representationApproved) {
       return `<article class="admin-record-card"><header><strong>${esc(id)}</strong><em>STEP 2 · REPRESENTATION APPROVAL</em></header><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:12px 0">${lifecycle}</div><div class="admin-record-grid"><div><span>Approved amount / supply</span><strong>${esc(authorized ?? '—')}</strong></div><div><span>Next step</span><strong>Complete Representation Approval</strong></div></div><p style="color:#9a9a9a;line-height:1.5">This instrument cannot enter network preparation until its representation approval record is complete.</p></article>`;
@@ -157,10 +159,10 @@
       return `<article class="admin-record-card" data-create-card="${esc(id)}"><header><strong>${esc(id)}</strong><em>${current}</em></header><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:12px 0">${lifecycle}</div><p style="color:#9a9a9a;line-height:1.5">${esc(explanation)} On Stellar, the asset code is 1–12 letters or numbers and is paired with the issuer identity; the SRA instrument ID remains the internal instrument reference.</p><div class="admin-record-grid"><div><span>Approved amount / supply</span><strong>${esc(authorized ?? '—')}</strong></div><label><span>Network</span><select data-create-network ${networkReady ? '' : 'disabled'}>${options || '<option value="">No create-capable network ready</option>'}</select></label><label><span>Asset code</span><input data-create-asset-code type="text" maxlength="12" autocomplete="off" placeholder="Generated by SRA" value="${esc(existingAssetCode)}" ${networkReady ? '' : 'disabled'}><small style="display:block;color:#777;margin-top:4px">${esc(assetCodeSource)}</small></label></div><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px"><button data-create-on-chain="${esc(id)}" ${networkReady ? '' : 'disabled'}>Create Asset Identity</button><span data-create-result style="color:#d6a92f;font-size:12px">${networkReady ? '' : 'Waiting for create-capable network readiness.'}</span></div></article>`;
     }
 
-    return `<article class="admin-record-card" data-asset-card="${esc(asset.assetId)}"><header><strong>${esc(id)}</strong><em>${issued ? 'STEP 7 · TRANSFER' : 'STEP 6 · ISSUE SUPPLY'}</em></header><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:12px 0">${lifecycle}</div><div class="admin-record-grid"><div><span>Network</span><strong>${esc(asset.network)}</strong></div><div><span>Asset address</span><strong>${esc(asset.assetAddress)}</strong></div><div><span>Network decimals</span><strong>${esc(asset.decimals)}</strong></div><div><span>Issued supply</span><strong>${esc(asset.issuedSupply ?? '0')}</strong></div><div><span>Asset identity transaction</span><strong>${esc(asset.createdTransactionId || 'Not applicable / not broadcast')}</strong></div><div><span>Last issue transaction</span><strong>${esc(asset.lastIssueTransactionId || '—')}</strong></div></div>
+    return `<article class="admin-record-card" data-asset-card="${esc(asset.assetId)}"><header><strong>${esc(id)}</strong><em>${esc(marketState || (issued ? 'STEP 7 · TRANSFER / STEP 8 · MARKET' : 'STEP 6 · ISSUE SUPPLY'))}</em></header><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:12px 0">${lifecycle}</div><div class="admin-record-grid"><div><span>Network</span><strong>${esc(asset.network)}</strong></div><div><span>Asset address</span><strong>${esc(asset.assetAddress)}</strong></div><div><span>Network decimals</span><strong>${esc(asset.decimals)}</strong></div><div><span>Issued supply</span><strong>${esc(asset.issuedSupply ?? '0')}</strong></div><div><span>Asset identity transaction</span><strong>${esc(asset.createdTransactionId || 'Not applicable / not broadcast')}</strong></div><div><span>Last issue transaction</span><strong>${esc(asset.lastIssueTransactionId || '—')}</strong></div></div>
       <section style="margin-top:16px;border-top:1px solid #292929;padding-top:16px"><strong>Step 6 · Issue Supply</strong><p style="color:#9a9a9a;font-size:12px;line-height:1.45">Issue units from the linked SRA Coin Position to the platform distribution account. The network adapter handles the required trustline and signed issuance transaction.</p><div class="admin-record-grid" style="margin-top:10px"><label><span>Source Coin Position</span><select data-issue-source>${sourceOptions(sources,id) || '<option value="">No linked SRA Coin Position available</option>'}</select></label><label><span>Amount</span><input data-issue-amount type="text" inputmode="decimal" autocomplete="off" placeholder="Amount"></label></div><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px"><button data-issue-asset="${esc(asset.assetId)}" data-issue-network="${esc(asset.network)}" ${eligibleSources.length ? '' : 'disabled'}>Issue Supply</button><span data-issue-result style="color:#d6a92f;font-size:12px">${eligibleSources.length ? '' : 'No linked SRA Coin Position is available.'}</span></div></section>
       <section style="margin-top:16px;border-top:1px solid #292929;padding-top:16px"><strong>Step 7 · Transfer On Chain</strong><p style="color:#9a9a9a;font-size:12px;line-height:1.45">Send issued units from the platform distribution account to a destination address.</p><div class="admin-record-grid" style="margin-top:10px"><label><span>Amount</span><input data-transfer-amount type="text" inputmode="decimal" autocomplete="off" placeholder="Amount"></label><label><span>Destination address</span><input data-transfer-destination type="text" autocomplete="off" placeholder="Destination wallet"></label></div><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px"><button data-transfer-asset="${esc(asset.assetId)}" data-transfer-symbol="${esc(asset.asset)}" data-transfer-network="${esc(asset.network)}" ${issued ? '' : 'disabled'}>Send On Chain</button><span data-transfer-result style="color:#d6a92f;font-size:12px">${issued ? '' : 'Issue supply first.'}</span></div></section>
-      <section style="margin-top:16px;border-top:1px solid #292929;padding-top:16px"><strong>Step 8 · Offer on ${esc(asset.network)} Market</strong><p style="color:#9a9a9a;font-size:12px;line-height:1.45">Submit a live Mainnet offer selling this issued asset for native ${esc(nativeAsset)}. The offer fills only when market liquidity accepts the entered price.</p><div class="admin-record-grid" style="margin-top:10px"><label><span>Asset amount to sell</span><input data-offer-sell type="text" inputmode="decimal" autocomplete="off" placeholder="Amount"></label><label><span>${esc(nativeAsset)} requested</span><input data-offer-buy type="text" inputmode="decimal" autocomplete="off" placeholder="${esc(nativeAsset)} amount"></label><div><span>Implied ${esc(nativeAsset)} per unit</span><strong data-offer-rate>—</strong></div></div><label style="display:flex;gap:8px;align-items:flex-start;color:#cfcfcf;font-size:12px;line-height:1.4;margin-top:10px"><input type="checkbox" data-confirm-market-offer style="margin-top:2px"><span>I confirm this submits a live ${esc(asset.network)} Mainnet offer at the entered amounts.</span></label><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px"><button data-market-offer="${esc(asset.assetId)}" data-market-network="${esc(asset.network)}" data-market-native="${esc(nativeAsset)}" ${issued ? '' : 'disabled'}>Submit ${esc(asset.asset)}/${esc(nativeAsset)} Offer</button><span data-market-result style="color:#d6a92f;font-size:12px">${issued ? '' : 'Issue supply first.'}</span></div>${offerHistory(offers,nativeAsset)}</section>
+      <section style="margin-top:16px;border-top:1px solid #292929;padding-top:16px"><strong>Step 8 · Offer on ${esc(asset.network)} Market</strong><p style="color:#9a9a9a;font-size:12px;line-height:1.45">Submit a live Mainnet offer selling this issued asset for native ${esc(nativeAsset)}. The offer fills only when market liquidity accepts the entered price.</p><div class="admin-record-grid" style="margin-top:10px"><label><span>Asset amount to sell</span><input data-offer-sell type="text" inputmode="decimal" autocomplete="off" placeholder="Amount"></label><label><span>${esc(nativeAsset)} requested</span><input data-offer-buy type="text" inputmode="decimal" autocomplete="off" placeholder="${esc(nativeAsset)} amount"></label><div><span>Implied ${esc(nativeAsset)} per unit</span><strong data-offer-rate>—</strong></div></div><label style="display:flex;gap:8px;align-items:flex-start;color:#cfcfcf;font-size:12px;line-height:1.4;margin-top:10px"><input type="checkbox" data-confirm-market-offer style="margin-top:2px"><span>I confirm this submits a live ${esc(asset.network)} Mainnet offer at the entered amounts.</span></label><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px"><button data-market-offer="${esc(asset.assetId)}" data-market-network="${esc(asset.network)}" data-market-native="${esc(nativeAsset)}" ${issued ? '' : 'disabled'}>Submit ${esc(asset.asset)}/${esc(nativeAsset)} Offer</button><span data-market-result style="color:#d6a92f;font-size:12px">${issued ? '' : 'Issue supply first.'}</span></div>${offerHistory(offers,nativeAsset,asset.network)}</section>
     </article>`;
   }
 
@@ -277,6 +279,32 @@
         catch(error){if(result)result.textContent=error.message;button.disabled=false;}
       });
     });
+
+    card.querySelectorAll('[data-reconcile-offer]').forEach((button) => button.addEventListener('click', async () => {
+      const assetRow=button.closest('[data-asset-card]');const offerRow=button.closest('[data-offer-card]');const result=offerRow?.querySelector('[data-offer-action-result]');
+      button.disabled=true;if(result)result.textContent='Reading validated XRPL offer state…';
+      try{const response=await request(`/api/on-chain/assets/${encodeURIComponent(assetRow.dataset.assetCard)}/markets/offers/${encodeURIComponent(button.dataset.reconcileOffer)}/reconcile`,{method:'POST'});if(result)result.textContent=response.marketState;await render(workspace);}
+      catch(error){if(result)result.textContent=error.message;button.disabled=false;}
+    }));
+
+    card.querySelectorAll('[data-cancel-offer]').forEach((button) => button.addEventListener('click', async () => {
+      const assetRow=button.closest('[data-asset-card]');const offerRow=button.closest('[data-offer-card]');const result=offerRow?.querySelector('[data-offer-action-result]');
+      if(!confirm('Cancel the remaining open amount of this live XRPL Mainnet offer?'))return;
+      button.disabled=true;if(result)result.textContent='Reconciling and cancelling offer…';
+      try{const response=await request(`/api/on-chain/assets/${encodeURIComponent(assetRow.dataset.assetCard)}/markets/offers/${encodeURIComponent(button.dataset.cancelOffer)}/cancel`,{method:'POST'});if(result)result.textContent=`CANCELLED · ${response.cancelTransactionId}`;await render(workspace);}
+      catch(error){if(result)result.textContent=error.message;button.disabled=false;}
+    }));
+
+    card.querySelectorAll('[data-replace-offer]').forEach((button) => button.addEventListener('click', async () => {
+      const assetRow=button.closest('[data-asset-card]');const offerRow=button.closest('[data-offer-card]');const result=offerRow?.querySelector('[data-offer-action-result]');
+      const sellAmount=assetRow?.querySelector('[data-offer-sell]')?.value?.trim();const buyAmountNative=assetRow?.querySelector('[data-offer-buy]')?.value?.trim();
+      if(!sellAmount||!buyAmountNative||!(Number(sellAmount)>0)||!(Number(buyAmountNative)>0)){if(result)result.textContent='Enter the replacement sell and XRP amounts above.';return;}
+      if(!assetRow?.querySelector('[data-confirm-market-offer]')?.checked){if(result)result.textContent='Confirm the replacement Mainnet offer first.';return;}
+      if(!confirm(`Cancel this offer and replace it with ${sellAmount} units for ${buyAmountNative} XRP?`))return;
+      button.disabled=true;if(result)result.textContent='Cancelling original and submitting replacement…';
+      try{const response=await request(`/api/on-chain/assets/${encodeURIComponent(assetRow.dataset.assetCard)}/markets/offers/${encodeURIComponent(button.dataset.replaceOffer)}/replace`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sellAmount,buyAmountNative})});if(result)result.textContent=`REPLACED · ${response.replacement.transactionId}`;await render(workspace);}
+      catch(error){if(result)result.textContent=error.message;button.disabled=false;}
+    }));
   }
 
   async function renderApproval(workspace, card) {
