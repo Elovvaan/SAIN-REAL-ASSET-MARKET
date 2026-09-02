@@ -36,7 +36,7 @@
 
   async function settlementMarkup() {
     const [workspaceData, dexExports] = await Promise.all([
-      request('/api/admin/workspaces?limit=100'),
+      request('/api/admin/workspaces?workspace=settlement&limit=100'),
       request('/api/on-chain/dex/exports'),
     ]);
     const packages = list(workspaceData.records?.exportPackages).filter((item) => item.state === 'READY_FOR_EXPORT');
