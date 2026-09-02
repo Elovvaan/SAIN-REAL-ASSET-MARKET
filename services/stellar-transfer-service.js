@@ -66,7 +66,7 @@ export class StellarTransferService {
       distributorConfigured,
       configured: issuerConfigured && distributorConfigured && Boolean(this.horizonUrl) && Boolean(this.passphrase),
       ready: issuerConfigured && distributorConfigured && Boolean(this.horizonUrl) && Boolean(this.passphrase),
-      capabilities: ['CREATE_ASSET', 'ISSUE_ASSET', 'TRANSFER_NATIVE', 'TRANSFER_ASSET'],
+      capabilities: ['CREATE_ASSET', 'ISSUE_ASSET', 'TRANSFER_NATIVE', 'TRANSFER_ASSET', 'CREATE_DEX_OFFER'],
     };
   }
 
@@ -103,6 +103,7 @@ export class StellarTransferService {
         ...configuration,
         reachable: ready,
         ready,
+        issuanceReady: ready,
         issuerAddress,
         distributorAddress,
         issuerReachable,
@@ -200,6 +201,38 @@ export class StellarTransferService {
       destinationAddress: distributor.publicKey(),
       amount: issueAmount,
       trustlineTransactionId,
+      transactionId: result.hash,
+      confirmation: { state: 'CONFIRMED', transactionId: result.hash, ledger: result.ledger },
+      state: 'CONFIRMED',
+    };
+  }
+
+  async createOffer(record, input = {}) {
+    const { server, distributor } = this.ensure();
+    const selling = this.stellarAsset(record);
+    const sellAmount = amount(input.sellAmount);
+    const buyAmountXlm = amount(input.buyAmountXlm ?? input.buyAmountNative);
+    const price = Number(buyAmountXlm) / Number(sellAmount);
+    if (!Number.isFinite(price) || price <= 0) throw new Error('The SRA/XLM offer price must be greater than zero.');
+    const account = await server.loadAccount(distributor.publicKey());
+    const tx = new StellarSdk.TransactionBuilder(account, {
+      fee: StellarSdk.BASE_FEE,
+      networkPassphrase: this.passphrase,
+    }).addOperation(StellarSdk.Operation.manageSellOffer({
+      selling,
+      buying: StellarSdk.Asset.native(),
+      amount: sellAmount,
+      price: price.toFixed(7),
+    })).setTimeout(100).build();
+    tx.sign(distributor);
+    const result = await server.submitTransaction(tx);
+    return {
+      network: NETWORK,
+      market: `${record.asset || record.symbol}/XLM`,
+      side: 'SELL_SRA_ASSET_FOR_XLM',
+      sellAmount,
+      buyAmountXlm,
+      priceXlmPerUnit: price.toFixed(7),
       transactionId: result.hash,
       confirmation: { state: 'CONFIRMED', transactionId: result.hash, ledger: result.ledger },
       state: 'CONFIRMED',

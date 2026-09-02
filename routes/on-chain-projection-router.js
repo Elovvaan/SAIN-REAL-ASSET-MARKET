@@ -206,6 +206,13 @@ export function createOnChainProjectionRouter(service) {
           error.code = 'INSTRUMENT_COIN_POSITION_LINKAGE_REQUIRED';
           throw error;
         }
+        const existingRepresentation = service.listAssets({ instrumentId })[0] || null;
+        const selectedNetwork = upper(instrument.selectedOnChainNetwork || existingRepresentation?.network);
+        if (selectedNetwork && selectedNetwork !== network) {
+          const error = new Error(`This instrument is already bound to ${selectedNetwork}. Create and use its market workflow on that network.`);
+          error.code = 'INSTRUMENT_ON_CHAIN_NETWORK_ALREADY_SELECTED';
+          throw error;
+        }
       }
 
       const asset = resolveOnChainAssetCode({ instrumentId, instrument, requestedAsset });
@@ -247,6 +254,7 @@ export function createOnChainProjectionRouter(service) {
 
       const created = await adapter.createAsset({ asset, symbol });
       const record = await service.recordCreated({ assetId: id, network, asset: created.asset || asset, instrumentId: instrumentId || null, symbol: created.symbol || symbol, assetAddress: created.assetAddress, sourceAccount: created.distributionAddress || null, decimals: created.decimals, transactionId: created.transactionId }, actor);
+      if (instrument) await service.domain.put('SRA_INSTRUMENT', instrument.instrumentId, { ...instrument, selectedOnChainNetwork: network, onChainAssetId: record.assetId, onChainNetworkSelectedAt: new Date().toISOString(), onChainNetworkSelectedBy: actor }, { actorId: actor, eventType: 'INSTRUMENT_ON_CHAIN_NETWORK_SELECTED' });
       return res.status(201).json({ created: true, asset: record, networkResult: created, generatedAssetCode: requestedAsset ? null : generateOnChainAssetCode(instrumentId) });
     } catch (error) { return handle(res, error); }
   });
@@ -326,7 +334,16 @@ export function createOnChainProjectionRouter(service) {
         error.code = 'ON_CHAIN_NETWORK_NOT_READY';
         throw error;
       }
+      const sellAmount = Number(req.body?.sellAmount);
+      if (!Number.isFinite(sellAmount) || sellAmount <= 0) throw new Error('sellAmount must be greater than zero.');
+      if (sellAmount > Number(asset.issuedSupply || 0)) throw new Error(`Offer exceeds the recorded issued supply of ${asset.issuedSupply || 0}.`);
       const offer = await adapter.createOffer(asset, req.body || {});
+      if (offer?.state !== 'CONFIRMED' || offer?.confirmation?.state !== 'CONFIRMED') {
+        const error = new Error(`${asset.network} market offer was not confirmed.`);
+        error.code = 'ON_CHAIN_MARKET_OFFER_NOT_CONFIRMED';
+        error.transactionId = offer?.transactionId || null;
+        throw error;
+      }
       const offerId = `OCMO-${offer.transactionId}`;
       const record = { id: offerId, offerId, assetId: asset.assetId, instrumentId: asset.instrumentId || null, ...offer, createdBy: actor, createdAt: new Date().toISOString() };
       await service.domain.put('ON_CHAIN_MARKET_OFFER', offerId, record, { actorId: actor, eventType: `ON_CHAIN_MARKET_OFFER_${offer.state}` });

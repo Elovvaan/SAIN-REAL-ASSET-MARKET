@@ -10,14 +10,14 @@ export class OnChainProjectionService {
   }
 
   async initialize() {
-    await this.domain.hydrate?.([TYPE]);
+    await this.domain.hydrate?.([TYPE, 'ON_CHAIN_MARKET_OFFER']);
     return this.status();
   }
 
   status() {
     return {
       service: 'SRA_ON_CHAIN_ASSETS',
-      structure: ['CREATE', 'ISSUE', 'TRANSFER'],
+      structure: ['CREATE', 'ISSUE', 'TRANSFER', 'OFFER'],
       assets: this.domain.list(TYPE).length,
     };
   }

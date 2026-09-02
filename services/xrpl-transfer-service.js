@@ -295,7 +295,7 @@ export class XrplTransferService {
     const { distributor } = await this.ensureIssuance();
     const asset = this.issuedAsset(record);
     const sellAmount = positiveAmount(input.sellAmount, 6, 'sellAmount');
-    const buyAmountXrp = positiveAmount(input.buyAmountXrp, 6, 'buyAmountXrp');
+    const buyAmountXrp = positiveAmount(input.buyAmountXrp ?? input.buyAmountNative, 6, 'buyAmountXrp');
     const submitted = await this.submit({
       TransactionType: 'OfferCreate',
       Account: distributor.address,
