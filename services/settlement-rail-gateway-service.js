@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { RECORD_TYPES } from './persistent-domain-service.js';
 
 const INSTRUCTION_STATES = new Set(['DRAFT','READY','DISPATCHED','ACCEPTED','EXECUTED','REJECTED','RETURNED','EXCEPTION','RECONCILED','CANCELLED']);
-const SUPPORTED_RAILS = new Set(['ACH','FEDWIRE','WIRE','INTERNAL_TRANSFER','OTHER_APPROVED_RAIL']);
+const SUPPORTED_RAILS = new Set(['ACH','FEDWIRE','WIRE','STELLAR_USDC','INTERNAL_TRANSFER','OTHER_APPROVED_RAIL']);
 const EXECUTION_MODES = new Set(['BANK_PARTNER','SERVICE_PROVIDER','DIRECT_PARTICIPANT','INTERNAL']);
 const EXPORT_PACKAGE_TYPE = 'EXPORT_PACKAGE';
 
@@ -11,8 +11,8 @@ function id(prefix){return `${prefix}-${crypto.randomUUID().split('-')[0].toUppe
 function requiredString(value,field){if(typeof value!=='string'||!value.trim())throw new Error(`${field} is required.`);return value.trim();}
 function positiveMoney(value,field){const number=Number(value);if(!Number.isFinite(number)||number<=0)throw new Error(`${field} must be greater than zero.`);return Number(number.toFixed(2));}
 function hash(value){return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');}
-function defaultStandard(rail){if(rail==='ACH')return 'NACHA';if(rail==='FEDWIRE')return 'ISO_20022';return 'INSTITUTION_DEFINED';}
-function defaultExecutionMode(rail){if(rail==='INTERNAL_TRANSFER')return 'INTERNAL';return 'BANK_PARTNER';}
+function defaultStandard(rail){if(rail==='ACH')return 'NACHA';if(rail==='FEDWIRE')return 'ISO_20022';if(rail==='STELLAR_USDC')return 'STELLAR_PAYMENT';return 'INSTITUTION_DEFINED';}
+function defaultExecutionMode(rail){if(rail==='INTERNAL_TRANSFER')return 'INTERNAL';if(rail==='STELLAR_USDC')return 'DIRECT_PARTICIPANT';return 'BANK_PARTNER';}
 function normalizedRoutingNumber(value){
   const routing=String(value||'').replace(/\D/g,'');
   if(!/^\d{9}$/.test(routing))throw new Error('ABA routing number must contain exactly 9 digits.');
@@ -79,7 +79,7 @@ export class SettlementRailGatewayService{
   supportedRails(){
     return [...SUPPORTED_RAILS].map((rail)=>({
       rail,
-      displayName:rail==='ACH'?'ACH Network':rail==='FEDWIRE'?'Fedwire Funds Service':rail==='WIRE'?'Bank Wire':rail,
+      displayName:rail==='ACH'?'ACH Network':rail==='FEDWIRE'?'Fedwire Funds Service':rail==='WIRE'?'Bank Wire':rail==='STELLAR_USDC'?'Stellar USDC':rail,
       messageStandard:defaultStandard(rail),
       executionMode:defaultExecutionMode(rail),
     }));
@@ -198,7 +198,10 @@ export class SettlementRailGatewayService{
     }
     if(source.sourceType==='FINANCING_DISBURSEMENT'){
       const existing=this.listInstructions({exportPackageId:source.exportPackage.exportPackageId}).find((item)=>!['CANCELLED','REJECTED','RETURNED'].includes(item.state));
-      if(existing)return existing;
+      if(existing){
+        if(existing.rail===requestedRail&&existing.receivingAccountReference===String(input.receivingAccountReference||'').trim())return existing;
+        throw new Error(`Financing export package already uses ${existing.rail} instruction ${existing.instructionId}. Cancel it before selecting another settlement rail.`);
+      }
     }
 
     const receivingAccountReference=requiredString(input.receivingAccountReference,'receivingAccountReference');
@@ -243,12 +246,12 @@ export class SettlementRailGatewayService{
       institutionId:adapter?.institutionId||null,
       adapterId:adapter?.adapterId||null,
       rail:requestedRail,
-      railDisplayName:requestedRail==='ACH'?'ACH Network':requestedRail==='FEDWIRE'?'Fedwire Funds Service':requestedRail,
-      executionMode:adapter?.executionMode||null,
+      railDisplayName:requestedRail==='ACH'?'ACH Network':requestedRail==='FEDWIRE'?'Fedwire Funds Service':requestedRail==='STELLAR_USDC'?'Stellar USDC':requestedRail,
+      executionMode:adapter?.executionMode||(requestedRail==='STELLAR_USDC'?defaultExecutionMode(requestedRail):null),
       amount:instructionAmount,
-      currency:input.currency||source.currency||adapter?.currency||'USD',
+      currency:requestedRail==='STELLAR_USDC'?'USDC':input.currency||source.currency||adapter?.currency||'USD',
       senderAccountReference:input.senderAccountReference||adapter?.senderAccountReference||null,
-      receivingInstitutionReference:requiredString(input.receivingInstitutionReference,'receivingInstitutionReference'),
+      receivingInstitutionReference:requestedRail==='STELLAR_USDC'?String(input.receivingInstitutionReference||'STELLAR_NETWORK').trim():requiredString(input.receivingInstitutionReference,'receivingInstitutionReference'),
       receivingAccountReference,
       routingNumber,
       accountType:input.accountType||null,
@@ -259,6 +262,10 @@ export class SettlementRailGatewayService{
       supportingDocumentHash:documentaryEvidence?.documentHash||null,
       messageStandard:adapter?.messageStandard||defaultStandard(requestedRail),
       standardDetails,
+      network:requestedRail==='STELLAR_USDC'?'STELLAR':null,
+      networkAssetCode:requestedRail==='STELLAR_USDC'?'USDC':null,
+      networkAssetIssuer:requestedRail==='STELLAR_USDC'?'GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN':null,
+      destinationMemo:requestedRail==='STELLAR_USDC'?(String(input.destinationMemo||'').trim()||null):null,
     };
     const record={...message,messageHash:hash(message),state:'READY',createdBy:actorId,createdAt:timestamp,updatedAt:timestamp,history:[{state:'READY',at:timestamp,actorId}]};
     const changes=[{type:RECORD_TYPES.SETTLEMENT_RAIL_INSTRUCTION,id:instructionId,payload:record,actorId,eventType:'SETTLEMENT_RAIL_INSTRUCTION_CREATED'}];

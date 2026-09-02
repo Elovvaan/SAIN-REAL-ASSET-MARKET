@@ -54,6 +54,9 @@ import { HomeFinancingService } from './services/home-financing-service.js';
 import { SraSettlementService } from './services/sra-settlement-service.js';
 import { InstitutionParticipationService } from './services/institution-participation-service.js';
 import { SettlementRailGatewayService } from './services/settlement-rail-gateway-service.js';
+import { StellarUsdcSettlementService } from './services/stellar-usdc-settlement-service.js';
+import { StellarSep24ClientService } from './services/stellar-sep24-client-service.js';
+import { FinancingClosingService } from './services/financing-closing-service.js';
 import { TreasuryBankConnectorService } from './services/treasury-bank-connector-service.js';
 import { PlatformEconomicsService } from './services/platform-economics-service.js';
 import { PlatformLedgerService } from './services/platform-ledger-service.js';
@@ -162,6 +165,10 @@ export async function createApp(options = {}) {
   const platformEconomicsService = new PlatformEconomicsService(persistentDomain, platformLedgerService);
   const institutionalBillingService = new InstitutionalBillingService(persistentDomain, platformEconomicsService);
   const assetServicingService = new AssetServicingService(persistentDomain);
+  const financingClosingSettlementService = new FinancingClosingService(persistentDomain, assetServicingService); await financingClosingSettlementService.initialize();
+  const stellarUsdcAdapter = new StellarTransferService({ domain:persistentDomain });
+  const stellarSep24ClientService = new StellarSep24ClientService({ stellar:stellarUsdcAdapter });
+  const stellarUsdcSettlementService = new StellarUsdcSettlementService({ domain:persistentDomain, gateway:settlementRailGatewayService, closingService:financingClosingSettlementService, stellar:stellarUsdcAdapter, sep24:stellarSep24ClientService });
   const platformTreasuryService = new PlatformTreasuryService(persistentDomain, platformLedgerService);
   const financialStatementsService = new FinancialStatementsService(persistentDomain, platformLedgerService);
   const sraAgentService = new SraAgentService({
@@ -182,7 +189,7 @@ export async function createApp(options = {}) {
   app.use('/api/access', createAccessRouter(marketplace, accessService));
   app.use('/api/participation', createParticipationRouter(marketplace, accessService, persistentDomain));
   app.use('/api/institutions', createInstitutionParticipationRouter(institutionParticipationService, accessService));
-  app.use('/api/settlement-rails', createSettlementRailGatewayRouter(settlementRailGatewayService));
+  app.use('/api/settlement-rails', createSettlementRailGatewayRouter(settlementRailGatewayService, undefined, stellarUsdcSettlementService));
   app.use('/api/treasury', createTreasuryBankConnectorRouter(treasuryBankConnectorService));
   app.use('/api/economics', createPlatformEconomicsRouter(platformEconomicsService));
   app.use('/api/ledger', createPlatformLedgerRouter(platformLedgerService));

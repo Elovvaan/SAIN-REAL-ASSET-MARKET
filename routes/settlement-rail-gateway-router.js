@@ -2,9 +2,10 @@ import express from 'express';
 import { BankAchOriginationService } from '../services/bank-ach-origination-service.js';
 
 function actorId(req){return req.headers['x-sra-actor-id']||req.body?.actorId||null;}
+function authenticatedActor(req){return req.sraOperationsAuth?.actorId||req.sraIdentity?.actorId||null;}
 function handleError(res,error){const message=error?.message||'Unexpected settlement rail error.';const status=/not found/i.test(message)?404:error?.httpStatus||400;return res.status(status).json({error:message,code:error?.code||null});}
 
-export function createSettlementRailGatewayRouter(service,bankAchOriginationService=new BankAchOriginationService()){
+export function createSettlementRailGatewayRouter(service,bankAchOriginationService=new BankAchOriginationService(),stellarUsdcSettlementService=null){
   const router=express.Router();
 
   async function submitAchInstruction(instructionId,actor){
@@ -32,6 +33,10 @@ export function createSettlementRailGatewayRouter(service,bankAchOriginationServ
 
   router.get('/rails',(_req,res)=>res.json({rails:service.supportedRails()}));
   router.get('/origination/status',(_req,res)=>res.json(bankAchOriginationService.status()));
+  router.get('/stellar-usdc/status',async(_req,res)=>{try{return res.json(stellarUsdcSettlementService?await stellarUsdcSettlementService.status():{rail:'STELLAR_USDC',ready:false,error:'Stellar USDC settlement service is unavailable.'});}catch(error){return handleError(res,error);}});
+  router.get('/stellar-usdc/sep24/status',(_req,res)=>{try{return res.json(stellarUsdcSettlementService?.sep24?.status()||{configured:false,standard:'SEP-24'});}catch(error){return handleError(res,error);}});
+  router.post('/stellar-usdc/sep24/interactive',async(req,res)=>{try{if(!authenticatedActor(req))return res.status(401).json({error:'Authenticated SRA operations identity is required.'});if(!stellarUsdcSettlementService?.sep24)throw new Error('SEP-24 client is unavailable.');return res.json(await stellarUsdcSettlementService.sep24.startInteractive(req.body||{}));}catch(error){return handleError(res,error);}});
+  router.get('/stellar-usdc/recipients/:address',async(req,res)=>{try{if(!stellarUsdcSettlementService)throw new Error('Stellar USDC settlement service is unavailable.');return res.json(await stellarUsdcSettlementService.recipientStatus(req.params.address));}catch(error){return handleError(res,error);}});
   router.get('/adapters',(req,res)=>res.json({adapters:service.listAdapters({institutionId:req.query.institutionId||null,rail:req.query.rail||null,state:req.query.state||null})}));
   router.post('/adapters',async(req,res)=>{try{return res.status(201).json(await service.registerAdapter(req.body||{},actorId(req)));}catch(error){return handleError(res,error);}});
   router.get('/adapters/:adapterId',(req,res)=>{const record=service.getAdapter(req.params.adapterId);return record?res.json(record):res.status(404).json({error:'Settlement Rail Adapter not found.'});});
@@ -40,6 +45,7 @@ export function createSettlementRailGatewayRouter(service,bankAchOriginationServ
   router.post('/instructions',async(req,res)=>{try{return res.status(201).json(await service.createInstruction(req.body||{},actorId(req)));}catch(error){return handleError(res,error);}});
   router.get('/instructions/:instructionId',(req,res)=>{const record=service.getInstruction(req.params.instructionId);return record?res.json(record):res.status(404).json({error:'Settlement Rail Instruction not found.'});});
   router.post('/instructions/:instructionId/submit',async(req,res)=>{try{return res.json(await submitAchInstruction(req.params.instructionId,actorId(req)));}catch(error){return handleError(res,error);}});
+  router.post('/instructions/:instructionId/execute-stellar-usdc',async(req,res)=>{try{const actor=authenticatedActor(req);if(!actor)return res.status(401).json({error:'Authenticated SRA operations identity is required.'});if(!stellarUsdcSettlementService)throw new Error('Stellar USDC settlement service is unavailable.');return res.json(await stellarUsdcSettlementService.execute(req.params.instructionId,req.body||{},actor));}catch(error){return handleError(res,error);}});
   router.post('/instructions/:instructionId/transition',async(req,res)=>{
     try{
       const current=service.getInstruction(req.params.instructionId);

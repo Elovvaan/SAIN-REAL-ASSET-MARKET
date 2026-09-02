@@ -3,6 +3,15 @@ import * as StellarSdk from '@stellar/stellar-sdk';
 const NETWORK = 'STELLAR';
 const NATIVE_ASSET = 'XLM';
 const ASSET_TYPE = 'ON_CHAIN_ASSET';
+export const STELLAR_USDC = Object.freeze({
+  network: NETWORK,
+  asset: 'USDC',
+  symbol: 'USDC',
+  issuerAddress: 'GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN',
+  assetAddress: 'USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN',
+  decimals: 7,
+  externalIssuer: true,
+});
 
 function text(value) { return String(value ?? '').trim(); }
 function upper(value) { return text(value).toUpperCase(); }
@@ -62,6 +71,7 @@ export class StellarTransferService {
       network: NETWORK,
       horizonUrl: this.horizonUrl,
       networkConfigured: Boolean(this.passphrase),
+      publicNetwork: this.passphrase === StellarSdk.Networks.PUBLIC,
       issuerConfigured,
       distributorConfigured,
       configured: issuerConfigured && distributorConfigured && Boolean(this.horizonUrl) && Boolean(this.passphrase),
@@ -118,6 +128,7 @@ export class StellarTransferService {
   assetRecord(asset) {
     const normalized = upper(asset);
     if (normalized === NATIVE_ASSET) return { native: true, asset: NATIVE_ASSET };
+    if ([STELLAR_USDC.asset, STELLAR_USDC.assetAddress].map(upper).includes(normalized)) return STELLAR_USDC;
     const record = (this.domain?.list?.(ASSET_TYPE) || []).find((candidate) => {
       if (upper(candidate.network) !== NETWORK) return false;
       return [candidate.asset, candidate.symbol, candidate.instrumentId, candidate.assetId, candidate.assetAddress]
@@ -129,6 +140,37 @@ export class StellarTransferService {
       throw error;
     }
     return record;
+  }
+
+  async assetBalance(asset = 'USDC') {
+    const { server, distributor } = this.ensure();
+    const record = this.assetRecord(asset);
+    const account = await server.loadAccount(distributor.publicKey());
+    if (record.native) {
+      const native = account.balances.find((balance) => balance.asset_type === 'native');
+      return { asset: NATIVE_ASSET, balance: text(native?.balance || '0'), account: distributor.publicKey() };
+    }
+    const stellarAsset = this.stellarAsset(record);
+    const balance = account.balances.find((candidate) => candidate.asset_type !== 'native'
+      && candidate.asset_code === stellarAsset.code && candidate.asset_issuer === stellarAsset.issuer);
+    return { asset: stellarAsset.code, issuerAddress: stellarAsset.issuer, balance: text(balance?.balance || '0'), account: distributor.publicKey(), trustline: Boolean(balance) };
+  }
+
+  async recipientStatus(destination, asset = 'USDC') {
+    const address = text(destination);
+    if (!StellarSdk.StrKey.isValidEd25519PublicKey(address)) return { address, exists: false, canReceive: false, error: 'Invalid Stellar account address.' };
+    const { server } = this.ensure();
+    const record = this.assetRecord(asset);
+    try {
+      const account = await server.loadAccount(address);
+      const stellarAsset = record.native ? StellarSdk.Asset.native() : this.stellarAsset(record);
+      const canReceive = record.native || account.balances.some((balance) => balance.asset_type !== 'native'
+        && balance.asset_code === stellarAsset.code && balance.asset_issuer === stellarAsset.issuer);
+      return { address, exists: true, canReceive, trustline: canReceive, asset: record.asset, issuerAddress: record.issuerAddress || null };
+    } catch (error) {
+      if (error?.response?.status === 404) return { address, exists: false, canReceive: false, error: 'Stellar account was not found on the configured network.' };
+      throw error;
+    }
   }
 
   async createAsset(input = {}) {
@@ -256,20 +298,40 @@ export class StellarTransferService {
     const source = await server.loadAccount(distributor.publicKey());
     const stellarAsset = record.native ? StellarSdk.Asset.native() : this.stellarAsset(record);
 
+    if (record.externalIssuer) {
+      const balance = await this.assetBalance(record.asset);
+      if (!balance.trustline) {
+        const error = new Error(`The SRA Stellar distribution account does not have a trustline for ${record.asset}.`);
+        error.code = 'STELLAR_SOURCE_TRUSTLINE_REQUIRED';
+        throw error;
+      }
+      if (Number(balance.balance) < Number(transferAmount)) {
+        const error = new Error(`USDC settlement exceeds the live treasury balance of ${balance.balance} USDC.`);
+        error.code = 'STELLAR_USDC_INSUFFICIENT_BALANCE';
+        throw error;
+      }
+    }
+
     if (!record.native && !(await this.destinationCanReceive(destination, stellarAsset))) {
       const error = new Error('Destination Stellar account does not have a trustline for this asset.');
       error.code = 'STELLAR_DESTINATION_TRUSTLINE_REQUIRED';
       throw error;
     }
 
-    const transaction = new StellarSdk.TransactionBuilder(source, {
+    const builder = new StellarSdk.TransactionBuilder(source, {
       fee: StellarSdk.BASE_FEE,
       networkPassphrase: this.passphrase,
     }).addOperation(StellarSdk.Operation.payment({
       destination,
       asset: stellarAsset,
       amount: transferAmount,
-    })).setTimeout(100).build();
+    }));
+    const memo = text(input.memo);
+    if (memo) {
+      if (Buffer.byteLength(memo, 'utf8') > 28) throw new Error('Stellar text memo must not exceed 28 bytes.');
+      builder.addMemo(StellarSdk.Memo.text(memo));
+    }
+    const transaction = builder.setTimeout(100).build();
 
     return { transaction, destination, fromAddress: distributor.publicKey(), record };
   }
@@ -311,6 +373,7 @@ export class StellarTransferService {
       amount: text(input.amount),
       fromAddress: submitted.fromAddress,
       destinationAddress: submitted.destination,
+      memo: text(input.memo) || null,
       transactionId: submitted.transactionId,
       confirmation,
       state: confirmation.state,
