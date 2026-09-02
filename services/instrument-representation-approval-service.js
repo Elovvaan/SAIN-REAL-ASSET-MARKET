@@ -20,6 +20,22 @@ export class InstrumentRepresentationApprovalService {
   evaluate(instrumentId) {
     const instrument = this.domain.get('SRA_INSTRUMENT', instrumentId);
     if (!instrument) return { eligible: false, instrumentId, state: 'NOT_FOUND', blockers: ['INSTRUMENT_NOT_FOUND'] };
+    return this.evaluateMany([instrument])[0];
+  }
+
+  evaluateMany(instruments = this.domain.list('SRA_INSTRUMENT')) {
+    const approvalsByInstrument = new Map(this.domain.list(TYPE).map((approval) => [approval.instrumentId, approval]));
+    const linkedByInstrument = new Map();
+    for (const position of this.domain.list('COIN_POSITION')) {
+      const linkedId = position.instrumentId || position.sraInstrumentId || position.linkedInstrumentId;
+      const positionId = position.coinPositionId || position.positionId || position.id;
+      if (!linkedId || !positionId) continue;
+      const linked = linkedByInstrument.get(linkedId) || [];
+      linked.push(positionId);
+      linkedByInstrument.set(linkedId, linked);
+    }
+    return instruments.map((instrument) => {
+      const instrumentId = instrument.instrumentId || instrument.id;
     const state = stateOf(instrument);
     const blockers = [];
     if (!ELIGIBLE_STATES.has(state)) blockers.push('INSTRUMENT_NOT_APPROVED_OR_ISSUED');
@@ -28,12 +44,10 @@ export class InstrumentRepresentationApprovalService {
       instrumentId,
       state,
       blockers,
-      existingApproval: this.get(instrumentId),
-      linkedCoinPositionIds: this.domain.list('COIN_POSITION')
-        .filter((position) => position.instrumentId === instrumentId || position.sraInstrumentId === instrumentId || position.linkedInstrumentId === instrumentId)
-        .map((position) => position.coinPositionId || position.positionId || position.id)
-        .filter(Boolean),
+      existingApproval: approvalsByInstrument.get(instrumentId) || null,
+      linkedCoinPositionIds: linkedByInstrument.get(instrumentId) || [],
     };
+    });
   }
 
   async approve(instrumentId, actorId = 'SRA_PLATFORM_ADMIN') {

@@ -309,7 +309,7 @@
 
   async function renderApproval(workspace, card) {
     card.innerHTML = '<header><strong>Representation Approval</strong><em>CHECKING</em></header><p>Loading instruments…</p>';
-    const approvalStatus = await request(`/api/admin/instruments/approval-status?_=${Date.now()}`);
+    const approvalStatus = await request('/api/admin/instruments/approval-status');
     if (!active(workspace) || activeTab(workspace) !== 'Approval') return;
     const eligible = approvalStatus.representationReady || [];
     card.innerHTML = `<header><strong>Representation Approval</strong><em>INSTRUMENT LIFECYCLE</em></header><p style="color:#9a9a9a;line-height:1.5">Instrument approval comes first. Representation approval is the explicit handoff that authorizes an approved instrument to enter on-chain preparation.</p><div style="display:grid;gap:10px">${eligible.length ? eligible.map(approvalCard).join('') : '<p>No approved instruments are currently available for representation review.</p>'}</div>`;
@@ -318,20 +318,23 @@
 
   async function renderOnChain(workspace, card) {
     card.innerHTML = '<header><strong>On-Chain</strong><em>CHECKING</em></header><p>Loading instrument lifecycle and network state…</p>';
-    const [approvalStatus, status, assetsResult, sourcesResult] = await Promise.all([
-      request(`/api/admin/instruments/approval-status?_=${Date.now()}`),
-      request('/api/on-chain/status'),
+    const [approvalStatus, status, assetsResult, sourcesResult, offersResult] = await Promise.all([
+      request('/api/admin/instruments/approval-status'),
+      request('/api/on-chain/status?networks=STELLAR,XRPL'),
       request('/api/on-chain/assets'),
       request('/api/on-chain/source-positions'),
+      request('/api/on-chain/market-offers'),
     ]);
     if (!active(workspace) || activeTab(workspace) !== 'On-Chain') return;
     const eligible = approvalStatus.representationReady || [];
     const assets = assetsResult.records || [];
     const sources = sourcesResult.records || [];
-    const offersByAsset = new Map((await Promise.all(assets.map(async (asset) => {
-      try { const response = await request(`/api/on-chain/assets/${encodeURIComponent(asset.assetId)}/markets/offers`); return [asset.assetId,response.records || []]; }
-      catch { return [asset.assetId,[]]; }
-    }))).map(([assetId,offers])=>[assetId,offers]));
+    const offersByAsset = new Map();
+    for (const offer of offersResult.records || []) {
+      const records = offersByAsset.get(offer.assetId) || [];
+      records.push(offer);
+      offersByAsset.set(offer.assetId, records);
+    }
     const ready = (status.networks || []).some((item) => item.ready && (item.capabilities || []).includes('CREATE_ASSET'));
     card.innerHTML = `<header><strong>On-Chain</strong><em>${ready ? 'NETWORK READY' : 'NETWORK NOT READY'}</em></header><p style="color:#9a9a9a;line-height:1.5">Instrument approval → representation approval → Coin Position linkage → network readiness → asset identity → issue supply → transfer or live market offer. Each stage must complete before the next stage becomes actionable. Choose Stellar Mainnet or XRPL Mainnet when creating the asset identity; the selected network is then recorded on the instrument.</p><div style="display:grid;gap:10px">${eligible.length ? eligible.map((item) => onChainCard(item, assets, status, sources, offersByAsset)).join('') : '<p>No approved instruments are currently available.</p>'}</div>`;
     bindOnChain(workspace, card);

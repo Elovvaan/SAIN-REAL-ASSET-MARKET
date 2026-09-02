@@ -52,6 +52,7 @@ export async function installInstrumentAdminRoutes({ router, domain, requireAdmi
     const representationReady = instruments.filter((instrument) => REPRESENTATION_STATES.has(stateOf(instrument)));
     const representationApprovals = representations.list();
     const approvedIds = new Set(representationApprovals.filter((item) => item.state === 'APPROVED').map((item) => item.instrumentId));
+    const assessments = new Map(representations.evaluateMany(representationReady).map((assessment) => [assessment.instrumentId, assessment]));
     return res.json({
       pending,
       pendingCount: pending.length,
@@ -60,7 +61,7 @@ export async function installInstrumentAdminRoutes({ router, domain, requireAdmi
         const representationApproved = approvedIds.has(instrumentId);
         return {
           instrument,
-          assessment: representations.evaluate(instrumentId),
+          assessment: assessments.get(instrumentId),
           representationApproved,
           workflow: workflowFor(instrument, representationApproved),
         };

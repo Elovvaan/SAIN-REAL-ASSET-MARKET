@@ -113,7 +113,7 @@
     const root=host('instruments','instrument-approvals');if(!root)return;
     root.innerHTML='<header><strong>Instrument & Representation Approval</strong><em>CHECKING</em></header>';
     try {
-      const status=await request(`/api/admin/instruments/approval-status?_=${Date.now()}`);
+      const status=await request('/api/admin/instruments/approval-status');
       const pending=status.pending||[];
       const representationReady=status.representationReady||[];
       const awaitingRepresentation=representationReady.filter((item)=>!item.representationApproved);

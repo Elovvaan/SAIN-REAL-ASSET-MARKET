@@ -137,11 +137,30 @@ export function createOnChainProjectionRouter(service) {
   const transferAdapters = Object.fromEntries(adapters.entries());
   const transfers = new OnChainTransferService({ domain: service.domain, adapters: transferAdapters });
   const stableSettlementAssets = new StableSettlementAssetService(service.domain);
+  const networkHealthCache = new Map();
+  const NETWORK_HEALTH_TTL_MS = 15_000;
+  const NETWORK_HEALTH_TIMEOUT_MS = 4_000;
 
-  router.get('/status', async (_req, res) => {
+  async function boundedNetworkHealth(network, adapter) {
+    const cached = networkHealthCache.get(network);
+    if (cached && Date.now() - cached.recordedAt < NETWORK_HEALTH_TTL_MS) return cached.value;
+    let timer;
+    const timeout = new Promise((resolve) => {
+      timer = setTimeout(() => resolve({ network, ...adapter.status(), ready:false, reachable:false, healthTimedOut:true, error:`Network health check exceeded ${NETWORK_HEALTH_TIMEOUT_MS / 1000} seconds.` }), NETWORK_HEALTH_TIMEOUT_MS);
+      timer.unref?.();
+    });
+    const value = await Promise.race([adapterHealth(network, adapter).catch((error) => ({ network, ...adapter.status(), ready:false, reachable:false, error:String(error?.message || error) })), timeout]);
+    clearTimeout(timer);
+    networkHealthCache.set(network, { value, recordedAt:Date.now() });
+    return value;
+  }
+
+  router.get('/status', async (req, res) => {
     try {
       await stableSettlementAssets.ensure();
-      const networks = await Promise.all([...adapters.entries()].map(([network, adapter]) => adapterHealth(network, adapter)));
+      const requested = new Set(text(req.query.networks).split(',').map(upper).filter(Boolean));
+      const selectedAdapters = [...adapters.entries()].filter(([network]) => !requested.size || requested.has(network));
+      const networks = await Promise.all(selectedAdapters.map(([network, adapter]) => boundedNetworkHealth(network, adapter)));
       return res.json({
         service: service.status(),
         networks,
@@ -357,6 +376,16 @@ export function createOnChainProjectionRouter(service) {
       if (!asset) throw new Error('On-chain asset not found.');
       const records = service.domain.list('ON_CHAIN_MARKET_OFFER')
         .filter((record) => record.assetId === asset.assetId)
+        .sort((left, right) => String(right.createdAt || '').localeCompare(String(left.createdAt || '')));
+      return res.json({ records });
+    } catch (error) { return handle(res, error); }
+  });
+
+  router.get('/market-offers', (req, res) => {
+    try {
+      const requested = new Set(text(req.query.assetIds).split(',').filter(Boolean));
+      const records = service.domain.list('ON_CHAIN_MARKET_OFFER')
+        .filter((record) => !requested.size || requested.has(record.assetId))
         .sort((left, right) => String(right.createdAt || '').localeCompare(String(left.createdAt || '')));
       return res.json({ records });
     } catch (error) { return handle(res, error); }
