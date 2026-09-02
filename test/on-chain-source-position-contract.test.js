@@ -22,3 +22,12 @@ test('XRPL interface selects existing native or Coinbase-derived Coin Position s
   assert.match(ui, /sourcePositionId/);
   assert.match(ui, /externalize the entered quantity from the selected Coin Position/);
 });
+
+test('instrument on-chain issuance selects and submits its linked Coin Position source', () => {
+  const instrumentUi = fs.readFileSync(new URL('../public/admin/admin-on-chain-issuance-controls.js', import.meta.url), 'utf8');
+  assert.match(router, /linkedCoinPositionIds\?\.\[0\]/);
+  assert.match(router, /INSTRUMENT_REPRESENTATION_APPROVAL/);
+  assert.match(instrumentUi, /Source Coin Position/);
+  assert.match(instrumentUi, /sourcePositionId/);
+  assert.match(instrumentUi, /\/api\/on-chain\/source-positions/);
+});
