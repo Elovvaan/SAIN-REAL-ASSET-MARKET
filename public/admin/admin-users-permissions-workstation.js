@@ -45,7 +45,7 @@
 
   async function load() {
     const [workspacePayload, sessionPayload] = await Promise.all([
-      request('/api/admin/workspaces?limit=250'),
+      request('/api/admin/workspaces?workspace=users&limit=250'),
       request('/api/admin/session'),
     ]);
     const users = allUsers(workspacePayload);
