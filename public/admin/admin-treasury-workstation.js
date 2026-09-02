@@ -22,7 +22,7 @@
     const [treasury, eligible, workspace] = await Promise.all([
       request('/api/admin/treasury'),
       request('/api/admin/treasury/funding-instrument-deposits/eligible-instruments'),
-      request('/api/admin/workspaces?limit=100'),
+      request('/api/admin/workspaces?workspace=treasury&limit=100'),
     ]);
     return { treasury, eligible, records: workspace?.records || {} };
   }
