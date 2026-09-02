@@ -60,7 +60,7 @@
     loading.innerHTML = '<header><strong>Financial Records</strong><em>READING</em></header><p>Reading canonical financial record chain…</p>';
     controls.prepend(loading);
     try {
-      const payload = await request('/api/admin/workspaces?limit=100');
+      const payload = await request('/api/admin/workspaces?workspace=records&limit=100');
       const r = payload?.records || {};
       const tab = workspace.dataset.activeTab || 'Recognitions';
       const records = recordsFor(tab, r);
