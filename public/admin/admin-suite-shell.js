@@ -30,7 +30,7 @@
     users:['Overview','Administrators','Roles','Permissions','Sessions','Access History'],
     system:['Overview','Core Services','Diagnostics','Protected Actions','Alerts','Audit State']
   };
-  const state = { mounted:false, routed:new WeakSet(), observer:null, workspaceData:null, loading:null, lastError:null };
+  const state = { mounted:false, routed:new WeakSet(), observer:null, workspaceData:null, loading:null, loadingScope:null, loadedScopes:new Set(), lastError:null };
   const esc = value => String(value ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;');
   const recordsBody = id => document.querySelector(`[data-workspace="${id}"] .admin-workspace-records`);
   const controlsBody = id => document.querySelector(`[data-workspace="${id}"] .admin-workspace-controls`);
@@ -286,14 +286,21 @@
     if(id==='settlement' && tab==='Workflow'){ node.innerHTML = settlementWorkflowMarkup(); return; }
     node.innerHTML = recordsMarkup(workspaceRecords(id,tab),labelFor(id,tab));
   }
-  async function loadWorkspaceData(force=false){
-    if(state.loading && !force) return state.loading;
+  const workspaceApiKey = (id) => id === 'native-asset' ? 'nativeAsset' : id === 'coin-positions' ? 'coinPositions' : id;
+  async function loadWorkspaceData(force=false,id=activeWorkspaceId()){
+    const scope = workspaceApiKey(id);
+    if(state.loading && state.loadingScope === scope && !force) return state.loading;
     state.lastError = null;
-    const request = requestJson('/api/admin/workspaces?limit=100', force ? { cache:'reload' } : {})
-      .then(data => { state.workspaceData = data; return data; })
+    const request = requestJson(`/api/admin/workspaces?workspace=${encodeURIComponent(scope)}&limit=100`, force ? { cache:'reload' } : {})
+      .then(data => {
+        state.workspaceData = { ...state.workspaceData, ...data, records:{...(state.workspaceData?.records||{}),...(data.records||{})}, workspaces:{...(state.workspaceData?.workspaces||{}),...(data.workspaces||{})} };
+        state.loadedScopes.add(scope);
+        return state.workspaceData;
+      })
       .catch(error => { state.lastError = error.message; throw error; })
-      .finally(() => { if(state.loading === request) state.loading = null; });
+      .finally(() => { if(state.loading === request){ state.loading = null; state.loadingScope = null; } });
     state.loading = request;
+    state.loadingScope = scope;
     return request;
   }
   async function refreshWorkspace(id){
@@ -303,7 +310,7 @@
     }
     const node = recordsBody(id);
     if(node) node.innerHTML = loadingState();
-    try { await loadWorkspaceData(true); } catch {}
+    try { await loadWorkspaceData(true,id); } catch {}
     renderWorkspace(id);
     syncDashboard();
   }
@@ -325,8 +332,9 @@
     const hash = `#admin-${id}`;
     if(location.hash!==hash) history.replaceState(null,'',hash);
     renderWorkspace(id);
-    if(id!=='dashboard' && !state.workspaceData){
-      const pending = loadWorkspaceData(false);
+    const scope = workspaceApiKey(id);
+    if(id!=='dashboard' && !state.loadedScopes.has(scope)){
+      const pending = loadWorkspaceData(false,id);
       void pending.catch(()=>{}).finally(() => {
         const active = activeWorkspaceId();
         renderWorkspace(active);
