@@ -96,6 +96,45 @@ export class UnifiedMarketOperationsQueueService {
     const queue = [];
     const exceptions = [];
 
+    for (const { record: position } of this.coinAgents.positions()) {
+      try {
+        const agent = this.coinAgents.explain(position.coinPositionId || position.positionId || position.id);
+        if (agent.blockers.length) {
+          exceptions.push({
+            ...item(agent.positionId, 'COIN_POSITION', agent.currentState, agent.participantId, 'RESOLVE_COIN_POSITION_BLOCKERS', agent.explanation, { positionId:agent.positionId, instrumentId:agent.instrumentId }),
+            agentId:'SRA-COIN-AGENT', agentType:'COIN_AGENT', humanApprovalRequired:false, blockers:agent.blockers,
+          });
+          continue;
+        }
+        const stage = agent.nextEligibleAction === 'PREPARE_INSTRUMENT_REPRESENTATION' ? 'INSTRUMENT_REPRESENTATION'
+          : agent.nextEligibleAction === 'PREPARE_ON_CHAIN_ISSUANCE' ? 'ON_CHAIN_REPRESENTATION'
+            : agent.nextEligibleAction === 'RECONCILE_ON_CHAIN_REPRESENTATION' ? 'ON_CHAIN_RECONCILIATION'
+              : agent.nextEligibleAction === 'PREPARE_DIRECT_COIN_REPRESENTATION' ? 'COIN_POSITION' : null;
+        if (!stage) continue;
+        queue.push({
+          ...item(agent.positionId, stage, agent.currentState, agent.participantId, agent.nextEligibleAction, agent.explanation, { positionId:agent.positionId, instrumentId:agent.instrumentId }),
+          agentId:'SRA-COIN-AGENT', agentType:'COIN_AGENT', humanApprovalRequired:true,
+          sourceClass:agent.sourceClass, lineage:agent.lineage, onChainRepresentations:agent.onChainRepresentations,
+        });
+      } catch (error) {
+        exceptions.push(item(`COIN-AGENT-${position.coinPositionId || position.positionId || 'UNKNOWN'}`, 'COIN_POSITION', 'AGENT_ERROR', null, 'REVIEW_COIN_AGENT_ERROR', error.message, position));
+      }
+    }
+
+    for (const listing of this.domain.list('MARKETPLACE_LISTING')) {
+      const listingId = listing.listingId || listing.id;
+      const state = String(listing.state || listing.status || '').toUpperCase();
+      if (state === 'PREPARED') queue.push({ ...item(listingId, 'LISTING_PREPARATION', state, listing.sellerId || listing.participantId, 'PREPARE_LISTING_READINESS', 'Listing Agent should verify the linked position, instrument, ownership, pricing, and publication requirements.', listing), agentId:'SRA-LISTING-AGENT', agentType:'LISTING_AGENT', humanApprovalRequired:false });
+      else if (['READY','READY_FOR_PUBLICATION_APPROVAL'].includes(state)) queue.push({ ...item(listingId, 'LISTING_PUBLICATION', state, listing.sellerId || listing.participantId, 'PREPARE_PUBLICATION_APPROVAL', 'Listing readiness is complete. Listing Agent should prepare the publication action for administrator approval.', listing), agentId:'SRA-LISTING-AGENT', agentType:'LISTING_AGENT', humanApprovalRequired:true });
+      else if (['PUBLISHED','ACTIVE','LIVE'].includes(state)) queue.push({ ...item(listingId, 'MARKETPLACE_READINESS', state, listing.sellerId || listing.participantId, 'MONITOR_MARKET_READINESS', 'Marketplace Agent should monitor inventory, executable routes, offers, orders, and exceptions for this live listing.', listing), agentId:'SRA-MARKETPLACE-AGENT', agentType:'MARKETPLACE_AGENT', humanApprovalRequired:false });
+    }
+
+    for (const offer of this.domain.list('ON_CHAIN_MARKET_OFFER')) {
+      const state = String(offer.state || '').toUpperCase();
+      const entry = { ...item(offer.offerId || offer.id, 'MARKET_OFFER', state, null, state === 'CONFIRMED' ? 'MONITOR_MARKET_OFFER' : 'RECONCILE_MARKET_OFFER', `Marketplace Agent should ${state === 'CONFIRMED' ? 'monitor liquidity and fill state' : 'reconcile the submitted on-chain market offer'} for ${offer.market || 'the recorded market'}.`, offer), agentId:'SRA-MARKETPLACE-AGENT', agentType:'MARKETPLACE_AGENT', humanApprovalRequired:state !== 'CONFIRMED' };
+      if (state === 'FAILED') exceptions.push(entry); else queue.push(entry);
+    }
+
     for (const record of tx) {
       if (record.transactionType === 'PARTICIPANT_ORDER_INTENT' && record.state === 'QUEUED_FOR_ORDER_REVIEW') {
         queue.push(item(record.orderIntentId || record.transactionId, 'ORDER_INTENT', record.state, record.participantId, 'REVIEW_MATCH', 'Participant intent is confirmed and waiting for a compatible counter-side order.', record));

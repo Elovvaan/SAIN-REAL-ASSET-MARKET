@@ -40,7 +40,11 @@
     return `<div class="admin-record-list" style="margin-top:10px">${offers.slice(0, 10).map((offer) => `<article class="admin-record-card" style="margin:0"><header><strong>${esc(offer.sellAmount)} SRAUSD → ${esc(offer.buyAmountXrp)} XRP</strong><em>${esc(offer.state || 'UNKNOWN')}</em></header><div class="admin-record-grid">${metric('Transaction', offer.transactionId || '—')}${metric('Ledger', offer.confirmation?.ledgerIndex || '—')}${metric('Created', offer.createdAt || '—')}</div></article>`).join('')}</div>`;
   }
 
-  function markup(network, asset, offers) {
+  function sourceOptions(sources = []) {
+    return sources.map((source) => `<option value="${esc(source.positionId)}">${esc(source.positionId)} · ${esc(source.sourceClass)} · ${esc(source.availableQuantity)} SRA available${source.instrumentId ? ` · ${esc(source.instrumentId)}` : ''}</option>`).join('');
+  }
+
+  function markup(network, asset, offers, sources) {
     const ready = Boolean(network?.issuanceReady);
     const issued = Number(asset?.issuedSupply || 0);
     const badge = ready ? 'MAINNET READY' : 'NOT READY';
@@ -48,7 +52,7 @@
       <p style="color:#9a9a9a;line-height:1.5">This workflow begins with SRAUSD. It creates SRAUSD on XRPL, issues an entered amount to SRA's distribution account, then posts a separate offer selling SRAUSD for native XRP. Nothing executes until an administrator enters the values and confirms the Mainnet action.</p>
       <div class="admin-record-grid" style="margin-top:12px">${metric('Network','XRPL Mainnet')}${metric('Issuer',network?.issuerAddress || 'Not configured')}${metric('Distribution account',network?.distributorAddress || network?.address || 'Not configured')}${metric('Issuer status',network?.issuerReachable ? 'ACTIVE' : 'NOT READY')}${metric('Asset identity',asset?.assetAddress || 'Not created')}${metric('Issued supply',`${asset?.issuedSupply || 0} SRAUSD`)}</div>
       ${!asset ? `<section style="margin-top:16px;border-top:1px solid #292929;padding-top:16px"><strong>1 · Create SRAUSD Identity</strong><p style="color:#9a9a9a;font-size:12px">Registers SRAUSD with the configured XRPL issuer. This step does not issue supply.</p>${confirmation('create','I confirm this creates the SRAUSD identity using the configured XRPL Mainnet issuer.')}<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px"><button type="button" data-create-xrpl-asset ${ready ? '' : 'disabled'}>Create SRAUSD Identity</button><span data-create-result style="color:#d6a92f;font-size:12px"></span></div></section>` : `
-      <section style="margin-top:16px;border-top:1px solid #292929;padding-top:16px"><strong>2 · Issue SRAUSD</strong><p style="color:#9a9a9a;font-size:12px">The entered amount is signed by the issuer and delivered to SRA's XRPL distribution account. Issuance is not an XRP exchange.</p><div class="admin-record-grid" style="margin-top:10px"><label><span>SRAUSD amount</span><input data-issue-amount type="text" inputmode="decimal" autocomplete="off" placeholder="Enter amount, for example 1000"></label></div>${confirmation('issue','I confirm this will issue the entered SRAUSD amount on XRPL Mainnet.')}<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px"><button type="button" data-issue-xrpl-asset="${esc(asset.assetId)}" ${ready ? '' : 'disabled'}>Issue SRAUSD</button><span data-issue-result style="color:#d6a92f;font-size:12px"></span></div></section>
+      <section style="margin-top:16px;border-top:1px solid #292929;padding-top:16px"><strong>2 · Issue SRAUSD</strong><p style="color:#9a9a9a;font-size:12px">Select the recognized SRA Coin Position supplying this issuance. The entered amount is signed by the issuer, delivered to SRA's XRPL distribution account, and externalized from that position only after XRPL confirmation. Issuance is not an XRP exchange.</p><div class="admin-record-grid" style="margin-top:10px"><label><span>Source Coin Position</span><select data-issue-source>${sourceOptions(sources) || '<option value="">No eligible Coin Position supply</option>'}</select></label><label><span>SRAUSD amount</span><input data-issue-amount type="text" inputmode="decimal" autocomplete="off" placeholder="Enter amount, for example 1000"></label></div>${confirmation('issue','I confirm this will externalize the entered quantity from the selected Coin Position and issue the same SRAUSD amount on XRPL Mainnet.')}<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px"><button type="button" data-issue-xrpl-asset="${esc(asset.assetId)}" ${ready && sources.length ? '' : 'disabled'}>Issue SRAUSD</button><span data-issue-result style="color:#d6a92f;font-size:12px">${sources.length ? '' : 'No eligible source Coin Position is available.'}</span></div></section>
       <section style="margin-top:16px;border-top:1px solid #292929;padding-top:16px"><strong>3 · Offer SRAUSD for XRP</strong><p style="color:#9a9a9a;font-size:12px">Enter both sides of the offer. This sells the entered SRAUSD amount and requests the entered native XRP amount. The offer only fills when XRPL liquidity accepts it.</p><div class="admin-record-grid" style="margin-top:10px"><label><span>SRAUSD to sell</span><input data-offer-sell type="text" inputmode="decimal" autocomplete="off" placeholder="SRAUSD amount"></label><label><span>XRP requested</span><input data-offer-buy type="text" inputmode="decimal" autocomplete="off" placeholder="XRP amount"></label><div><span>Implied XRP per SRAUSD</span><strong data-implied-rate>—</strong></div></div>${confirmation('offer','I confirm this will submit a live XRPL Mainnet offer selling SRAUSD for XRP at the entered amounts.')}<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px"><button type="button" data-create-xrpl-offer="${esc(asset.assetId)}" ${issued > 0 && ready ? '' : 'disabled'}>Submit SRAUSD/XRP Offer</button><span data-offer-result style="color:#d6a92f;font-size:12px">${issued > 0 ? '' : 'Issue SRAUSD first.'}</span></div>${offersMarkup(offers)}</section>`}`;
   }
 
@@ -63,11 +67,13 @@
     });
     node.querySelector('[data-issue-xrpl-asset]')?.addEventListener('click', async (event) => {
       const amount = node.querySelector('[data-issue-amount]')?.value?.trim(); const result = node.querySelector('[data-issue-result]');
+      const sourcePositionId = node.querySelector('[data-issue-source]')?.value?.trim();
       if (!positive(amount)) { result.textContent = 'Enter a positive SRAUSD amount with no more than 6 decimals.'; return; }
+      if (!sourcePositionId) { result.textContent = 'Select the source SRA Coin Position.'; return; }
       if (!node.querySelector('[data-confirm-issue]')?.checked) { result.textContent = 'Confirm the Mainnet issuance first.'; return; }
-      if (!window.confirm(`Issue exactly ${amount} SRAUSD on XRPL Mainnet?`)) return;
+      if (!window.confirm(`Externalize ${amount} SRA from ${sourcePositionId} and issue exactly ${amount} SRAUSD on XRPL Mainnet?`)) return;
       event.currentTarget.disabled = true; result.textContent = 'Signing, submitting, and confirming issuance…';
-      try { const response = await request(`/api/on-chain/assets/${encodeURIComponent(asset.assetId)}/issue`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount})}); result.textContent = `Confirmed · ${response.issuance?.transactionId || 'transaction recorded'}`; await refresh(workspace); }
+      try { const response = await request(`/api/on-chain/assets/${encodeURIComponent(asset.assetId)}/issue`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount,sourcePositionId})}); result.textContent = `Confirmed · ${response.issuance?.transactionId || 'transaction recorded'} · ${response.sourcePosition?.availableAfter ?? '—'} SRA remains`; await refresh(workspace); }
       catch (error) { result.textContent = error.message; event.currentTarget.disabled = false; }
     });
     const updateRate = () => { const sell = Number(node.querySelector('[data-offer-sell]')?.value); const buy = Number(node.querySelector('[data-offer-buy]')?.value); const target = node.querySelector('[data-implied-rate]'); if (target) target.textContent = sell > 0 && buy > 0 ? `${(buy / sell).toLocaleString(undefined,{maximumFractionDigits:8})} XRP` : '—'; };
@@ -89,13 +95,13 @@
     const node = host(workspace); if (!node) return;
     node.innerHTML = '<header><strong>SRAUSD → XRP Mainnet Workflow</strong><em>CHECKING</em></header><p style="color:#9a9a9a">Checking XRPL accounts and SRAUSD state…</p>';
     try {
-      const [status, assetsResult] = await Promise.all([request('/api/on-chain/status'), request('/api/on-chain/assets?network=XRPL&asset=SRAUSD')]);
+      const [status, assetsResult, sourcesResult] = await Promise.all([request('/api/on-chain/status'), request('/api/on-chain/assets?network=XRPL&asset=SRAUSD'), request('/api/on-chain/source-positions')]);
       if (!active(workspace) || !node.isConnected) return;
       const network = (status.networks || []).find((item) => item.network === 'XRPL') || null;
       const asset = (assetsResult.records || []).find((item) => item.network === 'XRPL' && item.asset === ASSET) || null;
       const offers = asset ? (await request(`/api/on-chain/assets/${encodeURIComponent(asset.assetId)}/markets/offers`)).records || [] : [];
       if (!active(workspace) || !node.isConnected) return;
-      node.innerHTML = markup(network, asset, offers); bind(workspace, node, asset);
+      node.innerHTML = markup(network, asset, offers, sourcesResult.records || []); bind(workspace, node, asset);
     } catch (error) { node.innerHTML = `<header><strong>SRAUSD → XRP Mainnet Workflow</strong><em>UNAVAILABLE</em></header><p style="color:#d6a92f">${esc(error.message)}</p>`; }
   }
   function mount(workspace) {

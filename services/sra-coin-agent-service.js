@@ -48,9 +48,12 @@ export class SraCoinAgentService {
     const { type, record: position } = this.resolvePosition(positionId);
     const id = recordId(position);
     const owner = participantId(position);
-    const instrument = instrumentId(position);
+    const directInstrumentId = instrumentId(position);
     const tx = this.transactions();
-    const linkedInstrument = instrument ? this.domain.get('SRA_INSTRUMENT', instrument) : null;
+    const linkedInstrument = directInstrumentId ? this.domain.get('SRA_INSTRUMENT', directInstrumentId) : this.domain.list('SRA_INSTRUMENT').find((item) => item.coinPositionId === id) || null;
+    const instrument = directInstrumentId || linkedInstrument?.instrumentId || null;
+    const observation = position.observationId ? this.domain.get('MARKET_OBSERVATION', position.observationId) : null;
+    const onChainAssets = this.domain.list('ON_CHAIN_ASSET').filter((item) => item.sourcePositionId === id || item.coinPositionId === id || (instrument && item.instrumentId === instrument));
     const ownership = this.domain.list('OWNERSHIP_RECOGNITION').find((item) => item.positionId === id
       || (owner && instrument && participantId(item) === owner && instrumentId(item) === instrument)) || null;
     const listings = this.domain.list('MARKETPLACE_LISTING').filter((item) => item.instrumentId === instrument);
@@ -81,7 +84,6 @@ export class SraCoinAgentService {
         || item.transactionId === transferInstruction.transferResultId)) || null : null;
 
     const blockers = [];
-    if (!instrument) blockers.push('NO_LINKED_INSTRUMENT');
     if (instrument && !linkedInstrument) blockers.push('LINKED_INSTRUMENT_NOT_FOUND');
     if (!owner) blockers.push('NO_RECOGNIZED_PARTICIPANT');
     if (restricted(position)) blockers.push('POSITION_RESTRICTED');
@@ -113,7 +115,10 @@ export class SraCoinAgentService {
     else if (activeReservation && !allocation) { nextAction = 'APPROVE_ALLOCATION'; approvalRequired = true; }
     else if (live) nextAction = 'AVAILABLE_FOR_GOVERNED_MARKET_PARTICIPATION';
     else if (readyForPublication) { nextAction = 'AUTHORIZE_PUBLICATION'; approvalRequired = true; }
-    else if (instrument) nextAction = 'APPLY_OR_REVIEW_MARKET_READINESS_POLICY';
+    else if (onChainAssets.some((item) => item.state === 'ISSUED')) nextAction = 'MONITOR_ON_CHAIN_REPRESENTATION';
+    else if (onChainAssets.length) { nextAction = 'PREPARE_ON_CHAIN_ISSUANCE'; approvalRequired = true; }
+    else if (instrument) { nextAction = 'PREPARE_INSTRUMENT_REPRESENTATION'; approvalRequired = true; }
+    else { nextAction = 'PREPARE_DIRECT_COIN_REPRESENTATION'; approvalRequired = true; }
 
     const quantity = number(first(position.availableQuantity, position.quantity, position.balance));
     const reservedQuantity = activeReservation ? number(first(activeReservation.positionReservation?.quantity, activeReservation.quantity)) : 0;
@@ -150,10 +155,12 @@ export class SraCoinAgentService {
         executionAuthorizationId: idOf(execution, 'executionAuthorizationId'),
         externalResultId: idOf(result, 'transferResultId'),
       },
+      sourceClass: observation?.sourceMarket === 'COINBASE' ? 'COINBASE_RECOGNIZED_MARKET_TRANSACTION' : instrument ? 'INSTRUMENT_LINKED_POSITION' : 'RECOGNIZED_FINANCIAL_RECORD_POSITION',
+      onChainRepresentations: onChainAssets.map((item) => ({ assetId:item.assetId, network:item.network, asset:item.asset, state:item.state, issuedSupply:item.issuedSupply })),
       blockers,
       nextEligibleAction: nextAction,
       humanApprovalRequired: approvalRequired,
-      capabilities: ['EXPLAIN_ORIGIN', 'EXPLAIN_CURRENT_STATE', 'TRACE_LINEAGE', 'REPORT_RESTRICTIONS', 'IDENTIFY_NEXT_ACTION', 'PREPARE_GOVERNED_ACTION'],
+      capabilities: ['EXPLAIN_ORIGIN', 'EXPLAIN_CURRENT_STATE', 'TRACE_LINEAGE', 'REPORT_RESTRICTIONS', 'IDENTIFY_NEXT_ACTION', 'PREPARE_GOVERNED_ACTION', 'PREPARE_INSTRUMENT_HANDOFF', 'PREPARE_ON_CHAIN_REPRESENTATION'],
       prohibitedActions: ['SELF_APPROVE', 'MOVE_VALUE_WITHOUT_AUTHORIZATION', 'CHANGE_OWNERSHIP_WITHOUT_SETTLEMENT', 'CREATE_UNVERIFIED_VALUE', 'BYPASS_POLICY'],
       explanation: this.summarize({ id, quantity, currentState, instrument, owner, blockers, nextAction, approvalRequired }),
       generatedAt: new Date().toISOString(),

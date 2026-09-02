@@ -25,7 +25,7 @@
     'coin-positions':['Current Supply','Represented Value','Legacy Corrections','Coin Intelligence','Mint History','XRPL Exchange','Retirements','Adjustments'],
     transactions:['All','Pending','Completed','Failed','Exported','Imported','Settlement','Search'],
     settlement:['Export Packages','Settlement Instructions','External Confirmation','Destination Verification','Export History','Settlement Logs','Workflow'],
-    agent:['Conversation','Suggested Actions','Workflow Approvals','Incomplete Workflows','Explain Record','Trace Instrument','Platform Questions','Diagnostics'],
+    agent:['Conversation','Workforce','Suggested Actions','Workflow Approvals','Incomplete Workflows','Explain Record','Trace Instrument','Platform Questions','Diagnostics'],
     connections:['Coinbase','Ethereum','Solana','Bitcoin','Export Adapters','Connector Logs','Synchronization'],
     users:['Overview','Administrators','Roles','Permissions','Sessions','Access History'],
     system:['Overview','Core Services','Diagnostics','Protected Actions','Alerts','Audit State']

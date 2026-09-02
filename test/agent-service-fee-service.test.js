@@ -27,10 +27,13 @@ test('current unified operations stages resolve to the agent service rate actual
   assert.equal(service.quoteWorkflowStage('EXPORT_EXCEPTION').amount, 24.75);
 });
 
-test('agents not yet attached to a current unified queue stage stay priced without inventing a workflow trigger', () => {
+test('coin, listing, and marketplace agents are priced and attached to their operating stages', () => {
   const service = new AgentServiceFeeService();
-  assert.deepEqual(service.quoteAgent('SRA-COIN-AGENT').workflowStages, []);
-  assert.deepEqual(service.quoteAgent('SRA-LISTING-AGENT').workflowStages, []);
-  assert.deepEqual(service.quoteAgent('SRA-MARKETPLACE-AGENT').workflowStages, []);
+  assert.deepEqual(service.quoteAgent('SRA-COIN-AGENT').workflowStages, ['COIN_POSITION','INSTRUMENT_REPRESENTATION','ON_CHAIN_REPRESENTATION','ON_CHAIN_RECONCILIATION']);
+  assert.deepEqual(service.quoteAgent('SRA-LISTING-AGENT').workflowStages, ['LISTING_PREPARATION','LISTING_PUBLICATION']);
+  assert.deepEqual(service.quoteAgent('SRA-MARKETPLACE-AGENT').workflowStages, ['MARKETPLACE_READINESS','MARKET_OFFER']);
+  assert.equal(service.quoteWorkflowStage('COIN_POSITION').agentId, 'SRA-COIN-AGENT');
+  assert.equal(service.quoteWorkflowStage('LISTING_PUBLICATION').agentId, 'SRA-LISTING-AGENT');
+  assert.equal(service.quoteWorkflowStage('MARKET_OFFER').agentId, 'SRA-MARKETPLACE-AGENT');
   assert.equal(service.quoteWorkflowStage('NOT_A_REAL_STAGE'), null);
 });

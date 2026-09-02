@@ -1,4 +1,5 @@
 import { SraCoinAgentService } from './sra-coin-agent-service.js';
+import { getSraAgentServiceFee } from '../config/agent-service-fee-schedule.js';
 
 function now() { return new Date().toISOString(); }
 function count(domain, type, predicate = () => true) { return domain.list(type).filter(predicate).length; }
@@ -20,14 +21,15 @@ export class SraAgentOperatingSystemService {
   }
 
   registry() {
-    return [
-      { agentId: 'SRA-COIN-AGENT', agentType: 'COIN_AGENT', scope: 'COIN_POSITION', state: 'ACTIVE', recordCount: this.coinAgents.status().coinAgentCount, capabilities: ['EXPLAIN_ORIGIN', 'TRACE_LINEAGE', 'REPORT_RESTRICTIONS', 'IDENTIFY_NEXT_ACTION'] },
-      { agentId: 'SRA-LISTING-AGENT', agentType: 'LISTING_AGENT', scope: 'MARKETPLACE_LISTING', state: 'ACTIVE', recordCount: count(this.domain, 'MARKETPLACE_LISTING'), capabilities: ['REPORT_LISTING_STATE', 'REPORT_READINESS', 'IDENTIFY_PUBLICATION_ACTION'] },
-      { agentId: 'SRA-ORDER-AGENT', agentType: 'ORDER_AGENT', scope: 'PARTICIPANT_ORDER_INTENT_AND_MATCH', state: 'ACTIVE', recordCount: count(this.domain, 'SRA_TRANSACTION', (item) => ['PARTICIPANT_ORDER_INTENT', 'ORDER_MATCH_REVIEW', 'PRE_ALLOCATION_RESERVATION', 'POSITION_ALLOCATION_APPROVAL'].includes(item.transactionType)), capabilities: ['REPORT_ORDER_STATE', 'REPORT_MATCH_STATE', 'IDENTIFY_NEXT_GOVERNED_ACTION'] },
-      { agentId: 'SRA-SETTLEMENT-AGENT', agentType: 'SETTLEMENT_AGENT', scope: 'ATOMIC_ORDER_SETTLEMENT', state: 'ACTIVE', recordCount: count(this.domain, 'SRA_TRANSACTION', (item) => item.transactionType === 'ATOMIC_ORDER_SETTLEMENT'), capabilities: ['REPORT_SETTLEMENT_STATE', 'VERIFY_SETTLEMENT_LINEAGE', 'REPORT_SETTLEMENT_BLOCKERS'] },
-      { agentId: 'SRA-EXPORT-AGENT', agentType: 'EXPORT_AGENT', scope: 'EXPORT_AND_EXTERNAL_TRANSFER', state: 'ACTIVE', recordCount: count(this.domain, 'EXPORT_PACKAGE') + count(this.domain, 'SRA_TRANSACTION', (item) => String(item.transactionType || '').startsWith('EXTERNAL_TRANSFER_')), capabilities: ['REPORT_EXPORT_STATE', 'REPORT_TRANSFER_STATE', 'IDENTIFY_RECONCILIATION_ACTION'] },
-      { agentId: 'SRA-MARKETPLACE-AGENT', agentType: 'MARKETPLACE_AGENT', scope: 'SRA_MARKET', state: 'ACTIVE', recordCount: count(this.domain, 'MARKETPLACE_LISTING'), capabilities: ['REPORT_MARKET_INVENTORY', 'REPORT_MARKET_READINESS', 'REPORT_MARKET_EXCEPTIONS'] },
+    const definitions = [
+      { agentId:'SRA-COIN-AGENT',name:'Coin Operations Agent',agentType:'COIN_AGENT',scope:'OBSERVATION_TO_COIN_POSITION_AND_ON_CHAIN_PREPARATION',recordCount:this.coinAgents.status().coinAgentCount,capabilities:['EXPLAIN_ORIGIN','TRACE_LINEAGE','REPORT_RESTRICTIONS','IDENTIFY_NEXT_ACTION','PREPARE_INSTRUMENT_HANDOFF','PREPARE_ON_CHAIN_REPRESENTATION','PREPARE_RECONCILIATION'] },
+      { agentId:'SRA-LISTING-AGENT',name:'Listing Operations Agent',agentType:'LISTING_AGENT',scope:'LISTING_PREPARATION_AND_PUBLICATION',recordCount:count(this.domain,'MARKETPLACE_LISTING'),capabilities:['REPORT_LISTING_STATE','REPORT_READINESS','PREPARE_PUBLICATION_ACTION'] },
+      { agentId:'SRA-ORDER-AGENT',name:'Order Operations Agent',agentType:'ORDER_AGENT',scope:'PARTICIPANT_ORDER_INTENT_AND_MATCH',recordCount:count(this.domain,'SRA_TRANSACTION',(item)=>['PARTICIPANT_ORDER_INTENT','ORDER_MATCH_REVIEW','PRE_ALLOCATION_RESERVATION','POSITION_ALLOCATION_APPROVAL'].includes(item.transactionType)),capabilities:['REPORT_ORDER_STATE','REPORT_MATCH_STATE','PREPARE_NEXT_GOVERNED_ACTION'] },
+      { agentId:'SRA-SETTLEMENT-AGENT',name:'Settlement Operations Agent',agentType:'SETTLEMENT_AGENT',scope:'ALLOCATION_AND_ATOMIC_SETTLEMENT',recordCount:count(this.domain,'SRA_TRANSACTION',(item)=>['POSITION_ALLOCATION_APPROVAL','ATOMIC_ORDER_SETTLEMENT'].includes(item.transactionType)),capabilities:['REPORT_SETTLEMENT_STATE','VERIFY_SETTLEMENT_LINEAGE','PREPARE_SETTLEMENT_ACTION'] },
+      { agentId:'SRA-EXPORT-AGENT',name:'External Rail Agent',agentType:'EXPORT_AGENT',scope:'EXPORT_SETTLEMENT_AND_EXTERNAL_TRANSFER',recordCount:count(this.domain,'EXPORT_PACKAGE')+count(this.domain,'SRA_TRANSACTION',(item)=>String(item.transactionType||'').startsWith('EXTERNAL_TRANSFER_')),capabilities:['REPORT_EXPORT_STATE','REPORT_TRANSFER_STATE','PREPARE_RECONCILIATION_ACTION'] },
+      { agentId:'SRA-MARKETPLACE-AGENT',name:'Marketplace Operations Agent',agentType:'MARKETPLACE_AGENT',scope:'MARKET_READINESS_AND_OFFERS',recordCount:count(this.domain,'MARKETPLACE_LISTING')+count(this.domain,'ON_CHAIN_MARKET_OFFER'),capabilities:['REPORT_MARKET_INVENTORY','REPORT_MARKET_READINESS','PREPARE_MARKET_OFFER','REPORT_MARKET_EXCEPTIONS'] },
     ];
+    return definitions.map((definition)=>({...definition,state:'ACTIVE',workflowStages:getSraAgentServiceFee(definition.agentId)?.workflowStages||[]}));
   }
 
   brief() {

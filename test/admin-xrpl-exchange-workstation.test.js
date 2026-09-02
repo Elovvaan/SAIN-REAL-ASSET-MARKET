@@ -18,7 +18,7 @@ test('workflow starts with SRAUSD and separates issuance from XRP exchange', () 
   assert.match(ui, /SRAUSD → XRP Mainnet Workflow/);
   assert.match(ui, /Issuance is not an XRP exchange/);
   assert.match(ui, /sellAmount,buyAmountXrp/);
-  assert.match(ui, /Issue exactly \$\{amount\} SRAUSD/);
+  assert.match(ui, /issue exactly \$\{amount\} SRAUSD/i);
   assert.match(ui, /selling \$\{sellAmount\} SRAUSD for \$\{buyAmountXrp\} XRP/);
 });
 

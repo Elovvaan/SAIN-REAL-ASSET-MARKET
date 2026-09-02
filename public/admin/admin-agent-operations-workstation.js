@@ -4,11 +4,18 @@
 
   const mounted = new WeakSet();
   const conversation = [];
-  const ownedTabs = new Set(['Conversation','Suggested Actions','Workflow Approvals','Incomplete Workflows']);
+  const ownedTabs = new Set(['Conversation','Workforce','Suggested Actions','Workflow Approvals','Incomplete Workflows']);
   const esc = (value) => String(value ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;');
 
   async function request(payload) {
     const response = await fetch('/api/admin/agent/query', { method:'POST', credentials:'same-origin', cache:'no-store', headers:{ Accept:'application/json','Content-Type':'application/json' }, body:JSON.stringify(payload) });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || `Request failed with ${response.status}.`);
+    return body;
+  }
+
+  async function json(url, options = {}) {
+    const response = await fetch(url, { credentials:'same-origin', cache:'no-store', headers:{ Accept:'application/json','Content-Type':'application/json',...(options.headers||{}) }, ...options });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error || `Request failed with ${response.status}.`);
     return body;
@@ -90,6 +97,20 @@
     return `<section class="admin-record-card" data-agent-operation-card data-agent-conversation><header><strong>SAIN Administrative Agent</strong><em>CONVERSATION</em></header><div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0"><button type="button" data-agent-quick-question="What currently needs my approval?">Approval review</button><button type="button" data-agent-quick-question="Give me the operational brief and work queue.">Platform status</button><button type="button" data-agent-quick-question="What workflows are incomplete?">Incomplete workflows</button></div><div data-agent-conversation-log style="display:grid;gap:10px;margin:12px 0">${messages}</div><form data-agent-conversation-form><textarea name="question" rows="3" placeholder="Message SAIN about the platform..." required style="width:100%;box-sizing:border-box;background:#050505;border:1px solid #292929;border-radius:10px;color:#f5f5f5;padding:12px;resize:vertical"></textarea><div style="display:flex;gap:12px;align-items:center;margin-top:10px"><button type="submit">Send to SAIN</button><span data-agent-conversation-result style="font-size:12px;color:#d6a92f"></span></div></form></section>`;
   }
 
+  function workforceMarkup(status, agents, work) {
+    const registry = status.agentOS?.agents || [];
+    const byAgent = new Map();
+    for (const item of work || []) {
+      const counts = byAgent.get(item.agentId) || { total:0, completed:0, awaitingAcceptance:0 };
+      counts.total += 1;
+      if (['COMPLETED','ACCEPTED'].includes(item.state)) counts.completed += 1;
+      if (item.state === 'COMPLETED') counts.awaitingAcceptance += 1;
+      byAgent.set(item.agentId, counts);
+    }
+    const stored = new Map((agents || []).map((agent) => [agent.agentId, agent]));
+    return `<section class="admin-record-card" data-agent-operation-card><header><strong>SRA Agent Workforce</strong><em>${registry.length} ACTIVE AGENTS</em></header><p style="color:#b8b8b8;line-height:1.5">Agents continuously inspect their assigned lifecycle stages and prepare work. Protected value movement, publication, settlement, instrument issuance, and on-chain execution remain subject to administrator approval.</p><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:12px 0"><button type="button" data-run-agent-workforce>Run Workforce Now</button><span data-workforce-result style="color:#d6a92f;font-size:12px"></span></div></section><div data-agent-operation-card class="admin-record-list">${registry.map((agent) => { const persisted=stored.get(agent.agentId)||{}, counts=byAgent.get(agent.agentId)||{total:0,completed:0,awaitingAcceptance:0}; const stages=agent.workflowStages||persisted.workflowStages||[]; return `<article class="admin-record-card"><header><strong>${esc(agent.name||agent.agentId)}</strong><em>${esc(agent.state||persisted.state||'UNKNOWN')}</em></header><div class="admin-record-grid"><div><span>Agent ID</span><strong>${esc(agent.agentId)}</strong></div><div><span>Scope</span><strong>${esc(agent.scope||persisted.scope||'—')}</strong></div><div><span>Assigned stages</span><strong>${esc(stages.join(' · ')||'NONE')}</strong></div><div><span>Records monitored</span><strong>${Number(agent.recordCount||0).toLocaleString()}</strong></div><div><span>Work orders</span><strong>${counts.total.toLocaleString()}</strong></div><div><span>Completed / awaiting acceptance</span><strong>${counts.completed.toLocaleString()} / ${counts.awaitingAcceptance.toLocaleString()}</strong></div></div></article>`; }).join('')}</div>`;
+  }
+
   function setPresentationOwnership(workspace, tab) { const records = workspace.querySelector('.admin-workspace-records'); if (records) records.style.display = ownedTabs.has(tab) ? 'none' : ''; }
   function removeForeignAgentPresentation(workspace) { const controls = workspace?.querySelector('.admin-workspace-controls'); if (!controls) return; for (const child of [...controls.children]) if (!child.matches('[data-agent-operation-card]')) child.remove(); }
 
@@ -102,6 +123,14 @@
     const tab = workspace.dataset.activeTab;
     setPresentationOwnership(workspace, tab);
     if (tab === 'Conversation') { controls.insertAdjacentHTML('afterbegin', conversationMarkup()); return; }
+    if (tab === 'Workforce') {
+      try {
+        const [status, agents, work] = await Promise.all([json('/api/admin/agent-workforce/status'), json('/api/admin/agent-workforce/agents'), json('/api/admin/agent-workforce/work')]);
+        if (workspace.dataset.activeTab !== tab) return;
+        controls.insertAdjacentHTML('afterbegin', workforceMarkup(status, agents.records || [], work.records || []));
+      } catch (error) { if (workspace.dataset.activeTab === tab) controls.insertAdjacentHTML('afterbegin', `<div data-agent-operation-card class="admin-placeholder"><strong>Agent workforce unavailable.</strong><br>${esc(error.message)}</div>`); }
+      return;
+    }
     if (!['Suggested Actions','Workflow Approvals','Incomplete Workflows'].includes(tab)) return;
 
     try {
@@ -136,9 +165,15 @@
     catch (error) { if (result) result.textContent = error.message; button.disabled = false; }
   }
 
+  async function runWorkforce(workspace, button) {
+    const result = workspace.querySelector('[data-workforce-result]'); button.disabled = true; if (result) result.textContent = 'Agents are reviewing their assigned work…';
+    try { const response = await json('/api/admin/agent-workforce/run',{method:'POST',body:'{}'}); if (result) result.textContent = `${response.run?.completedCount || 0} work order(s) completed · ${response.run?.skippedCount || 0} already current`; window.dispatchEvent(new CustomEvent('sra:admin-refresh',{detail:{source:'agent-workforce'}})); await render(workspace); }
+    catch (error) { if (result) result.textContent = error.message; button.disabled = false; }
+  }
+
   function mount(workspace) {
     if (!workspace || mounted.has(workspace)) return; mounted.add(workspace); removeForeignAgentPresentation(workspace); const controls = workspace.querySelector('.admin-workspace-controls'); const presentationObserver = controls ? new MutationObserver(() => removeForeignAgentPresentation(workspace)) : null; presentationObserver?.observe(controls,{ childList:true });
-    workspace.addEventListener('click', (event) => { const executeButton = event.target.closest('[data-agent-execute-chain-job]'); if (executeButton) { void execute(workspace, executeButton); return; } const quick = event.target.closest('[data-agent-quick-question]'); if (quick) { void ask(workspace, quick.dataset.agentQuickQuestion); return; } if (event.target.closest('[data-admin-tab]')) queueMicrotask(() => void render(workspace)); });
+    workspace.addEventListener('click', (event) => { const runButton=event.target.closest('[data-run-agent-workforce]'); if(runButton){void runWorkforce(workspace,runButton);return;} const executeButton = event.target.closest('[data-agent-execute-chain-job]'); if (executeButton) { void execute(workspace, executeButton); return; } const quick = event.target.closest('[data-agent-quick-question]'); if (quick) { void ask(workspace, quick.dataset.agentQuickQuestion); return; } if (event.target.closest('[data-admin-tab]')) queueMicrotask(() => void render(workspace)); });
     workspace.addEventListener('submit', (event) => { const form = event.target.closest('[data-agent-conversation-form]'); if (!form) return; event.preventDefault(); const question = new FormData(form).get('question'); form.reset(); void ask(workspace, question); });
     window.addEventListener('sra:admin-workspace-synchronized', (event) => { if (event.detail?.workspaceId === 'agent') void render(workspace); });
     void render(workspace);
