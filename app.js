@@ -59,6 +59,8 @@ import { StellarSep24ClientService } from './services/stellar-sep24-client-servi
 import { SraAnchorPlatformService } from './services/sra-anchor-platform-service.js';
 import { createSraAnchorPlatformRouter } from './routes/sra-anchor-platform-router.js';
 import { TreasuryUsdcConversionService } from './services/treasury-usdc-conversion-service.js';
+import { CircleCctpAdapter } from './services/circle-cctp-adapter.js';
+import { CircleCctpTransferService } from './services/circle-cctp-transfer-service.js';
 import { TreasuryLedgerService } from './services/treasury-ledger-service.js';
 import { FinancingClosingService } from './services/financing-closing-service.js';
 import { TreasuryBankConnectorService } from './services/treasury-bank-connector-service.js';
@@ -177,6 +179,8 @@ export async function createApp(options = {}) {
   const platformTreasuryService = new PlatformTreasuryService(persistentDomain, platformLedgerService);
   const treasuryLedgerService = new TreasuryLedgerService(persistentDomain); await treasuryLedgerService.initialize();
   const treasuryUsdcConversionService = new TreasuryUsdcConversionService({ domain:persistentDomain, treasury:treasuryLedgerService, stellar:stellarUsdcAdapter, sep24:stellarSep24ClientService });
+  const circleCctpAdapter = new CircleCctpAdapter({ environment });
+  const circleCctpTransferService = new CircleCctpTransferService({ domain:persistentDomain, adapter:circleCctpAdapter, stellar:stellarUsdcAdapter });
   const financialStatementsService = new FinancialStatementsService(persistentDomain, platformLedgerService);
   const sraAgentService = new SraAgentService({
     persistentDomain,
@@ -208,7 +212,7 @@ export async function createApp(options = {}) {
   app.use('/api/ledger', createPlatformLedgerRouter(platformLedgerService));
   app.use('/api/institution-billing', createInstitutionalBillingRouter(institutionalBillingService));
   app.use('/api/servicing', createAssetServicingRouter(assetServicingService));
-  app.use('/api/platform-treasury', createPlatformTreasuryRouter(platformTreasuryService, treasuryUsdcConversionService));
+  app.use('/api/platform-treasury', createPlatformTreasuryRouter(platformTreasuryService, treasuryUsdcConversionService, circleCctpTransferService));
   app.use('/api/anchor-platform', createSraAnchorPlatformRouter(sraAnchorPlatformService));
   app.use('/api/financial-statements', createFinancialStatementsRouter(financialStatementsService));
   app.use('/api/observations', createObservationLayerRouter(observationLayerService));
@@ -252,6 +256,7 @@ export async function createApp(options = {}) {
     eventMarketService,
     authoritativeAssetRegistryService,
     sraAnchorPlatformService,
+    circleCctpTransferService,
     sraAgentService,
   };
 }

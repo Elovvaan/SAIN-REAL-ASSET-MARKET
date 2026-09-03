@@ -50,6 +50,25 @@ The repository includes `railway.json` and uses the Railway-provided `PORT` envi
 3. The service starts with `npm start`.
 4. The health check is available at `/api/health`.
 
+### Circle CCTP V2
+
+Treasury Wallets includes a governed Circle CCTP V2 workflow for moving genuine USDC from Stellar to another configured CCTP network. It records authorization, Stellar approval and burn transactions, Circle attestation, destination mint, and reconciliation as separate persistent stages.
+
+The integration defaults to testnet. Configure the following before enabling a destination:
+
+```text
+CIRCLE_CCTP_MODE=TESTNET
+STELLAR_SOROBAN_RPC_URL=https://soroban-testnet.stellar.org
+STELLAR_DISTRIBUTOR_SECRET=...
+CIRCLE_CCTP_API_URL=https://iris-api-sandbox.circle.com
+
+CCTP_ETHEREUM_RPC_URL=...
+CCTP_ETHEREUM_PRIVATE_KEY=...
+CCTP_ETHEREUM_MESSAGE_TRANSMITTER=...
+```
+
+Replace `ETHEREUM` with another supported EVM destination name (`BASE`, `ARBITRUM`, `OPTIMISM`, `AVALANCHE`, or `POLYGON`) to configure that executor. Production additionally requires `CIRCLE_CCTP_MODE=PRODUCTION`, a production Stellar Soroban RPC URL, and Circle's current production MessageTransmitter address for each enabled destination. Solana remains unavailable in the action selector until its destination mint executor is configured; the platform does not represent an unavailable route as executable.
+
 ## Repository Rule
 
 `SRA_MASTER_ARCHITECTURE.md` is the current architectural source of truth for SRA. The implementation should follow that document and should not redefine Verified Value or import unrelated architecture from outside the repository.
