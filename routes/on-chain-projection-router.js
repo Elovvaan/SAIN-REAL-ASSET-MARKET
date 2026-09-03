@@ -399,7 +399,23 @@ export function createOnChainProjectionRouter(service) {
       const records = service.domain.list('ON_CHAIN_USDC_MARKET')
         .filter((record)=>!requested.size || requested.has(record.assetId))
         .sort((left,right)=>String(right.createdAt || '').localeCompare(String(left.createdAt || '')));
-      return res.json({ records });
+      const readiness = service.domain.list('ON_CHAIN_USDC_MARKET_READINESS').filter((record)=>!requested.size || requested.has(record.assetId));
+      return res.json({ records, readiness });
+    } catch (error) { return handle(res, error); }
+  });
+
+  router.post('/assets/:assetId/markets/usdc/prepare', async (req, res) => {
+    try {
+      const actor = requireActor(req);
+      if (req.body?.confirmTrustline !== true) throw new Error('Explicit USDC trustline preparation confirmation is required.');
+      const asset = service.getAsset(req.params.assetId);
+      if (!asset) throw new Error('On-chain asset not found.');
+      if (upper(asset.network) !== 'STELLAR') throw new Error('USDC market preparation requires a Stellar-issued SRA asset.');
+      const prepared = await adapters.get('STELLAR').prepareUsdcMarket(asset);
+      const readinessId = `OCUSR-${asset.assetId}`;
+      const record = {id:readinessId,readinessId,assetId:asset.assetId,instrumentId:asset.instrumentId || null,...prepared,preparedBy:actor,updatedAt:new Date().toISOString()};
+      await service.domain.put('ON_CHAIN_USDC_MARKET_READINESS',readinessId,record,{actorId:actor,eventType:'SRAUSD_USDC_MARKET_TRUSTLINE_PREPARED'});
+      return res.status(201).json(record);
     } catch (error) { return handle(res, error); }
   });
 

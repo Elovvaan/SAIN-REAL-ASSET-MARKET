@@ -350,6 +350,20 @@ export class StellarTransferService {
     };
   }
 
+  async prepareUsdcMarket(record) {
+    const usdcRecord = this.usdcRecord();
+    const usdc = this.stellarAsset(usdcRecord);
+    const trustlineTransactionId = await this.ensureDistributorTrustline(usdc);
+    const [sraBalance, usdcBalance] = await Promise.all([this.assetBalance(record.assetAddress),this.assetBalance('USDC')]);
+    return {
+      network:NETWORK, market:`${record.asset || record.symbol}/USDC`, account:this.distributionAddress(),
+      usdcAssetAddress:usdcRecord.assetAddress, trustline:true, trustlineTransactionId,
+      sraBalance:sraBalance.balance, sraAvailable:sraBalance.available,
+      usdcBalance:usdcBalance.balance, usdcAvailable:usdcBalance.available,
+      state:'READY_TO_RECEIVE_USDC', preparedAt:new Date().toISOString(),
+    };
+  }
+
   async inspectUsdcMarket(record) {
     const { server, distributor } = this.ensure();
     const sra = this.stellarAsset(record);

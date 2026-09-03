@@ -14,6 +14,8 @@ test('Stellar activates a funded two-sided SRAUSD/USDC order book',()=>{
   assert.match(stellar,/manageSellOffer\(\{ selling:usdc, buying:sra/);
   assert.match(stellar,/spreadBps/);
   assert.match(stellar,/inspectUsdcMarket/);
+  assert.match(stellar,/prepareUsdcMarket/);
+  assert.match(stellar,/READY_TO_RECEIVE_USDC/);
   assert.match(stellar,/server\.orderbook\(sra, usdc\)/);
 });
 
@@ -22,6 +24,8 @@ test('market activation is governed, persisted, monitored, and exposed in Instru
   assert.match(router,/ON_CHAIN_USDC_MARKET/);
   assert.match(router,/SRAUSD_USDC_MARKET_ACTIVATED/);
   assert.match(router,/markets\/usdc\/activate/);
+  assert.match(router,/markets\/usdc\/prepare/);
+  assert.match(router,/ON_CHAIN_USDC_MARKET_READINESS/);
   assert.match(router,/markets\/usdc\/:marketId\/reconcile/);
   assert.match(ui,/Activate Two-Sided Market/);
   assert.match(ui,/data-reconcile-usdc-market/);
