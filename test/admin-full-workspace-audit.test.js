@@ -25,7 +25,8 @@ test('workspace API exposes the complete domain sources used by all tabs', () =>
     'connectorDefinitions','enterpriseConnections','extractionRequests','extractionResults','outboundEvents','lifecycleEvents','users'
   ];
   for (const source of requiredSources) assert.match(router, new RegExp(`${source}:`));
-  assert.match(router, /workspaceSources/);
+  assert.match(router, /const ADMIN_WORKSPACE_SOURCES = Object\.freeze/);
+  assert.match(router, /requestedKeys = requestedWorkspace \? new Set\(ADMIN_WORKSPACE_SOURCES\[requestedWorkspace\]\)/);
   assert.match(router, /workspaces,/);
 });
 
@@ -35,7 +36,7 @@ test('administration assets cannot remain stale after deployment', () => {
   assert.match(router, /lastModified: false/);
   assert.match(router, /maxAge: 0/);
   assert.match(client, /cache: 'no-store'/);
-  assert.match(shell, /_\=\$\{Date\.now\(\)\}/);
+  assert.match(shell, /admin-suite-shell\.css\?v=\$\{Date\.now\(\)\}/);
 });
 
 test('all workspace groups have dedicated record mappings', () => {
@@ -88,7 +89,7 @@ test('administration loads the single suite shell before lazy workspace controls
 });
 
 test('workspace opened during the shared initial request is rendered when that request settles', () => {
-  assert.match(shell, /const pending = loadWorkspaceData\(false\)/);
+  assert.match(shell, /const pending = loadWorkspaceData\(false,id\)/);
   assert.match(shell, /activeWorkspaceId\(\)/);
   assert.match(shell, /pending\.catch\(\(\)=>\{\}\)\.finally/);
 });
