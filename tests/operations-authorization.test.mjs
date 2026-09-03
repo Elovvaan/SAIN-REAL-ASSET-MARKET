@@ -132,6 +132,17 @@ test('private admin session is accepted for funding operations through the priva
   assert.equal(request.sraOperationsAuth.source, 'PRIVATE_ADMIN_SESSION');
 });
 
+test('private admin session supplies the authenticated actor for platform treasury operations', async () => {
+  const middleware = createOperationsAuthorization({ accessServiceProvider: provider({ admin }) });
+  const request = req({ path: '/api/platform-treasury/usdc-conversions', cookie: 'sra_admin_session=admin' });
+  const { response, nextCalled } = await run(middleware, request);
+  assert.equal(response.statusCode, 200);
+  assert.equal(nextCalled, true);
+  assert.equal(request.sraOperationsAuth.actorId, 'USR-ADMIN');
+  assert.equal(request.sraOperationsAuth.source, 'PRIVATE_ADMIN_SESSION');
+  assert.equal(request.sraIdentity.activeCapacity, 'PLATFORM_ADMIN');
+});
+
 test('expired or signed-out session returns 401', async () => {
   const middleware = createOperationsAuthorization({ accessServiceProvider: provider({ expired: null, signedout: null }) });
   for (const token of ['expired', 'signedout']) {
