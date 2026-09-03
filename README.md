@@ -69,6 +69,12 @@ CCTP_ETHEREUM_MESSAGE_TRANSMITTER=...
 
 Replace `ETHEREUM` with another supported EVM destination name (`BASE`, `ARBITRUM`, `OPTIMISM`, `AVALANCHE`, or `POLYGON`) to configure that executor. Production additionally requires `CIRCLE_CCTP_MODE=PRODUCTION`, a production Stellar Soroban RPC URL, and Circle's current production MessageTransmitter address for each enabled destination. Solana remains unavailable in the action selector until its destination mint executor is configured; the platform does not represent an unavailable route as executable.
 
+### SRAUSD / USDC conversion
+
+The Instruments → On-Chain workstation can quote and execute a live Stellar strict-send path payment from an issued SRA asset into USDC. SRA stores the quote, explicit execution approval, confirmed transaction, and reconciled SRAUSD sold / USDC received amounts. The swap fails without live market liquidity and never manufactures or relabels USDC.
+
+USDC identity follows `STELLAR_NETWORK`: the official public-network issuer is used for Mainnet and the official Testnet issuer is used for Testnet. `STELLAR_USDC_ISSUER` may override the issuer explicitly when required by the selected environment.
+
 ## Repository Rule
 
 `SRA_MASTER_ARCHITECTURE.md` is the current architectural source of truth for SRA. The implementation should follow that document and should not redefine Verified Value or import unrelated architecture from outside the repository.

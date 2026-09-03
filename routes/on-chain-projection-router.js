@@ -121,6 +121,7 @@ export function createOnChainProjectionRouter(service) {
   const router = express.Router();
   router.use(normalizeDirectMount);
   const issuanceSourcesInFlight = new Set();
+  const swapsInFlight = new Set();
 
   const stellar = new StellarTransferService({ domain: service.domain });
   const bitcoin = new BitcoinTransferService();
@@ -388,6 +389,75 @@ export function createOnChainProjectionRouter(service) {
         .filter((record) => !requested.size || requested.has(record.assetId))
         .sort((left, right) => String(right.createdAt || '').localeCompare(String(left.createdAt || '')));
       return res.json({ records });
+    } catch (error) { return handle(res, error); }
+  });
+
+  router.post('/assets/:assetId/markets/usdc/quotes', async (req, res) => {
+    try {
+      const actor = requireActor(req);
+      const asset = service.getAsset(req.params.assetId);
+      if (!asset) throw new Error('On-chain asset not found.');
+      if (upper(asset.network) !== 'STELLAR') throw new Error('This SRAUSD/USDC conversion workflow currently requires a Stellar-issued SRA asset.');
+      if (Number(asset.issuedSupply || 0) <= 0) throw new Error('Issue SRAUSD supply before requesting a USDC conversion quote.');
+      const adapter = adapters.get('STELLAR');
+      const health = await adapterHealth('STELLAR', adapter);
+      if (!health.ready) throw Object.assign(new Error(`Stellar distribution account is not ready. ${health.error || ''}`.trim()), { code:'ON_CHAIN_NETWORK_NOT_READY' });
+      const quote = await adapter.quoteUsdcSwap(asset, req.body || {});
+      const quoteId = `OCSQ-${crypto.randomUUID().split('-')[0].toUpperCase()}`;
+      const record = { id:quoteId, quoteId, assetId:asset.assetId, instrumentId:asset.instrumentId || null, ...quote, createdBy:actor, createdAt:new Date().toISOString() };
+      await service.domain.put('ON_CHAIN_SWAP_QUOTE', quoteId, record, { actorId:actor, eventType:'SRAUSD_USDC_SWAP_QUOTED' });
+      return res.status(201).json(record);
+    } catch (error) { return handle(res, error); }
+  });
+
+  router.post('/assets/:assetId/markets/usdc/swaps', async (req, res) => {
+    const quoteId = text(req.body?.quoteId);
+    try {
+      const actor = requireActor(req);
+      if (req.body?.confirmSwap !== true) throw new Error('Explicit SRAUSD/USDC swap confirmation is required.');
+      const asset = service.getAsset(req.params.assetId);
+      if (!asset) throw new Error('On-chain asset not found.');
+      const quote = service.domain.get('ON_CHAIN_SWAP_QUOTE', quoteId);
+      if (!quote || quote.assetId !== asset.assetId) throw new Error('SRAUSD/USDC quote was not found for this asset.');
+      if (quote.state !== 'QUOTED') throw new Error(`SRAUSD/USDC quote is ${quote.state || 'unavailable'} and cannot be executed.`);
+      if (swapsInFlight.has(quoteId)) throw Object.assign(new Error('This SRAUSD/USDC quote is already being executed.'), { code:'SRAUSD_USDC_SWAP_IN_PROGRESS' });
+      swapsInFlight.add(quoteId);
+      try {
+        const execution = await adapters.get('STELLAR').executeUsdcSwap(asset, quote);
+        if (execution?.confirmation?.state !== 'CONFIRMED') throw Object.assign(new Error('Stellar SRAUSD/USDC swap was not confirmed.'), { code:'SRAUSD_USDC_SWAP_NOT_CONFIRMED', transactionId:execution?.transactionId });
+        const completedAt = new Date().toISOString();
+        const swapId = `OCSW-${execution.transactionId}`;
+        const swap = { id:swapId, swapId, quoteId, assetId:asset.assetId, instrumentId:asset.instrumentId || null, ...execution, approvedBy:actor, executedAt:completedAt, createdAt:completedAt };
+        const consumedQuote = { ...quote, state:'EXECUTED', swapId, transactionId:execution.transactionId, executedBy:actor, executedAt:completedAt };
+        await service.domain.atomicPut([
+          { type:'ON_CHAIN_SWAP_QUOTE', id:quoteId, payload:consumedQuote, actorId:actor, eventType:'SRAUSD_USDC_SWAP_QUOTE_EXECUTED' },
+          { type:'ON_CHAIN_ASSET_SWAP', id:swapId, payload:swap, actorId:actor, eventType:'SRAUSD_USDC_SWAP_CONFIRMED' },
+        ]);
+        return res.status(201).json(swap);
+      } finally { swapsInFlight.delete(quoteId); }
+    } catch (error) { return handle(res, error); }
+  });
+
+  router.get('/market-swaps', (req, res) => {
+    try {
+      const requested = new Set(text(req.query.assetIds).split(',').filter(Boolean));
+      const records = service.domain.list('ON_CHAIN_ASSET_SWAP').filter((record)=>!requested.size || requested.has(record.assetId))
+        .sort((left,right)=>String(right.createdAt || '').localeCompare(String(left.createdAt || '')));
+      return res.json({ records });
+    } catch (error) { return handle(res, error); }
+  });
+
+  router.post('/assets/:assetId/markets/usdc/swaps/:swapId/reconcile', async (req, res) => {
+    try {
+      const actor = requireActor(req);
+      const asset = service.getAsset(req.params.assetId);
+      if (!asset) throw new Error('On-chain asset not found.');
+      const swap = service.domain.get('ON_CHAIN_ASSET_SWAP', req.params.swapId);
+      if (!swap || swap.assetId !== asset.assetId) throw new Error('SRAUSD/USDC swap was not found for this asset.');
+      const reconciliation = await adapters.get('STELLAR').reconcileUsdcSwap(asset, swap);
+      const updated = { ...swap, ...reconciliation, reconciledBy:actor, updatedAt:new Date().toISOString() };
+      await service.domain.put('ON_CHAIN_ASSET_SWAP', swap.swapId, updated, { actorId:actor, eventType:'SRAUSD_USDC_SWAP_RECONCILED' });
+      return res.json(updated);
     } catch (error) { return handle(res, error); }
   });
 

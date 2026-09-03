@@ -2,7 +2,7 @@ import * as StellarSdk from '@stellar/stellar-sdk';
 import { PublicKey } from '@solana/web3.js';
 import { Contract as EthersContract, JsonRpcProvider, Wallet } from 'ethers';
 import { CCTP_DOMAINS } from './circle-cctp-transfer-service.js';
-import { STELLAR_USDC } from './stellar-transfer-service.js';
+import { STELLAR_USDC, stellarUsdcIssuer } from './stellar-transfer-service.js';
 
 const CONTRACTS={
   TESTNET:{tokenMessengerMinter:'CDNG7HXAPBWICI2E3AUBP3YZWZELJLYSB6F5CC7WLDTLTHVM74SLRTHP'},
@@ -28,7 +28,7 @@ export class CircleCctpAdapter {
     this.attestationUrl=text(environment.CIRCLE_CCTP_API_URL)||(this.mode==='PRODUCTION'?'https://iris-api.circle.com':'https://iris-api-sandbox.circle.com');
   }
   signer(){const secret=text(this.environment.STELLAR_DISTRIBUTOR_SECRET);if(!secret)throw new Error('STELLAR_DISTRIBUTOR_SECRET is required for a CCTP source burn.');return StellarSdk.Keypair.fromSecret(secret);}
-  usdcContract(){const asset=new StellarSdk.Asset(STELLAR_USDC.asset,STELLAR_USDC.issuerAddress);return StellarSdk.StrKey.encodeContract(Buffer.from(asset.contractId(this.passphrase),'hex'));}
+  usdcContract(){const asset=new StellarSdk.Asset(STELLAR_USDC.asset,stellarUsdcIssuer(this.environment,this.passphrase));return StellarSdk.StrKey.encodeContract(Buffer.from(asset.contractId(this.passphrase),'hex'));}
   status(){return{mode:this.mode,sourceReady:Boolean(this.rpcUrl&&text(this.environment.STELLAR_DISTRIBUTOR_SECRET)),stellarRpcConfigured:Boolean(this.rpcUrl),attestationApi:this.attestationUrl,contracts:this.contracts};}
   destinationStatus(network){
     if(network==='SOLANA')return{ready:false,execution:'DESTINATION_EXECUTOR_REQUIRED',reason:'Solana CCTP destination executor is not configured.'};

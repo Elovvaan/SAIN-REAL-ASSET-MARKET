@@ -3,6 +3,14 @@ import * as StellarSdk from '@stellar/stellar-sdk';
 const NETWORK = 'STELLAR';
 const NATIVE_ASSET = 'XLM';
 const ASSET_TYPE = 'ON_CHAIN_ASSET';
+const STELLAR_USDC_ISSUERS = Object.freeze({
+  PUBLIC: 'GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN',
+  TESTNET: 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5',
+});
+export function stellarUsdcIssuer(environment = process.env, passphrase = networkPassphrase(environment)) {
+  const network = passphrase === StellarSdk.Networks.TESTNET ? 'TESTNET' : 'PUBLIC';
+  return text(environment.STELLAR_USDC_ISSUER || STELLAR_USDC_ISSUERS[network]);
+}
 export const STELLAR_USDC = Object.freeze({
   network: NETWORK,
   asset: 'USDC',
@@ -21,6 +29,15 @@ function amount(value) {
     throw new Error('amount must be a positive Stellar amount with no more than 7 decimal places.');
   }
   return raw;
+}
+function amountSubunits(value) {
+  const [whole, fraction=''] = amount(value).split('.');
+  return BigInt(whole) * 10_000_000n + BigInt((fraction + '0000000').slice(0, 7));
+}
+function subunitsAmount(value) {
+  const whole = value / 10_000_000n;
+  const fraction = String(value % 10_000_000n).padStart(7, '0');
+  return `${whole}.${fraction}`;
 }
 function assetCode(value) {
   const code = upper(value);
@@ -53,6 +70,11 @@ function accountHealthError(role, address, error) {
   return `${role} account ${address} could not be loaded from Horizon: ${String(error?.message || error)}.`;
 }
 
+function horizonAsset(asset) {
+  if (asset.asset_type === 'native') return StellarSdk.Asset.native();
+  return new StellarSdk.Asset(asset.asset_code, asset.asset_issuer);
+}
+
 export class StellarTransferService {
   constructor(options = {}) {
     this.domain = options.domain || null;
@@ -76,7 +98,7 @@ export class StellarTransferService {
       distributorConfigured,
       configured: issuerConfigured && distributorConfigured && Boolean(this.horizonUrl) && Boolean(this.passphrase),
       ready: issuerConfigured && distributorConfigured && Boolean(this.horizonUrl) && Boolean(this.passphrase),
-      capabilities: ['CREATE_ASSET', 'ISSUE_ASSET', 'TRANSFER_NATIVE', 'TRANSFER_ASSET', 'CREATE_DEX_OFFER'],
+      capabilities: ['CREATE_ASSET', 'ISSUE_ASSET', 'TRANSFER_NATIVE', 'TRANSFER_ASSET', 'CREATE_DEX_OFFER', 'SWAP_FOR_USDC'],
     };
   }
 
@@ -93,6 +115,13 @@ export class StellarTransferService {
   }
 
   distributionAddress() { return this.ensure().distributor.publicKey(); }
+
+  usdcRecord() {
+    const network = this.passphrase === StellarSdk.Networks.TESTNET ? 'TESTNET' : 'PUBLIC';
+    const issuerAddress = stellarUsdcIssuer(this.environment, this.passphrase);
+    if (!StellarSdk.StrKey.isValidEd25519PublicKey(issuerAddress)) throw new Error('STELLAR_USDC_ISSUER is not a valid Stellar issuer address.');
+    return { ...STELLAR_USDC, issuerAddress, assetAddress:`USDC:${issuerAddress}`, networkEnvironment:network };
+  }
 
   async health() {
     const configuration = this.status();
@@ -130,7 +159,8 @@ export class StellarTransferService {
   assetRecord(asset) {
     const normalized = upper(asset);
     if (normalized === NATIVE_ASSET) return { native: true, asset: NATIVE_ASSET };
-    if ([STELLAR_USDC.asset, STELLAR_USDC.assetAddress].map(upper).includes(normalized)) return STELLAR_USDC;
+    const usdc = this.usdcRecord();
+    if ([usdc.asset, usdc.assetAddress].map(upper).includes(normalized)) return usdc;
     const record = (this.domain?.list?.(ASSET_TYPE) || []).find((candidate) => {
       if (upper(candidate.network) !== NETWORK) return false;
       return [candidate.asset, candidate.symbol, candidate.instrumentId, candidate.assetId, candidate.assetAddress]
@@ -280,6 +310,70 @@ export class StellarTransferService {
       transactionId: result.hash,
       confirmation: { state: 'CONFIRMED', transactionId: result.hash, ledger: result.ledger },
       state: 'CONFIRMED',
+    };
+  }
+
+  async quoteUsdcSwap(record, input = {}) {
+    const { server, distributor } = this.ensure();
+    const selling = this.stellarAsset(record);
+    const sendAmount = amount(input.sellAmount);
+    const slippageBps = Number(input.slippageBps ?? 100);
+    if (!Number.isInteger(slippageBps) || slippageBps < 0 || slippageBps > 5000) throw new Error('slippageBps must be an integer from 0 to 5000.');
+    const usdcRecord = this.usdcRecord();
+    const buying = this.stellarAsset(usdcRecord);
+    const sourceBalance = await this.assetBalance(record.assetAddress);
+    if (Number(sendAmount) > Number(sourceBalance.balance || 0)) throw new Error(`Swap exceeds the live distribution balance of ${sourceBalance.balance || 0} ${record.asset || record.symbol}.`);
+    const response = await server.strictSendPaths(selling, sendAmount, [buying]).call();
+    const paths = response?.records || [];
+    if (!paths.length) {
+      const error = new Error(`No live ${record.asset || record.symbol}/USDC order-book path is currently available on Stellar.`);
+      error.code = 'STELLAR_USDC_LIQUIDITY_UNAVAILABLE';
+      throw error;
+    }
+    const best = [...paths].sort((a,b)=>amountSubunits(a.destination_amount) > amountSubunits(b.destination_amount) ? -1 : 1)[0];
+    const expectedUsdc = amount(best.destination_amount);
+    const minimumUnits = amountSubunits(expectedUsdc) * BigInt(10000 - slippageBps) / 10000n;
+    if (minimumUnits <= 0n) throw new Error('Live SRAUSD/USDC quote is too small to execute at Stellar precision.');
+    const minimumUsdc = subunitsAmount(minimumUnits);
+    return {
+      network:NETWORK, market:`${record.asset || record.symbol}/USDC`, side:'SELL_SRA_ASSET_FOR_USDC',
+      sourceAccount:distributor.publicKey(), sellAmount:sendAmount, expectedUsdc, minimumUsdc,
+      slippageBps, path:(best.path || []).map((item)=>({ assetType:item.asset_type, assetCode:item.asset_code || 'XLM', issuerAddress:item.asset_issuer || null })),
+      quotedAt:new Date().toISOString(), expiresAt:new Date(Date.now()+60_000).toISOString(), state:'QUOTED',
+    };
+  }
+
+  async executeUsdcSwap(record, quote) {
+    if (new Date(quote.expiresAt).getTime() <= Date.now()) throw new Error('SRAUSD/USDC quote has expired. Request a new quote.');
+    const { server, distributor } = this.ensure();
+    const selling = this.stellarAsset(record);
+    const buying = this.stellarAsset(this.usdcRecord());
+    const trustlineTransactionId = await this.ensureDistributorTrustline(buying);
+    const account = await server.loadAccount(distributor.publicKey());
+    const path = (quote.path || []).map((item)=>horizonAsset({ asset_type:item.assetType, asset_code:item.assetCode, asset_issuer:item.issuerAddress }));
+    const tx = new StellarSdk.TransactionBuilder(account, { fee:StellarSdk.BASE_FEE, networkPassphrase:this.passphrase })
+      .addOperation(StellarSdk.Operation.pathPaymentStrictSend({
+        sendAsset:selling, sendAmount:amount(quote.sellAmount), destination:distributor.publicKey(),
+        destAsset:buying, destMin:amount(quote.minimumUsdc), path,
+      })).setTimeout(100).build();
+    tx.sign(distributor);
+    const result = await server.submitTransaction(tx);
+    return {
+      network:NETWORK, market:quote.market, side:quote.side, sellAmount:quote.sellAmount,
+      quotedUsdc:quote.expectedUsdc, minimumUsdc:quote.minimumUsdc, sourceAccount:distributor.publicKey(),
+      destinationAccount:distributor.publicKey(), trustlineTransactionId, transactionId:result.hash,
+      confirmation:{ state:'CONFIRMED', transactionId:result.hash, ledger:result.ledger }, state:'CONFIRMED',
+    };
+  }
+
+  async reconcileUsdcSwap(_record, swap) {
+    const { server } = this.ensure();
+    const response = await server.operations().forTransaction(swap.transactionId).call();
+    const operation = (response?.records || []).find((item)=>item.type === 'path_payment_strict_send');
+    if (!operation) throw new Error('Confirmed Stellar SRAUSD/USDC path-payment operation was not found.');
+    return {
+      actualSraSold:text(operation.source_amount || swap.sellAmount), actualUsdcReceived:text(operation.amount),
+      marketState:'FILLED', state:'RECONCILED', reconciledAt:new Date().toISOString(),
     };
   }
 
