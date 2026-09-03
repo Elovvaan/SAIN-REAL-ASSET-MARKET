@@ -56,6 +56,8 @@ import { InstitutionParticipationService } from './services/institution-particip
 import { SettlementRailGatewayService } from './services/settlement-rail-gateway-service.js';
 import { StellarUsdcSettlementService } from './services/stellar-usdc-settlement-service.js';
 import { StellarSep24ClientService } from './services/stellar-sep24-client-service.js';
+import { SraAnchorPlatformService } from './services/sra-anchor-platform-service.js';
+import { createSraAnchorPlatformRouter } from './routes/sra-anchor-platform-router.js';
 import { TreasuryUsdcConversionService } from './services/treasury-usdc-conversion-service.js';
 import { TreasuryLedgerService } from './services/treasury-ledger-service.js';
 import { FinancingClosingService } from './services/financing-closing-service.js';
@@ -114,6 +116,7 @@ const ledgerSeed = [
 
 export async function createApp(options = {}) {
   const app = express();
+  const environment = options.environment || process.env;
   const database = options.database || new DatabaseService({ connectionString: options.connectionString });
   await database.initialize();
   const persistentDomain = new PersistentDomainService(database);
@@ -124,7 +127,6 @@ export async function createApp(options = {}) {
   app.disable('x-powered-by');
   app.use(express.json({ limit: '1mb' }));
   app.get('/brand-logo', (_req, res) => res.sendFile(path.join(__dirname, 'SRA LOGO.jpg')));
-  if (options.serveStatic !== false) app.use(express.static(path.join(__dirname, 'public')));
   if (options.seedMarketplace !== false) {
     await persistentDomain.seed(RECORD_TYPES.ASSET_ACCOUNT, marketplaceSeed.assets);
     await persistentDomain.seed(RECORD_TYPES.PROJECT_ACCOUNT, marketplaceSeed.projects);
@@ -169,7 +171,8 @@ export async function createApp(options = {}) {
   const assetServicingService = new AssetServicingService(persistentDomain);
   const financingClosingSettlementService = new FinancingClosingService(persistentDomain, assetServicingService); await financingClosingSettlementService.initialize();
   const stellarUsdcAdapter = new StellarTransferService({ domain:persistentDomain });
-  const stellarSep24ClientService = new StellarSep24ClientService({ stellar:stellarUsdcAdapter });
+  const stellarSep24ClientService = new StellarSep24ClientService({ stellar:stellarUsdcAdapter, environment });
+  const sraAnchorPlatformService = new SraAnchorPlatformService({ domain:persistentDomain, environment });
   const stellarUsdcSettlementService = new StellarUsdcSettlementService({ domain:persistentDomain, gateway:settlementRailGatewayService, closingService:financingClosingSettlementService, stellar:stellarUsdcAdapter, sep24:stellarSep24ClientService });
   const platformTreasuryService = new PlatformTreasuryService(persistentDomain, platformLedgerService);
   const treasuryLedgerService = new TreasuryLedgerService(persistentDomain); await treasuryLedgerService.initialize();
@@ -190,6 +193,12 @@ export async function createApp(options = {}) {
   const onboardingRouter = await createOnboardingRouter(domainStore, database, persistentDomain);
   const authoritativeAssetRegistryService = installAuthoritativeAssetRegistry(app, { persistentDomain, accessService });
 
+  app.get('/.well-known/stellar.toml', (_req, res) => {
+    try { return res.type('text/plain').send(sraAnchorPlatformService.stellarToml()); }
+    catch (error) { return res.status(503).type('text/plain').send(`# SRA Anchor Platform unavailable\n# ${error.message}\n`); }
+  });
+  if (options.serveStatic !== false) app.use(express.static(path.join(__dirname, 'public')));
+
   app.use('/api/access', createAccessRouter(marketplace, accessService));
   app.use('/api/participation', createParticipationRouter(marketplace, accessService, persistentDomain));
   app.use('/api/institutions', createInstitutionParticipationRouter(institutionParticipationService, accessService));
@@ -200,6 +209,7 @@ export async function createApp(options = {}) {
   app.use('/api/institution-billing', createInstitutionalBillingRouter(institutionalBillingService));
   app.use('/api/servicing', createAssetServicingRouter(assetServicingService));
   app.use('/api/platform-treasury', createPlatformTreasuryRouter(platformTreasuryService, treasuryUsdcConversionService));
+  app.use('/api/anchor-platform', createSraAnchorPlatformRouter(sraAnchorPlatformService));
   app.use('/api/financial-statements', createFinancialStatementsRouter(financialStatementsService));
   app.use('/api/observations', createObservationLayerRouter(observationLayerService));
   app.use('/api/financial-records', createFinancialRecordRouter(financialRecordService));
@@ -241,6 +251,7 @@ export async function createApp(options = {}) {
     productiveBasketService,
     eventMarketService,
     authoritativeAssetRegistryService,
+    sraAnchorPlatformService,
     sraAgentService,
   };
 }
