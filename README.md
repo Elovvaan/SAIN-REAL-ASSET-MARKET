@@ -73,6 +73,8 @@ Replace `ETHEREUM` with another supported EVM destination name (`BASE`, `ARBITRU
 
 The Instruments → On-Chain workstation can quote and execute a live Stellar strict-send path payment from an issued SRA asset into USDC. SRA stores the quote, explicit execution approval, confirmed transaction, and reconciled SRAUSD sold / USDC received amounts. The swap fails without live market liquidity and never manufactures or relabels USDC.
 
+The same workstation can activate the maker side of that market by allocating live SRAUSD and genuine Stellar USDC from the distribution account. SRA submits a two-sided Stellar order book around an administrator-approved reference price and spread, persists the market and transaction identity, and reconciles current balances plus bid/ask depth from Horizon. Activation is blocked unless both live inventories are present.
+
 USDC identity follows `STELLAR_NETWORK`: the official public-network issuer is used for Mainnet and the official Testnet issuer is used for Testnet. `STELLAR_USDC_ISSUER` may override the issuer explicitly when required by the selected environment.
 
 ## Repository Rule

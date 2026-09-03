@@ -122,6 +122,7 @@ export function createOnChainProjectionRouter(service) {
   router.use(normalizeDirectMount);
   const issuanceSourcesInFlight = new Set();
   const swapsInFlight = new Set();
+  const marketActivationsInFlight = new Set();
 
   const stellar = new StellarTransferService({ domain: service.domain });
   const bitcoin = new BitcoinTransferService();
@@ -389,6 +390,53 @@ export function createOnChainProjectionRouter(service) {
         .filter((record) => !requested.size || requested.has(record.assetId))
         .sort((left, right) => String(right.createdAt || '').localeCompare(String(left.createdAt || '')));
       return res.json({ records });
+    } catch (error) { return handle(res, error); }
+  });
+
+  router.get('/usdc-markets', (req, res) => {
+    try {
+      const requested = new Set(text(req.query.assetIds).split(',').filter(Boolean));
+      const records = service.domain.list('ON_CHAIN_USDC_MARKET')
+        .filter((record)=>!requested.size || requested.has(record.assetId))
+        .sort((left,right)=>String(right.createdAt || '').localeCompare(String(left.createdAt || '')));
+      return res.json({ records });
+    } catch (error) { return handle(res, error); }
+  });
+
+  router.post('/assets/:assetId/markets/usdc/activate', async (req, res) => {
+    const assetId = req.params.assetId;
+    try {
+      const actor = requireActor(req);
+      if (req.body?.confirmMarketActivation !== true) throw new Error('Explicit SRAUSD/USDC market activation confirmation is required.');
+      const asset = service.getAsset(assetId);
+      if (!asset) throw new Error('On-chain asset not found.');
+      if (upper(asset.network) !== 'STELLAR') throw new Error('SRAUSD/USDC market activation currently requires a Stellar-issued SRA asset.');
+      if (Number(asset.issuedSupply || 0) <= 0) throw new Error('Issue SRAUSD supply before activating its USDC market.');
+      if (marketActivationsInFlight.has(assetId)) throw Object.assign(new Error('This SRAUSD/USDC market activation is already in progress.'), {code:'SRAUSD_USDC_MARKET_IN_PROGRESS'});
+      marketActivationsInFlight.add(assetId);
+      try {
+        const activation = await adapters.get('STELLAR').activateUsdcMarket(asset, req.body || {});
+        if (activation?.confirmation?.state !== 'CONFIRMED') throw Object.assign(new Error('Stellar SRAUSD/USDC market activation was not confirmed.'), {code:'SRAUSD_USDC_MARKET_NOT_CONFIRMED'});
+        const createdAt = new Date().toISOString();
+        const marketId = `OCUSM-${activation.transactionId}`;
+        const record = {id:marketId,marketId,assetId:asset.assetId,instrumentId:asset.instrumentId || null,...activation,createdBy:actor,createdAt,updatedAt:createdAt};
+        await service.domain.put('ON_CHAIN_USDC_MARKET',marketId,record,{actorId:actor,eventType:'SRAUSD_USDC_MARKET_ACTIVATED'});
+        return res.status(201).json(record);
+      } finally { marketActivationsInFlight.delete(assetId); }
+    } catch (error) { return handle(res, error); }
+  });
+
+  router.post('/assets/:assetId/markets/usdc/:marketId/reconcile', async (req, res) => {
+    try {
+      const actor = requireActor(req);
+      const asset = service.getAsset(req.params.assetId);
+      if (!asset) throw new Error('On-chain asset not found.');
+      const market = service.domain.get('ON_CHAIN_USDC_MARKET',req.params.marketId);
+      if (!market || market.assetId !== asset.assetId) throw new Error('SRAUSD/USDC market record was not found for this asset.');
+      const inspection = await adapters.get('STELLAR').inspectUsdcMarket(asset);
+      const updated = {...market,...inspection,state:inspection.state,updatedBy:actor,updatedAt:new Date().toISOString()};
+      await service.domain.put('ON_CHAIN_USDC_MARKET',market.marketId,updated,{actorId:actor,eventType:'SRAUSD_USDC_MARKET_RECONCILED'});
+      return res.json(updated);
     } catch (error) { return handle(res, error); }
   });
 

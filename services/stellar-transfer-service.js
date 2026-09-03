@@ -98,7 +98,7 @@ export class StellarTransferService {
       distributorConfigured,
       configured: issuerConfigured && distributorConfigured && Boolean(this.horizonUrl) && Boolean(this.passphrase),
       ready: issuerConfigured && distributorConfigured && Boolean(this.horizonUrl) && Boolean(this.passphrase),
-      capabilities: ['CREATE_ASSET', 'ISSUE_ASSET', 'TRANSFER_NATIVE', 'TRANSFER_ASSET', 'CREATE_DEX_OFFER', 'SWAP_FOR_USDC'],
+      capabilities: ['CREATE_ASSET', 'ISSUE_ASSET', 'TRANSFER_NATIVE', 'TRANSFER_ASSET', 'CREATE_DEX_OFFER', 'CREATE_USDC_MARKET', 'SWAP_FOR_USDC'],
     };
   }
 
@@ -185,7 +185,10 @@ export class StellarTransferService {
     const stellarAsset = this.stellarAsset(record);
     const balance = account.balances.find((candidate) => candidate.asset_type !== 'native'
       && candidate.asset_code === stellarAsset.code && candidate.asset_issuer === stellarAsset.issuer);
-    return { asset: stellarAsset.code, issuerAddress: stellarAsset.issuer, balance: text(balance?.balance || '0'), account: distributor.publicKey(), trustline: Boolean(balance) };
+    const total = Number(balance?.balance || 0);
+    const sellingLiabilities = Number(balance?.selling_liabilities || 0);
+    const available = Math.max(0,total-sellingLiabilities).toFixed(7);
+    return { asset: stellarAsset.code, issuerAddress: stellarAsset.issuer, balance:text(balance?.balance || '0'), sellingLiabilities:text(balance?.selling_liabilities || '0'), available, account:distributor.publicKey(), trustline:Boolean(balance) };
   }
 
   async recipientStatus(destination, asset = 'USDC') {
@@ -313,6 +316,58 @@ export class StellarTransferService {
     };
   }
 
+  async activateUsdcMarket(record, input = {}) {
+    const { server, distributor } = this.ensure();
+    const sra = this.stellarAsset(record);
+    const usdcRecord = this.usdcRecord();
+    const usdc = this.stellarAsset(usdcRecord);
+    const sraSellAmount = amount(input.sraSellAmount);
+    const usdcSellAmount = amount(input.usdcSellAmount);
+    const usdcPerSra = amount(input.usdcPerSra);
+    const referencePrice = Number(usdcPerSra);
+    const spreadBps = Number(input.spreadBps ?? 100);
+    if (!Number.isFinite(referencePrice) || referencePrice <= 0) throw new Error('USDC per SRAUSD must be greater than zero.');
+    if (!Number.isInteger(spreadBps) || spreadBps < 1 || spreadBps > 2500) throw new Error('spreadBps must be an integer from 1 to 2500.');
+    const askUsdcPerSra = referencePrice * (1 + spreadBps / 10000);
+    const bidUsdcPerSra = referencePrice * (1 - spreadBps / 10000);
+    const [sraBalance, usdcBalance] = await Promise.all([this.assetBalance(record.assetAddress), this.assetBalance('USDC')]);
+    if (Number(sraSellAmount) > Number(sraBalance.available || 0)) throw new Error(`Market allocation exceeds the live uncommitted distribution balance of ${sraBalance.available || 0} SRAUSD.`);
+    if (!usdcBalance.trustline) throw new Error('The Stellar distribution account must receive a USDC trustline before USDC market inventory can be allocated.');
+    if (Number(usdcSellAmount) > Number(usdcBalance.available || 0)) throw new Error(`Market allocation exceeds the live uncommitted distribution balance of ${usdcBalance.available || 0} USDC.`);
+    const account = await server.loadAccount(distributor.publicKey());
+    const tx = new StellarSdk.TransactionBuilder(account, { fee:String(Number(StellarSdk.BASE_FEE) * 2), networkPassphrase:this.passphrase })
+      .addOperation(StellarSdk.Operation.manageSellOffer({ selling:sra, buying:usdc, amount:sraSellAmount, price:askUsdcPerSra.toFixed(7) }))
+      .addOperation(StellarSdk.Operation.manageSellOffer({ selling:usdc, buying:sra, amount:usdcSellAmount, price:(1 / bidUsdcPerSra).toFixed(7) }))
+      .setTimeout(100).build();
+    tx.sign(distributor);
+    const result = await server.submitTransaction(tx);
+    return {
+      network:NETWORK, market:`${record.asset || record.symbol}/USDC`, marketType:'STELLAR_ORDER_BOOK',
+      account:distributor.publicKey(), sraAssetAddress:record.assetAddress, usdcAssetAddress:usdcRecord.assetAddress,
+      sraSellAmount, usdcSellAmount, referenceUsdcPerSra:referencePrice.toFixed(7), spreadBps,
+      askUsdcPerSra:askUsdcPerSra.toFixed(7), bidUsdcPerSra:bidUsdcPerSra.toFixed(7),
+      transactionId:result.hash, confirmation:{state:'CONFIRMED',transactionId:result.hash,ledger:result.ledger}, state:'ACTIVE',
+    };
+  }
+
+  async inspectUsdcMarket(record) {
+    const { server, distributor } = this.ensure();
+    const sra = this.stellarAsset(record);
+    const usdc = this.stellarAsset(this.usdcRecord());
+    const [account, orderBook] = await Promise.all([
+      server.loadAccount(distributor.publicKey()),
+      server.orderbook(sra, usdc).limit(20).call(),
+    ]);
+    const balanceFor = (asset) => account.balances.find((item)=>item.asset_type !== 'native' && item.asset_code === asset.code && item.asset_issuer === asset.issuer)?.balance || '0';
+    return {
+      network:NETWORK, market:`${record.asset || record.symbol}/USDC`, account:distributor.publicKey(),
+      sraBalance:text(balanceFor(sra)), usdcBalance:text(balanceFor(usdc)),
+      bids:(orderBook?.bids || []).map((item)=>({price:text(item.price),amount:text(item.amount)})),
+      asks:(orderBook?.asks || []).map((item)=>({price:text(item.price),amount:text(item.amount)})),
+      lastReadAt:new Date().toISOString(), state:(orderBook?.bids?.length && orderBook?.asks?.length) ? 'TWO_SIDED' : 'ONE_SIDED_OR_EMPTY',
+    };
+  }
+
   async quoteUsdcSwap(record, input = {}) {
     const { server, distributor } = this.ensure();
     const selling = this.stellarAsset(record);
@@ -322,7 +377,7 @@ export class StellarTransferService {
     const usdcRecord = this.usdcRecord();
     const buying = this.stellarAsset(usdcRecord);
     const sourceBalance = await this.assetBalance(record.assetAddress);
-    if (Number(sendAmount) > Number(sourceBalance.balance || 0)) throw new Error(`Swap exceeds the live distribution balance of ${sourceBalance.balance || 0} ${record.asset || record.symbol}.`);
+    if (Number(sendAmount) > Number(sourceBalance.available || 0)) throw new Error(`Swap exceeds the live uncommitted distribution balance of ${sourceBalance.available || 0} ${record.asset || record.symbol}.`);
     const response = await server.strictSendPaths(selling, sendAmount, [buying]).call();
     const paths = response?.records || [];
     if (!paths.length) {
