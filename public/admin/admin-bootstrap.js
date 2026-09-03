@@ -186,7 +186,10 @@
     if (!admin) return;
     const featureList = WORKSPACE_FEATURES[workspaceId] || [];
     if (!featureList.length) return;
-    if (workspaceLoads.has(workspaceId)) return workspaceLoads.get(workspaceId);
+    if (workspaceLoads.has(workspaceId)) {
+      const loaded=workspaceLoads.get(workspaceId);
+      return loaded.then(()=>mountWorkspaceFeatures(workspaceId,admin));
+    }
 
     const pending = Promise.all(featureList.map(([source, marker]) => loadScript(source, marker)))
       .then(() => {

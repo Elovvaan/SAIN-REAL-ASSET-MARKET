@@ -3,6 +3,7 @@
   window.__sraAdminCoinLifecycleInstalled = true;
 
   const mounted = new WeakSet();
+  const refreshState = new WeakMap();
   const esc = (value) => String(value ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;');
   const num = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
   const qty = (value) => num(value).toLocaleString(undefined, { maximumFractionDigits: 8 });
@@ -10,6 +11,7 @@
   const terminalTabs = new Set(['Legacy Corrections', 'XRPL Exchange']);
 
   async function requestJson(url,options={}) {
+    if(window.SRAAdminDataClient)return window.SRAAdminDataClient.json(url,options);
     const response = await fetch(url, { cache:'no-store', ...options, headers:{ Accept:'application/json', 'Cache-Control':'no-cache', ...(options.headers||{}) } });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || `Request failed with ${response.status}.`);
@@ -65,12 +67,14 @@
   async function refresh(workspace) {
     const tab=workspace?.dataset.activeTab||'';
     if(!tab||terminalTabs.has(tab)){removePanel(workspace);return;}
+    const state=refreshState.get(workspace)||{inFlight:null,queued:false};
+    if(state.inFlight){state.queued=true;refreshState.set(workspace,state);return state.inFlight;}
     const node=panel(workspace); if(!node)return;
     node.innerHTML='<header><strong>Coin Position Lifecycle</strong><em>LOADING</em></header><p style="color:#9a9a9a">Reconciling the complete persistent Coin Position domain…</p>';
-    try {
+    const work=(async()=>{try {
       const data=tab==='Instrument Linkage'
-        ? await requestJson(`/api/admin/instrument-coin-position-linkages?_=${Date.now()}`)
-        : await requestJson(`/api/admin/coin-position-lifecycle?_=${Date.now()}`);
+        ? await requestJson('/api/admin/instrument-coin-position-linkages')
+        : await requestJson('/api/admin/coin-position-lifecycle');
       if(!node.isConnected||workspace.dataset.activeTab!==tab)return;
       node.innerHTML=markup(tab,data);
       node.querySelectorAll('[data-link-instrument]').forEach(button=>button.addEventListener('click',async()=>{
@@ -80,7 +84,9 @@
         button.disabled=true;if(result)result.textContent='Registering instrument linkage…';
         try{await requestJson(`/api/admin/instruments/${encodeURIComponent(button.dataset.linkInstrument)}/coin-position-linkage`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approval:'LINK',coinPositionId})});if(result)result.textContent='Coin Position linked and lifecycle event recorded.';window.SRAAdminDataClient?.refresh?.('instrument-coin-position-linked');await refresh(workspace);}catch(error){if(result)result.textContent=error.message;button.disabled=false;}
       }));
-    } catch(error) { node.innerHTML=`<header><strong>Coin Position Lifecycle</strong><em>UNAVAILABLE</em></header><p style="color:#d6a92f">${esc(error.message)}</p>`; }
+    } catch(error) { node.innerHTML=`<header><strong>Coin Position Lifecycle</strong><em>UNAVAILABLE</em></header><p style="color:#d6a92f">${esc(error.message)}</p>`; }})();
+    state.inFlight=work;state.queued=false;refreshState.set(workspace,state);
+    try{await work;}finally{state.inFlight=null;if(state.queued){state.queued=false;queueMicrotask(()=>void refresh(workspace));}refreshState.set(workspace,state);}
   }
   function mount(workspace) {
     if(!workspace||mounted.has(workspace))return;

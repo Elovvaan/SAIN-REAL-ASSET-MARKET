@@ -30,7 +30,7 @@
     if (url.pathname === '/api/admin/session' || url.pathname === '/api/admin/bootstrap-status') return false;
     if (url.pathname.startsWith('/api/admin/')) return true;
     if (url.pathname === '/api/sane/operations-queue') return true;
-    if (url.pathname === '/api/on-chain/status' || url.pathname === '/api/on-chain/assets' || url.pathname === '/api/on-chain/source-positions' || url.pathname === '/api/on-chain/market-offers') return true;
+    if (url.pathname === '/api/on-chain/status' || url.pathname === '/api/on-chain/assets' || url.pathname === '/api/on-chain/source-positions' || url.pathname === '/api/on-chain/market-offers' || url.pathname === '/api/on-chain/market-swaps' || url.pathname === '/api/on-chain/usdc-markets') return true;
     return false;
   }
 

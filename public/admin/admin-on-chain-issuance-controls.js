@@ -462,9 +462,9 @@
   }
 
   function mount(workspace) {
+    ensureTabs(workspace);
     if (!workspace || mounted.has(workspace)) return;
     mounted.add(workspace);
-    ensureTabs(workspace);
     const schedule = () => {
       const state = renderState.get(workspace) || { inFlight:null, queued:false, timer:null };
       clearTimeout(state.timer);
