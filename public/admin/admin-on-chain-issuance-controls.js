@@ -1,7 +1,6 @@
 (() => {
   if (window.__sraAdminOnChainIssuanceControlsInstalled) return;
   window.__sraAdminOnChainIssuanceControlsInstalled = true;
-    const usdcPreparation = asset.network === 'STELLAR' ? `<section style="margin-top:16px;border-top:1px solid #292929;padding-top:16px"><strong>Prepare Stellar USDC Account</strong><p style="color:#9a9a9a;font-size:12px;line-height:1.45">Create the distribution account’s trustline to genuine USDC so it can receive market inventory.</p><div class="admin-record-grid"><div><span>Trustline</span><strong>${usdcReadiness?.trustline ? 'READY' : 'NOT PREPARED'}</strong></div><div><span>USDC asset</span><strong>${esc(usdcReadiness?.usdcAssetAddress || 'Network-authoritative USDC')}</strong></div><div><span>Recorded USDC balance</span><strong>${esc(usdcReadiness?.usdcBalance ?? 'Refresh after preparation')}</strong></div></div><label style="display:block;margin:10px 0"><input type="checkbox" data-confirm-usdc-trustline> I confirm preparation of the Stellar USDC trustline.</label><button data-prepare-usdc-market="${esc(asset.assetId)}">${usdcReadiness?.trustline ? 'Refresh USDC Readiness' : 'Prepare USDC Trustline'}</button><span data-usdc-prepare-result style="color:#d6a92f;font-size:12px;margin-left:8px"></span></section>` : '';
   const mounted = new WeakSet();
   const renderState = new WeakMap();
   const SPECIAL_TABS = new Set(['Approval', 'On-Chain']);
@@ -153,6 +152,7 @@
     const swaps = asset ? (swapsByAsset.get(asset.assetId) || []) : [];
     const usdcMarkets = asset ? (marketsByAsset.get(asset.assetId) || []) : [];
     const usdcReadiness = asset ? readinessByAsset.get(asset.assetId) : null;
+    const usdcPreparation = asset?.network === 'STELLAR' ? `<section style="margin-top:16px;border-top:1px solid #292929;padding-top:16px"><strong>Prepare Stellar USDC Account</strong><p style="color:#9a9a9a;font-size:12px;line-height:1.45">Create the distribution account’s trustline to genuine USDC so it can receive market inventory.</p><div class="admin-record-grid"><div><span>Trustline</span><strong>${usdcReadiness?.trustline ? 'READY' : 'NOT PREPARED'}</strong></div><div><span>USDC asset</span><strong>${esc(usdcReadiness?.usdcAssetAddress || 'Network-authoritative USDC')}</strong></div><div><span>Recorded USDC balance</span><strong>${esc(usdcReadiness?.usdcBalance ?? 'Refresh after preparation')}</strong></div></div><label style="display:block;margin:10px 0"><input type="checkbox" data-confirm-usdc-trustline> I confirm preparation of the Stellar USDC trustline.</label><button data-prepare-usdc-market="${esc(asset.assetId)}">${usdcReadiness?.trustline ? 'Refresh USDC Readiness' : 'Prepare USDC Trustline'}</button><span data-usdc-prepare-result style="color:#d6a92f;font-size:12px;margin-left:8px"></span></section>` : '';
     const lifecycle = lifecycleSteps(item, networkReady, asset, issued, offers);
     const marketState = offers[0]?.marketState || (offers.length ? 'OFFER SUBMITTED' : null);
 
