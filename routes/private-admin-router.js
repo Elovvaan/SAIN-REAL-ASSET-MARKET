@@ -66,13 +66,25 @@ const ADMIN_WORKSPACE_SOURCES = Object.freeze({
   marketplace: ['marketplaceListings','marketplaceCommitmentWindows','marketplaceCommitments','marketplacePositions','marketplaceAllocations','marketplaceSettlementPreparations','marketplaceSettlementReviews','marketplaceSettlementAuthorizations','transactions','settlements','lifecycleEvents'],
   instruments: ['instruments','protectionInstruments','lifecycleEvents'],
   records: ['recognitions','ownershipRecognitions','observations','verifiedValueRecords','financialRecords','financialRecordAccounts','financialHistory','evidencePackages','assetRelationships','lifecycleEvents'],
-  coinPositions: ['coinAccounts','coinPositions','recognitions','observations','lifecycleEvents'],
+  coinPositions: ['coinAccounts','coinPositions','instruments','recognitions','observations','lifecycleEvents'],
   transactions: ['transactions','fundingInstructions','paymentReceipts','settlements','settlementRecords','lifecycleEvents'],
   settlement: ['exportPackages','settlementInstructions','settlementAdapters','settlements','settlementRecords','paymentReceipts','lifecycleEvents'],
   agent: ['transactions','settlementInstructions','treasuryExceptions','lifecycleEvents'],
   connections: ['settlementAdapters','treasuryBankConnections','treasuryWallets','connectorDefinitions','enterpriseConnections','extractionRequests','extractionResults','outboundEvents','lifecycleEvents'],
   users: ['users','participants','lifecycleEvents'],
   system: ['treasuryExceptions','outboundEvents','lifecycleEvents'],
+});
+
+const ADMIN_TAB_SOURCES = Object.freeze({
+  instruments: {
+    'Overview':['instruments','protectionInstruments'], 'Pending Review':['instruments'], Approved:['instruments'], Published:['instruments'], History:['instruments','protectionInstruments','lifecycleEvents'],
+  },
+  coinPositions: {
+    'Current Supply':['coinAccounts','coinPositions'], 'Represented Value':['coinAccounts','coinPositions'], 'Legacy Corrections':['coinPositions'], 'Coin Intelligence':['coinPositions','recognitions','observations'], 'Instrument Linkage':['coinPositions','instruments','lifecycleEvents'], 'Mint History':['lifecycleEvents'], 'XRPL Exchange':['coinPositions'], Retirements:['lifecycleEvents'], Adjustments:['lifecycleEvents'],
+  },
+  settlement: {
+    'Export Packages':['exportPackages'], 'Settlement Instructions':['settlementInstructions','settlementAdapters'], 'External Confirmation':['settlements','settlementRecords','paymentReceipts'], 'Destination Verification':['settlementInstructions'], 'Export History':['exportPackages','lifecycleEvents'], 'Settlement Logs':['settlements','settlementRecords','settlementInstructions','lifecycleEvents'], Workflow:['exportPackages','settlementInstructions','settlements','settlementRecords','paymentReceipts','lifecycleEvents'],
+  },
 });
 
 const ADMIN_RECORD_TYPES = Object.freeze({
@@ -334,8 +346,10 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
     const session = await requireAdmin(req, res); if (!session) return;
     const limit = req.query.limit;
     const requestedWorkspace = String(req.query.workspace || '').trim();
+    const requestedTab = String(req.query.tab || '').trim();
     if (requestedWorkspace && !ADMIN_WORKSPACE_SOURCES[requestedWorkspace]) return res.status(400).json({ error:'Unknown administration workspace.' });
-    const requestedKeys = requestedWorkspace ? new Set(ADMIN_WORKSPACE_SOURCES[requestedWorkspace]) : new Set([...Object.keys(ADMIN_RECORD_TYPES),'users']);
+    const tabSources = requestedWorkspace && requestedTab ? ADMIN_TAB_SOURCES[requestedWorkspace]?.[requestedTab] : null;
+    const requestedKeys = requestedWorkspace ? new Set(tabSources || ADMIN_WORKSPACE_SOURCES[requestedWorkspace]) : new Set([...Object.keys(ADMIN_RECORD_TYPES),'users']);
     const records = {};
     for (const key of requestedKeys) {
       if (key === 'users') {
@@ -348,7 +362,7 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
       for (const record of value) byState[stateOf(record)] = (byState[stateOf(record)] || 0) + 1;
       return [key, byState];
     }));
-    const statusEntries = requestedWorkspace ? [[requestedWorkspace, ADMIN_WORKSPACE_SOURCES[requestedWorkspace]]] : Object.entries(ADMIN_WORKSPACE_SOURCES);
+    const statusEntries = requestedWorkspace ? [[requestedWorkspace, [...requestedKeys]]] : Object.entries(ADMIN_WORKSPACE_SOURCES);
     const workspaces = Object.fromEntries(statusEntries.map(([key, required]) => [key, workspaceStatus(records, required)]));
     return res.json({ generatedAt: new Date().toISOString(), administrator: { id: session.id, displayName: session.displayName }, counts, states, workspaces, records });
   });

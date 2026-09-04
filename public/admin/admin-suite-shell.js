@@ -30,7 +30,7 @@
     users:['Overview','Administrators','Roles','Permissions','Sessions','Access History'],
     system:['Overview','Core Services','Diagnostics','Protected Actions','Alerts','Audit State']
   };
-  const state = { mounted:false, routed:new WeakSet(), observer:null, workspaceData:null, loading:null, loadingScope:null, loadedScopes:new Set(), lastError:null };
+  const state = { mounted:false, routed:new WeakSet(), observer:null, workspaceData:null, loading:null, loadingScope:null, loadedScopes:new Set(), loadedViews:new Set(), loadingViews:new Map(), lastError:null };
   const esc = value => String(value ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;');
   const recordsBody = id => document.querySelector(`[data-workspace="${id}"] .admin-workspace-records`);
   const controlsBody = id => document.querySelector(`[data-workspace="${id}"] .admin-workspace-controls`);
@@ -81,6 +81,7 @@
       button.setAttribute('aria-selected','true');
       section.dataset.activeTab = button.dataset.adminTab;
       renderWorkspace(id);
+      void ensureSelectedTab(id);
     });
     return section;
   }
@@ -283,27 +284,41 @@
     if(id==='dashboard'){ node.innerHTML = dashboardMarkup(); syncDashboard(); return; }
     const section = document.querySelector(`[data-workspace="${id}"]`);
     const tab = section?.dataset.activeTab || TABS[id]?.[0] || '';
-    if(state.loading){ node.innerHTML = loadingState(); return; }
+    if(state.loadingViews.has(viewKey(id,tab))){ node.innerHTML = loadingState(); return; }
     if(state.lastError){ node.innerHTML = errorState(state.lastError); return; }
     if(id==='settlement' && tab==='Workflow'){ node.innerHTML = settlementWorkflowMarkup(); return; }
     node.innerHTML = recordsMarkup(workspaceRecords(id,tab),labelFor(id,tab));
   }
   const workspaceApiKey = (id) => id === 'native-asset' ? 'nativeAsset' : id === 'coin-positions' ? 'coinPositions' : id;
-  async function loadWorkspaceData(force=false,id=activeWorkspaceId()){
+  const viewKey = (id,tab) => `${workspaceApiKey(id)}::${tab||''}`;
+  async function loadWorkspaceData(force=false,id=activeWorkspaceId(),tab=document.querySelector(`[data-workspace="${id}"]`)?.dataset.activeTab||''){
     const scope = workspaceApiKey(id);
-    if(state.loading && state.loadingScope === scope && !force) return state.loading;
+    const key = viewKey(id,tab);
+    if(state.loadingViews.has(key) && !force) return state.loadingViews.get(key);
     state.lastError = null;
-    const request = requestJson(`/api/admin/workspaces?workspace=${encodeURIComponent(scope)}&limit=100`, force ? { cache:'reload' } : {})
+    const request = requestJson(`/api/admin/workspaces?workspace=${encodeURIComponent(scope)}&tab=${encodeURIComponent(tab)}&limit=100`, force ? { cache:'reload' } : {})
       .then(data => {
         state.workspaceData = { ...state.workspaceData, ...data, records:{...(state.workspaceData?.records||{}),...(data.records||{})}, workspaces:{...(state.workspaceData?.workspaces||{}),...(data.workspaces||{})} };
         state.loadedScopes.add(scope);
+        state.loadedViews.add(key);
         return state.workspaceData;
       })
       .catch(error => { state.lastError = error.message; throw error; })
-      .finally(() => { if(state.loading === request){ state.loading = null; state.loadingScope = null; } });
+      .finally(() => { state.loadingViews.delete(key); if(state.loading === request){ state.loading = null; state.loadingScope = null; } });
     state.loading = request;
     state.loadingScope = scope;
+    state.loadingViews.set(key,request);
     return request;
+  }
+  async function ensureSelectedTab(id){
+    if(id==='dashboard') return;
+    const tab=document.querySelector(`[data-workspace="${id}"]`)?.dataset.activeTab||'';
+    const key=viewKey(id,tab);
+    if(state.loadedViews.has(key)) return;
+    const pending=loadWorkspaceData(false,id,tab);
+    renderWorkspace(id);
+    try { await pending; } catch {}
+    if(activeWorkspaceId()===id && document.querySelector(`[data-workspace="${id}"]`)?.dataset.activeTab===tab) renderWorkspace(id);
   }
   async function refreshWorkspace(id){
     if(id==='dashboard'){
@@ -312,7 +327,8 @@
     }
     const node = recordsBody(id);
     if(node) node.innerHTML = loadingState();
-    try { await loadWorkspaceData(true,id); } catch {}
+    const tab=document.querySelector(`[data-workspace="${id}"]`)?.dataset.activeTab||'';
+    try { await loadWorkspaceData(true,id,tab); } catch {}
     renderWorkspace(id);
     syncDashboard();
   }
@@ -334,15 +350,7 @@
     const hash = `#admin-${id}`;
     if(location.hash!==hash) history.replaceState(null,'',hash);
     renderWorkspace(id);
-    const scope = workspaceApiKey(id);
-    if(id!=='dashboard' && !state.loadedScopes.has(scope)){
-      const pending = loadWorkspaceData(false,id);
-      void pending.catch(()=>{}).finally(() => {
-        const active = activeWorkspaceId();
-        renderWorkspace(active);
-        syncDashboard();
-      });
-    }
+    if(id!=='dashboard') void ensureSelectedTab(id).finally(syncDashboard);
     document.querySelector('.admin-suite-main')?.scrollTo({top:0,behavior:'auto'});
   }
   function mount(){
