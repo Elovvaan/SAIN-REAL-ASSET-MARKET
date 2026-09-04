@@ -17,10 +17,11 @@ test('agent operating system registers specialized read-only agents', () => {
   domain.put('MARKETPLACE_LISTING', 'LIST-1', { listingId: 'LIST-1', instrumentId: 'INS-1', status: 'LIVE' });
   const service = new SraAgentOperatingSystemService(domain);
   const registry = service.registry();
-  assert.equal(registry.length, 6);
+  assert.equal(registry.length, 7);
   assert.ok(registry.every((agent) => agent.state === 'ACTIVE'));
   assert.equal(registry.find((agent) => agent.agentType === 'COIN_AGENT').recordCount, 1);
   assert.equal(registry.find((agent) => agent.agentType === 'LISTING_AGENT').recordCount, 1);
+  assert.ok(registry.some((agent) => agent.agentId === 'SRA-CAPITAL-ACTIVATION-AGENT'));
 });
 
 test('agent operating system coordinates queue and heartbeat without granting authority', () => {

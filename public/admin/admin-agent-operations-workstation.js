@@ -4,7 +4,7 @@
 
   const mounted = new WeakSet();
   const conversation = [];
-  const ownedTabs = new Set(['Conversation','Workforce','Suggested Actions','Workflow Approvals','Incomplete Workflows']);
+  const ownedTabs = new Set(['Conversation','Capital Activation','Workforce','Suggested Actions','Workflow Approvals','Incomplete Workflows']);
   const esc = (value) => String(value ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;');
 
   async function request(payload) {
@@ -111,6 +111,13 @@
     return `<section class="admin-record-card" data-agent-operation-card><header><strong>SRA Agent Workforce</strong><em>${registry.length} ACTIVE AGENTS</em></header><p style="color:#b8b8b8;line-height:1.5">Agents continuously inspect their assigned lifecycle stages and prepare work. Protected value movement, publication, settlement, instrument issuance, and on-chain execution remain subject to administrator approval.</p><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:12px 0"><button type="button" data-run-agent-workforce>Run Workforce Now</button><span data-workforce-result style="color:#d6a92f;font-size:12px"></span></div></section><div data-agent-operation-card class="admin-record-list">${registry.map((agent) => { const persisted=stored.get(agent.agentId)||{}, counts=byAgent.get(agent.agentId)||{total:0,completed:0,awaitingAcceptance:0}; const stages=agent.workflowStages||persisted.workflowStages||[]; return `<article class="admin-record-card"><header><strong>${esc(agent.name||agent.agentId)}</strong><em>${esc(agent.state||persisted.state||'UNKNOWN')}</em></header><div class="admin-record-grid"><div><span>Agent ID</span><strong>${esc(agent.agentId)}</strong></div><div><span>Scope</span><strong>${esc(agent.scope||persisted.scope||'—')}</strong></div><div><span>Assigned stages</span><strong>${esc(stages.join(' · ')||'NONE')}</strong></div><div><span>Records monitored</span><strong>${Number(agent.recordCount||0).toLocaleString()}</strong></div><div><span>Work orders</span><strong>${counts.total.toLocaleString()}</strong></div><div><span>Completed / awaiting acceptance</span><strong>${counts.completed.toLocaleString()} / ${counts.awaitingAcceptance.toLocaleString()}</strong></div></div></article>`; }).join('')}</div>`;
   }
 
+  function capitalActivationMarkup(payload) {
+    const summary = payload.summary || {};
+    const queue = payload.queue || [];
+    const policy = payload.policy || {};
+    return `<section class="admin-record-card" data-agent-operation-card><header><strong>Capital Activation Agent</strong><em>${esc(payload.state || 'UNKNOWN')}</em></header><p style="color:#b8b8b8;line-height:1.5">Maps verified platform positions and on-chain inventory into governed next actions. Proposals do not execute transfers, swaps, market orders, or external trades.</p><div class="admin-record-grid"><div><span>Tracked assets</span><strong>${Number(summary.totalAssets || 0).toLocaleString()}</strong></div><div><span>Deployable</span><strong>${Number(summary.deployable || 0).toLocaleString()}</strong></div><div><span>Market ready</span><strong>${Number(summary.marketReady || 0).toLocaleString()}</strong></div><div><span>Liquidity blocked</span><strong>${Number(summary.liquidityBlocked || 0).toLocaleString()}</strong></div><div><span>Dormant</span><strong>${Number(summary.dormant || 0).toLocaleString()}</strong></div><div><span>Available units</span><strong>${Number(summary.availableUnits || 0).toLocaleString(undefined,{maximumFractionDigits:8})}</strong></div></div><p style="color:#d6a92f;font-size:12px">Authority: ${esc(policy.authorityLevel || 'RECOMMEND_AND_PREPARE_ONLY')} · Leverage cap: ${Number(policy.leverageCap || 0)} · Reserve floor: ${Number(policy.reserveFloorPercent || 0)}%</p></section>${queue.length ? `<div data-agent-operation-card class="admin-record-list">${queue.map((item)=>`<article class="admin-record-card"><header><strong>${esc(item.symbol)} · ${esc(item.assetId || item.coinPositionId || item.instrumentId)}</strong><em>${esc(item.classification)}</em></header><div class="admin-record-grid"><div><span>Available</span><strong>${Number(item.availableAmount || 0).toLocaleString(undefined,{maximumFractionDigits:8})} ${esc(item.symbol)}</strong></div><div><span>Network</span><strong>${esc(item.network || 'NOT ON CHAIN')}</strong></div><div><span>Instrument</span><strong>${esc(item.instrumentId || 'NOT LINKED')}</strong></div><div><span>Next governed action</span><strong>${esc(item.recommendedAction)}</strong></div></div><p style="color:#b8b8b8;line-height:1.5">${esc(item.reason)}</p>${item.classification === 'RESERVED' ? '' : `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button type="button" data-prepare-capital-proposal="${esc(item.assetId || item.coinPositionId || item.instrumentId)}" data-proposal-amount="${Number(item.availableAmount || 0)}">Prepare Proposal</button><span data-capital-proposal-result style="color:#d6a92f;font-size:12px"></span></div>`}</article>`).join('')}</div>` : '<div data-agent-operation-card class="admin-placeholder">No verified platform capital is currently available for classification.</div>'}`;
+  }
+
   function setPresentationOwnership(workspace, tab) { const records = workspace.querySelector('.admin-workspace-records'); if (records) records.style.display = ownedTabs.has(tab) ? 'none' : ''; }
   function removeForeignAgentPresentation(workspace) { const controls = workspace?.querySelector('.admin-workspace-controls'); if (!controls) return; for (const child of [...controls.children]) if (!child.matches('[data-agent-operation-card]')) child.remove(); }
 
@@ -123,6 +130,11 @@
     const tab = workspace.dataset.activeTab;
     setPresentationOwnership(workspace, tab);
     if (tab === 'Conversation') { controls.insertAdjacentHTML('afterbegin', conversationMarkup()); return; }
+    if (tab === 'Capital Activation') {
+      try { const payload = await json('/api/admin/capital-activation'); if (workspace.dataset.activeTab === tab) controls.insertAdjacentHTML('afterbegin', capitalActivationMarkup(payload)); }
+      catch (error) { if (workspace.dataset.activeTab === tab) controls.insertAdjacentHTML('afterbegin', `<div data-agent-operation-card class="admin-placeholder"><strong>Capital activation unavailable.</strong><br>${esc(error.message)}</div>`); }
+      return;
+    }
     if (tab === 'Workforce') {
       try {
         const [status, agents, work] = await Promise.all([json('/api/admin/agent-workforce/status'), json('/api/admin/agent-workforce/agents'), json('/api/admin/agent-workforce/work')]);
@@ -171,9 +183,15 @@
     catch (error) { if (result) result.textContent = error.message; button.disabled = false; }
   }
 
+  async function prepareCapitalProposal(workspace, button) {
+    const card = button.closest('[data-agent-operation-card]'); const result = card?.querySelector('[data-capital-proposal-result]'); button.disabled = true; if (result) result.textContent = 'Preparing governed proposal…';
+    try { const proposal = await json(`/api/admin/capital-activation/${encodeURIComponent(button.dataset.prepareCapitalProposal)}/proposals`,{method:'POST',body:JSON.stringify({amount:Number(button.dataset.proposalAmount || 0)})}); if (result) result.textContent = `${proposal.proposalId} prepared · execution remains unauthorized`; }
+    catch (error) { if (result) result.textContent = error.message; button.disabled = false; }
+  }
+
   function mount(workspace) {
     if (!workspace || mounted.has(workspace)) return; mounted.add(workspace); removeForeignAgentPresentation(workspace); const controls = workspace.querySelector('.admin-workspace-controls'); const presentationObserver = controls ? new MutationObserver(() => removeForeignAgentPresentation(workspace)) : null; presentationObserver?.observe(controls,{ childList:true });
-    workspace.addEventListener('click', (event) => { const runButton=event.target.closest('[data-run-agent-workforce]'); if(runButton){void runWorkforce(workspace,runButton);return;} const executeButton = event.target.closest('[data-agent-execute-chain-job]'); if (executeButton) { void execute(workspace, executeButton); return; } const quick = event.target.closest('[data-agent-quick-question]'); if (quick) { void ask(workspace, quick.dataset.agentQuickQuestion); return; } if (event.target.closest('[data-admin-tab]')) queueMicrotask(() => void render(workspace)); });
+    workspace.addEventListener('click', (event) => { const proposalButton=event.target.closest('[data-prepare-capital-proposal]'); if(proposalButton){void prepareCapitalProposal(workspace,proposalButton);return;} const runButton=event.target.closest('[data-run-agent-workforce]'); if(runButton){void runWorkforce(workspace,runButton);return;} const executeButton = event.target.closest('[data-agent-execute-chain-job]'); if (executeButton) { void execute(workspace, executeButton); return; } const quick = event.target.closest('[data-agent-quick-question]'); if (quick) { void ask(workspace, quick.dataset.agentQuickQuestion); return; } if (event.target.closest('[data-admin-tab]')) queueMicrotask(() => void render(workspace)); });
     workspace.addEventListener('submit', (event) => { const form = event.target.closest('[data-agent-conversation-form]'); if (!form) return; event.preventDefault(); const question = new FormData(form).get('question'); form.reset(); void ask(workspace, question); });
     window.addEventListener('sra:admin-workspace-synchronized', (event) => { if (event.detail?.workspaceId === 'agent') void render(workspace); });
     void render(workspace);

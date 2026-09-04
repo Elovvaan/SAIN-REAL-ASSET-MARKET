@@ -26,9 +26,9 @@ test('Coin Agent treats Coinbase-derived Coin Position as direct representation 
   assert.equal(agent.humanApprovalRequired, true);
 });
 
-test('all six operating agents expose assigned workflow stages', () => {
+test('all seven operating agents expose assigned workflow stages', () => {
   const registry = new SraAgentOperatingSystemService(new Domain(records())).registry();
-  assert.equal(registry.length, 6);
+  assert.equal(registry.length, 7);
   for (const agent of registry) assert.ok(agent.workflowStages.length > 0, `${agent.agentId} must own workflow stages`);
 });
 
@@ -44,7 +44,7 @@ test('unified operations queue hands direct Coin Position representation to Coin
 test('admin workforce UI exposes agents, stages, work counts, and manual run control', () => {
   const shell = fs.readFileSync(new URL('../public/admin/admin-suite-shell.js', import.meta.url), 'utf8');
   const ui = fs.readFileSync(new URL('../public/admin/admin-agent-operations-workstation.js', import.meta.url), 'utf8');
-  assert.match(shell, /'Conversation','Workforce','Suggested Actions'/);
+  assert.match(shell, /'Conversation','Capital Activation','Workforce','Suggested Actions'/);
   assert.match(ui, /SRA Agent Workforce/);
   assert.match(ui, /Assigned stages/);
   assert.match(ui, /Run Workforce Now/);

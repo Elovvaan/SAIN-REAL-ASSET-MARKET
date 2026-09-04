@@ -5,6 +5,7 @@ import { SraAgentOperatingSystemService } from '../services/sra-agent-operating-
 import { UnifiedMarketOperationsQueueService } from '../services/unified-market-operations-queue-service.js';
 import { CounterpartyOperationsStatusService } from '../services/counterparty-operations-status-service.js';
 import { AutonomousOperationalContinuationService } from '../services/autonomous-operational-continuation-service.js';
+import { CapitalActivationAgentService } from '../services/capital-activation-agent-service.js';
 
 export async function installAgentWorkforceAdminRoutes({ router, domain, database, requireAdmin }) {
   const workforce = new AgentWorkforceService({ domain, database });
@@ -14,8 +15,20 @@ export async function installAgentWorkforceAdminRoutes({ router, domain, databas
   const agentOS = new SraAgentOperatingSystemService(domain, { operationsQueue });
   const counterpartyOperations = new CounterpartyOperationsStatusService(domain);
   const autonomousContinuation = new AutonomousOperationalContinuationService(domain);
+  const capitalActivation = new CapitalActivationAgentService(domain);
   await workforce.initialize();
   await serviceFeeBilling.initialize('SRA_AGENT_OS');
+
+  router.get('/api/admin/capital-activation', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    return res.json({ ...capitalActivation.snapshot(), proposals:domain.list('CAPITAL_ACTIVATION_PROPOSAL') });
+  });
+
+  router.post('/api/admin/capital-activation/:subjectId/proposals', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    try { return res.status(201).json(await capitalActivation.prepareProposal(req.params.subjectId, req.body || {}, session.id)); }
+    catch (error) { return res.status(422).json({ error:error.message, code:'SRA_CAPITAL_ACTIVATION_PROPOSAL_FAILED' }); }
+  });
 
   const synchronizedAgents = await workforce.synchronizeOperatingAgents(agentOS.registry(), { id: 'SRA_AGENT_OS' });
   const initialQueue = await operationsQueue.explainPersisted();

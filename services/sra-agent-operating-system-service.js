@@ -28,8 +28,9 @@ export class SraAgentOperatingSystemService {
       { agentId:'SRA-SETTLEMENT-AGENT',name:'Settlement Operations Agent',agentType:'SETTLEMENT_AGENT',scope:'ALLOCATION_AND_ATOMIC_SETTLEMENT',recordCount:count(this.domain,'SRA_TRANSACTION',(item)=>['POSITION_ALLOCATION_APPROVAL','ATOMIC_ORDER_SETTLEMENT'].includes(item.transactionType)),capabilities:['REPORT_SETTLEMENT_STATE','VERIFY_SETTLEMENT_LINEAGE','PREPARE_SETTLEMENT_ACTION'] },
       { agentId:'SRA-EXPORT-AGENT',name:'External Rail Agent',agentType:'EXPORT_AGENT',scope:'EXPORT_SETTLEMENT_AND_EXTERNAL_TRANSFER',recordCount:count(this.domain,'EXPORT_PACKAGE')+count(this.domain,'SRA_TRANSACTION',(item)=>String(item.transactionType||'').startsWith('EXTERNAL_TRANSFER_')),capabilities:['REPORT_EXPORT_STATE','REPORT_TRANSFER_STATE','PREPARE_RECONCILIATION_ACTION'] },
       { agentId:'SRA-MARKETPLACE-AGENT',name:'Marketplace Operations Agent',agentType:'MARKETPLACE_AGENT',scope:'MARKET_READINESS_AND_OFFERS',recordCount:count(this.domain,'MARKETPLACE_LISTING')+count(this.domain,'ON_CHAIN_MARKET_OFFER'),capabilities:['REPORT_MARKET_INVENTORY','REPORT_MARKET_READINESS','PREPARE_MARKET_OFFER','REPORT_MARKET_EXCEPTIONS'] },
+      { agentId:'SRA-CAPITAL-ACTIVATION-AGENT',name:'Capital Activation Agent',agentType:'CAPITAL_ACTIVATION_AGENT',scope:'PLATFORM_CAPITAL_INVENTORY_ALLOCATION_AND_LIQUIDITY_PREPARATION',recordCount:count(this.domain,'ON_CHAIN_ASSET')+count(this.domain,'COIN_POSITION')+count(this.domain,'CAPITAL_ACTIVATION_PROPOSAL'),capabilities:['CLASSIFY_PLATFORM_CAPITAL','REPORT_DEPLOYABLE_INVENTORY','IDENTIFY_LIQUIDITY_BLOCKERS','PREPARE_ALLOCATION_PROPOSAL','OBSERVE_EXTERNAL_MARKETS'],workflowStages:['CAPITAL_CLASSIFICATION','ALLOCATION_PROPOSAL'] },
     ];
-    return definitions.map((definition)=>({...definition,state:'ACTIVE',workflowStages:getSraAgentServiceFee(definition.agentId)?.workflowStages||[]}));
+    return definitions.map((definition)=>({...definition,state:'ACTIVE',workflowStages:getSraAgentServiceFee(definition.agentId)?.workflowStages||definition.workflowStages||[]}));
   }
 
   brief() {

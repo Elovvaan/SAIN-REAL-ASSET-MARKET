@@ -28,7 +28,7 @@ test('Administration feature workstations are loaded by workspace instead of ser
 
 test('Administrative Agent conversation is owned by the final workstation', () => {
   const agent = read('public/admin/admin-agent-operations-workstation.js');
-  assert.match(agent, /ownedTabs = new Set\(\['Conversation','Suggested Actions','Workflow Approvals','Incomplete Workflows'\]\)/);
+  assert.match(agent, /ownedTabs = new Set\(\['Conversation','Capital Activation','Workforce','Suggested Actions','Workflow Approvals','Incomplete Workflows'\]\)/);
   assert.match(agent, /data-agent-conversation-form/);
   assert.match(agent, /data-agent-quick-question/);
   assert.match(agent, /\/api\/admin\/agent\/query/);
