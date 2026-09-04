@@ -71,3 +71,16 @@ test('SEP-24 client rejects local or non-HTTPS anchor configuration', async () =
   const service = new StellarSep24ClientService({ stellar:{}, environment:{ STELLAR_SEP24_ANCHOR_DOMAIN:'anchor.example' }, fetchImpl:async()=>({ ok:true, async text(){return 'TRANSFER_SERVER_SEP0024="http://anchor.example/sep24"\nWEB_AUTH_ENDPOINT="https://anchor.example/auth"\nSIGNING_KEY="GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"';} }) });
   await assert.rejects(() => service.discover(), /must use HTTPS/);
 });
+
+test('SEP-24 transaction refresh reauthenticates and queries the anchor by transaction ID', async () => {
+  const service = Object.create(StellarSep24ClientService.prototype);
+  service.discover = async () => ({ transferServer:'https://anchor.example/sep24' });
+  service.authenticate = async (_discovery, input) => { assert.equal(input.userId,'42'); return { token:'new-jwt' }; };
+  service.fetch = async (url, options) => {
+    assert.equal(String(url),'https://anchor.example/sep24/transaction?id=mg-123');
+    assert.equal(options.headers.Authorization,'Bearer new-jwt');
+    return { ok:true, async json(){return {transaction:{id:'mg-123',status:'completed'}};} };
+  };
+  const result=await service.getTransaction({transactionId:'mg-123',userId:'42'});
+  assert.equal(result.transaction.status,'completed');
+});

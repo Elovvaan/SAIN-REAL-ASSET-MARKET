@@ -56,6 +56,7 @@ import { InstitutionParticipationService } from './services/institution-particip
 import { SettlementRailGatewayService } from './services/settlement-rail-gateway-service.js';
 import { StellarUsdcSettlementService } from './services/stellar-usdc-settlement-service.js';
 import { StellarSep24ClientService } from './services/stellar-sep24-client-service.js';
+import { MoneyGramSandboxCertificationService } from './services/moneygram-sandbox-certification-service.js';
 import { SraAnchorPlatformService } from './services/sra-anchor-platform-service.js';
 import { createSraAnchorPlatformRouter } from './routes/sra-anchor-platform-router.js';
 import { TreasuryUsdcConversionService } from './services/treasury-usdc-conversion-service.js';
@@ -174,6 +175,7 @@ export async function createApp(options = {}) {
   const financingClosingSettlementService = new FinancingClosingService(persistentDomain, assetServicingService); await financingClosingSettlementService.initialize();
   const stellarUsdcAdapter = new StellarTransferService({ domain:persistentDomain });
   const stellarSep24ClientService = new StellarSep24ClientService({ stellar:stellarUsdcAdapter, environment });
+  const moneyGramSandboxCertificationService = new MoneyGramSandboxCertificationService({ domain:persistentDomain, sep24:stellarSep24ClientService });
   const sraAnchorPlatformService = new SraAnchorPlatformService({ domain:persistentDomain, environment });
   const stellarUsdcSettlementService = new StellarUsdcSettlementService({ domain:persistentDomain, gateway:settlementRailGatewayService, closingService:financingClosingSettlementService, stellar:stellarUsdcAdapter, sep24:stellarSep24ClientService });
   const platformTreasuryService = new PlatformTreasuryService(persistentDomain, platformLedgerService);
@@ -206,7 +208,7 @@ export async function createApp(options = {}) {
   app.use('/api/access', createAccessRouter(marketplace, accessService));
   app.use('/api/participation', createParticipationRouter(marketplace, accessService, persistentDomain));
   app.use('/api/institutions', createInstitutionParticipationRouter(institutionParticipationService, accessService));
-  app.use('/api/settlement-rails', createSettlementRailGatewayRouter(settlementRailGatewayService, undefined, stellarUsdcSettlementService));
+  app.use('/api/settlement-rails', createSettlementRailGatewayRouter(settlementRailGatewayService, undefined, stellarUsdcSettlementService, moneyGramSandboxCertificationService));
   app.use('/api/treasury', createTreasuryBankConnectorRouter(treasuryBankConnectorService));
   app.use('/api/economics', createPlatformEconomicsRouter(platformEconomicsService));
   app.use('/api/ledger', createPlatformLedgerRouter(platformLedgerService));

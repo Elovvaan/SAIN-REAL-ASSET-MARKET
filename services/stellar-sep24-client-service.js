@@ -130,4 +130,17 @@ export class StellarSep24ClientService {
     const interactiveUrl = httpsEndpoint(result.url, 'SEP-24 interactive URL');
     return { anchorDomain:discovery.anchorDomain, kind, asset:'USDC', account, authAccount:moneyGramKeypair(this.environment, 'MONEYGRAM_AUTH_SECRET').publicKey(), userId, transactionId:text(result.id) || null, interactiveUrl };
   }
+
+  async getTransaction(input = {}) {
+    const transactionId = text(input.transactionId);
+    if (!transactionId) throw new Error('MoneyGram transaction ID is required.');
+    const discovery = await this.discover();
+    const { token } = await this.authenticate(discovery, input);
+    const url = new URL(`${discovery.transferServer}/transaction`);
+    url.searchParams.set('id', transactionId);
+    const result = await jsonResponse(await this.fetch(url, {
+      headers:{ Authorization:`Bearer ${token}`, Accept:'application/json' },
+    }), 'SEP-24 transaction status');
+    return { anchorDomain:discovery.anchorDomain, transaction:result.transaction || result };
+  }
 }

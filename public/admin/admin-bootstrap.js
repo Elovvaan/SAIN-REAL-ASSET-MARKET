@@ -19,6 +19,7 @@
     settlement: [
       ['/admin/admin-settlement-execution-controls.js', 'data-sra-admin-settlement-execution-controls'],
       ['/admin/admin-treasury-prime-connection-test.js', 'data-sra-admin-treasury-prime-connection-test'],
+      ['/admin/admin-moneygram-sandbox-test.js', 'data-sra-admin-moneygram-sandbox-test'],
     ],
     treasury: [
       ['/admin/admin-treasury-workstation.js', 'data-sra-admin-treasury-workstation'],
@@ -130,6 +131,7 @@
       const settlement = admin.querySelector('[data-workspace="settlement"]');
       window.mountAdminSettlementExecutionControls?.(settlement);
       window.mountAdminTreasuryPrimeConnectionTest?.(settlement);
+      window.mountAdminMoneyGramSandboxTest?.(settlement);
       return;
     }
     if (workspaceId === 'treasury') {
