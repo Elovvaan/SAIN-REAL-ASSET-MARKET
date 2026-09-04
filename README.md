@@ -50,6 +50,20 @@ The repository includes `railway.json` and uses the Railway-provided `PORT` envi
 3. The service starts with `npm start`.
 4. The health check is available at `/api/health`.
 
+### MoneyGram Ramps sandbox
+
+MoneyGram SEP-10/SEP-24 certification uses dedicated Testnet authentication and funds accounts. These credentials are isolated from SRA's `STELLAR_ISSUER_SECRET` and `STELLAR_DISTRIBUTOR_SECRET`, which remain connected to the primary Stellar Mainnet adapter.
+
+```text
+STELLAR_SEP24_ANCHOR_DOMAIN=extmgxanchor.moneygram.com
+STELLAR_SEP24_MODE=SANDBOX
+MONEYGRAM_AUTH_SECRET=...
+MONEYGRAM_FUNDS_SECRET=...
+MONEYGRAM_USER_ID=1
+```
+
+`MONEYGRAM_USER_ID` must be a positive 64-bit integer identifying the wallet holder in MoneyGram's custodial SEP-10 flow. Railway must store secret keys as protected variables. Only the corresponding public addresses are supplied to MoneyGram for Testnet allowlisting. Production uses separate production credentials and `STELLAR_SEP24_MODE=PRODUCTION`; sandbox success does not itself authorize production operation.
+
 ### Circle CCTP V2
 
 Treasury Wallets includes a governed Circle CCTP V2 workflow for moving genuine USDC from Stellar to another configured CCTP network. It records authorization, Stellar approval and burn transactions, Circle attestation, destination mint, and reconciliation as separate persistent stages.

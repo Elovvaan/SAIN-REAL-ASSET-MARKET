@@ -11,6 +11,8 @@ const router=fs.readFileSync(new URL('../routes/platform-treasury-router.js',imp
 test('Treasury Wallets exposes the governed USD to Stellar USDC lifecycle',()=>{
   assert.match(ui,/Treasury Wallets & Stellar USDC/);
   assert.match(ui,/Authorization alone does not create USDC/);
+  assert.match(ui,/MoneyGram credentials required/);
+  assert.match(ui,/sep24\.ready/);
   for(const action of ['initiate','confirm-usd-funding','confirm-usdc-receipt','reconcile','reclassify'])assert.match(router,new RegExp(action));
   assert.match(router,/Authenticated SRA treasury identity is required/);
 });

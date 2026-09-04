@@ -97,7 +97,7 @@
 
   async function refreshLiveUsdcStatus(workspace) {
     const root=controls(workspace),balance=root?.querySelector('[data-stellar-usdc-balance] strong'),anchor=root?.querySelector('[data-stellar-sep24-status] strong');
-    try{const status=await request('/api/settlement-rails/stellar-usdc/status');if(balance)balance.textContent=status.treasury?.balance||'0';if(anchor)anchor.textContent=status.sep24?.configured?(status.sep24.anchorDomain||'Configured'):'Not configured';}
+    try{const status=await request('/api/settlement-rails/stellar-usdc/status');if(balance)balance.textContent=status.treasury?.balance||'0';if(anchor){const sep24=status.sep24||{};anchor.textContent=sep24.ready?`${sep24.anchorDomain||'Configured'} · ${sep24.network||sep24.mode||''} ready`:sep24.configured?`${sep24.anchorDomain||'Configured'} · MoneyGram credentials required`:'Not configured';}}
     catch(error){if(balance)balance.textContent='Unavailable';if(anchor)anchor.textContent=error.message;}
   }
 

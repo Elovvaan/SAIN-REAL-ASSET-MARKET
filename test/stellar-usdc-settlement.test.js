@@ -75,3 +75,15 @@ test('USDC settlement blocks missing trustline and insufficient treasury invento
   stellar.recipientStatus = async (address) => ({ address, exists:true, canReceive:true });
   await assert.rejects(() => service.execute(instruction.instructionId, { confirmMainnetSettlement:true }, 'ADMIN'), /below the authorized settlement amount/);
 });
+
+test('settlement status preserves MoneyGram sandbox readiness when Mainnet is unavailable', async () => {
+  const sep24Status = { configured:true, ready:true, mode:'SANDBOX', network:'TESTNET', anchorDomain:'extmgxanchor.moneygram.com' };
+  const service = new StellarUsdcSettlementService({
+    stellar:{ async health(){ return { ready:false, publicNetwork:false }; } },
+    sep24:{ status(){ return sep24Status; } },
+  });
+  const status = await service.status();
+  assert.equal(status.ready, false);
+  assert.deepEqual(status.sep24, sep24Status);
+  assert.match(status.error, /Mainnet/);
+});

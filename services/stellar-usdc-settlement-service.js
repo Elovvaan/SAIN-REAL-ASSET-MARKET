@@ -16,13 +16,14 @@ export class StellarUsdcSettlementService {
   }
 
   async status() {
+    const sep24 = this.sep24?.status() || { configured:false, ready:false, standard:'SEP-24' };
     const health = await this.stellar.health();
-    if (!health.ready || health.publicNetwork === false) return { rail: RAIL, asset: STELLAR_USDC, ready: false, health, error:health.publicNetwork === false?'Stellar USDC settlement requires Stellar Mainnet.':undefined };
+    if (!health.ready || health.publicNetwork === false) return { rail: RAIL, asset: STELLAR_USDC, ready: false, health, sep24, error:health.publicNetwork === false?'Stellar USDC settlement requires Stellar Mainnet.':undefined };
     try {
       const treasury = await this.stellar.assetBalance('USDC');
-      return { rail: RAIL, asset: STELLAR_USDC, ready: treasury.trustline && Number(treasury.balance) > 0, health, treasury, sep24:this.sep24?.status() || { configured:false, standard:'SEP-24' } };
+      return { rail: RAIL, asset: STELLAR_USDC, ready: treasury.trustline && Number(treasury.balance) > 0, health, treasury, sep24 };
     } catch (error) {
-      return { rail: RAIL, asset: STELLAR_USDC, ready: false, health, error: text(error?.message || error) };
+      return { rail: RAIL, asset: STELLAR_USDC, ready: false, health, sep24, error: text(error?.message || error) };
     }
   }
 
