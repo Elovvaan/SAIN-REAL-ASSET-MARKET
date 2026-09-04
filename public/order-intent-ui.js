@@ -58,7 +58,7 @@
       root.insertAdjacentHTML('beforeend', `<div data-order-intent-review style="margin-top:10px;padding:12px;border:1px solid #3f3519;border-radius:10px;background:#0e0c08">
         <strong>${preview.side} ${Number(preview.quantity).toLocaleString()} ${preview.unit}</strong>
         <div style="margin-top:6px">Estimated value: ${Number(preview.estimatedNotional).toLocaleString('en-US',{style:'currency',currency:'USD'})}</div>
-        <div style="margin-top:6px;color:#aaa">This creates a queued order intent only. It does not match, allocate, settle, move balances, or transfer ownership.</div>
+        <div style="margin-top:6px;color:#aaa">Next: review and confirm your queued order.</div>
         <button data-confirm-order-intent class="terminal-primary" style="margin-top:10px">Confirm Order Intent</button>
       </div>`);
       root.querySelector('[data-confirm-order-intent]').addEventListener('click', confirm);

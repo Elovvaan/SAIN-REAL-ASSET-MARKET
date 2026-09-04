@@ -54,7 +54,7 @@
         <div>
           <p class="eyebrow">PARTICIPANT-OWNED DIGITAL ACCOUNT</p>
           <h2>${esc(vault.displayName)} Asset Vault</h2>
-          <p>This view is derived from participant-linked transaction records. SRA connects, verifies, records, and routes authorized activity without representing the participant's assets as platform-owned property.</p>
+          <p>View your participant-linked transactions and authorized activity.</p>
         </div>
         <div class="asset-vault-identity">
           <span>Universal Account</span>
@@ -76,7 +76,7 @@
       <section class="asset-vault-control-grid">
         <article><span>Ownership</span><strong>${esc(vault.ownership || 'PARTICIPANT')}</strong><p>The account belongs to the identified participant.</p></article>
         <article><span>Platform role</span><strong>${esc(vault.platformRole || 'INFRASTRUCTURE')}</strong><p>SRA provides access, verification, recording, routing, and settlement coordination.</p></article>
-        <article><span>Custody state</span><strong>${esc(String(vault.custodyState || 'NOT_INFERRED').replaceAll('_', ' '))}</strong><p>Custody is shown only when an actual custody arrangement is recorded.</p></article>
+        <article><span>Custody state</span><strong>${esc(String(vault.custodyState || 'NOT_INFERRED').replaceAll('_', ' '))}</strong><p>Current recorded custody arrangement.</p></article>
       </section>
 
       <section class="asset-vault-balance-grid">

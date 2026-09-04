@@ -41,7 +41,7 @@
           <div>
             <p class="eyebrow">VERIFIED SETTLEMENT GATE</p>
             <h3>Settlement confirmation and ownership gate</h3>
-            <p>Ownership cannot be recognized until a trusted confirmation matches the authorized amount, currency, source, and destination.</p>
+            <p>Next: match the trusted confirmation to the authorized transaction.</p>
           </div>
           <button class="secondary-button" id="vs-refresh">Refresh</button>
         </div>

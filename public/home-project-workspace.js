@@ -20,7 +20,7 @@
     if (page) page.textContent = value;
     if (context) context.textContent = value;
     if (status) status.textContent = state.workspace?.homeProject?.state || 'HOME';
-    if (chatContext) chatContext.textContent = 'Sane guides this Home Project from verified information through funding approval, settlement readiness, and closing. Nothing executes without the customer.';
+    if (chatContext) chatContext.textContent = 'Sane guides this Home Project from verified information through funding approval, settlement readiness, and closing. Customer confirmation is required for execution.';
   }
 
   async function api(path, options = {}) {

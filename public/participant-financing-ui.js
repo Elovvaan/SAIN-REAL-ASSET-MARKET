@@ -122,7 +122,7 @@
     return `<section class="participant-financing-success" aria-live="polite">
       <p class="eyebrow">REQUEST SUBMITTED</p>
       <h3>Your financing request and supporting documents are now in SRA.</h3>
-      <p>The intake package is recorded together and can move into review without exposing administrative controls in your workspace.</p>
+      <p>Your intake package is recorded together and moves through review in this workspace.</p>
       <div class="participant-financing-success-grid">
         <div><span>Request ID</span><strong>${esc(record.opportunityId || 'Recorded')}</strong></div>
         <div><span>Status</span><strong>${esc(record.status || 'RECEIVED')}</strong></div>
@@ -193,7 +193,7 @@
         <article class="participant-financing-step"><span>1 · REQUEST + DOCUMENTS</span><strong>Submit one complete intake package</strong><p>Your financing details, signed-in identity, Universal Account, and supporting documents enter together.</p></article>
         <article class="participant-financing-step"><span>2 · INGESTION</span><strong>SRA records and organizes the package</strong><p>The request and evidence are associated to the same financing opportunity.</p></article>
         <article class="participant-financing-step"><span>3 · REVIEW</span><strong>SRA reviews what was submitted</strong><p>If something specific is missing, a targeted follow-up can be requested instead of making documents a separate default step.</p></article>
-        <article class="participant-financing-step"><span>4 · STATUS</span><strong>Track the financing lifecycle</strong><p>The participant sees their request state without seeing the administrative workstation.</p></article>
+        <article class="participant-financing-step"><span>4 · STATUS</span><strong>Track the financing lifecycle</strong><p>Track your request status and next action here.</p></article>
       </section>
     </section>`;
   }

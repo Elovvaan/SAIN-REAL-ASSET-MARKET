@@ -36,7 +36,7 @@
     const queues = state.workspace?.queues || {};
     view.innerHTML = `
       <section class="institution-hero">
-        <div><p class="eyebrow">PHASE 15 · INSTITUTION PARTICIPATION</p><h2>Capital participation without duplicate underwriting</h2><p>SRA presents authorized, verified Home Projects. Institutions may review the opportunity, request information, commit capital, or pass.</p></div>
+        <div><p class="eyebrow">PHASE 15 · INSTITUTION PARTICIPATION</p><h2>Capital participation</h2><p>Review authorized, verified Home Projects, request information, commit capital, or pass.</p></div>
         <div class="institution-metrics">
           <article><span>Incoming</span><strong>${queueCount('incoming')}</strong></article>
           <article><span>Under review</span><strong>${queueCount('underReview')}</strong></article>

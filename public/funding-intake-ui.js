@@ -24,7 +24,7 @@
       </form>
       <form class="funding-intake-form" id="crypto-verification-form" hidden>
         <input name="transactionHash" placeholder="Base transaction hash (0x...)" required>
-        <div><strong>Verify transfer</strong><div class="funding-intake-note">The same blockchain transaction cannot be used twice.</div></div>
+        <div><strong>Verify transfer</strong><div class="funding-intake-note">Enter the transaction hash to continue.</div></div>
         <button class="primary-button" type="submit">Verify and credit vault</button>
       </form>
       <form class="funding-intake-form" id="vault-funding-form" hidden>
@@ -38,7 +38,7 @@
         <button class="primary-button" type="submit">Create payment instruction</button>
       </form>
       <div class="funding-intake-result" id="funding-intake-result"></div>
-      <p class="funding-intake-note">Creating an instruction does not represent receipt, custody, settlement, or available balance. Crypto must be verified on Base before the Asset Vault is credited.</p>
+      <p class="funding-intake-note">Your Asset Vault balance updates after the Base transfer is verified.</p>
     </section>`;
   }
 
@@ -59,7 +59,7 @@
   async function submitInstruction(endpoint, body) {
     const { payload } = await jsonRequest(endpoint, body);
     const instruction = payload.instruction;
-    showResult(`${esc(instruction.fundingInstructionId)} · ${money.format(instruction.amount)} · ${esc(instruction.rail)} · ${esc(instruction.state)}. No balance has been credited yet.`);
+    showResult(`${esc(instruction.fundingInstructionId)} · ${money.format(instruction.amount)} · ${esc(instruction.rail)} · ${esc(instruction.state)}. Next: complete transfer verification.`);
     return instruction;
   }
 
@@ -82,7 +82,7 @@
         activeCryptoInstructionId = instruction.fundingInstructionId;
         const verificationForm = host.querySelector('#crypto-verification-form');
         verificationForm.hidden = false;
-        showResult(`Send exactly <strong>${money.format(instruction.amount)} USDC</strong> on <strong>Base</strong> to <span class="crypto-address">${esc(instruction.receivingAddress)}</span>. Then enter the transaction hash below. No balance is credited until verification succeeds.`);
+        showResult(`Send exactly <strong>${money.format(instruction.amount)} USDC</strong> on <strong>Base</strong> to <span class="crypto-address">${esc(instruction.receivingAddress)}</span>. Then enter the transaction hash below to update your balance.`);
       } catch (error) { showResult(esc(error.message), true); }
     });
     host.querySelector('#crypto-verification-form')?.addEventListener('submit', async (event) => {

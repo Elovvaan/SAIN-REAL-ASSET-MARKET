@@ -16,7 +16,7 @@ function renderCapacityManager(){
   const root=document.querySelector('#view-root');
   document.querySelector('#page-title').textContent='Account Capacities';
   const owned=new Set(accessState.session.capacities.map(item=>item.id));
-  root.innerHTML=`<section class="participant-home"><div class="participant-welcome"><p class="eyebrow">UNIVERSAL IDENTITY</p><h2>${accessEscape(accessState.session.displayName)}</h2><p>Universal Account ${accessEscape(accessState.session.universalAccountId)} is the permanent identity. Specialized capacities add tools without creating another login.</p></div><div class="participant-actions">
+  root.innerHTML=`<section class="participant-home"><div class="participant-welcome"><p class="eyebrow">UNIVERSAL IDENTITY</p><h2>${accessEscape(accessState.session.displayName)}</h2><p>Universal Account ${accessEscape(accessState.session.universalAccountId)} is the permanent identity. Use this login across all active capacities.</p></div><div class="participant-actions">
     <article class="participant-action capacity-owned"><strong>Universal Account</strong><span>Marketplace access, balances, positions, watchlist, activity, and Sane.</span><small>ACTIVE</small></article>
     <button class="participant-action" data-add-capacity="ASSET_PROVIDER"><strong>Asset Provider</strong><span>Start V4V, manage productive assets, create projects, and publish opportunities.</span><small>${owned.has('ASSET_PROVIDER')?'ACTIVE':'ADD CAPACITY'}</small></button>
     <button class="participant-action" data-add-capacity="MARKET_PROFESSIONAL"><strong>Market Professional</strong><span>Offer capital, services, materials, equipment, and contract capacity.</span><small>${owned.has('MARKET_PROFESSIONAL')?'ACTIVE':'ADD CAPACITY'}</small></button>

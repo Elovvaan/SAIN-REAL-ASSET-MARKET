@@ -25,5 +25,5 @@ test('regular participant marketplace renders issued wallet inventory separately
   const ui=fs.readFileSync(new URL('../public/transaction-market-ui.js',import.meta.url),'utf8');
   assert.match(ui,/\/api\/participation\/market-inventory/);
   assert.match(ui,/Issued Stellar Wallet Inventory/);
-  assert.match(ui,/wallet balance as an automatic sell order/);
+  assert.match(ui,/View issued assets and live market opportunities/);
 });
