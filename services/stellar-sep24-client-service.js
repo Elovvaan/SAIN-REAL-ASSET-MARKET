@@ -124,9 +124,16 @@ export class StellarSep24ClientService {
     if (!['deposit', 'withdraw'].includes(kind)) throw new Error('SEP-24 kind must be deposit or withdraw.');
     const capability = info?.[kind]?.USDC;
     if (!capability?.enabled) throw new Error(`Configured SEP-24 anchor does not report ${kind} support for USDC.`);
-    const body = new URLSearchParams({ asset_code:'USDC', account });
+    const body = new FormData();
+    body.set('asset_code', 'USDC');
+    body.set('account', account);
+    body.set('lang', 'en');
     if (input.amount != null) body.set('amount', text(input.amount));
-    const result = await jsonResponse(await this.fetch(`${discovery.transferServer}/transactions/${kind}/interactive`, { method:'POST', headers:{ Authorization:`Bearer ${token}`, 'Content-Type':'application/x-www-form-urlencoded', Accept:'application/json' }, body }), `SEP-24 ${kind}`);
+    const result = await jsonResponse(await this.fetch(`${discovery.transferServer}/transactions/${kind}/interactive`, {
+      method:'POST',
+      headers:{ Authorization:`Bearer ${token}`, Accept:'application/json' },
+      body,
+    }), `SEP-24 ${kind}`);
     const interactiveUrl = httpsEndpoint(result.url, 'SEP-24 interactive URL');
     return { anchorDomain:discovery.anchorDomain, kind, asset:'USDC', account, authAccount:moneyGramKeypair(this.environment, 'MONEYGRAM_AUTH_SECRET').publicKey(), userId, transactionId:text(result.id) || null, interactiveUrl };
   }

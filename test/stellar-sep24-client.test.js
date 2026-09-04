@@ -84,3 +84,38 @@ test('SEP-24 transaction refresh reauthenticates and queries the anchor by trans
   const result=await service.getTransaction({transactionId:'mg-123',userId:'42'});
   assert.equal(result.transaction.status,'completed');
 });
+
+for (const kind of ['withdraw', 'deposit']) {
+  test(`SEP-24 ${kind} interactive request uses multipart form data`, async () => {
+    const auth = StellarSdk.Keypair.random();
+    const funds = StellarSdk.Keypair.random();
+    const service = new StellarSep24ClientService({
+      stellar:{},
+      environment:{
+        STELLAR_SEP24_MODE:'SANDBOX',
+        MONEYGRAM_AUTH_SECRET:auth.secret(),
+        MONEYGRAM_FUNDS_SECRET:funds.secret(),
+      },
+    });
+    service.discover = async () => ({ anchorDomain:'anchor.example', transferServer:'https://anchor.example/sep24' });
+    service.authenticate = async () => ({ token:'sandbox-jwt', userId:'42' });
+    service.info = async () => ({ [kind]:{ USDC:{ enabled:true } } });
+    service.fetch = async (url, options) => {
+      assert.equal(url, `https://anchor.example/sep24/transactions/${kind}/interactive`);
+      assert.equal(options.method, 'POST');
+      assert.equal(options.headers.Authorization, 'Bearer sandbox-jwt');
+      assert.equal(options.headers.Accept, 'application/json');
+      assert.equal(Object.hasOwn(options.headers, 'Content-Type'), false);
+      assert.equal(options.body instanceof FormData, true);
+      assert.equal(options.body.get('asset_code'), 'USDC');
+      assert.equal(options.body.get('account'), funds.publicKey());
+      assert.equal(options.body.get('lang'), 'en');
+      assert.equal(options.body.get('amount'), '25');
+      return { ok:true, async json(){ return { id:`mg-${kind}`, url:`https://anchor.example/${kind}/mg-${kind}` }; } };
+    };
+
+    const result = await service.startInteractive({ kind, amount:'25', userId:'42' });
+    assert.equal(result.kind, kind);
+    assert.equal(result.transactionId, `mg-${kind}`);
+  });
+}
