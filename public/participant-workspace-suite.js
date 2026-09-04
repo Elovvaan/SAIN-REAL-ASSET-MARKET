@@ -346,8 +346,42 @@
     }
   }
 
+  function compactMarketRows(listings = []) {
+    if (!listings.length) return `<div class="participant-market-empty"><strong>No published opportunities right now.</strong><span>Only verified, unblocked LIVE listings appear in this board.</span></div>`;
+    return listings.slice(0, 4).map((listing) => {
+      const listingId = listing.listingId || listing.id || '';
+      const name = listing.title || listing.instrumentName || listing.instrumentId || listingId || 'Published instrument';
+      const instrument = listing.instrumentId || listing.assetCode || 'SRA';
+      const rawPrice = listing.pricing?.unitPrice ?? listing.pricing?.askingPrice;
+      const hasPrice = rawPrice !== undefined && rawPrice !== null && rawPrice !== '';
+      const quantity = number(listing.availableQuantity ?? listing.quantity);
+      return `<article class="participant-market-row">
+        <div class="participant-market-identity"><span class="participant-market-symbol">◇</span><span><strong>${esc(name)}</strong><small>${esc(instrument)} · SRA/USD</small></span></div>
+        <div class="participant-market-quote"><strong>${hasPrice ? moneyCents.format(number(rawPrice)) : '—'}</strong><small>${quantity > 0 ? `${qty(quantity)} SRA available` : 'Published inventory'}</small></div>
+        <span class="participant-market-state">LIVE</span>
+        <button type="button" data-participant-prompt="Open marketplace listing ${esc(listingId)}" aria-label="Open ${esc(name)}">Open</button>
+      </article>`;
+    }).join('');
+  }
+
+  async function hydrateCompactMarketBoard() {
+    const board = document.querySelector('[data-participant-market-board]');
+    if (!board || activeView !== 'marketplace') return;
+    try {
+      const data = await getParticipantMirror();
+      if (!board.isConnected || activeView !== 'marketplace') return;
+      if (data.errors.listings) throw new Error(data.errors.listings);
+      const count = data.listings.length;
+      board.innerHTML = `<div class="participant-market-head"><div><span>LIVE SRA/USD MARKET</span><strong>${count} published opportunit${count === 1 ? 'y' : 'ies'}</strong></div><button type="button" data-participant-prompt="Show me all published marketplace opportunities.">View all</button></div><div class="participant-market-columns" aria-hidden="true"><span>Instrument</span><span>Price / inventory</span><span>Status</span><span></span></div><div class="participant-market-list">${compactMarketRows(data.listings)}</div>`;
+      bindParticipantPrompts(board);
+    } catch (error) {
+      if (!board.isConnected || activeView !== 'marketplace') return;
+      board.innerHTML = `<div class="participant-market-empty"><strong>Market board temporarily unavailable.</strong><span>${esc(error.message)}</span></div>`;
+    }
+  }
+
   function actionMarkup(view) {
-    if (view === 'marketplace') return ['Marketplace', `<div class="participant-action-ticket"><div class="ticket-stat"><span>Market</span><strong>LIVE SRA/USD</strong></div><button type="button" data-participant-prompt="Show me opportunities I can participate in.">Find opportunities</button><button type="button" data-participant-prompt="Explain what is currently LIVE in the marketplace.">Explain market</button></div>`];
+    if (view === 'marketplace') return ['Marketplace', `<div class="participant-action-ticket participant-market-board" data-participant-market-board><div class="participant-market-loading"><span></span><strong>Loading published market opportunities…</strong></div></div>`];
     if (view === 'instruments') return ['Create Instrument', `<div class="participant-action-ticket"><div class="ticket-stat"><span>Current operating tier</span><strong>${esc(String(window.accessState?.session?.activeCapacity || 'UNIVERSAL').replaceAll('_',' '))}</strong></div><div class="ticket-stat"><span>Representation rule</span><strong>1 SRA = 1 USD recognized value</strong></div><button type="button" data-participant-prompt="Review what instrument formation paths are currently available to my account.">Review formation paths</button><button type="button" data-participant-prompt="What recognized value and authority records do I need before creating an instrument?">Explain prerequisites</button></div>`];
     if (view === 'funding-operations') return ['Request Financing', `<div class="participant-action-ticket"><div class="ticket-stat"><span>Workflow</span><strong>Verified Value → Model → Instrument → Market → Settlement</strong></div><button type="button" data-participant-prompt="Explain my current financing state and the next available action.">Explain financing state</button></div>`];
     if (view === 'pools') return ['Market Pools', `<div class="participant-action-ticket"><div class="ticket-stat"><span>Market</span><strong>PRODUCTIVE BASKETS</strong></div><button type="button" data-participant-prompt="Explain how productive asset baskets form, close, perform, and distribute value.">Explain market pools</button></div>`];
@@ -384,6 +418,7 @@
     if (context) context.textContent = view === 'home-projects' ? 'Ask SAIN to guide your next participant action.' : 'Current participant action';
     if (prompts) prompts.innerHTML = html;
     bindParticipantPrompts();
+    if (view === 'marketplace') void hydrateCompactMarketBoard();
   }
 
   function renderOwnedView(view) {
