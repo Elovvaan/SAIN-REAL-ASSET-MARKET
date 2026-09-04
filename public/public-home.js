@@ -1,6 +1,6 @@
 (() => {
-  const PUBLIC_HOME_VERSION = 'V21';
-  const PUBLIC_WELCOME = 'Welcome to the Living Marketplace. SRA connects authorized transaction and asset data to recognized financial assets. Source activity moves through Observation, Recognition, Financial Record, Verified Value, SRA Coin representation, instrument formation, and marketplace participation. What would you like to understand or accomplish?';
+  const PUBLIC_HOME_VERSION = 'V22_INFRASTRUCTURE';
+  const PUBLIC_WELCOME = 'SRA is the infrastructure connecting productive assets to verified financial positions, governed markets, and settlement. Ask me to explain the asset path, current system status, SRA Coin participation, or how to bring an asset into SRA.';
   const originalFetch = window.fetch.bind(window);
   let syncQueued = false;
 
@@ -50,12 +50,26 @@
     return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(Number(value || 0));
   }
 
+  function stateLabel(value) {
+    return String(value || 'AVAILABLE').replaceAll('_',' ');
+  }
+
+  function statusMarkup() {
+    const status = window.accessState?.publicData?.infrastructureStatus;
+    const stages = Array.isArray(status?.stages) ? status.stages : [];
+    return `<section class="public-infrastructure-status" aria-label="Current SRA infrastructure status"><div class="public-section-heading"><div><p class="eyebrow">CURRENT BUILD STATUS</p><h2>Infrastructure, matched to operations</h2></div><span class="public-phase">${escape(stateLabel(status?.phase || 'INFRASTRUCTURE BUILDOUT'))}</span></div><div class="public-status-grid">${stages.map((stage)=>`<article><div><span class="public-status-dot" data-state="${escape(stage.state)}"></span><strong>${escape(stage.label)}</strong></div><em>${escape(stateLabel(stage.state))}</em><p>${escape(stage.detail)}</p></article>`).join('') || '<article><strong>Status initializing</strong><p>Operational records are being read.</p></article>'}</div></section>`;
+  }
+
+  function infrastructureNarrative() {
+    return `<section class="public-infrastructure-intro"><div class="public-infrastructure-hero"><p class="eyebrow">ASSET · MARKET · SETTLEMENT INFRASTRUCTURE</p><h2>Make productive assets liquid.</h2><p>SRA verifies real-world economic activity, forms approved assets into tokenized financial positions, and connects them to governed market participation and settlement.</p><strong class="public-infrastructure-thesis">The moat is not lending. The moat is infrastructure that makes business assets liquid.</strong><div class="public-infrastructure-actions"><button class="primary-button" data-public-action="signup">Bring an asset</button><button class="secondary-button" data-public-prompt="Show me how an asset moves from verification to a financial position and market participation.">See how the system works</button></div></div><div class="public-model-shift"><p class="eyebrow">THE STRUCTURAL SHIFT</p><div><span>Traditional model</span><strong>Qualify for standardized credit</strong><small>Capital decisions begin with lender criteria and a centralized balance sheet.</small></div><div class="sra-model"><span>SRA infrastructure</span><strong>Verify, form, connect, settle</strong><small>Economic activity becomes a governed financial position with a visible lifecycle.</small></div></div></section><section class="public-asset-path" aria-label="How productive assets move through SRA"><article><span>01</span><strong>Bring the asset</strong><p>Connect an eligible productive asset, revenue stream, or obligation and its supporting records.</p></article><article><span>02</span><strong>Verify the value</strong><p>Record ownership, evidence, economic output, and recognized value.</p></article><article><span>03</span><strong>Form the position</strong><p>Move approved records through instrument formation and authorized on-chain representation.</p></article><article><span>04</span><strong>Open market access</strong><p>Enter supported markets and settlement workflows when authorization and liquidity are present.</p></article></section>${statusMarkup()}<section class="public-ecosystem"><div class="public-section-heading"><div><p class="eyebrow">ONE INFRASTRUCTURE · DISTINCT ROLES</p><h2>Built for the entire asset lifecycle</h2></div></div><div><article><strong>Businesses and asset providers</strong><p>Bring productive activity into verification and financial-position formation.</p></article><article><strong>Market participants</strong><p>Review and participate in authorized, evidence-backed positions through SRA Coin workflows.</p></article><article><strong>Institutions and settlement partners</strong><p>Provide liquidity, custody, or external settlement at the governed boundaries of the system.</p></article></div></section>`;
+  }
+
   function cardMarkup(cards, side) {
     return `<aside class="public-feature-rail public-feature-rail-${side}" aria-label="Platform highlights">${cards.map(([title,description,prompt])=>`<button class="public-feature-card" data-public-prompt="${escape(prompt)}"><strong>${escape(title)}</strong><span>${escape(description)}</span><small>Ask SAIN →</small></button>`).join('')}</aside>`;
   }
 
   function removePublicHome() {
-    document.querySelectorAll('.public-feature-rail,.public-home-actions,.public-business-identity').forEach(node => node.remove());
+    document.querySelectorAll('.public-feature-rail,.public-home-actions,.public-business-identity,.public-infrastructure-intro,.public-asset-path,.public-infrastructure-status,.public-ecosystem').forEach(node => node.remove());
     document.querySelector('#access-actions')?.classList.remove('public-top-access-hidden');
     if (document.body.dataset.publicHome !== 'inactive') document.body.dataset.publicHome = 'inactive';
   }
@@ -72,6 +86,8 @@
     const workspace = document.querySelector('.operating-workspace');
     const sane = document.querySelector('.sane-workspace');
     if (!workspace || !sane) return;
+
+    if (!document.querySelector('.public-infrastructure-intro')) workspace.insertAdjacentHTML('beforebegin', infrastructureNarrative());
 
     ownSignedOutCanvas();
     document.querySelector('#access-actions')?.classList.add('public-top-access-hidden');
@@ -98,16 +114,14 @@
       button.dataset.publicBound = 'true';
       button.addEventListener('click', () => openSainWithPrompt(button.dataset.publicPrompt || 'Help me understand this marketplace.'));
     });
-    const signin = document.querySelector('[data-public-action="signin"]');
-    if (signin && signin.dataset.publicBound !== 'true') {
-      signin.dataset.publicBound = 'true';
-      signin.addEventListener('click', () => openAccess('signin'));
-    }
-    const signup = document.querySelector('[data-public-action="signup"]');
-    if (signup && signup.dataset.publicBound !== 'true') {
-      signup.dataset.publicBound = 'true';
-      signup.addEventListener('click', () => openAccess('signup'));
-    }
+    document.querySelectorAll('[data-public-action="signin"]:not([data-public-bound])').forEach((button) => {
+      button.dataset.publicBound = 'true';
+      button.addEventListener('click', () => openAccess('signin'));
+    });
+    document.querySelectorAll('[data-public-action="signup"]:not([data-public-bound])').forEach((button) => {
+      button.dataset.publicBound = 'true';
+      button.addEventListener('click', () => openAccess('signup'));
+    });
   }
 
   async function renderDecisionCanvas(payload, requestBody) {

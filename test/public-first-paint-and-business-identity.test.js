@@ -9,6 +9,7 @@ const access = read('../public/access.js');
 const home = read('../public/public-home.js');
 const chat = read('../public/public-chat-runtime.js');
 const css = read('../public/access.css');
+const accessRouter = read('../routes/access-router.js');
 
 test('public shell stays hidden until one resolved access render is complete', () => {
   assert.match(index, /<body class="sra-access-resolving">/);
@@ -34,4 +35,24 @@ test('homepage carries filed SRA business identity and a contact route', () => {
   assert.match(home, /September 3, 2026/);
   assert.match(home, /href="\/support\/"/);
   assert.doesNotMatch(home, /42-4236568/);
+});
+
+test('homepage positions SRA as infrastructure and reports persisted operational stages', () => {
+  assert.match(home, /Make productive assets liquid/);
+  assert.match(home, /tokenized financial positions/);
+  assert.match(home, /The moat is not lending/);
+  assert.match(home, /Verify the value/);
+  assert.match(home, /Form the position/);
+  assert.match(home, /Open market access/);
+  assert.match(home, /Businesses and asset providers/);
+  assert.match(home, /Market participants/);
+  assert.match(home, /Institutions and settlement partners/);
+  assert.match(accessRouter, /function publicInfrastructureStatus\(\)/);
+  assert.match(accessRouter, /ON_CHAIN_USDC_MARKET_READINESS/);
+  assert.match(accessRouter, /MONEYGRAM_SANDBOX_CERTIFICATION_TEST/);
+  assert.match(accessRouter, /record\.anchorStatus/);
+  assert.match(accessRouter, /TWO_SIDED/);
+  assert.match(accessRouter, /infrastructureStatus: publicInfrastructureStatus\(\)/);
+  assert.doesNotMatch(home, /licensed bank/i);
+  assert.doesNotMatch(home, /freely tradeable from day one/i);
 });
