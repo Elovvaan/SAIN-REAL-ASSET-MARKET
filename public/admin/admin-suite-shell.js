@@ -81,6 +81,7 @@
       button.setAttribute('aria-selected','true');
       section.dataset.activeTab = button.dataset.adminTab;
       renderWorkspace(id);
+      window.dispatchEvent(new CustomEvent('sra:admin-tab-selected', { detail:{ workspaceId:id, tab:button.dataset.adminTab } }));
       void ensureSelectedTab(id);
     });
     return section;

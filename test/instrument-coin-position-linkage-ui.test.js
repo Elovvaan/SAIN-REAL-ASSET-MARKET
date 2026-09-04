@@ -13,6 +13,9 @@ test('Coin Positions exposes the Instrument Linkage operating station',()=>{
   assert.match(workstation,/Register an existing SRA Coin Position/);
   assert.match(workstation,/data-link-instrument/);
   assert.match(workstation,/\/api\/admin\/instrument-coin-position-linkages/);
+  assert.match(shell,/sra:admin-tab-selected/);
+  assert.match(workstation,/event\.detail\?\.workspaceId==='coin-positions'/);
+  assert.match(workstation,/recordRoot\.style\.display='none'/);
   assert.match(routes,/INSTRUMENT_COIN_POSITION_LINKED/);
   assert.match(onChain,/INSTRUMENT_COIN_POSITION_LINKAGE_REQUIRED/);
   assert.match(issuance,/Coin Position linkage → network readiness/);

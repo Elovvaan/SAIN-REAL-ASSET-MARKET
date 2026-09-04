@@ -9,6 +9,7 @@
   const qty = (value) => num(value).toLocaleString(undefined, { maximumFractionDigits: 8 });
   const usd = (value) => `$${num(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const terminalTabs = new Set(['Legacy Corrections', 'XRPL Exchange']);
+  const ownedTabs = new Set(['Current Supply','Represented Value','Coin Intelligence','Instrument Linkage','Mint History','Adjustments','Retirements']);
 
   async function requestJson(url,options={}) {
     if(window.SRAAdminDataClient)return window.SRAAdminDataClient.json(url,options);
@@ -18,11 +19,13 @@
     return payload;
   }
   function controls(workspace) { return workspace?.querySelector('.admin-workspace-controls') || null; }
-  function removePanel(workspace) { controls(workspace)?.querySelector('[data-coin-lifecycle-workstation]')?.remove(); }
+  function records(workspace) { return workspace?.querySelector('.admin-workspace-records') || null; }
+  function removePanel(workspace) { controls(workspace)?.querySelector('[data-coin-lifecycle-workstation]')?.remove(); const root=records(workspace); if(root)root.style.display=''; }
   function panel(workspace) {
     const root = controls(workspace); if (!root) return null;
     let node = root.querySelector('[data-coin-lifecycle-workstation]');
     if (!node) { node = document.createElement('section'); node.className='admin-record-card'; node.dataset.coinLifecycleWorkstation='true'; root.prepend(node); }
+    const recordRoot=records(workspace); if(recordRoot)recordRoot.style.display='none';
     return node;
   }
   function card(label,value,detail='') { return `<div style="border:1px solid #292929;border-radius:12px;padding:14px;background:#090909;min-width:0"><span style="display:block;color:#9a9a9a;font-size:10px;text-transform:uppercase">${esc(label)}</span><strong style="display:block;font-size:20px;margin-top:7px">${esc(value)}</strong>${detail?`<small style="display:block;color:#8f8f8f;margin-top:5px">${esc(detail)}</small>`:''}</div>`; }
@@ -66,7 +69,7 @@
   }
   async function refresh(workspace) {
     const tab=workspace?.dataset.activeTab||'';
-    if(!tab||terminalTabs.has(tab)){removePanel(workspace);return;}
+    if(!tab||terminalTabs.has(tab)||!ownedTabs.has(tab)){removePanel(workspace);return;}
     const state=refreshState.get(workspace)||{inFlight:null,queued:false};
     if(state.inFlight){state.queued=true;refreshState.set(workspace,state);return state.inFlight;}
     const node=panel(workspace); if(!node)return;
@@ -91,7 +94,7 @@
   function mount(workspace) {
     if(!workspace||mounted.has(workspace))return;
     mounted.add(workspace);
-    workspace.addEventListener('click',event=>{if(event.target.closest('[data-admin-tab]'))queueMicrotask(()=>void refresh(workspace));});
+    window.addEventListener('sra:admin-tab-selected',event=>{if(event.detail?.workspaceId==='coin-positions')void refresh(workspace);});
     window.addEventListener('sra:admin-workspace-synchronized',event=>{if(event.detail?.workspaceId==='coin-positions')void refresh(workspace);});
     void refresh(workspace);
   }
