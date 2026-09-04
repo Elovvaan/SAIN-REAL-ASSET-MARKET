@@ -1,7 +1,7 @@
 (() => {
   const usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
   const number = new Intl.NumberFormat('en-US', { maximumFractionDigits: 8 });
-  const marketState = { listings: [], total: 0, selected: null, query: '', refreshedAt: null, loading: false };
+  const marketState = { listings: [], inventory: [], total: 0, selected: null, query: '', refreshedAt: null, loading: false };
 
   const esc = (value) => String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#039;');
   const price = (listing) => Number(listing?.pricing?.askingPrice ?? listing?.unitPrice ?? 0);
@@ -25,10 +25,14 @@
     if (!force && marketState.refreshedAt && Date.now() - marketState.refreshedAt.getTime() < 10_000) return;
     marketState.loading = true;
     try {
-      const response = await fetch('/api/marketplace-listings?state=LIVE&page=1&limit=100', { headers: { Accept: 'application/json' } });
+      const [response, inventoryResponse] = await Promise.all([
+        fetch('/api/marketplace-listings?state=LIVE&page=1&limit=100', { headers: { Accept: 'application/json' } }),
+        fetch('/api/participation/market-inventory', { cache:'no-store', headers: { Accept:'application/json' } })
+      ]);
       if (!response.ok) throw new Error('The live marketplace inventory could not be loaded.');
-      const payload = await response.json();
+      const [payload, inventoryPayload] = await Promise.all([response.json(), inventoryResponse.ok ? inventoryResponse.json() : Promise.resolve({ inventory:[] })]);
       marketState.listings = (payload.listings || []).filter(isLive);
+      marketState.inventory = inventoryPayload.inventory || [];
       marketState.total = marketState.listings.length;
       marketState.refreshedAt = new Date();
       if (!marketState.selected || !marketState.listings.some((item) => item.listingId === marketState.selected)) marketState.selected = marketState.listings[0]?.listingId || null;
@@ -46,6 +50,16 @@
     });
   }
   const selectedListing = () => marketState.listings.find((item) => item.listingId === marketState.selected) || filtered()[0] || null;
+
+  function walletInventory() {
+    if (!marketState.inventory.length) return '<div class="terminal-empty">No issued on-chain inventory is currently recorded.</div>';
+    return `<section class="wallet-market-inventory"><div class="terminal-panel-head"><strong>Issued Stellar Wallet Inventory</strong><span>${marketState.inventory.length} ASSET${marketState.inventory.length === 1 ? '' : 'S'}</span></div><div class="tier-one-inventory-grid">${marketState.inventory.map((item) => {
+      const walletBalance = item.wallet?.balance == null ? 'Unavailable' : number.format(Number(item.wallet.balance));
+      const availableBalance = item.wallet?.available == null ? 'Unavailable' : number.format(Number(item.wallet.available));
+      const address = item.wallet?.account || item.assetAddress || 'Not recorded';
+      return `<article class="tier-one-inventory-card"><div class="tier-one-opportunity-head"><span class="badge open">${esc(String(item.marketState || 'ISSUED_INVENTORY').replaceAll('_',' '))}</span><span>${esc(item.network)}</span></div><h3>${esc(item.asset)} issued position</h3><p>${esc(item.instrumentId || item.assetId)}</p><div class="tier-one-inventory-metrics"><span><small>Recorded issued supply</small><strong>${number.format(Number(item.issuedSupply || 0))}</strong></span><span><small>Live wallet balance</small><strong>${esc(walletBalance)}</strong></span><span><small>Available in wallet</small><strong>${esc(availableBalance)}</strong></span><span><small>Market access</small><strong>${esc(String(item.participationState || '').replaceAll('_',' '))}</strong></span></div><div class="tier-one-wallet-address"><small>Stellar distribution wallet</small><code title="${esc(address)}">${esc(address)}</code></div><button class="secondary-button" data-context-action="Review ${esc(item.asset)} issued inventory ${esc(item.assetId)} and explain its marketplace participation and liquidity state">Review Market Access</button></article>`;
+    }).join('')}</div></section>`;
+  }
 
   function marketRows() {
     const rows = filtered();
@@ -73,8 +87,8 @@
 
   function terminalMarkup() {
     const listing = selectedListing();
-    if (!listing) return '<section class="live-terminal"><div class="terminal-empty">No LIVE marketplace products are currently available.</div></section>';
-    return `<section class="live-terminal"><header class="terminal-summary"><div><p class="eyebrow">SRA LIVE MARKET</p><h2>SRA Market Instruments</h2><span>Only published, LIVE products appear in the participant marketplace.</span></div><div class="terminal-kpis"><div><strong>${marketState.total.toLocaleString()}</strong><span>Live products</span></div><div><strong>$1.00</strong><span>SRA par</span></div></div></header><div class="terminal-toolbar"><input id="market-search" value="${esc(marketState.query)}" placeholder="Search live market, listing, instrument, or origin"><button id="market-refresh">Refresh</button><span>Updated ${marketState.refreshedAt ? marketState.refreshedAt.toLocaleTimeString() : 'now'}</span></div><div class="terminal-grid"><section class="market-watch"><div class="terminal-panel-head"><strong>Market Watch</strong><span>${filtered().length} LIVE</span></div><div class="market-table-head"><span>Market</span><span>Price</span><span>Quantity</span><span>Status</span></div><div class="market-rows">${marketRows()}</div></section><section class="instrument-chart"><div class="terminal-panel-head"><div><strong>${esc(marketIdentity(listing))}</strong><small>${esc(listing.listingId)}</small></div><span>LIVE</span></div><div class="chart-price"><strong>${usd.format(price(listing) || 1)}</strong><span>${esc(listing.title || listing.instrumentId)}</span></div><div class="market-chart"><div class="chart-grid"></div><svg viewBox="0 0 700 260" preserveAspectRatio="none"><polyline points="0,205 70,175 140,188 210,132 280,148 350,102 420,118 490,74 560,91 630,45 700,58" fill="none" stroke="currentColor" stroke-width="4" vector-effect="non-scaling-stroke"/></svg><div class="chart-label">Recorded value path · not a price prediction</div></div><div class="instrument-details"><div><span>Instrument</span><strong>${esc(listing.instrumentId)}</strong></div><div><span>Available</span><strong>${number.format(available(listing))} ${esc(listing.unit || 'SRA')}</strong></div><div><span>Pricing method</span><strong>${esc(listing.pricing?.method || 'SRA par')}</strong></div><div><span>Access</span><strong>${esc(listing.access?.eligibilityRule || listing.access?.state || 'Controlled')}</strong></div></div></section><section class="market-depth"><div class="terminal-panel-head"><strong>Market Depth</strong><span>Indicative</span></div><div class="depth-head"><span>Price</span><span>Quantity</span><span>Side</span></div>${depthRows(listing)}</section>${orderTicket(listing)}${originPanel(listing)}</div></section>`;
+    if (!listing) return `<section class="live-terminal"><header class="terminal-summary"><div><p class="eyebrow">SRA MARKET INVENTORY</p><h2>Issued positions</h2><span>Issued wallet inventory is visible before a separate LIVE offer is authorized.</span></div><div class="terminal-kpis"><div><strong>${marketState.inventory.length}</strong><span>Issued assets</span></div><div><strong>0</strong><span>Live products</span></div></div></header>${walletInventory()}<div class="terminal-empty">No separately published LIVE marketplace products are currently available.</div></section>`;
+    return `<section class="live-terminal"><header class="terminal-summary"><div><p class="eyebrow">SRA LIVE MARKET</p><h2>SRA Market Instruments</h2><span>Issued wallet inventory and separately published LIVE products are displayed without treating a wallet balance as an automatic sell order.</span></div><div class="terminal-kpis"><div><strong>${marketState.total.toLocaleString()}</strong><span>Live products</span></div><div><strong>${marketState.inventory.length}</strong><span>Issued assets</span></div></div></header>${walletInventory()}<div class="terminal-toolbar"><input id="market-search" value="${esc(marketState.query)}" placeholder="Search live market, listing, instrument, or origin"><button id="market-refresh">Refresh</button><span>Updated ${marketState.refreshedAt ? marketState.refreshedAt.toLocaleTimeString() : 'now'}</span></div><div class="terminal-grid"><section class="market-watch"><div class="terminal-panel-head"><strong>Market Watch</strong><span>${filtered().length} LIVE</span></div><div class="market-table-head"><span>Market</span><span>Price</span><span>Quantity</span><span>Status</span></div><div class="market-rows">${marketRows()}</div></section><section class="instrument-chart"><div class="terminal-panel-head"><div><strong>${esc(marketIdentity(listing))}</strong><small>${esc(listing.listingId)}</small></div><span>LIVE</span></div><div class="chart-price"><strong>${usd.format(price(listing) || 1)}</strong><span>${esc(listing.title || listing.instrumentId)}</span></div><div class="market-chart"><div class="chart-grid"></div><svg viewBox="0 0 700 260" preserveAspectRatio="none"><polyline points="0,205 70,175 140,188 210,132 280,148 350,102 420,118 490,74 560,91 630,45 700,58" fill="none" stroke="currentColor" stroke-width="4" vector-effect="non-scaling-stroke"/></svg><div class="chart-label">Recorded value path · not a price prediction</div></div><div class="instrument-details"><div><span>Instrument</span><strong>${esc(listing.instrumentId)}</strong></div><div><span>Available</span><strong>${number.format(available(listing))} ${esc(listing.unit || 'SRA')}</strong></div><div><span>Pricing method</span><strong>${esc(listing.pricing?.method || 'SRA par')}</strong></div><div><span>Access</span><strong>${esc(listing.access?.eligibilityRule || listing.access?.state || 'Controlled')}</strong></div></div></section><section class="market-depth"><div class="terminal-panel-head"><strong>Market Depth</strong><span>Indicative</span></div><div class="depth-head"><span>Price</span><span>Quantity</span><span>Side</span></div>${depthRows(listing)}</section>${orderTicket(listing)}${originPanel(listing)}</div></section>`;
   }
 
   function bindTerminal(root) {

@@ -43,6 +43,32 @@ export class ParticipationService{
 
   getOpportunity(projectId){return this.listOpportunities().find(item=>item.id===projectId)||null}
 
+  async listMarketInventory(balanceReader){
+    const assets=this.domain.list('ON_CHAIN_ASSET').filter(item=>Number(item.issuedSupply||0)>0);
+    const offers=this.domain.list('ON_CHAIN_MARKET_OFFER');
+    const usdcMarkets=this.domain.list('ON_CHAIN_USDC_MARKET');
+    return Promise.all(assets.map(async asset=>{
+      const assetOffers=offers.filter(item=>item.assetId===asset.assetId);
+      const liveOffers=assetOffers.filter(item=>['CONFIRMED','ACTIVE','LIVE','OPEN'].includes(String(item.marketState||item.state||item.confirmation?.state||'').toUpperCase()));
+      const activeUsdcMarket=usdcMarkets.find(item=>item.assetId===asset.assetId&&['CONFIRMED','ACTIVE','READY','TWO_SIDED'].includes(String(item.state||item.confirmation?.state||'').toUpperCase()));
+      let wallet={account:asset.distributionAddress||asset.sourceAccount||null,balance:null,available:null,sellingLiabilities:null,trustline:null,live:false,error:null};
+      if(String(asset.network||'').toUpperCase()==='STELLAR'&&typeof balanceReader==='function'){
+        try{
+          const live=await balanceReader(asset);
+          wallet={account:live.account||wallet.account,balance:live.balance??'0',available:live.available??live.balance??'0',sellingLiabilities:live.sellingLiabilities??'0',trustline:live.trustline??true,live:true,error:null};
+        }catch(error){wallet.error=String(error?.message||error);}
+      }
+      return{
+        assetId:asset.assetId,instrumentId:asset.instrumentId||null,network:asset.network,asset:asset.asset||asset.symbol,
+        assetAddress:asset.assetAddress||asset.mintAddress||null,issuedSupply:String(asset.issuedSupply||'0'),
+        lastIssuedAmount:asset.lastIssuedAmount||null,lastIssueTransactionId:asset.lastIssueTransactionId||null,
+        wallet,offerCount:assetOffers.length,liveOfferCount:liveOffers.length,usdcMarketActive:Boolean(activeUsdcMarket),
+        marketState:liveOffers.length||activeUsdcMarket?'LIVE':'ISSUED_INVENTORY',
+        participationState:liveOffers.length?'OPEN':'AVAILABLE_FOR_MARKET_FORMATION',updatedAt:asset.updatedAt||asset.createdAt||null
+      };
+    }));
+  }
+
   async createPosition({session,projectId,participationType,medium,amount,description}){
     if(!session)return{ok:false,status:401,error:'Sign in to create a participation position.'};
     const opportunity=this.getOpportunity(projectId);

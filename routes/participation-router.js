@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { ParticipationService, participationConfiguration } from '../services/participation-service.js';
 import { TransactionParticipationGatewayService } from '../services/transaction-participation-gateway-service.js';
 import { createTransactionParticipationGatewayRouter } from './transaction-participation-gateway-router.js';
+import { StellarTransferService } from '../services/stellar-transfer-service.js';
 
 function readCookie(req,name){
   const cookie=req.headers.cookie||'';
@@ -13,9 +14,17 @@ export function createParticipationRouter(marketplace,accessService,domain){
   const router=Router();
   const service=new ParticipationService(marketplace,accessService,domain);
   const transactionParticipation=new TransactionParticipationGatewayService(domain);
+  const stellar=new StellarTransferService({domain});
 
   router.get('/configuration',(_req,res)=>res.json(participationConfiguration));
   router.get('/opportunities',(_req,res)=>res.json({opportunities:service.listOpportunities()}));
+  router.get('/market-inventory',async(_req,res)=>{
+    const balanceReader=asset=>Promise.race([
+      stellar.assetBalance(asset.assetAddress||asset.assetId),
+      new Promise((_,reject)=>{const timer=setTimeout(()=>reject(new Error('Live Stellar wallet lookup timed out.')),4000);timer.unref?.();})
+    ]);
+    return res.json({inventory:await service.listMarketInventory(balanceReader),generatedAt:new Date().toISOString()});
+  });
   router.get('/opportunities/:projectId',(req,res)=>{
     const opportunity=service.getOpportunity(req.params.projectId);
     if(!opportunity)return res.status(404).json({error:'Opportunity not found.'});

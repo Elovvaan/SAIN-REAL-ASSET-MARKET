@@ -1,0 +1,33 @@
+.tier-one-inventory-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.tier-one-inventory-card {
+  display: grid;
+  gap: 11px;
+  min-width: 0;
+  padding: 15px;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: radial-gradient(circle at 100% 0, rgba(215, 166, 42, .1), transparent 32%), #080808;
+}
+
+.tier-one-inventory-card h3,
+.tier-one-inventory-card p { margin: 0; }
+.tier-one-inventory-card p { color: var(--muted); font-size: 11px; }
+.tier-one-inventory-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.tier-one-inventory-metrics span { padding-top: 8px; border-top: 1px solid var(--line); }
+.tier-one-inventory-metrics small,
+.tier-one-wallet-address small { display: block; margin-bottom: 4px; color: var(--muted); font-size: 10px; }
+.tier-one-inventory-metrics strong { font-size: 13px; }
+.tier-one-wallet-address { min-width: 0; }
+.tier-one-wallet-address code { display: block; overflow: hidden; color: var(--gold); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.tier-one-inventory-card > button { justify-self: start; }
+.wallet-market-inventory { display: grid; gap: 12px; padding: 16px; border-bottom: 1px solid var(--line); }
+
+@media (max-width: 820px) {
+  .tier-one-inventory-grid { grid-template-columns: 1fr; }
+}
