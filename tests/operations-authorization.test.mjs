@@ -123,6 +123,33 @@ test('on-chain write falls back to active private admin session when standard se
   assert.equal(request.sraOperationsAuth.source, 'PRIVATE_ADMIN_SESSION');
 });
 
+test('private admin session wins for protected operations when a valid Universal session also exists', async () => {
+  const middleware = createOperationsAuthorization({ accessServiceProvider: provider({ customer, admin }) });
+  const request = req({
+    path: '/api/on-chain/assets/OCA-1/issue',
+    cookie: 'sra_session=customer; sra_admin_session=admin',
+  });
+  const { nextCalled, response } = await run(middleware, request);
+  assert.equal(response.statusCode, 200);
+  assert.equal(nextCalled, true);
+  assert.equal(request.sraOperationsAuth.actorId, 'USR-ADMIN');
+  assert.equal(request.sraOperationsAuth.source, 'PRIVATE_ADMIN_SESSION');
+  assert.equal(request.sraIdentity.activeCapacity, 'PLATFORM_ADMIN');
+});
+
+test('participant self-service keeps the Universal session when both portal cookies exist', async () => {
+  const middleware = createOperationsAuthorization({ accessServiceProvider: provider({ customer, admin }) });
+  const request = req({
+    path: '/api/funding/opportunities',
+    cookie: 'sra_session=customer; sra_admin_session=admin',
+  });
+  const { nextCalled, response } = await run(middleware, request);
+  assert.equal(response.statusCode, 200);
+  assert.equal(nextCalled, true);
+  assert.equal(request.sraOperationsAuth.actorId, 'USR-CUSTOMER');
+  assert.equal(request.sraOperationsAuth.source, 'SERVER_SESSION');
+});
+
 test('private admin session is accepted for funding operations through the private-admin boundary', async () => {
   const middleware = createOperationsAuthorization({ accessServiceProvider: provider({ admin }) });
   const request = req({ path: '/api/funding/opportunities', cookie: 'sra_admin_session=admin' });
