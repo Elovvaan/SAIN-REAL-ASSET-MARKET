@@ -6,6 +6,7 @@
   const sendButton = document.querySelector('#send-message');
   const heartbeat = document.querySelector('#heartbeat-track');
   const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+  let heartbeatStarted = false;
 
   function activeView() {
     return document.querySelector('.nav-item.active')?.dataset.view || 'marketplace';
@@ -58,7 +59,8 @@
   }
 
   async function startHeartbeat() {
-    if (!heartbeat) return;
+    if (!heartbeat || heartbeatStarted) return;
+    heartbeatStarted = true;
     try {
       const response = await fetch('/api/marketplace', { cache: 'no-store' });
       if (!response.ok) return;
@@ -99,5 +101,9 @@
 
   window.SRAPublicChat = { sendMessage, activeView };
   bind();
-  void startHeartbeat();
+  function scheduleHeartbeat() {
+    if ('requestIdleCallback' in window) window.requestIdleCallback(() => void startHeartbeat(), { timeout: 1500 });
+    else window.setTimeout(() => void startHeartbeat(), 0);
+  }
+  window.addEventListener('sra:public-access-ready', scheduleHeartbeat, { once: true });
 })();

@@ -5,13 +5,13 @@
   const CORE_PARALLEL_FEATURES = [
     '/sane-skills.js',
     '/public-chat-runtime.js',
+    '/public-home.js',
     '/sane-chat-format.js',
     '/access.js',
     '/sra-authenticated-fetch.js',
   ];
 
   const CORE_FINAL_FEATURES = [
-    '/public-home.js',
     '/participant-workspace-bootstrap.js',
   ];
 

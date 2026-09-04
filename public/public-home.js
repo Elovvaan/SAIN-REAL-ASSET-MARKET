@@ -24,14 +24,6 @@
     return accessResolved() && !window.accessState.session;
   }
 
-  function ensureBootStyle() {
-    if (document.querySelector('style[data-public-home-boot]')) return;
-    const style = document.createElement('style');
-    style.dataset.publicHomeBoot = 'true';
-    style.textContent = 'body.sra-access-resolving .app-shell{visibility:hidden}';
-    document.head.append(style);
-  }
-
   function ensurePublicHomeAttributes() {
     const state = isSignedOut() ? 'active' : 'inactive';
     if (document.body.dataset.publicHome !== state) document.body.dataset.publicHome = state;
@@ -63,7 +55,7 @@
   }
 
   function removePublicHome() {
-    document.querySelectorAll('.public-feature-rail,.public-home-actions').forEach(node => node.remove());
+    document.querySelectorAll('.public-feature-rail,.public-home-actions,.public-business-identity').forEach(node => node.remove());
     document.querySelector('#access-actions')?.classList.remove('public-top-access-hidden');
     if (document.body.dataset.publicHome !== 'inactive') document.body.dataset.publicHome = 'inactive';
   }
@@ -93,6 +85,10 @@
 
     if (!document.querySelector('.public-home-actions')) {
       sane.insertAdjacentHTML('afterend', '<div class="public-home-actions"><button class="secondary-button" data-public-action="signin">Sign in</button><button class="primary-button" data-public-action="signup">Create free account</button></div>');
+    }
+
+    if (!document.querySelector('.public-business-identity')) {
+      workspace.insertAdjacentHTML('afterend', '<footer class="public-business-identity" aria-label="SRA business information"><div><strong>Sain Real Asset LLC</strong><span>Utah domestic limited liability company · Active</span></div><div><span>Entity 14733803-0160 · Effective September 3, 2026</span><a href="/support/">Contact and support</a><a href="https://businessregistration.utah.gov/">Utah business registry</a></div></footer>');
     }
 
     const firstMessage = document.querySelector('#chat-log .sane-message');
@@ -142,7 +138,6 @@
       document.body.classList.add('sra-access-resolving');
       return;
     }
-    document.body.classList.remove('sra-access-resolving');
     if (isSignedOut()) buildPublicHome();
     else removePublicHome();
   }
@@ -155,8 +150,6 @@
 
   function scheduleAccessSync() {
     queueSync();
-    setTimeout(queueSync, 50);
-    setTimeout(queueSync, 250);
   }
 
   window.fetch = async (...args) => {
@@ -169,14 +162,10 @@
     return response;
   };
 
-  ensureBootStyle();
-  document.body?.classList.add('sra-access-resolving');
-  window.SRAPublicHome = { version: PUBLIC_HOME_VERSION, refresh: queueSync };
+  window.SRAPublicHome = { version: PUBLIC_HOME_VERSION, refresh: queueSync, refreshNow: syncPublicHome };
   window.addEventListener('sra:access-state-changed', scheduleAccessSync);
   function initialize() {
     queueSync();
-    setTimeout(queueSync, 100);
-    setTimeout(queueSync, 300);
   }
   if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', initialize, { once: true });
   else initialize();
