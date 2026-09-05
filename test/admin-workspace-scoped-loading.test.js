@@ -15,9 +15,9 @@ test('administration workspace endpoint loads only the requested domain collecti
 
 test('admin workstations request scoped payloads instead of the full platform domain', () => {
   assert.match(read('public/admin/admin-suite-shell.js'), /workspaces\?workspace=\$\{encodeURIComponent\(scope\)\}&tab=\$\{encodeURIComponent\(tab\)\}&limit=100/);
-  assert.match(read('public/admin/admin-treasury-workstation.js'), /workspaces\?workspace=treasury&limit=100/);
-  assert.match(read('public/admin/admin-financial-records-workstation.js'), /workspaces\?workspace=records&limit=100/);
-  assert.match(read('public/admin/admin-users-permissions-workstation.js'), /workspaces\?workspace=users&limit=250/);
+  assert.match(read('public/admin/admin-treasury-workstation.js'), /workspaces\?workspace=treasury&tab=\$\{encodeURIComponent\(tab\)\}&limit=100/);
+  assert.match(read('public/admin/admin-financial-records-workstation.js'), /workspaces\?workspace=records&tab=\$\{encodeURIComponent\(selectedTab\)\}&limit=100/);
+  assert.match(read('public/admin/admin-users-permissions-workstation.js'), /workspaces\?workspace=users&tab=\$\{encodeURIComponent\(tab\)\}&limit=250/);
 });
 
 test('scoped responses merge into the existing admin cache without removing other tabs', () => {

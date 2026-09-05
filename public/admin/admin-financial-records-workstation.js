@@ -33,12 +33,12 @@
   }
   function field(label,value) { return `<div><span>${esc(label)}</span><strong>${esc(scalar(value))}</strong></div>`; }
   function card(record) {
-    return `<article class="admin-record-card"><header><strong>${esc(idOf(record))}</strong><em>${esc(stateOf(record))}</em></header><div class="admin-record-grid">${field('Type',typeOf(record))}${field('Amount / value',amountOf(record))}${field('Observation',record.observationId)}${field('Recognition',record.recognitionId)}${field('Financial record',record.financialRecordId)}${field('Coin position',record.coinPositionId)}${field('Instrument',record.instrumentId)}${field('Owner',record.ownerId || record.participantId)}${field('Updated',record.updatedAt || record.recordedAt || record.recognizedAt || record.observedAt || record.createdAt)}</div><details><summary>Record details</summary><pre>${esc(JSON.stringify(record,null,2))}</pre></details></article>`;
+    return `<article class="admin-record-card"><header><strong>${esc(idOf(record))}</strong><em>${esc(stateOf(record))}</em></header><div class="admin-record-grid">${field('Type',typeOf(record))}${field('Amount / value',amountOf(record))}${field('Network',record.blockchain || record.network)}${field('Account role',record.role)}${field('Public address',record.address)}${field('Observation',record.observationId)}${field('Recognition',record.recognitionId)}${field('Financial record',record.financialRecordId)}${field('Coin position',record.coinPositionId)}${field('Instrument',record.instrumentId)}${field('Owner',record.ownerId || record.participantId)}${field('Updated',record.updatedAt || record.recordedAt || record.recognizedAt || record.observedAt || record.createdAt)}</div><details><summary>Record details</summary><pre>${esc(JSON.stringify(record,null,2))}</pre></details></article>`;
   }
   function recordsFor(tab, r) {
     if (tab === 'Recognitions') return [...list(r.recognitions), ...list(r.ownershipRecognitions)];
     if (tab === 'Observations') return list(r.observations);
-    if (tab === 'Financial Records') return [...list(r.financialRecords), ...list(r.financialRecordAccounts), ...list(r.verifiedValueRecords)];
+    if (tab === 'Financial Records') return [...list(r.financialRecords), ...list(r.financialRecordAccounts), ...list(r.verifiedValueRecords), ...list(r.networkAccounts)];
     if (tab === 'Evidence') return list(r.evidencePackages);
     if (tab === 'Origin Records') return list(r.financialHistory);
     if (tab === 'Trace') return [...list(r.assetRelationships), ...list(r.financialHistory), ...list(r.lifecycleEvents)];
@@ -60,9 +60,10 @@
     loading.innerHTML = '<header><strong>Financial Records</strong><em>READING</em></header><p>Reading canonical financial record chain…</p>';
     controls.prepend(loading);
     try {
-      const payload = await request('/api/admin/workspaces?workspace=records&limit=100');
+      const selectedTab = workspace.dataset.activeTab || 'Recognitions';
+      const payload = await request(`/api/admin/workspaces?workspace=records&tab=${encodeURIComponent(selectedTab)}&limit=100`);
       const r = payload?.records || {};
-      const tab = workspace.dataset.activeTab || 'Recognitions';
+      const tab = selectedTab;
       const records = recordsFor(tab, r);
       loading.outerHTML = summary(tab, r, records);
       body.innerHTML = records.length ? `<div class="admin-record-list">${records.map(card).join('')}</div>` : `<div class="admin-placeholder">No ${esc(tab)} records are currently stored.</div>`;

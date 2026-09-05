@@ -58,12 +58,13 @@
     return `<div class="admin-record-list">${records.map((record) => `<article class="admin-record-card"><header><strong>${esc(idOf(record))}</strong><em>${esc(stateOf(record))}</em></header><div class="admin-record-grid"><div><span>Type</span><strong>${esc(record.opportunityType || record.transactionType || record.eventType || record.type || 'Operation')}</strong></div>${record.requestedAmount != null ? `<div><span>Requested</span><strong>${Number(record.requestedAmount).toLocaleString()} ${esc(record.currency || 'USD')}</strong></div>` : ''}${record.amount != null ? `<div><span>Amount</span><strong>${Number(record.amount).toLocaleString()} ${esc(record.currency || 'USD')}</strong></div>` : ''}<div><span>Updated</span><strong>${esc(record.updatedAt || record.createdAt || record.occurredAt || record.submittedAt || '')}</strong></div></div>${recordAction(record)}<details><summary>Record details</summary><pre>${esc(JSON.stringify(record, null, 2))}</pre></details></article>`).join('')}</div>`;
   }
 
-  async function loadWorkspaceRecords(force = false) {
-    if (!force && workspaceCache && Date.now() - workspaceCacheAt < 15000) return workspaceCache;
+  async function loadWorkspaceRecords(tab, force = false) {
+    if (!force && workspaceCache?.tab === tab && Date.now() - workspaceCacheAt < 15000) return workspaceCache.payload;
     const suffix = force ? `&_=${Date.now()}` : '';
-    workspaceCache = await request(`/api/admin/workspaces?workspace=operations&limit=100${suffix}`);
+    const payload = await request(`/api/admin/workspaces?workspace=operations&tab=${encodeURIComponent(tab)}&limit=100${suffix}`);
+    workspaceCache = { tab, payload };
     workspaceCacheAt = Date.now();
-    return workspaceCache;
+    return payload;
   }
 
   async function loadOperationsQueue(force = false) {
@@ -133,7 +134,7 @@
         return;
       }
 
-      const data = await loadWorkspaceRecords(force);
+      const data = await loadWorkspaceRecords(tab, force);
       const r = data.records || {};
       let records = [];
       if (tab === 'Settlement Queue') records = [...(r.settlementInstructions || []), ...(r.marketplaceSettlementPreparations || []), ...(r.marketplaceSettlementReviews || []), ...(r.marketplaceSettlementAuthorizations || [])];

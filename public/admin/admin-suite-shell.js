@@ -30,7 +30,7 @@
     users:['Overview','Administrators','Roles','Permissions','Sessions','Access History'],
     system:['Overview','Core Services','Diagnostics','Protected Actions','Alerts','Audit State']
   };
-  const state = { mounted:false, routed:new WeakSet(), observer:null, workspaceData:null, loading:null, loadingScope:null, loadedScopes:new Set(), loadedViews:new Set(), loadingViews:new Map(), lastError:null };
+  const state = { mounted:false, routed:new WeakSet(), observer:null, workspaceData:null, loading:null, loadingScope:null, loadedScopes:new Set(), loadedViews:new Set(), loadingViews:new Map(), viewErrors:new Map() };
   const esc = value => String(value ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;');
   const recordsBody = id => document.querySelector(`[data-workspace="${id}"] .admin-workspace-records`);
   const controlsBody = id => document.querySelector(`[data-workspace="${id}"] .admin-workspace-controls`);
@@ -52,17 +52,12 @@
     document.head.append(link);
   }
   async function requestJson(url,options={}){
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(),10000);
     try {
-      const response = await fetch(url,{cache:'default',...options,signal:controller.signal,headers:{Accept:'application/json',...(options.headers||{})}});
+      const response = await fetch(url,{cache:'default',...options,headers:{Accept:'application/json',...(options.headers||{})}});
       const payload = await response.json().catch(() => ({}));
       if(!response.ok) throw new Error(payload.error || `Request failed with ${response.status}.`);
       return payload;
-    } catch(error) {
-      if(error?.name === 'AbortError') throw new Error('The platform did not respond within 10 seconds.');
-      throw error;
-    } finally { clearTimeout(timer); }
+    } catch(error) { throw error; }
   }
 
   function makeWorkspace([id,label,description]){
@@ -92,10 +87,17 @@
   function emptyState(label){ return `<div class="admin-placeholder">No ${esc(label)} records are currently stored.</div>`; }
   function errorState(message){ return `<div class="admin-placeholder"><strong>Unable to load this workspace.</strong><br>${esc(message)}</div>`; }
   function loadingState(){ return '<div class="admin-placeholder">Loading current platform records…</div>'; }
-  function field(label,value){ if(value===undefined || value===null || value==='') return ''; return `<div><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`; }
+  function scalar(value){
+    if(value===undefined || value===null || value==='') return '';
+    if(typeof value==='string'||typeof value==='number'||typeof value==='boolean') return String(value);
+    if(Array.isArray(value)) return value.map(scalar).filter(Boolean).join(', ');
+    for(const key of ['code','name','type','recordType','classification','kind','label','id']) if(value?.[key]!=null&&typeof value[key]!=='object') return String(value[key]);
+    try{return JSON.stringify(value);}catch{return 'Structured record';}
+  }
+  function field(label,value){ const readable=scalar(value); if(!readable) return ''; return `<div><span>${esc(label)}</span><strong>${esc(readable)}</strong></div>`; }
   function recordCard(record){
     const amount = money(record.amount ?? record.value ?? record.faceValueUsd ?? record.verifiedValue ?? record.totalAmount ?? record.quantity ?? record.balance ?? record.principalQuantity);
-    return `<article class="admin-record-card"><header><strong>${esc(firstId(record))}</strong><em>${esc(recordState(record))}</em></header><div class="admin-record-grid">${field('Type',record.instrumentType||record.transactionType||record.recordType||record.rail||record.classification||record.type||record.eventType||record.journalType)}${field('Amount',amount?`${amount} ${record.currency||'USD'}`:null)}${field('Participant',record.participantId||record.ownerId||record.holderId||record.accountId)}${field('Instrument',record.instrumentId)}${field('Listing',record.listingId)}${field('Export package',record.exportPackageId)}${field('Settlement',record.settlementId||record.settlementAuthorizationId)}${field('Connection',record.connectionId||record.adapterId)}${field('Updated',dateValue(record))}</div><details><summary>Record details</summary><pre>${esc(JSON.stringify(record,null,2))}</pre></details></article>`;
+    return `<article class="admin-record-card"><header><strong>${esc(firstId(record))}</strong><em>${esc(recordState(record))}</em></header><div class="admin-record-grid">${field('Type',record.instrumentType||record.transactionType||record.recordType||record.rail||record.classification||record.type||record.eventType||record.journalType)}${field('Amount',amount?`${amount} ${record.currency||'USD'}`:null)}${field('Participant',record.participantId||record.ownerId||record.holderId)}${field('Account',record.accountId)}${field('Network',record.blockchain||record.network)}${field('Role',record.role)}${field('Public address',record.address)}${field('Instrument',record.instrumentId)}${field('Listing',record.listingId)}${field('Export package',record.exportPackageId)}${field('Settlement',record.settlementId||record.settlementAuthorizationId)}${field('Connection',record.connectionId||record.adapterId)}${field('Updated',dateValue(record))}</div><details><summary>Record details</summary><pre>${esc(JSON.stringify(record,null,2))}</pre></details></article>`;
   }
   function recordsMarkup(records,label){ return list(records).length ? `<div class="admin-record-list">${records.map(recordCard).join('')}</div>` : emptyState(label); }
   function settlementWorkflowMarkup(){
@@ -205,7 +207,7 @@
     if(id==='records'){
       if(tab==='Recognitions') return combined(r.recognitions,r.ownershipRecognitions);
       if(tab==='Observations') return r.observations;
-      if(tab==='Financial Records') return combined(r.financialRecords,r.financialRecordAccounts,r.verifiedValueRecords);
+      if(tab==='Financial Records') return combined(r.financialRecords,r.financialRecordAccounts,r.verifiedValueRecords,r.networkAccounts);
       if(tab==='Evidence') return r.evidencePackages;
       if(tab==='Origin Records') return r.financialHistory;
       if(tab==='Trace') return combined(r.assetRelationships,r.financialHistory,r.lifecycleEvents);
@@ -286,7 +288,8 @@
     const section = document.querySelector(`[data-workspace="${id}"]`);
     const tab = section?.dataset.activeTab || TABS[id]?.[0] || '';
     if(state.loadingViews.has(viewKey(id,tab))){ node.innerHTML = loadingState(); return; }
-    if(state.lastError){ node.innerHTML = errorState(state.lastError); return; }
+    const error = state.viewErrors.get(viewKey(id,tab));
+    if(error){ node.innerHTML = errorState(error); return; }
     if(id==='settlement' && tab==='Workflow'){ node.innerHTML = settlementWorkflowMarkup(); return; }
     node.innerHTML = recordsMarkup(workspaceRecords(id,tab),labelFor(id,tab));
   }
@@ -296,7 +299,7 @@
     const scope = workspaceApiKey(id);
     const key = viewKey(id,tab);
     if(state.loadingViews.has(key) && !force) return state.loadingViews.get(key);
-    state.lastError = null;
+    state.viewErrors.delete(key);
     const request = requestJson(`/api/admin/workspaces?workspace=${encodeURIComponent(scope)}&tab=${encodeURIComponent(tab)}&limit=100`, force ? { cache:'reload' } : {})
       .then(data => {
         state.workspaceData = { ...state.workspaceData, ...data, records:{...(state.workspaceData?.records||{}),...(data.records||{})}, workspaces:{...(state.workspaceData?.workspaces||{}),...(data.workspaces||{})} };
@@ -304,7 +307,7 @@
         state.loadedViews.add(key);
         return state.workspaceData;
       })
-      .catch(error => { state.lastError = error.message; throw error; })
+      .catch(error => { state.viewErrors.set(key,error.message); throw error; })
       .finally(() => { state.loadingViews.delete(key); if(state.loading === request){ state.loading = null; state.loadingScope = null; } });
     state.loading = request;
     state.loadingScope = scope;

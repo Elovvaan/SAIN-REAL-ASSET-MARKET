@@ -23,8 +23,8 @@ test('agent-owned tabs reject foreign legacy presentation', () => {
 
 test('approved chain work executes without leaving the agent portal', () => {
   assert.match(workstation, /data-agent-execute-chain-job/);
-  assert.match(workstation, /action: 'EXECUTE_CHAIN_JOB'/);
-  assert.match(workstation, /approval: 'APPROVE'/);
-  assert.match(workstation, /targetSupply: Number\(button\.dataset\.targetSupply/);
+  assert.match(workstation, /action:'EXECUTE_CHAIN_JOB'/);
+  assert.match(workstation, /approval:'APPROVE'/);
+  assert.match(workstation, /targetSupply:Number\(button\.dataset\.targetSupply/);
   assert.match(workstation, /window\.dispatchEvent\(new CustomEvent\('sra:admin-refresh'/);
 });

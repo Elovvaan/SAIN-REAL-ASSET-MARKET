@@ -43,9 +43,9 @@
     controls(workspace)?.querySelectorAll('[data-users-permissions-workstation-card]').forEach((node) => node.remove());
   }
 
-  async function load() {
+  async function load(tab = 'Overview') {
     const [workspacePayload, sessionPayload] = await Promise.all([
-      request('/api/admin/workspaces?workspace=users&limit=250'),
+      request(`/api/admin/workspaces?workspace=users&tab=${encodeURIComponent(tab)}&limit=250`),
       request('/api/admin/session'),
     ]);
     const users = allUsers(workspacePayload);
@@ -99,8 +99,8 @@
     placeholder.innerHTML = '<header><strong>Users & Permissions</strong><em>READING</em></header><p>Reading current access state…</p>';
     host.prepend(placeholder);
     try {
-      const data = await load();
       const tab = workspace.dataset.activeTab || 'Overview';
+      const data = await load(tab);
       let markup = renderOverview(data);
       if (tab === 'Administrators') markup = renderAdministrators(data);
       else if (tab === 'Roles') markup = renderRoles(data);

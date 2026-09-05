@@ -27,10 +27,10 @@
     }
   }
 
-  async function load() {
+  async function load(tab = 'Current Asset') {
     const [status, workspace] = await Promise.all([
       request('/api/admin/platform-asset'),
-      request('/api/admin/workspaces?workspace=nativeAsset&limit=100'),
+      request(`/api/admin/workspaces?workspace=nativeAsset&tab=${encodeURIComponent(tab)}&limit=100`),
     ]);
     return { status, records: workspace?.records || {} };
   }
@@ -134,9 +134,9 @@
     placeholder.innerHTML = '<header><strong>Native Platform Asset</strong><em>READING</em></header><p>Reading canonical asset lifecycle…</p>';
     root.prepend(placeholder);
     try {
-      const data = await load();
-      if (!placeholder.isConnected) return;
       const tab = workspace.dataset.activeTab || 'Current Asset';
+      const data = await load(tab);
+      if (!placeholder.isConnected) return;
       const renderers = {
         'Current Asset':currentAsset,
         'Approval Status':approval,

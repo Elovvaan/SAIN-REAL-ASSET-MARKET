@@ -76,6 +76,31 @@ const ADMIN_WORKSPACE_SOURCES = Object.freeze({
 });
 
 const ADMIN_TAB_SOURCES = Object.freeze({
+  operations: {
+    Overview:['transactions','fundingInstructions','exportPackages','settlementInstructions','treasuryPaymentOrders','treasuryExceptions'],
+    'Awaiting Actions':['transactions','settlementInstructions','treasuryPaymentOrders'], Exceptions:['transactions','settlementInstructions','treasuryExceptions'],
+    'Settlement Queue':['settlementInstructions','marketplaceSettlementPreparations','marketplaceSettlementReviews','marketplaceSettlementAuthorizations'],
+    Exports:['exportPackages','transactions'], Imports:['transactions'], 'Transaction Router':['transactions','fundingInstructions','treasuryPaymentOrders'],
+    'Audit Trail':['lifecycleEvents'], 'Operation History':['lifecycleEvents'],
+  },
+  treasury: {
+    Overview:['treasuryProfiles','ledgerAccounts','ledgerEntries','treasuryBankConnections','treasuryPaymentOrders','treasuryStatements','treasuryWallets','treasuryForecasts','treasuryExceptions'],
+    'Commercial Instruments':['instruments','transactions'], 'Cash Position':['ledgerAccounts'], 'Available Financing':['treasuryProfiles','treasuryForecasts','instruments'],
+    'Funding Capacity':['treasuryProfiles','treasuryForecasts','instruments'], 'Journal Entries':['ledgerEntries'], 'Treasury Wallets':['treasuryWallets','treasuryCryptoActivity'],
+    Ledger:['ledgerAccounts','ledgerEntries','accountingPeriods'], 'Treasury Reports':['financialStatementSnapshots','treasuryStatements','treasuryForecasts','treasuryExceptions'],
+  },
+  nativeAsset: {
+    'Current Asset':['instruments'], 'Approval Status':['instruments'], Listing:['instruments','marketplaceListings'], 'Marketplace Status':['instruments','marketplaceListings'],
+    'Export Status':['exportPackages'], Ownership:['ownershipRecognitions'], Recognitions:['recognitions','ownershipRecognitions'],
+    'Asset History':['lifecycleEvents'], Publishing:['lifecycleEvents'], Governance:['lifecycleEvents'],
+  },
+  marketplace: {
+    'Investor Funding Flow':['marketplaceListings','marketplaceCommitments','marketplacePositions','marketplaceAllocations','marketplaceSettlementPreparations','marketplaceSettlementReviews','marketplaceSettlementAuthorizations','transactions','settlements'],
+    Prepared:['marketplaceListings'], Ready:['marketplaceListings'], Published:['marketplaceListings'], Orders:['marketplaceCommitments','transactions'],
+    Reservations:['marketplaceCommitmentWindows','marketplaceCommitments'], Allocations:['marketplaceAllocations','marketplacePositions'],
+    Settlement:['marketplaceSettlementPreparations','marketplaceSettlementReviews','marketplaceSettlementAuthorizations','settlements'],
+    'Historical Listings':['marketplaceListings','lifecycleEvents'],
+  },
   instruments: {
     'Overview':['instruments','protectionInstruments'], 'Pending Review':['instruments'], Approved:['instruments'], Published:['instruments'], History:['instruments','protectionInstruments','lifecycleEvents'],
   },
@@ -83,9 +108,47 @@ const ADMIN_TAB_SOURCES = Object.freeze({
     'Current Supply':['coinAccounts','coinPositions'], 'Represented Value':['coinAccounts','coinPositions'], 'Legacy Corrections':['coinPositions'], 'Coin Intelligence':['coinPositions','recognitions','observations'], 'Instrument Linkage':['coinPositions','instruments','lifecycleEvents'], 'Mint History':['lifecycleEvents'], 'XRPL Exchange':['coinPositions'], Retirements:['lifecycleEvents'], Adjustments:['lifecycleEvents'],
   },
   settlement: {
-    'Export Packages':['exportPackages'], 'Settlement Instructions':['settlementInstructions','settlementAdapters'], 'External Confirmation':['settlements','settlementRecords','paymentReceipts'], 'Destination Verification':['settlementInstructions'], 'Export History':['exportPackages','lifecycleEvents'], 'Settlement Logs':['settlements','settlementRecords','settlementInstructions','lifecycleEvents'], Workflow:['exportPackages','settlementInstructions','settlements','settlementRecords','paymentReceipts','lifecycleEvents'],
+    'Export Packages':['exportPackages'], 'Settlement Instructions':['exportPackages','settlementInstructions','settlementAdapters'], 'External Confirmation':['settlements','settlementRecords','paymentReceipts'], 'Destination Verification':['settlementInstructions'], 'Export History':['exportPackages','lifecycleEvents'], 'Settlement Logs':['settlements','settlementRecords','settlementInstructions','lifecycleEvents'], Workflow:['exportPackages','settlementInstructions','settlements','settlementRecords','paymentReceipts','lifecycleEvents'],
+  },
+  records: {
+    Recognitions:['recognitions','ownershipRecognitions'], Observations:['observations'],
+    'Financial Records':['financialRecords','financialRecordAccounts','verifiedValueRecords','networkAccounts'], Evidence:['evidencePackages'],
+    'Origin Records':['financialHistory'], Trace:['assetRelationships','financialHistory','lifecycleEvents'], Audit:['lifecycleEvents'],
+  },
+  transactions: {
+    All:['transactions','fundingInstructions','paymentReceipts'], Pending:['transactions'], Completed:['transactions'], Failed:['transactions'],
+    Exported:['transactions'], Imported:['transactions'], Settlement:['transactions','settlements','settlementRecords'], Search:['transactions','fundingInstructions','paymentReceipts'],
+  },
+  agent: {
+    Conversation:[], 'Capital Activation':[], Workforce:[], 'Suggested Actions':['lifecycleEvents'], 'Workflow Approvals':['lifecycleEvents'],
+    'Incomplete Workflows':['transactions','settlementInstructions','treasuryExceptions'], 'Explain Record':[], 'Trace Instrument':[], 'Platform Questions':[], Diagnostics:['lifecycleEvents'],
+  },
+  connections: {
+    Coinbase:['settlementAdapters','treasuryWallets','enterpriseConnections'], Ethereum:['treasuryWallets','settlementAdapters'], Solana:['treasuryWallets','settlementAdapters'],
+    Bitcoin:['treasuryWallets','settlementAdapters'], 'Export Adapters':['settlementAdapters','connectorDefinitions','enterpriseConnections'],
+    'Connector Logs':['extractionRequests','extractionResults','outboundEvents','lifecycleEvents'], Synchronization:['enterpriseConnections','extractionRequests','extractionResults','outboundEvents'],
+  },
+  users: {
+    Overview:['users','participants'], Administrators:['users'], Roles:['users'], Permissions:['users'], Sessions:[], 'Access History':['lifecycleEvents'],
+  },
+  system: {
+    Overview:['treasuryExceptions','outboundEvents','lifecycleEvents'], 'Core Services':[], Diagnostics:['treasuryExceptions','outboundEvents','lifecycleEvents'],
+    'Protected Actions':['lifecycleEvents'], Alerts:['treasuryExceptions','lifecycleEvents'], 'Audit State':['lifecycleEvents'],
   },
 });
+
+function configuredNetworkAccounts(environment = process.env) {
+  const network = String(environment.STELLAR_NETWORK || environment.STELLAR_NETWORK_PASSPHRASE || '').toUpperCase().includes('TEST') ? 'TESTNET' : 'PUBLIC';
+  return [
+    ['NETWORK-ACCOUNT-STELLAR-DISTRIBUTION','STELLAR','DISTRIBUTION',environment.STELLAR_DISTRIBUTOR_PUBLIC_KEY,network],
+    ['NETWORK-ACCOUNT-STELLAR-ISSUER','STELLAR','ISSUER',environment.STELLAR_ISSUER_PUBLIC_KEY,network],
+    ['NETWORK-ACCOUNT-XRPL-OPERATING','XRPL','OPERATING',environment.XRPL_ADDRESS,'PUBLIC'],
+    ['NETWORK-ACCOUNT-XRPL-ISSUER','XRPL','ISSUER',environment.XRPL_ISSUER_ADDRESS,'PUBLIC'],
+  ].filter(([, , , address]) => String(address || '').trim()).map(([accountId, blockchain, role, address, networkEnvironment]) => ({
+    accountId, recordType:'NETWORK_ACCOUNT', classification:'ON_CHAIN_ACCOUNT', blockchain, network:networkEnvironment,
+    role, address:String(address).trim(), state:'CONFIGURED', publicAddress:true,
+  }));
+}
 
 const ADMIN_RECORD_TYPES = Object.freeze({
   participants:RECORD_TYPES.PARTICIPANT, assetAccounts:RECORD_TYPES.ASSET_ACCOUNT, projectAccounts:RECORD_TYPES.PROJECT_ACCOUNT,
@@ -354,6 +417,8 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
     for (const key of requestedKeys) {
       if (key === 'users') {
         records.users = (await persistedUsers()).map((user) => ({ id:user.id, displayName:user.displayName, email:user.email, capacities:user.capacities || [], state:user.state || 'ACTIVE', createdAt:user.createdAt || null }));
+      } else if (key === 'networkAccounts') {
+        records.networkAccounts = configuredNetworkAccounts();
       } else if (ADMIN_RECORD_TYPES[key]) records[key] = list(domain, ADMIN_RECORD_TYPES[key], limit);
     }
     const counts = Object.fromEntries(Object.entries(records).map(([key, value]) => [key, value.length]));

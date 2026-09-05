@@ -4,7 +4,7 @@
 
   const mounted = new WeakSet();
   const conversation = [];
-  const ownedTabs = new Set(['Conversation','Capital Activation','Workforce','Suggested Actions','Workflow Approvals','Incomplete Workflows']);
+  const ownedTabs = new Set(['Conversation','Capital Activation','Workforce','Suggested Actions','Workflow Approvals','Incomplete Workflows','Explain Record','Trace Instrument','Platform Questions','Diagnostics']);
   const esc = (value) => String(value ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;');
 
   async function request(payload) {
@@ -97,6 +97,20 @@
     return `<section class="admin-record-card" data-agent-operation-card data-agent-conversation><header><strong>SAIN Administrative Agent</strong><em>CONVERSATION</em></header><div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0"><button type="button" data-agent-quick-question="What currently needs my approval?">Approval review</button><button type="button" data-agent-quick-question="Give me the operational brief and work queue.">Platform status</button><button type="button" data-agent-quick-question="What workflows are incomplete?">Incomplete workflows</button></div><div data-agent-conversation-log style="display:grid;gap:10px;margin:12px 0">${messages}</div><form data-agent-conversation-form><textarea name="question" rows="3" placeholder="Message SAIN about the platform..." required style="width:100%;box-sizing:border-box;background:#050505;border:1px solid #292929;border-radius:10px;color:#f5f5f5;padding:12px;resize:vertical"></textarea><div style="display:flex;gap:12px;align-items:center;margin-top:10px"><button type="submit">Send to SAIN</button><span data-agent-conversation-result style="font-size:12px;color:#d6a92f"></span></div></form></section>`;
   }
 
+  function agentToolMarkup(tab) {
+    const config = {
+      'Explain Record': { label:'Record ID', placeholder:'Enter a Financial Record, Coin Position, transaction, or instrument ID', action:'Explain record' },
+      'Trace Instrument': { label:'Instrument ID', placeholder:'Enter an instrument ID', action:'Trace instrument' },
+      'Platform Questions': { label:'Question', placeholder:'Ask about platform records, workflows, or current status', action:'Ask SAIN' },
+    }[tab];
+    if (!config) return '';
+    return `<section class="admin-record-card" data-agent-operation-card><header><strong>${esc(tab)}</strong><em>READY</em></header><form data-agent-tool-form data-agent-tool="${esc(tab)}"><label style="display:grid;gap:8px"><span>${esc(config.label)}</span><textarea name="value" rows="3" placeholder="${esc(config.placeholder)}" required style="width:100%;box-sizing:border-box;background:#050505;border:1px solid #292929;border-radius:10px;color:#f5f5f5;padding:12px;resize:vertical"></textarea></label><div style="display:flex;gap:12px;align-items:center;margin-top:10px"><button type="submit">${esc(config.action)}</button><span data-agent-tool-result style="font-size:12px;color:#d6a92f"></span></div></form><div data-agent-tool-answer style="margin-top:12px"></div></section>`;
+  }
+
+  function loadingMarkup(title) {
+    return `<section class="admin-record-card" data-agent-operation-card><header><strong>${esc(title)}</strong><em>READING</em></header><p style="color:#b8b8b8">Loading current platform records…</p></section>`;
+  }
+
   function workforceMarkup(status, agents, work) {
     const registry = status.agentOS?.agents || [];
     const byAgent = new Map();
@@ -130,23 +144,42 @@
     const tab = workspace.dataset.activeTab;
     setPresentationOwnership(workspace, tab);
     if (tab === 'Conversation') { controls.insertAdjacentHTML('afterbegin', conversationMarkup()); return; }
+    if (['Explain Record','Trace Instrument','Platform Questions'].includes(tab)) { controls.insertAdjacentHTML('afterbegin', agentToolMarkup(tab)); return; }
     if (tab === 'Capital Activation') {
+      controls.insertAdjacentHTML('afterbegin', loadingMarkup('Capital Activation'));
+      const loading = controls.firstElementChild;
       try { const payload = await json('/api/admin/capital-activation'); if (workspace.dataset.activeTab === tab) controls.insertAdjacentHTML('afterbegin', capitalActivationMarkup(payload)); }
       catch (error) { if (workspace.dataset.activeTab === tab) controls.insertAdjacentHTML('afterbegin', `<div data-agent-operation-card class="admin-placeholder"><strong>Capital activation unavailable.</strong><br>${esc(error.message)}</div>`); }
+      finally { loading?.remove(); }
       return;
     }
     if (tab === 'Workforce') {
+      controls.insertAdjacentHTML('afterbegin', loadingMarkup('Agent Workforce'));
+      const loading = controls.firstElementChild;
       try {
         const [status, agents, work] = await Promise.all([json('/api/admin/agent-workforce/status'), json('/api/admin/agent-workforce/agents'), json('/api/admin/agent-workforce/work')]);
         if (workspace.dataset.activeTab !== tab) return;
         controls.insertAdjacentHTML('afterbegin', workforceMarkup(status, agents.records || [], work.records || []));
       } catch (error) { if (workspace.dataset.activeTab === tab) controls.insertAdjacentHTML('afterbegin', `<div data-agent-operation-card class="admin-placeholder"><strong>Agent workforce unavailable.</strong><br>${esc(error.message)}</div>`); }
+      finally { loading?.remove(); }
+      return;
+    }
+    if (tab === 'Diagnostics') {
+      controls.insertAdjacentHTML('afterbegin', loadingMarkup('Agent Diagnostics'));
+      const loading = controls.firstElementChild;
+      try {
+        const payload = await request({ question:'Give me the current platform diagnostics and identify any failed or incomplete administrative workflows.' });
+        if (workspace.dataset.activeTab === tab) controls.insertAdjacentHTML('afterbegin', summaryCard(payload,'Agent Diagnostics'));
+      } catch (error) { if (workspace.dataset.activeTab === tab) controls.insertAdjacentHTML('afterbegin', `<div data-agent-operation-card class="admin-placeholder"><strong>Agent diagnostics unavailable.</strong><br>${esc(error.message)}</div>`); }
+      finally { loading?.remove(); }
       return;
     }
     if (!['Suggested Actions','Workflow Approvals','Incomplete Workflows'].includes(tab)) return;
 
+    controls.insertAdjacentHTML('afterbegin', loadingMarkup(tab));
+    const loading = controls.firstElementChild;
     try {
-      const [payload, health] = await Promise.all([request({ question:'Give me the operational brief and work queue.' }), chainHealth()]);
+      const payload = await request({ question:'Give me the operational brief and work queue.' });
       if (workspace.dataset.activeTab !== tab) return;
       let items = tab === 'Workflow Approvals' ? (payload.administratorQueue || []) : tab === 'Incomplete Workflows' ? (payload.incompleteWorkflows || []) : [...(payload.administratorQueue || []), ...(payload.autonomousQueue || [])];
       let summaryOverride = null;
@@ -156,12 +189,27 @@
       }
       controls.insertAdjacentHTML('afterbegin', summaryCard(payload, tab === 'Workflow Approvals' ? 'Agent Workflow Approvals' : 'Agent Operations Brief', summaryOverride));
       const hasChainWork = items.some((item) => String(actionOf(item).network || '').toUpperCase() === 'SOLANA' || actionOf(item).executionAction === 'EXECUTE_CHAIN_JOB');
-      if (hasChainWork) controls.insertAdjacentHTML('beforeend', chainReadinessCard(health));
+      if (hasChainWork) controls.insertAdjacentHTML('beforeend', chainReadinessCard(await chainHealth()));
       if (items.length) controls.insertAdjacentHTML('beforeend', `<div data-agent-operation-card class="admin-record-list">${items.map((item) => workCard(item)).join('')}</div>`);
       else controls.insertAdjacentHTML('beforeend', '<div data-agent-operation-card class="admin-placeholder">No agent work is waiting in this queue.</div>');
     } catch (error) {
       if (workspace.dataset.activeTab === tab) controls.insertAdjacentHTML('afterbegin', `<div data-agent-operation-card class="admin-placeholder"><strong>Agent operations unavailable.</strong><br>${esc(error.message)}</div>`);
-    }
+    } finally { loading?.remove(); }
+  }
+
+  async function runAgentTool(workspace, form) {
+    const value = String(new FormData(form).get('value') || '').trim();
+    if (!value) return;
+    const tab = form.dataset.agentTool;
+    const result = form.querySelector('[data-agent-tool-result]');
+    const answer = form.closest('[data-agent-operation-card]')?.querySelector('[data-agent-tool-answer]');
+    const question = tab === 'Explain Record' ? `Explain record ${value} and its current lifecycle state.` : tab === 'Trace Instrument' ? `Trace instrument ${value} through its records, Coin Position, marketplace, and settlement lifecycle.` : value;
+    if (result) result.textContent = 'SAIN is reviewing the platform…';
+    try {
+      const payload = await request({ question });
+      if (answer) answer.innerHTML = summaryCard(payload, tab);
+      if (result) result.textContent = 'Complete';
+    } catch (error) { if (result) result.textContent = error.message; }
   }
 
   async function ask(workspace, question) {
@@ -192,7 +240,7 @@
   function mount(workspace) {
     if (!workspace || mounted.has(workspace)) return; mounted.add(workspace); removeForeignAgentPresentation(workspace); const controls = workspace.querySelector('.admin-workspace-controls'); const presentationObserver = controls ? new MutationObserver(() => removeForeignAgentPresentation(workspace)) : null; presentationObserver?.observe(controls,{ childList:true });
     workspace.addEventListener('click', (event) => { const proposalButton=event.target.closest('[data-prepare-capital-proposal]'); if(proposalButton){void prepareCapitalProposal(workspace,proposalButton);return;} const runButton=event.target.closest('[data-run-agent-workforce]'); if(runButton){void runWorkforce(workspace,runButton);return;} const executeButton = event.target.closest('[data-agent-execute-chain-job]'); if (executeButton) { void execute(workspace, executeButton); return; } const quick = event.target.closest('[data-agent-quick-question]'); if (quick) { void ask(workspace, quick.dataset.agentQuickQuestion); return; } if (event.target.closest('[data-admin-tab]')) queueMicrotask(() => void render(workspace)); });
-    workspace.addEventListener('submit', (event) => { const form = event.target.closest('[data-agent-conversation-form]'); if (!form) return; event.preventDefault(); const question = new FormData(form).get('question'); form.reset(); void ask(workspace, question); });
+    workspace.addEventListener('submit', (event) => { const toolForm=event.target.closest('[data-agent-tool-form]'); if(toolForm){event.preventDefault();void runAgentTool(workspace,toolForm);return;} const form = event.target.closest('[data-agent-conversation-form]'); if (!form) return; event.preventDefault(); const question = new FormData(form).get('question'); form.reset(); void ask(workspace, question); });
     window.addEventListener('sra:admin-workspace-synchronized', (event) => { if (event.detail?.workspaceId === 'agent') void render(workspace); });
     void render(workspace);
   }

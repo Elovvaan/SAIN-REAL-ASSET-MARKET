@@ -18,11 +18,11 @@
   function card(title,state,body) { return `<section class="admin-record-card" data-treasury-workstation-card><header><strong>${esc(title)}</strong><em>${esc(state)}</em></header>${body}</section>`; }
   function clear(workspace) { controls(workspace)?.querySelectorAll('[data-treasury-workstation-card]').forEach((node) => node.remove()); }
 
-  async function load(includeUsdc = false) {
+  async function load(tab = 'Overview', includeUsdc = false) {
     const requests = [
       request('/api/admin/treasury'),
       request('/api/admin/treasury/funding-instrument-deposits/eligible-instruments'),
-      request('/api/admin/workspaces?workspace=treasury&limit=100'),
+      request(`/api/admin/workspaces?workspace=treasury&tab=${encodeURIComponent(tab)}&limit=100`),
     ];
     if (includeUsdc) requests.push(request('/api/platform-treasury/profiles'),request('/api/platform-treasury/usdc-conversions'),request('/api/platform-treasury/cctp/status'),request('/api/platform-treasury/cctp/transfers'));
     const [treasury, eligible, workspace, profiles, conversions, cctpStatus, cctpTransfers] = await Promise.all(requests);
@@ -162,7 +162,7 @@
     root.prepend(placeholder);
     try {
       const tab = workspace.dataset.activeTab || 'Overview';
-      const data = await load(tab === 'Treasury Wallets');
+      const data = await load(tab, tab === 'Treasury Wallets');
       if (!placeholder.isConnected) return;
       let markup;
       if (tab === 'Overview') markup = renderOverview(data);
