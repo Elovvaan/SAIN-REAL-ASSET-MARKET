@@ -48,6 +48,14 @@ export function createProductiveBasketRouter(service, directAccounts, accessServ
     try {
       const current = await requireSession(req, res); if (!current) return;
       const admission = service.domain.get('BASKET_ASSET_ADMISSION', req.params.admissionId);
+      if (admission?.linkageType === 'FINANCED_POSITION' && String(req.body?.decision || '').toUpperCase() === 'APPROVE') {
+        const allocationRate = Number(req.body?.cashFlowAllocationRate ?? admission.cashFlowAllocationRate);
+        if (!Number.isFinite(allocationRate) || allocationRate <= 0 || allocationRate > 1) throw new Error('cashFlowAllocationRate must be greater than zero and no greater than 1.');
+        const otherApproved = service.domain.list('BASKET_ASSET_ADMISSION')
+          .filter((item) => item.admissionId !== admission.admissionId && item.financedPositionId === admission.financedPositionId && item.state === 'APPROVED')
+          .reduce((sum, item) => sum + Number(item.cashFlowAllocationRate || 0), 0);
+        if (otherApproved + allocationRate > 1.00000001) throw new Error('Approved basket cash-flow allocations for this financed position cannot exceed 100%.');
+      }
       const result = admission?.linkageType === 'FINANCED_POSITION'
         ? await decideFinancedPositionAdmission(service, req.params.admissionId, req.body, actor(current))
         : await service.decideAdmission(req.params.admissionId, req.body, actor(current));
