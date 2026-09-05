@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { submitFinancedPositionAdmission, decideFinancedPositionAdmission } from '../services/financed-position-basket-bridge-service.js';
 
 function readCookie(req, name) {
   const entry = String(req.headers.cookie || '').split(';').map((part) => part.trim()).find((part) => part.startsWith(`${name}=`));
@@ -34,11 +35,24 @@ export function createProductiveBasketRouter(service, directAccounts, accessServ
     catch (error) { return fail(res, error); }
   });
   router.post('/:basketId/admissions', async (req, res) => {
-    try { const current = await requireSession(req, res); if (!current) return; return res.status(201).json(await service.submitAsset(req.params.basketId, req.body, actor(current))); }
+    try {
+      const current = await requireSession(req, res); if (!current) return;
+      const result = req.body?.financedPositionId
+        ? await submitFinancedPositionAdmission(service, req.params.basketId, req.body, actor(current))
+        : await service.submitAsset(req.params.basketId, req.body, actor(current));
+      return res.status(201).json(result);
+    }
     catch (error) { return fail(res, error); }
   });
   router.post('/admissions/:admissionId/decision', async (req, res) => {
-    try { const current = await requireSession(req, res); if (!current) return; return res.json(await service.decideAdmission(req.params.admissionId, req.body, actor(current))); }
+    try {
+      const current = await requireSession(req, res); if (!current) return;
+      const admission = service.domain.get('BASKET_ASSET_ADMISSION', req.params.admissionId);
+      const result = admission?.linkageType === 'FINANCED_POSITION'
+        ? await decideFinancedPositionAdmission(service, req.params.admissionId, req.body, actor(current))
+        : await service.decideAdmission(req.params.admissionId, req.body, actor(current));
+      return res.json(result);
+    }
     catch (error) { return fail(res, error); }
   });
   router.post('/:basketId/contributions', async (req, res) => {
