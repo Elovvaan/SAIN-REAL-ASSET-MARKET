@@ -25,6 +25,10 @@
         child.hidden = false;
         continue;
       }
+      if (child.matches('[data-treasury-platform-instrument-recorder]')) {
+        child.hidden = !['Overview','Commercial Instruments'].includes(tab);
+        continue;
+      }
       if (child.matches('[data-treasury-cash-recording-card]')) {
         child.hidden = tab !== 'Cash Position';
         continue;
@@ -35,8 +39,7 @@
 
     const legacyControls = controls.querySelector('[data-workstation-control="treasury-controls"]');
     if (legacyControls) {
-      const canonicalRecognized = /TREASURY RECOGNIZED|DEPOSITED_RECOGNIZED_USD/i.test(controls.textContent || '');
-      const showDeposit = tab === 'Commercial Instruments' && !canonicalRecognized;
+      const showDeposit = tab === 'Commercial Instruments';
       const showJournal = tab === 'Journal Entries';
       legacyControls.hidden = !(showDeposit || showJournal);
 
