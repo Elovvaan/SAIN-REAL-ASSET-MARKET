@@ -9,7 +9,8 @@ const CAPACITY_DEFINITIONS = {
     activation: 'AUTOMATIC',
     selfService: false,
     activationGate: 'AUTOMATIC',
-    upgradeFlow: ['ACCOUNT_CREATED', 'ACTIVE']
+    upgradeFlow: ['ACCOUNT_CREATED', 'ACTIVE'],
+    feeTrigger: null
   },
   ASSET_PROVIDER: {
     label: 'Asset Provider',
@@ -18,7 +19,8 @@ const CAPACITY_DEFINITIONS = {
     activation: 'APPLICATION',
     selfService: true,
     activationGate: 'FEE_SCHEDULE_SETTLEMENT_AND_REVIEW',
-    upgradeFlow: ['APPLICATION', 'FEE_SCHEDULE', 'PAYMENT_SETTLEMENT', 'REVIEW', 'ACTIVE']
+    upgradeFlow: ['APPLICATION', 'FEE_SCHEDULE', 'PAYMENT_SETTLEMENT', 'REVIEW', 'ACTIVE'],
+    feeTrigger: 'ASSET_PROVIDER_CAPABILITY_ACTIVATION'
   },
   MARKET_PROFESSIONAL: {
     label: 'Market Professional',
@@ -27,7 +29,8 @@ const CAPACITY_DEFINITIONS = {
     activation: 'APPLICATION',
     selfService: true,
     activationGate: 'FEE_SCHEDULE_SETTLEMENT_AND_REVIEW',
-    upgradeFlow: ['APPLICATION', 'FEE_SCHEDULE', 'PAYMENT_SETTLEMENT', 'REVIEW', 'ACTIVE']
+    upgradeFlow: ['APPLICATION', 'FEE_SCHEDULE', 'PAYMENT_SETTLEMENT', 'REVIEW', 'ACTIVE'],
+    feeTrigger: 'MARKET_PROFESSIONAL_CAPABILITY_ACTIVATION'
   },
   INSTITUTIONAL_OPERATOR: {
     label: 'Institutional Operator',
@@ -36,7 +39,8 @@ const CAPACITY_DEFINITIONS = {
     activation: 'INSTITUTIONAL_APPROVAL',
     selfService: false,
     activationGate: 'INSTITUTIONAL_AGREEMENT_AND_APPROVAL',
-    upgradeFlow: ['AGREEMENT', 'INSTITUTIONAL_REVIEW', 'APPROVAL', 'ACTIVE']
+    upgradeFlow: ['AGREEMENT', 'INSTITUTIONAL_REVIEW', 'APPROVAL', 'ACTIVE'],
+    feeTrigger: null
   },
   PLATFORM_ADMIN: {
     label: 'Platform Administration',
@@ -45,7 +49,8 @@ const CAPACITY_DEFINITIONS = {
     activation: 'INTERNAL_AUTHORIZATION',
     selfService: false,
     activationGate: 'INTERNAL_AUTHORIZATION',
-    upgradeFlow: ['INTERNAL_AUTHORIZATION', 'ACTIVE']
+    upgradeFlow: ['INTERNAL_AUTHORIZATION', 'ACTIVE'],
+    feeTrigger: null
   }
 };
 
@@ -64,7 +69,23 @@ function hashToken(token) { return crypto.createHash('sha256').update(token).dig
 function buildCapacityState(activeCapacities = []) {
   const records = {};
   Object.keys(CAPACITY_DEFINITIONS).forEach((id) => {
-    records[id] = { id, state: activeCapacities.includes(id) ? 'ACTIVE' : 'NOT_ADDED', appliedAt: null, activatedAt: activeCapacities.includes(id) ? new Date().toISOString() : null, updatedAt: new Date().toISOString() };
+    records[id] = {
+      id,
+      state: activeCapacities.includes(id) ? 'ACTIVE' : 'NOT_ADDED',
+      appliedAt: null,
+      activatedAt: activeCapacities.includes(id) ? new Date().toISOString() : null,
+      updatedAt: new Date().toISOString(),
+      feeScheduleId: null,
+      invoiceId: null,
+      feeTotal: null,
+      feeCurrency: null,
+      billingState: null,
+      reviewState: null,
+      paymentSettledAt: null,
+      reviewedAt: null,
+      reviewedBy: null,
+      reviewNotes: null
+    };
   });
   records.UNIVERSAL.state = 'ACTIVE';
   return records;
@@ -84,6 +105,27 @@ export class AccessService {
     persistedSessions.forEach((session) => this.sessions.set(session.tokenHash, session));
     await ensurePlatformAdministrator(this, { database: this.database });
     if (!this.users.size && process.env.NODE_ENV !== 'production') await this.seedDemoUsers();
+  }
+
+  async refreshPersistedUsers() {
+    if (!this.database) return [...this.users.values()];
+    const users = await this.database.listUsers();
+    users.forEach((user) => this.users.set(user.email, user));
+    return users;
+  }
+
+  async getUserById(userId) {
+    let user = [...this.users.values()].find((candidate) => candidate.id === userId || candidate.universalAccountId === userId) || null;
+    if (!user && this.database) {
+      const users = await this.refreshPersistedUsers();
+      user = users.find((candidate) => candidate.id === userId || candidate.universalAccountId === userId) || null;
+    }
+    return user;
+  }
+
+  async listUsersCurrent() {
+    if (this.database) await this.refreshPersistedUsers();
+    return [...this.users.values()];
   }
 
   async seedDemoUsers() {
@@ -129,16 +171,28 @@ export class AccessService {
         activation: definition.activation,
         activationGate: definition.activationGate,
         upgradeFlow: [...definition.upgradeFlow],
+        feeTrigger: definition.feeTrigger,
         selfService: definition.selfService,
         state: record.state,
         appliedAt: record.appliedAt || null,
         activatedAt: record.activatedAt || null,
-        updatedAt: record.updatedAt || null
+        updatedAt: record.updatedAt || null,
+        feeScheduleId: record.feeScheduleId || null,
+        invoiceId: record.invoiceId || null,
+        feeTotal: record.feeTotal == null ? null : Number(record.feeTotal),
+        feeCurrency: record.feeCurrency || null,
+        billingState: record.billingState || null,
+        reviewState: record.reviewState || null,
+        paymentSettledAt: record.paymentSettledAt || null,
+        reviewedAt: record.reviewedAt || null,
+        reviewedBy: record.reviewedBy || null,
+        reviewNotes: record.reviewNotes || null
       };
     });
   }
 
   sanitizeUser(user, activeCapacity = user.capacities[0]) {
+    const activeDefinition = CAPACITY_DEFINITIONS[activeCapacity] || CAPACITY_DEFINITIONS.UNIVERSAL;
     return {
       id: user.id,
       universalAccountId: user.universalAccountId,
@@ -149,7 +203,7 @@ export class AccessService {
       capabilities: this.capabilityProjection(user),
       activeRole: activeCapacity,
       activeCapacity,
-      accountTier: 'FREE',
+      accountTier: activeDefinition.tier,
       shell: ['INSTITUTIONAL_OPERATOR','PLATFORM_ADMIN'].includes(activeCapacity) ? 'INSTITUTIONAL' : 'PARTICIPANT'
     };
   }
@@ -157,7 +211,7 @@ export class AccessService {
   async signup(input = {}) { return this.startSession(await this.createUser({ displayName: input.displayName, email: input.email, password: input.password, capacities: ['UNIVERSAL'] })); }
 
   async signin(input = {}) {
-    const user = this.users.get(normalizeEmail(input.email));
+    const user = this.users.get(normalizeEmail(input.email)) || (this.database ? (await this.refreshPersistedUsers()).find((candidate) => candidate.email === normalizeEmail(input.email)) : null);
     if (!user || !verifyPassword(String(input.password || ''), user.credentials)) throw new Error('Email or password is incorrect.');
     return this.startSession(user);
   }
@@ -177,8 +231,13 @@ export class AccessService {
 
   async getSession(token) {
     const tokenHash = token ? hashToken(token) : '';
-    const runtime = tokenHash ? RUNTIME_SESSIONS.get(tokenHash) : null;
-    const session = tokenHash ? (this.sessions.get(tokenHash) || runtime?.session || null) : null;
+    let runtime = tokenHash ? RUNTIME_SESSIONS.get(tokenHash) : null;
+    let session = tokenHash ? (this.sessions.get(tokenHash) || runtime?.session || null) : null;
+    if (!session && tokenHash && this.database) {
+      const persistedSessions = await this.database.listSessions();
+      session = persistedSessions.find((candidate) => candidate.tokenHash === tokenHash) || null;
+      if (session) this.sessions.set(tokenHash, session);
+    }
     if (!session || new Date(session.expiresAt).getTime() < Date.now()) {
       if (tokenHash) {
         this.sessions.delete(tokenHash);
@@ -187,19 +246,29 @@ export class AccessService {
       }
       return null;
     }
-    const user = this.users.get(session.email) || runtime?.user || null;
+    let user = this.users.get(session.email) || runtime?.user || null;
+    if ((!user || this.database) && this.database) {
+      const users = await this.refreshPersistedUsers();
+      user = users.find((candidate) => candidate.email === session.email) || user;
+    }
     if (!user) return null;
     this.sessions.set(tokenHash, session);
     this.users.set(user.email, user);
-    RUNTIME_SESSIONS.set(tokenHash, { session, user });
+    runtime = { session, user };
+    RUNTIME_SESSIONS.set(tokenHash, runtime);
     return this.sanitizeUser(user, session.activeCapacity);
   }
 
   async switchRole(token, capacity) {
     const tokenHash = hashToken(token || '');
-    const session = this.sessions.get(tokenHash) || RUNTIME_SESSIONS.get(tokenHash)?.session;
+    let session = this.sessions.get(tokenHash) || RUNTIME_SESSIONS.get(tokenHash)?.session;
+    if (!session && this.database) {
+      const sessions = await this.database.listSessions();
+      session = sessions.find((candidate) => candidate.tokenHash === tokenHash) || null;
+      if (session) this.sessions.set(tokenHash, session);
+    }
     if (!session) throw new Error('Session not found.');
-    const user = this.users.get(session.email) || RUNTIME_SESSIONS.get(tokenHash)?.user;
+    const user = this.users.get(session.email) || RUNTIME_SESSIONS.get(tokenHash)?.user || (await this.getUserById(session.userId));
     if (!user || !user.capacities.includes(capacity)) throw new Error('That account capacity is not active for this identity.');
     session.activeCapacity = capacity;
     this.sessions.set(tokenHash, session);
@@ -214,17 +283,23 @@ export class AccessService {
 
   async applyForCapacity(token, capacity) {
     const tokenHash = hashToken(token || '');
-    const session = this.sessions.get(tokenHash) || RUNTIME_SESSIONS.get(tokenHash)?.session;
+    let session = this.sessions.get(tokenHash) || RUNTIME_SESSIONS.get(tokenHash)?.session;
+    if (!session && this.database) {
+      const sessions = await this.database.listSessions();
+      session = sessions.find((candidate) => candidate.tokenHash === tokenHash) || null;
+      if (session) this.sessions.set(tokenHash, session);
+    }
     if (!session) throw new Error('Session not found.');
     const definition = CAPACITY_DEFINITIONS[capacity];
     if (!definition || !definition.selfService) throw new Error('That capacity requires institutional or internal authorization.');
-    const user = this.users.get(session.email) || RUNTIME_SESSIONS.get(tokenHash)?.user;
+    const user = this.users.get(session.email) || RUNTIME_SESSIONS.get(tokenHash)?.user || (await this.getUserById(session.userId));
     const record = user?.capabilityRecords?.[capacity];
     if (!user || !record || !CAPACITY_STATES.includes(record.state)) throw new Error('Capacity record unavailable.');
     if (record.state !== 'ACTIVE') {
       const now = new Date().toISOString();
-      record.state = record.state === 'NOT_ADDED' ? 'APPLICATION_STARTED' : record.state;
+      if (record.state === 'NOT_ADDED') record.state = 'APPLICATION_STARTED';
       record.appliedAt = record.appliedAt || now;
+      record.reviewState = record.reviewState || 'NOT_STARTED';
       record.updatedAt = now;
       this.users.set(user.email, user);
       RUNTIME_SESSIONS.set(tokenHash, { session, user });
@@ -236,13 +311,76 @@ export class AccessService {
     return this.sanitizeUser(user, session.activeCapacity);
   }
 
+  async updateCapacityProgress(userId, capacity, patch = {}, actorId = null, eventType = 'CAPACITY_PROGRESS_UPDATED') {
+    const definition = CAPACITY_DEFINITIONS[capacity];
+    if (!definition) throw new Error('Capacity definition unavailable.');
+    const user = await this.getUserById(userId);
+    const record = user?.capabilityRecords?.[capacity];
+    if (!user || !record) throw new Error('Capacity record unavailable.');
+    if (patch.state && !CAPACITY_STATES.includes(patch.state)) throw new Error('Unsupported capacity state.');
+    Object.assign(record, patch, { updatedAt: new Date().toISOString() });
+    this.users.set(user.email, user);
+    if (this.database) {
+      await this.database.putUser(user.email, user);
+      await this.database.audit({ actorId: actorId || user.id, eventType, objectType: 'CAPACITY', objectId: capacity, payload: { participantId: user.id, state: record.state, invoiceId: record.invoiceId || null, billingState: record.billingState || null, reviewState: record.reviewState || null } });
+    }
+    return this.sanitizeUser(user, 'UNIVERSAL');
+  }
+
+  async reviewCapacity(userId, capacity, input = {}, actorId = null) {
+    const definition = CAPACITY_DEFINITIONS[capacity];
+    if (!definition || definition.tier !== 'PAID') throw new Error('Only paid self-service capabilities use this review path.');
+    const user = await this.getUserById(userId);
+    const record = user?.capabilityRecords?.[capacity];
+    if (!user || !record) throw new Error('Capacity record unavailable.');
+    if (record.state !== 'UNDER_REVIEW') throw new Error('Capacity must be under review before a final review decision can be recorded.');
+    if (input.invoiceId && record.invoiceId !== input.invoiceId) throw new Error('Review invoice does not match the capability application.');
+    const decision = String(input.decision || '').toUpperCase();
+    const reviewedAt = new Date().toISOString();
+    if (decision === 'APPROVE') {
+      if (record.billingState !== 'PAID') throw new Error('Paid capability cannot be activated before fee settlement is confirmed.');
+      if (!user.capacities.includes(capacity)) user.capacities.push(capacity);
+      Object.assign(record, {
+        state: 'ACTIVE',
+        reviewState: 'APPROVED',
+        reviewNotes: clean(input.notes, 1000) || null,
+        reviewedBy: actorId,
+        reviewedAt,
+        activatedAt: reviewedAt,
+        updatedAt: reviewedAt
+      });
+    } else if (decision === 'RETURN') {
+      Object.assign(record, {
+        state: 'INFORMATION_REQUIRED',
+        reviewState: 'INFORMATION_REQUIRED',
+        reviewNotes: clean(input.notes, 1000) || null,
+        reviewedBy: actorId,
+        reviewedAt,
+        updatedAt: reviewedAt
+      });
+    } else {
+      throw new Error('Review decision must be APPROVE or RETURN.');
+    }
+    this.users.set(user.email, user);
+    if (this.database) {
+      await this.database.putUser(user.email, user);
+      await this.database.audit({ actorId, eventType: decision === 'APPROVE' ? 'CAPACITY_REVIEW_APPROVED' : 'CAPACITY_REVIEW_RETURNED', objectType: 'CAPACITY', objectId: capacity, payload: { participantId: user.id, invoiceId: record.invoiceId || null, state: record.state, reviewState: record.reviewState } });
+    }
+    return this.sanitizeUser(user, decision === 'APPROVE' ? capacity : 'UNIVERSAL');
+  }
+
   async activateCapacity(token, capacity) {
     const tokenHash = hashToken(token || '');
-    const session = this.sessions.get(tokenHash) || RUNTIME_SESSIONS.get(tokenHash)?.session;
+    let session = this.sessions.get(tokenHash) || RUNTIME_SESSIONS.get(tokenHash)?.session;
+    if (!session && this.database) {
+      const sessions = await this.database.listSessions();
+      session = sessions.find((candidate) => candidate.tokenHash === tokenHash) || null;
+      if (session) this.sessions.set(tokenHash, session);
+    }
     if (!session) throw new Error('Session not found.');
     const definition = CAPACITY_DEFINITIONS[capacity];
     if (!definition) throw new Error('Capacity definition unavailable.');
-    const user = this.users.get(session.email) || RUNTIME_SESSIONS.get(tokenHash)?.user;
+    const user = this.users.get(session.email) || RUNTIME_SESSIONS.get(tokenHash)?.user || (await this.getUserById(session.userId));
     const record = user?.capabilityRecords?.[capacity];
     if (!user || !record) throw new Error('Capacity record unavailable.');
     if (record.state === 'ACTIVE') return this.sanitizeUser(user, session.activeCapacity);
