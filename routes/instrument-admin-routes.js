@@ -1,22 +1,29 @@
 import { InstrumentApprovalService } from '../services/instrument-approval-service.js';
 import { InstrumentRepresentationApprovalService, INSTRUMENT_REPRESENTATION_APPROVAL_TYPE } from '../services/instrument-representation-approval-service.js';
 import { InstrumentCoinPositionLinkageService } from '../services/instrument-coin-position-linkage-service.js';
+import { CoinMarketPropagationService } from '../services/coin-market-propagation-service.js';
 
 const PENDING_STATES = new Set(['DRAFT', 'PENDING', 'PENDING_REVIEW', 'IN_REVIEW', 'REVIEW_REQUIRED', 'AWAITING_APPROVAL', 'RECORDED']);
 const REPRESENTATION_STATES = new Set(['APPROVED', 'ISSUED', 'ACTIVE']);
 
 function stateOf(record) { return String(record?.state || record?.status || '').toUpperCase(); }
 function idOf(record) { return record?.instrumentId || record?.id || null; }
-function workflowFor(instrument, representationApproved) {
+function workflowFor(instrument, representationApproved, marketplaceState = 'NOT_PREPARED') {
   const state = stateOf(instrument);
   const instrumentApproved = REPRESENTATION_STATES.has(state);
+  const internalMarketLive = marketplaceState === 'LIVE';
   return {
     instrumentApproval: instrumentApproved ? 'COMPLETE' : 'REQUIRED',
     representationApproval: instrumentApproved ? (representationApproved ? 'COMPLETE' : 'REQUIRED') : 'WAITING',
-    onChainPreparation: representationApproved ? 'READY' : 'WAITING',
+    internalMarketplace: internalMarketLive ? 'LIVE' : marketplaceState,
+    onChainPreparation: representationApproved ? (internalMarketLive ? 'READY' : 'WAITING_FOR_INTERNAL_MARKET') : 'WAITING',
     currentStage: !instrumentApproved
       ? 'INSTRUMENT_APPROVAL'
-      : (representationApproved ? 'ON_CHAIN_PREPARATION' : 'REPRESENTATION_APPROVAL'),
+      : !representationApproved
+        ? 'REPRESENTATION_APPROVAL'
+        : !internalMarketLive
+          ? 'INTERNAL_MARKETPLACE'
+          : 'ON_CHAIN_PREPARATION',
   };
 }
 
@@ -25,6 +32,7 @@ export async function installInstrumentAdminRoutes({ router, domain, requireAdmi
   const approvals = new InstrumentApprovalService(domain);
   const representations = new InstrumentRepresentationApprovalService(domain);
   const linkages = new InstrumentCoinPositionLinkageService(domain);
+  const marketPropagation = new CoinMarketPropagationService(domain);
 
   router.get('/api/admin/instrument-coin-position-linkages', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
@@ -38,8 +46,9 @@ export async function installInstrumentAdminRoutes({ router, domain, requireAdmi
     }
     try {
       const result = await linkages.link(req.params.instrumentId, String(req.body?.coinPositionId || '').trim(), session.id);
-      if (database?.audit) await database.audit({ actorId: session.id, eventType: 'INSTRUMENT_COIN_POSITION_LINKED', objectType: 'SRA_INSTRUMENT', objectId: req.params.instrumentId, payload: { changed: result.changed, coinPositionId: result.coinPosition?.coinPositionId } });
-      return res.status(result.changed ? 201 : 200).json(result);
+      const marketplace = await marketPropagation.propagate(req.params.instrumentId, 'SRA-COIN-AGENT');
+      if (database?.audit) await database.audit({ actorId: session.id, eventType: 'INSTRUMENT_COIN_POSITION_LINKED', objectType: 'SRA_INSTRUMENT', objectId: req.params.instrumentId, payload: { changed: result.changed, coinPositionId: result.coinPosition?.coinPositionId, marketplaceState: marketplace.marketplaceState } });
+      return res.status(result.changed ? 201 : 200).json({ ...result, marketplace });
     } catch (error) {
       return res.status(422).json({ error: error.message, code: error.code || 'INSTRUMENT_COIN_POSITION_LINKAGE_FAILED', assessment: error.assessment || null });
     }
@@ -59,16 +68,33 @@ export async function installInstrumentAdminRoutes({ router, domain, requireAdmi
       representationReady: representationReady.map((instrument) => {
         const instrumentId = idOf(instrument);
         const representationApproved = approvedIds.has(instrumentId);
+        const marketplace = marketPropagation.statusFor(instrumentId);
         return {
           instrument,
           assessment: assessments.get(instrumentId),
           representationApproved,
-          workflow: workflowFor(instrument, representationApproved),
+          marketplace: {
+            listingId: marketplace.listingId || null,
+            state: marketplace.marketplaceState || 'NOT_PREPARED',
+            blockers: marketplace.blockers || [],
+          },
+          workflow: workflowFor(instrument, representationApproved, marketplace.marketplaceState || 'NOT_PREPARED'),
         };
       }),
       representationApprovalCount: approvedIds.size,
       representationApprovals,
     });
+  });
+
+  router.get('/api/admin/instruments/:instrumentId/internal-market', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    return res.json(marketPropagation.statusFor(req.params.instrumentId));
+  });
+
+  router.post('/api/admin/instruments/internal-market/reconcile', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    try { return res.json(await marketPropagation.reconcile({ limit: req.body?.limit || 500, actorId: 'SRA-COIN-AGENT' })); }
+    catch (error) { return res.status(422).json({ error: error.message, code: 'COIN_INTERNAL_MARKET_RECONCILIATION_FAILED' }); }
   });
 
   router.post('/api/admin/instruments/:instrumentId/approve', async (req, res) => {
@@ -92,12 +118,19 @@ export async function installInstrumentAdminRoutes({ router, domain, requireAdmi
     }
     try {
       const result = await representations.approve(req.params.instrumentId, session.id);
-      if (database?.audit) await database.audit({ actorId: session.id, eventType: 'INSTRUMENT_REPRESENTATION_APPROVED', objectType: 'SRA_INSTRUMENT', objectId: req.params.instrumentId, payload: { changed: result.changed, approvalId: result.approval.approvalId } });
-      return res.status(result.changed ? 201 : 200).json(result);
+      const marketplace = await marketPropagation.propagate(req.params.instrumentId, 'SRA-COIN-AGENT');
+      if (database?.audit) await database.audit({ actorId: session.id, eventType: 'INSTRUMENT_REPRESENTATION_APPROVED', objectType: 'SRA_INSTRUMENT', objectId: req.params.instrumentId, payload: { changed: result.changed, approvalId: result.approval.approvalId, marketplaceState: marketplace.marketplaceState } });
+      return res.status(result.changed ? 201 : 200).json({ ...result, marketplace });
     } catch (error) {
       return res.status(422).json({ error: error.message, code: error.code || 'INSTRUMENT_REPRESENTATION_APPROVAL_FAILED', assessment: error.assessment || null });
     }
   });
 
-  return { approvals, representations, linkages };
+  queueMicrotask(() => {
+    void marketPropagation.reconcile({ limit: 1000, actorId: 'SRA-COIN-AGENT' }).catch((error) => {
+      console.error('Coin internal marketplace reconciliation failed:', error?.message || error);
+    });
+  });
+
+  return { approvals, representations, linkages, marketPropagation };
 }
