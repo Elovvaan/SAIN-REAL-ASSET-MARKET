@@ -3,7 +3,7 @@ import { InstrumentRepresentationApprovalService, INSTRUMENT_REPRESENTATION_APPR
 import { InstrumentCoinPositionLinkageService } from '../services/instrument-coin-position-linkage-service.js';
 
 const PENDING_STATES = new Set(['DRAFT', 'PENDING', 'PENDING_REVIEW', 'IN_REVIEW', 'REVIEW_REQUIRED', 'AWAITING_APPROVAL']);
-const REPRESENTATION_STATES = new Set(['APPROVED', 'ISSUED', 'ACTIVE', 'RECORDED']);
+const REPRESENTATION_STATES = new Set(['APPROVED', 'ISSUED', 'ACTIVE']);
 
 function stateOf(record) { return String(record?.state || record?.status || '').toUpperCase(); }
 function idOf(record) { return record?.instrumentId || record?.id || null; }
@@ -25,6 +25,7 @@ export async function installInstrumentAdminRoutes({ router, domain, requireAdmi
   const approvals = new InstrumentApprovalService(domain);
   const representations = new InstrumentRepresentationApprovalService(domain);
   const linkages = new InstrumentCoinPositionLinkageService(domain);
+  const reviewQueueReconciliation = await approvals.reconcilePropagatedReviewQueue('SRA_PLATFORM');
 
   router.get('/api/admin/instrument-coin-position-linkages', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
@@ -56,6 +57,7 @@ export async function installInstrumentAdminRoutes({ router, domain, requireAdmi
     return res.json({
       pending,
       pendingCount: pending.length,
+      reviewQueueReconciliation,
       representationReady: representationReady.map((instrument) => {
         const instrumentId = idOf(instrument);
         const representationApproved = approvedIds.has(instrumentId);
@@ -99,5 +101,5 @@ export async function installInstrumentAdminRoutes({ router, domain, requireAdmi
     }
   });
 
-  return { approvals, representations, linkages };
+  return { approvals, representations, linkages, reviewQueueReconciliation };
 }
