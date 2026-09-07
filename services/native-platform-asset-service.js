@@ -15,6 +15,15 @@ function money(value, field) {
 function getBy(domain, type, field, value) {
   return domain.list(type).find((record) => record?.[field] === value) || null;
 }
+function ownershipTime(record) {
+  return String(record?.recognizedAt || record?.settledAt || record?.completedAt || record?.updatedAt || record?.createdAt || '');
+}
+function currentOwnership(domain, coinPositionId, instrumentId) {
+  return domain.list(RECORD_TYPES.OWNERSHIP_RECOGNITION)
+    .filter((record) => record?.positionId === coinPositionId || record?.coinPositionId === coinPositionId || record?.instrumentId === instrumentId)
+    .sort((a, b) => ownershipTime(a).localeCompare(ownershipTime(b)))
+    .at(-1) || null;
+}
 
 export class NativePlatformAssetService {
   constructor(domain, internalLifecycle) {
@@ -29,6 +38,8 @@ export class NativePlatformAssetService {
         platformAssetCode: PLATFORM_ASSET_CODE,
         state: 'NOT_CREATED',
         ownerId: null,
+        initialOwnerId: null,
+        ownershipState: 'NOT_RECORDED',
         readyForExport: false,
         references: {},
         nextAction: 'ADMIN_APPROVAL_REQUIRED',
@@ -40,7 +51,7 @@ export class NativePlatformAssetService {
     const commitment = listing && getBy(this.domain, RECORD_TYPES.FUNDING_MARKETPLACE_COMMITMENT, 'listingId', listing.listingId);
     const allocation = commitment && getBy(this.domain, RECORD_TYPES.FUNDING_MARKETPLACE_POSITION, 'commitmentId', commitment.commitmentId);
     const settlement = allocation && getBy(this.domain, RECORD_TYPES.SRA_SETTLEMENT_RECORD, 'allocationPositionId', allocation.positionId);
-    const ownership = settlement && getBy(this.domain, RECORD_TYPES.OWNERSHIP_RECOGNITION, 'settlementRecordId', settlement.settlementRecordId);
+    const ownership = currentOwnership(this.domain, instrument.coinPositionId, instrument.instrumentId);
     const exportPackage = ownership && this.domain.list(RECORD_TYPES.EXPORT_PACKAGE)
       .find((record) => record.ownershipRecognitionId === ownership.ownershipRecognitionId && record.state === 'READY_FOR_EXPORT');
 
@@ -51,15 +62,15 @@ export class NativePlatformAssetService {
     if (commitment) { state = 'COMMITTED'; nextAction = 'AWAIT_ALLOCATION'; }
     if (allocation) { state = 'ALLOCATED'; nextAction = 'AWAIT_SETTLEMENT'; }
     if (settlement) { state = 'SETTLED'; nextAction = 'RECOGNIZE_OWNERSHIP'; }
-    if (ownership) { state = 'OWNERSHIP_RECOGNIZED'; nextAction = 'PREPARE_EXPORT'; }
+    if (ownership && ownership.ownerId !== PLATFORM_OWNER_ID) { state = 'OWNERSHIP_RECOGNIZED'; nextAction = 'PREPARE_EXPORT'; }
     if (exportPackage) { state = 'READY_FOR_EXPORT'; nextAction = 'NONE'; }
 
     return {
       platformAssetCode: PLATFORM_ASSET_CODE,
       state,
-      ownerId: ownership?.ownerId || instrument.ownerId || PLATFORM_OWNER_ID,
+      ownerId: ownership?.ownerId || ownership?.participantId || instrument.ownerId || PLATFORM_OWNER_ID,
       initialOwnerId: instrument.initialOwnerId || PLATFORM_OWNER_ID,
-      ownershipState: ownership ? 'TRANSFERRED_AFTER_SETTLEMENT' : (instrument.ownershipState || 'PLATFORM_OWNED'),
+      ownershipState: ownership?.ownershipState || ownership?.state || instrument.ownershipState || 'PLATFORM_OWNED',
       readyForExport: Boolean(exportPackage),
       references: {
         observationId: instrument.observationId || null,
@@ -94,6 +105,7 @@ export class NativePlatformAssetService {
     const coinPositionId = id('CP');
     const instrumentId = id('INS');
     const listingId = id('LIST');
+    const ownershipRecognitionId = `OWN-${coinPositionId}`;
 
     const observation = {
       observationId,
@@ -126,9 +138,12 @@ export class NativePlatformAssetService {
       coinPositionId,
       financialRecordId,
       assetCode: PLATFORM_ASSET_CODE,
+      symbol: 'SRA',
       ownerId: PLATFORM_OWNER_ID,
+      participantId: PLATFORM_OWNER_ID,
       ownerType: 'PLATFORM',
       initialOwnerId: PLATFORM_OWNER_ID,
+      ownershipRecognitionId,
       ownershipState: 'PLATFORM_OWNED',
       ownershipBasis: 'SRA_PLATFORM_FORMATION_RECORD',
       quantity,
@@ -145,6 +160,7 @@ export class NativePlatformAssetService {
       recognitionId,
       financialRecordId,
       coinPositionId,
+      ownershipRecognitionId,
       instrumentFamily: 'ASSET_BACKED_NOTE',
       instrumentType: 'PLATFORM_FUNDING_INSTRUMENT',
       issuerId: PLATFORM_OWNER_ID,
@@ -159,6 +175,26 @@ export class NativePlatformAssetService {
       state: 'ISSUED',
       issuedAt: createdAt,
       issuedBy: actorId,
+    };
+    const ownershipRecognition = {
+      ownershipRecognitionId,
+      positionId: coinPositionId,
+      coinPositionId,
+      instrumentId,
+      participantId: PLATFORM_OWNER_ID,
+      ownerId: PLATFORM_OWNER_ID,
+      ownerType: 'PLATFORM',
+      initialOwnerId: PLATFORM_OWNER_ID,
+      previousOwnerId: null,
+      ownershipState: 'PLATFORM_OWNED',
+      recognitionType: 'INITIAL_OWNERSHIP',
+      recognitionBasis: 'SRA_PLATFORM_FORMATION_RECORD',
+      state: 'RECOGNIZED',
+      quantity,
+      unit: 'SRA',
+      recognizedAt: createdAt,
+      recognizedBy: actorId,
+      createdAt,
     };
     const listing = {
       listingId,
@@ -184,6 +220,7 @@ export class NativePlatformAssetService {
       [RECORD_TYPES.FINANCIAL_RECORD, financialRecordId, financialRecord, 'SRA_PLATFORM_FINANCIAL_RECORD_CREATED'],
       [RECORD_TYPES.COIN_POSITION, coinPositionId, coinPosition, 'SRA_PLATFORM_COIN_POSITION_CREATED'],
       [RECORD_TYPES.SRA_INSTRUMENT, instrumentId, instrument, 'SRA_PLATFORM_INSTRUMENT_ISSUED'],
+      [RECORD_TYPES.OWNERSHIP_RECOGNITION, ownershipRecognitionId, ownershipRecognition, 'SRA_PLATFORM_INITIAL_OWNERSHIP_RECOGNIZED'],
       [RECORD_TYPES.MARKETPLACE_LISTING, listingId, listing, 'SRA_PLATFORM_ASSET_LISTED'],
     ];
 
@@ -199,6 +236,7 @@ export class NativePlatformAssetService {
       payload: {
         platformAssetCode: PLATFORM_ASSET_CODE,
         initialOwnerId: PLATFORM_OWNER_ID,
+        ownershipRecognitionId,
         ownershipState: 'PLATFORM_OWNED',
         listingId,
       },
@@ -209,6 +247,7 @@ export class NativePlatformAssetService {
       status: this.status(),
       coinPosition,
       instrument,
+      ownershipRecognition,
       listing,
     };
   }
