@@ -16,10 +16,58 @@ function recordId(record) {
 }
 
 export class PersistentDomainService {
-  constructor(database) { this.database = database; this.cache = new Map(); this.writeChains = new Map(); if (database) database.persistentDomain = this; }
+  constructor(database) {
+    this.database = database;
+    this.cache = new Map();
+    this.typeIndex = new Map();
+    this.writeChains = new Map();
+    if (database) database.persistentDomain = this;
+  }
+
   key(type, id) { return `${type}:${id}`; }
-  async hydrate(types = Object.values(RECORD_TYPES)) { for (const type of types) { const records = await this.database.listRecords(type); for (const record of records) { const id = recordId(record); if (id) this.cache.set(this.key(type, id), copy(record)); } } return this.snapshot(); }
-  async seed(type, records = []) { const existing = this.list(type); if (existing.length) return existing; for (const record of records) { const id = recordId(record); if (!id) throw new Error(`Cannot seed ${type} without an identifier.`); await this.put(type, id, record, { audit: false }); } return this.list(type); }
+
+  cacheRecord(type, id, payload) {
+    const record = copy(payload);
+    this.cache.set(this.key(type, id), record);
+    let typeRecords = this.typeIndex.get(type);
+    if (!typeRecords) {
+      typeRecords = new Map();
+      this.typeIndex.set(type, typeRecords);
+    }
+    typeRecords.set(id, record);
+    return record;
+  }
+
+  removeCachedRecord(type, id) {
+    this.cache.delete(this.key(type, id));
+    const typeRecords = this.typeIndex.get(type);
+    if (!typeRecords) return;
+    typeRecords.delete(id);
+    if (!typeRecords.size) this.typeIndex.delete(type);
+  }
+
+  async hydrate(types = Object.values(RECORD_TYPES)) {
+    for (const type of types) {
+      const records = await this.database.listRecords(type);
+      for (const record of records) {
+        const id = recordId(record);
+        if (id) this.cacheRecord(type, id, record);
+      }
+    }
+    return this.snapshot();
+  }
+
+  async seed(type, records = []) {
+    const existing = this.list(type);
+    if (existing.length) return existing;
+    for (const record of records) {
+      const id = recordId(record);
+      if (!id) throw new Error(`Cannot seed ${type} without an identifier.`);
+      await this.put(type, id, record, { audit: false });
+    }
+    return this.list(type);
+  }
+
   async coordinateWrites(keys, task) {
     const coordinatedKeys = [...new Set(keys)].sort();
     const priors = coordinatedKeys.map((cacheKey) => this.writeChains.get(cacheKey) || Promise.resolve());
@@ -34,6 +82,7 @@ export class PersistentDomainService {
       }
     }
   }
+
   async put(type, id, payload, options = {}) {
     const record = copy(payload);
     const cacheKey = this.key(type, id);
@@ -42,15 +91,16 @@ export class PersistentDomainService {
       try {
         await this.database.putRecord(type, id, record);
         if (options.audit !== false) await this.database.audit({ actorId: options.actorId || null, eventType: options.eventType || 'DOMAIN_RECORD_UPSERTED', objectType: type, objectId: id, payload: { state: record.state || record.status || null } });
-        this.cache.set(cacheKey, record);
+        this.cacheRecord(type, id, record);
         return copy(record);
       } catch (error) {
-        if (previous === undefined) this.cache.delete(cacheKey);
-        else this.cache.set(cacheKey, previous);
+        if (previous === undefined) this.removeCachedRecord(type, id);
+        else this.cacheRecord(type, id, previous);
         throw error;
       }
     });
   }
+
   async atomicPut(changes = []) {
     if (!Array.isArray(changes) || !changes.length) return [];
     const prepared = changes.map((change) => {
@@ -60,17 +110,17 @@ export class PersistentDomainService {
     const cacheKeys = prepared.map((change) => this.key(change.type, change.id));
     return this.coordinateWrites(cacheKeys, async () => {
       if (!this.database.pool) {
-        const previous = prepared.map((change) => ({ key: this.key(change.type, change.id), value: this.cache.get(this.key(change.type, change.id)) }));
+        const previous = prepared.map((change) => ({ type: change.type, id: change.id, key: this.key(change.type, change.id), value: this.cache.get(this.key(change.type, change.id)) }));
         try {
           for (const change of prepared) {
             await this.database.putRecord(change.type, change.id, change.payload);
             if (change.audit) await this.database.audit({ actorId: change.actorId, eventType: change.eventType, objectType: change.type, objectId: change.id, payload: { state: change.payload?.state || change.payload?.status || null } });
           }
-          for (const change of prepared) this.cache.set(this.key(change.type, change.id), copy(change.payload));
+          for (const change of prepared) this.cacheRecord(change.type, change.id, change.payload);
         } catch (error) {
           for (const item of previous) {
-            if (item.value === undefined) this.cache.delete(item.key);
-            else this.cache.set(item.key, item.value);
+            if (item.value === undefined) this.removeCachedRecord(item.type, item.id);
+            else this.cacheRecord(item.type, item.id, item.value);
           }
           throw error;
         }
@@ -84,7 +134,7 @@ export class PersistentDomainService {
           if (change.audit) await client.query('INSERT INTO sra_audit_events (actor_id, event_type, object_type, object_id, payload) VALUES ($1, $2, $3, $4, $5::jsonb)', [change.actorId, change.eventType, change.type, change.id, JSON.stringify({ state: change.payload?.state || change.payload?.status || null })]);
         }
         await client.query('COMMIT');
-        for (const change of prepared) this.cache.set(this.key(change.type, change.id), copy(change.payload));
+        for (const change of prepared) this.cacheRecord(change.type, change.id, change.payload);
         return prepared.map((change) => copy(change.payload));
       } catch (error) {
         await client.query('ROLLBACK').catch(() => {});
@@ -94,8 +144,35 @@ export class PersistentDomainService {
       }
     });
   }
-  get(type, id) { return copy(this.cache.get(this.key(type, id)) || null); }
-  list(type) { const prefix = `${type}:`; return [...this.cache.entries()].filter(([key]) => key.startsWith(prefix)).map(([, value]) => copy(value)); }
-  async lifecycle(input) { const event = { id: `LE-${crypto.randomUUID().split('-')[0].toUpperCase()}`, objectType: input.objectType, objectId: input.objectId, eventType: input.eventType, actorId: input.actorId || null, payload: copy(input.payload || {}), occurredAt: new Date().toISOString() }; await this.put(RECORD_TYPES.LIFECYCLE_EVENT, event.id, event, { audit: false }); await this.database.audit({ actorId: event.actorId, eventType: event.eventType, objectType: event.objectType, objectId: event.objectId, payload: event.payload }); return event; }
-  snapshot() { const counts = {}; for (const type of Object.values(RECORD_TYPES)) counts[type] = this.list(type).length; return { counts }; }
+
+  get(type, id) { return copy(this.typeIndex.get(type)?.get(id) || this.cache.get(this.key(type, id)) || null); }
+
+  list(type) {
+    const indexed = this.typeIndex.get(type);
+    if (indexed) return [...indexed.values()].map((value) => copy(value));
+    const prefix = `${type}:`;
+    const records = [...this.cache.entries()].filter(([key]) => key.startsWith(prefix)).map(([, value]) => value);
+    if (records.length) {
+      const rebuilt = new Map();
+      for (const record of records) {
+        const id = recordId(record);
+        if (id) rebuilt.set(id, record);
+      }
+      if (rebuilt.size) this.typeIndex.set(type, rebuilt);
+    }
+    return records.map((value) => copy(value));
+  }
+
+  async lifecycle(input) {
+    const event = { id: `LE-${crypto.randomUUID().split('-')[0].toUpperCase()}`, objectType: input.objectType, objectId: input.objectId, eventType: input.eventType, actorId: input.actorId || null, payload: copy(input.payload || {}), occurredAt: new Date().toISOString() };
+    await this.put(RECORD_TYPES.LIFECYCLE_EVENT, event.id, event, { audit: false });
+    await this.database.audit({ actorId: event.actorId, eventType: event.eventType, objectType: event.objectType, objectId: event.objectId, payload: event.payload });
+    return event;
+  }
+
+  snapshot() {
+    const counts = {};
+    for (const type of Object.values(RECORD_TYPES)) counts[type] = this.typeIndex.get(type)?.size || 0;
+    return { counts };
+  }
 }
