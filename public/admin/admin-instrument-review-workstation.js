@@ -20,15 +20,15 @@
     return String(workspace?.dataset?.activeTab || '') === 'Pending Review';
   }
 
-  function recordsHost(workspace) {
-    return workspace?.querySelector('.admin-workspace-records') || null;
-  }
-
-  function setQueuePresentation(workspace, enabled) {
-    const records = recordsHost(workspace);
-    if (!records) return;
-    if (enabled) records.style.display = 'none';
-    else records.style.removeProperty('display');
+  function removeLegacyApprovalPanel(workspace) {
+    const root = workspace?.querySelector('.admin-workspace-controls');
+    if (!root) return;
+    for (const node of [...root.children]) {
+      if (node.matches?.('[data-instrument-review-workstation],[data-on-chain-controls]')) continue;
+      const title = node.querySelector?.('h1,h2,h3,strong')?.textContent || '';
+      const text = node.textContent || '';
+      if (/Instrument\s*&\s*Representation\s*Approval/i.test(title) || /Instrument\s*&\s*Representation\s*Approval/i.test(text)) node.remove();
+    }
   }
 
   function host(workspace) {
@@ -46,7 +46,6 @@
 
   function clear(workspace) {
     workspace?.querySelector('[data-instrument-review-workstation]')?.remove();
-    setQueuePresentation(workspace, false);
   }
 
   function amountOf(instrument) {
@@ -80,11 +79,11 @@
   }
 
   async function render(workspace) {
+    removeLegacyApprovalPanel(workspace);
     if (!workspace || !active(workspace) || !pendingTab(workspace)) {
       clear(workspace);
       return;
     }
-    setQueuePresentation(workspace, true);
     const panel = host(workspace);
     if (!panel) return;
     panel.innerHTML = '<header><strong>Instrument Approval Queue</strong><em>LOADING</em></header><p style="color:#9a9a9a">Reading instruments that completed Coin Position propagation and require Platform Administration approval…</p>';
@@ -130,6 +129,12 @@
   function mount(workspace) {
     if (!workspace || mounted.has(workspace)) return;
     mounted.add(workspace);
+    removeLegacyApprovalPanel(workspace);
+    const controls = workspace.querySelector('.admin-workspace-controls');
+    if (controls) {
+      const observer = new MutationObserver(() => removeLegacyApprovalPanel(workspace));
+      observer.observe(controls, { childList:true });
+    }
     workspace.addEventListener('click', (event) => {
       if (!event.target.closest('[data-admin-tab]')) return;
       queueMicrotask(() => void render(workspace));
