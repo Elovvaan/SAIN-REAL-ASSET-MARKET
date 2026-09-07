@@ -20,10 +20,10 @@
   ];
   const WORKSPACE_RECORD_LIMIT = 100;
   const ADMIN_SESSION_TIMEOUT_MS = 15_000;
-  const ADMIN_READ_TIMEOUT_MS = 60_000;
+  const ADMIN_READ_TIMEOUT_MS = 15_000;
   const ADMIN_WRITE_TIMEOUT_MS = 180_000;
-  const ADMIN_READ_CACHE_TTL_MS = 5_000;
-  const ADMIN_HIDDEN_CACHE_TTL_MS = 60_000;
+  const ADMIN_READ_CACHE_TTL_MS = 30_000;
+  const ADMIN_HIDDEN_CACHE_TTL_MS = 120_000;
   let sessionExpired = false;
   let readGeneration = 0;
 
@@ -160,8 +160,8 @@
     const timer = timeoutMs
       ? window.setTimeout(() => controller.abort(new DOMException('Administration request timed out.', 'TimeoutError')), timeoutMs)
       : null;
-    const honorExternalSignal = !(isAdminRequest && SAFE_METHODS.has(method));
-    if (controller && externalSignal && honorExternalSignal) {
+    const honorExternalSignal = Boolean(externalSignal);
+    if (controller && externalSignal) {
       if (externalSignal.aborted) controller.abort(externalSignal.reason);
       else externalSignal.addEventListener('abort', () => controller.abort(externalSignal.reason), { once: true });
     }
@@ -170,7 +170,7 @@
         ...options,
         credentials: isAdminRequest ? 'include' : (options.credentials || 'same-origin'),
         cache: isAdminRequest ? 'no-store' : (options.cache || 'default'),
-        signal: controller?.signal || (honorExternalSignal ? externalSignal : undefined),
+        signal: controller?.signal || externalSignal || undefined,
       });
       if (isAdminRequest && !isSessionProbe && response.status === 401) markSessionExpired();
       if (isAdminRequest && response.ok && sessionExpired && !SAFE_METHODS.has(method)) markSessionRestored();
@@ -226,7 +226,10 @@
     const readKey = `${method}:${url.pathname}${url.search}`;
     const cacheableRead = isAdminRequest && method === 'GET' && !isSessionProbe && !externalSignal && !forcedRead;
 
-    if (forcedRead && method === 'GET') invalidateReads();
+    if (forcedRead && method === 'GET') {
+      readCache.delete(readKey);
+      inFlightReads.delete(readKey);
+    }
     if (governed && activeWrites.has(governed)) return fromSnapshot(await activeWrites.get(governed));
 
     const execute = () => performNative(normalizedInput, options, {
