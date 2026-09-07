@@ -11,245 +11,88 @@ function money(value, field) {
   if (!Number.isFinite(amount) || amount <= 0) throw new Error(`${field} must be greater than zero.`);
   return Number(amount.toFixed(2));
 }
-
-function getBy(domain, type, field, value) {
-  return domain.list(type).find((record) => record?.[field] === value) || null;
-}
-function ownershipTime(record) {
-  return String(record?.recognizedAt || record?.settledAt || record?.completedAt || record?.updatedAt || record?.createdAt || '');
-}
-function currentOwnership(domain, coinPositionId, instrumentId) {
+function getBy(domain, type, field, value) { return domain.list(type).find((record) => record?.[field] === value) || null; }
+function ownershipTime(record) { return String(record?.recognizedAt || record?.settledAt || record?.completedAt || record?.updatedAt || record?.createdAt || ''); }
+function ownershipOwner(record) { return record?.ownerId || record?.participantId || record?.ownerParticipantId || record?.accountHolderId || null; }
+function ownershipRecords(domain, coinPositionId, instrumentId) {
   return domain.list(RECORD_TYPES.OWNERSHIP_RECOGNITION)
     .filter((record) => record?.positionId === coinPositionId || record?.coinPositionId === coinPositionId || record?.instrumentId === instrumentId)
-    .sort((a, b) => ownershipTime(a).localeCompare(ownershipTime(b)))
-    .at(-1) || null;
+    .sort((a, b) => ownershipTime(a).localeCompare(ownershipTime(b)));
 }
+function currentOwnership(domain, coinPositionId, instrumentId) { return ownershipRecords(domain, coinPositionId, instrumentId).at(-1) || null; }
 
 export class NativePlatformAssetService {
-  constructor(domain, internalLifecycle) {
-    this.domain = domain;
-    this.internalLifecycle = internalLifecycle;
-  }
+  constructor(domain, internalLifecycle) { this.domain = domain; this.internalLifecycle = internalLifecycle; }
 
   status() {
     const instrument = getBy(this.domain, RECORD_TYPES.SRA_INSTRUMENT, 'platformAssetCode', PLATFORM_ASSET_CODE);
-    if (!instrument) {
-      return {
-        platformAssetCode: PLATFORM_ASSET_CODE,
-        state: 'NOT_CREATED',
-        ownerId: null,
-        initialOwnerId: null,
-        ownershipState: 'NOT_RECORDED',
-        readyForExport: false,
-        references: {},
-        nextAction: 'ADMIN_APPROVAL_REQUIRED',
-      };
-    }
-
+    if (!instrument) return { platformAssetCode: PLATFORM_ASSET_CODE, state: 'NOT_CREATED', ownerId: null, initialOwnerId: null, ownershipState: 'NOT_RECORDED', readyForExport: false, references: {}, nextAction: 'ADMIN_APPROVAL_REQUIRED' };
     const listing = getBy(this.domain, RECORD_TYPES.MARKETPLACE_LISTING, 'instrumentId', instrument.instrumentId);
     const participation = listing && getBy(this.domain, RECORD_TYPES.PARTICIPATION_POSITION, 'listingId', listing.listingId);
     const commitment = listing && getBy(this.domain, RECORD_TYPES.FUNDING_MARKETPLACE_COMMITMENT, 'listingId', listing.listingId);
     const allocation = commitment && getBy(this.domain, RECORD_TYPES.FUNDING_MARKETPLACE_POSITION, 'commitmentId', commitment.commitmentId);
     const settlement = allocation && getBy(this.domain, RECORD_TYPES.SRA_SETTLEMENT_RECORD, 'allocationPositionId', allocation.positionId);
     const ownership = currentOwnership(this.domain, instrument.coinPositionId, instrument.instrumentId);
-    const exportPackage = ownership && this.domain.list(RECORD_TYPES.EXPORT_PACKAGE)
-      .find((record) => record.ownershipRecognitionId === ownership.ownershipRecognitionId && record.state === 'READY_FOR_EXPORT');
-
-    let state = 'ISSUED';
-    let nextAction = 'PUBLISH_LISTING';
+    const exportPackage = ownership && this.domain.list(RECORD_TYPES.EXPORT_PACKAGE).find((record) => record.ownershipRecognitionId === ownership.ownershipRecognitionId && record.state === 'READY_FOR_EXPORT');
+    let state = 'ISSUED', nextAction = 'PUBLISH_LISTING';
     if (listing) { state = listing.state === 'PUBLISHED' ? 'PUBLISHED' : 'LISTED'; nextAction = 'AWAIT_MARKET_PARTICIPATION'; }
     if (participation) { state = 'PARTICIPATION_ACTIVE'; nextAction = 'AWAIT_COMMITMENT'; }
     if (commitment) { state = 'COMMITTED'; nextAction = 'AWAIT_ALLOCATION'; }
     if (allocation) { state = 'ALLOCATED'; nextAction = 'AWAIT_SETTLEMENT'; }
     if (settlement) { state = 'SETTLED'; nextAction = 'RECOGNIZE_OWNERSHIP'; }
-    if (ownership && ownership.ownerId !== PLATFORM_OWNER_ID) { state = 'OWNERSHIP_RECOGNIZED'; nextAction = 'PREPARE_EXPORT'; }
+    if (ownership && ownershipOwner(ownership) !== PLATFORM_OWNER_ID) { state = 'OWNERSHIP_RECOGNIZED'; nextAction = 'PREPARE_EXPORT'; }
     if (exportPackage) { state = 'READY_FOR_EXPORT'; nextAction = 'NONE'; }
-
     return {
-      platformAssetCode: PLATFORM_ASSET_CODE,
-      state,
-      ownerId: ownership?.ownerId || ownership?.participantId || instrument.ownerId || PLATFORM_OWNER_ID,
+      platformAssetCode: PLATFORM_ASSET_CODE, state,
+      ownerId: ownershipOwner(ownership) || instrument.ownerId || PLATFORM_OWNER_ID,
       initialOwnerId: instrument.initialOwnerId || PLATFORM_OWNER_ID,
       ownershipState: ownership?.ownershipState || ownership?.state || instrument.ownershipState || 'PLATFORM_OWNED',
       readyForExport: Boolean(exportPackage),
-      references: {
-        observationId: instrument.observationId || null,
-        recognitionId: instrument.recognitionId || null,
-        financialRecordId: instrument.financialRecordId || null,
-        coinPositionId: instrument.coinPositionId || null,
-        instrumentId: instrument.instrumentId,
-        listingId: listing?.listingId || null,
-        participationId: participation?.positionId || null,
-        commitmentId: commitment?.commitmentId || null,
-        allocationId: allocation?.positionId || null,
-        settlementRecordId: settlement?.settlementRecordId || null,
-        ownershipRecognitionId: ownership?.ownershipRecognitionId || null,
-        exportPackageId: exportPackage?.exportPackageId || null,
-      },
+      references: { observationId: instrument.observationId || null, recognitionId: instrument.recognitionId || null, financialRecordId: instrument.financialRecordId || null, coinPositionId: instrument.coinPositionId || null, instrumentId: instrument.instrumentId, listingId: listing?.listingId || null, participationId: participation?.positionId || null, commitmentId: commitment?.commitmentId || null, allocationId: allocation?.positionId || null, settlementRecordId: settlement?.settlementRecordId || null, ownershipRecognitionId: ownership?.ownershipRecognitionId || null, exportPackageId: exportPackage?.exportPackageId || null },
       nextAction,
     };
   }
 
+  async ensureInitialOwnership(actorId = 'SRA_PLATFORM_MIGRATION') {
+    const instrument = getBy(this.domain, RECORD_TYPES.SRA_INSTRUMENT, 'platformAssetCode', PLATFORM_ASSET_CODE);
+    if (!instrument?.coinPositionId) return null;
+    const position = this.domain.get(RECORD_TYPES.COIN_POSITION, instrument.coinPositionId) || getBy(this.domain, RECORD_TYPES.COIN_POSITION, 'coinPositionId', instrument.coinPositionId);
+    if (!position) return null;
+    const records = ownershipRecords(this.domain, position.coinPositionId, instrument.instrumentId);
+    const existingInitial = records.find((record) => record.recognitionType === 'INITIAL_OWNERSHIP' || (record.initialOwnerId === PLATFORM_OWNER_ID && (record.previousOwnerId === null || record.previousOwnerId === undefined)));
+    const ownershipRecognitionId = existingInitial?.ownershipRecognitionId || `OWN-${position.coinPositionId}`;
+    const timestamp = now();
+    const changes = [];
+    if (!position.initialOwnerId || !position.symbol || !position.initialOwnershipRecognitionId) changes.push({ type: RECORD_TYPES.COIN_POSITION, id: position.coinPositionId, payload: { ...position, symbol: position.symbol || 'SRA', initialOwnerId: position.initialOwnerId || PLATFORM_OWNER_ID, initialOwnershipRecognitionId: position.initialOwnershipRecognitionId || ownershipRecognitionId, ownershipBasis: position.ownershipBasis || 'SRA_PLATFORM_FORMATION_RECORD', updatedAt: timestamp }, eventType: 'NATIVE_SRA_INITIAL_OWNER_LINKAGE_ENFORCED' });
+    if (!instrument.initialOwnerId || !instrument.initialOwnershipRecognitionId) changes.push({ type: RECORD_TYPES.SRA_INSTRUMENT, id: instrument.instrumentId, payload: { ...instrument, initialOwnerId: instrument.initialOwnerId || PLATFORM_OWNER_ID, initialOwnershipRecognitionId: instrument.initialOwnershipRecognitionId || ownershipRecognitionId, updatedAt: timestamp }, eventType: 'NATIVE_SRA_INITIAL_OWNER_LINKAGE_ENFORCED' });
+    if (!existingInitial && !this.domain.get(RECORD_TYPES.OWNERSHIP_RECOGNITION, ownershipRecognitionId)) {
+      const createdAt = position.createdAt || instrument.issuedAt || timestamp;
+      changes.push({ type: RECORD_TYPES.OWNERSHIP_RECOGNITION, id: ownershipRecognitionId, payload: { ownershipRecognitionId, positionId: position.coinPositionId, coinPositionId: position.coinPositionId, instrumentId: instrument.instrumentId, participantId: PLATFORM_OWNER_ID, ownerId: PLATFORM_OWNER_ID, ownerType: 'PLATFORM', initialOwnerId: PLATFORM_OWNER_ID, previousOwnerId: null, ownershipState: 'PLATFORM_OWNED', recognitionType: 'INITIAL_OWNERSHIP', recognitionBasis: 'SRA_PLATFORM_FORMATION_RECORD', state: 'RECOGNIZED', quantity: Number(position.quantity || position.balance || 0), unit: 'SRA', recognizedAt: createdAt, recognizedBy: actorId, createdAt, backfilledAt: timestamp }, eventType: 'SRA_PLATFORM_INITIAL_OWNERSHIP_BACKFILLED' });
+    }
+    for (const change of changes) await this.domain.put(change.type, change.id, change.payload, { actorId, eventType: change.eventType });
+    return { ownershipRecognitionId, initialOwnerId: PLATFORM_OWNER_ID, changed: changes.length > 0 };
+  }
+
   async bootstrap(input = {}, actorId = 'SRA_PLATFORM_ADMIN') {
     const current = this.status();
-    if (current.references.instrumentId) return { created: false, status: current };
-
+    if (current.references.instrumentId) { await this.ensureInitialOwnership(actorId); return { created: false, status: this.status() }; }
     const issuedAmount = money(input.issuedAmount || 1000000, 'issuedAmount');
     const unitPrice = money(input.unitPrice || 1, 'unitPrice');
     const quantity = Number((issuedAmount / unitPrice).toFixed(8));
     const createdAt = now();
-
-    const observationId = id('OBS');
-    const recognitionId = id('REC');
-    const financialRecordId = id('FR');
-    const coinPositionId = id('CP');
-    const instrumentId = id('INS');
-    const listingId = id('LIST');
+    const observationId = id('OBS'), recognitionId = id('REC'), financialRecordId = id('FR'), coinPositionId = id('CP'), instrumentId = id('INS'), listingId = id('LIST');
     const ownershipRecognitionId = `OWN-${coinPositionId}`;
-
-    const observation = {
-      observationId,
-      source: 'SRA_PLATFORM_FORMATION',
-      subjectId: PLATFORM_ASSET_CODE,
-      description: input.description || 'SRA native platform marketplace asset',
-      state: 'OBSERVED',
-      observedAt: createdAt,
-      observedBy: actorId,
-    };
-    const recognition = {
-      recognitionId,
-      observationId,
-      decision: 'RECOGNIZED',
-      recognitionBasis: 'SRA_PLATFORM_FORMATION_RECORD',
-      recognizedAt: createdAt,
-      recognizedBy: actorId,
-    };
-    const financialRecord = {
-      financialRecordId,
-      recognitionId,
-      recordType: 'PLATFORM_CAPITAL_ASSET',
-      amount: issuedAmount,
-      currency: input.currency || 'USD',
-      state: 'RECORDED',
-      recordedAt: createdAt,
-      recordedBy: actorId,
-    };
-    const coinPosition = {
-      coinPositionId,
-      financialRecordId,
-      assetCode: PLATFORM_ASSET_CODE,
-      symbol: 'SRA',
-      ownerId: PLATFORM_OWNER_ID,
-      participantId: PLATFORM_OWNER_ID,
-      ownerType: 'PLATFORM',
-      initialOwnerId: PLATFORM_OWNER_ID,
-      ownershipRecognitionId,
-      ownershipState: 'PLATFORM_OWNED',
-      ownershipBasis: 'SRA_PLATFORM_FORMATION_RECORD',
-      quantity,
-      unitPrice,
-      currency: input.currency || 'USD',
-      state: 'ACTIVE',
-      createdAt,
-      createdBy: actorId,
-    };
-    const instrument = {
-      instrumentId,
-      platformAssetCode: PLATFORM_ASSET_CODE,
-      observationId,
-      recognitionId,
-      financialRecordId,
-      coinPositionId,
-      ownershipRecognitionId,
-      instrumentFamily: 'ASSET_BACKED_NOTE',
-      instrumentType: 'PLATFORM_FUNDING_INSTRUMENT',
-      issuerId: PLATFORM_OWNER_ID,
-      ownerId: PLATFORM_OWNER_ID,
-      initialOwnerId: PLATFORM_OWNER_ID,
-      ownershipState: 'PLATFORM_OWNED',
-      faceAmount: issuedAmount,
-      quantity,
-      unitPrice,
-      currency: input.currency || 'USD',
-      rights: ['MARKETPLACE_PARTICIPATION', 'TRANSFER_SUBJECT_TO_PLATFORM_RULES'],
-      state: 'ISSUED',
-      issuedAt: createdAt,
-      issuedBy: actorId,
-    };
-    const ownershipRecognition = {
-      ownershipRecognitionId,
-      positionId: coinPositionId,
-      coinPositionId,
-      instrumentId,
-      participantId: PLATFORM_OWNER_ID,
-      ownerId: PLATFORM_OWNER_ID,
-      ownerType: 'PLATFORM',
-      initialOwnerId: PLATFORM_OWNER_ID,
-      previousOwnerId: null,
-      ownershipState: 'PLATFORM_OWNED',
-      recognitionType: 'INITIAL_OWNERSHIP',
-      recognitionBasis: 'SRA_PLATFORM_FORMATION_RECORD',
-      state: 'RECOGNIZED',
-      quantity,
-      unit: 'SRA',
-      recognizedAt: createdAt,
-      recognizedBy: actorId,
-      createdAt,
-    };
-    const listing = {
-      listingId,
-      instrumentId,
-      sellerId: PLATFORM_OWNER_ID,
-      sourceOwnerId: PLATFORM_OWNER_ID,
-      offeredByOwner: true,
-      ownershipTransferMode: 'MARKETPLACE_SETTLEMENT',
-      quantity,
-      unitPrice,
-      currency: input.currency || 'USD',
-      marketAccessRule: 'SRA_REGISTERED_PARTICIPANTS',
-      transactionRoute: 'SRA_INTERNAL',
-      settlementRoute: 'SRA_INTERNAL',
-      state: 'PUBLISHED',
-      publishedAt: createdAt,
-      publishedBy: actorId,
-    };
-
-    const writes = [
-      [RECORD_TYPES.MARKET_OBSERVATION, observationId, observation, 'SRA_PLATFORM_ASSET_OBSERVED'],
-      [RECORD_TYPES.RECOGNITION_ASSESSMENT, recognitionId, recognition, 'SRA_PLATFORM_ASSET_RECOGNIZED'],
-      [RECORD_TYPES.FINANCIAL_RECORD, financialRecordId, financialRecord, 'SRA_PLATFORM_FINANCIAL_RECORD_CREATED'],
-      [RECORD_TYPES.COIN_POSITION, coinPositionId, coinPosition, 'SRA_PLATFORM_COIN_POSITION_CREATED'],
-      [RECORD_TYPES.SRA_INSTRUMENT, instrumentId, instrument, 'SRA_PLATFORM_INSTRUMENT_ISSUED'],
-      [RECORD_TYPES.OWNERSHIP_RECOGNITION, ownershipRecognitionId, ownershipRecognition, 'SRA_PLATFORM_INITIAL_OWNERSHIP_RECOGNIZED'],
-      [RECORD_TYPES.MARKETPLACE_LISTING, listingId, listing, 'SRA_PLATFORM_ASSET_LISTED'],
-    ];
-
-    for (const [type, recordId, record, eventType] of writes) {
-      await this.domain.put(type, recordId, record, { actorId, eventType });
-    }
-
-    await this.domain.lifecycle({
-      objectType: RECORD_TYPES.SRA_INSTRUMENT,
-      objectId: instrumentId,
-      eventType: 'SRA_NATIVE_PLATFORM_ASSET_CREATED_AND_LISTED',
-      actorId,
-      payload: {
-        platformAssetCode: PLATFORM_ASSET_CODE,
-        initialOwnerId: PLATFORM_OWNER_ID,
-        ownershipRecognitionId,
-        ownershipState: 'PLATFORM_OWNED',
-        listingId,
-      },
-    });
-
-    return {
-      created: true,
-      status: this.status(),
-      coinPosition,
-      instrument,
-      ownershipRecognition,
-      listing,
-    };
+    const observation = { observationId, source: 'SRA_PLATFORM_FORMATION', subjectId: PLATFORM_ASSET_CODE, description: input.description || 'SRA native platform marketplace asset', state: 'OBSERVED', observedAt: createdAt, observedBy: actorId };
+    const recognition = { recognitionId, observationId, decision: 'RECOGNIZED', recognitionBasis: 'SRA_PLATFORM_FORMATION_RECORD', recognizedAt: createdAt, recognizedBy: actorId };
+    const financialRecord = { financialRecordId, recognitionId, recordType: 'PLATFORM_CAPITAL_ASSET', amount: issuedAmount, currency: input.currency || 'USD', state: 'RECORDED', recordedAt: createdAt, recordedBy: actorId };
+    const coinPosition = { coinPositionId, financialRecordId, assetCode: PLATFORM_ASSET_CODE, symbol: 'SRA', ownerId: PLATFORM_OWNER_ID, participantId: PLATFORM_OWNER_ID, ownerType: 'PLATFORM', initialOwnerId: PLATFORM_OWNER_ID, ownershipRecognitionId, initialOwnershipRecognitionId: ownershipRecognitionId, ownershipState: 'PLATFORM_OWNED', ownershipBasis: 'SRA_PLATFORM_FORMATION_RECORD', quantity, unitPrice, currency: input.currency || 'USD', state: 'ACTIVE', createdAt, createdBy: actorId };
+    const instrument = { instrumentId, platformAssetCode: PLATFORM_ASSET_CODE, observationId, recognitionId, financialRecordId, coinPositionId, ownershipRecognitionId, initialOwnershipRecognitionId: ownershipRecognitionId, instrumentFamily: 'ASSET_BACKED_NOTE', instrumentType: 'PLATFORM_FUNDING_INSTRUMENT', issuerId: PLATFORM_OWNER_ID, ownerId: PLATFORM_OWNER_ID, initialOwnerId: PLATFORM_OWNER_ID, ownershipState: 'PLATFORM_OWNED', faceAmount: issuedAmount, quantity, unitPrice, currency: input.currency || 'USD', rights: ['MARKETPLACE_PARTICIPATION', 'TRANSFER_SUBJECT_TO_PLATFORM_RULES'], state: 'ISSUED', issuedAt: createdAt, issuedBy: actorId };
+    const ownershipRecognition = { ownershipRecognitionId, positionId: coinPositionId, coinPositionId, instrumentId, participantId: PLATFORM_OWNER_ID, ownerId: PLATFORM_OWNER_ID, ownerType: 'PLATFORM', initialOwnerId: PLATFORM_OWNER_ID, previousOwnerId: null, ownershipState: 'PLATFORM_OWNED', recognitionType: 'INITIAL_OWNERSHIP', recognitionBasis: 'SRA_PLATFORM_FORMATION_RECORD', state: 'RECOGNIZED', quantity, unit: 'SRA', recognizedAt: createdAt, recognizedBy: actorId, createdAt };
+    const listing = { listingId, instrumentId, sellerId: PLATFORM_OWNER_ID, sourceOwnerId: PLATFORM_OWNER_ID, offeredByOwner: true, ownershipTransferMode: 'MARKETPLACE_SETTLEMENT', quantity, unitPrice, currency: input.currency || 'USD', marketAccessRule: 'SRA_REGISTERED_PARTICIPANTS', transactionRoute: 'SRA_INTERNAL', settlementRoute: 'SRA_INTERNAL', state: 'PUBLISHED', publishedAt: createdAt, publishedBy: actorId };
+    const writes = [[RECORD_TYPES.MARKET_OBSERVATION, observationId, observation, 'SRA_PLATFORM_ASSET_OBSERVED'],[RECORD_TYPES.RECOGNITION_ASSESSMENT, recognitionId, recognition, 'SRA_PLATFORM_ASSET_RECOGNIZED'],[RECORD_TYPES.FINANCIAL_RECORD, financialRecordId, financialRecord, 'SRA_PLATFORM_FINANCIAL_RECORD_CREATED'],[RECORD_TYPES.COIN_POSITION, coinPositionId, coinPosition, 'SRA_PLATFORM_COIN_POSITION_CREATED'],[RECORD_TYPES.SRA_INSTRUMENT, instrumentId, instrument, 'SRA_PLATFORM_INSTRUMENT_ISSUED'],[RECORD_TYPES.OWNERSHIP_RECOGNITION, ownershipRecognitionId, ownershipRecognition, 'SRA_PLATFORM_INITIAL_OWNERSHIP_RECOGNIZED'],[RECORD_TYPES.MARKETPLACE_LISTING, listingId, listing, 'SRA_PLATFORM_ASSET_LISTED']];
+    for (const [type, recordId, record, eventType] of writes) await this.domain.put(type, recordId, record, { actorId, eventType });
+    await this.domain.lifecycle({ objectType: RECORD_TYPES.SRA_INSTRUMENT, objectId: instrumentId, eventType: 'SRA_NATIVE_PLATFORM_ASSET_CREATED_AND_LISTED', actorId, payload: { platformAssetCode: PLATFORM_ASSET_CODE, initialOwnerId: PLATFORM_OWNER_ID, ownershipRecognitionId, ownershipState: 'PLATFORM_OWNED', listingId } });
+    return { created: true, status: this.status(), coinPosition, instrument, ownershipRecognition, listing };
   }
 }
 
