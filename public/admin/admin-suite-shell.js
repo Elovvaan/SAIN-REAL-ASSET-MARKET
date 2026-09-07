@@ -47,7 +47,7 @@
     if(document.querySelector('link[data-admin-suite]')) return;
     const link = document.createElement('link');
     link.rel = 'stylesheet';
-    link.href = `/admin/admin-suite-shell.css?v=${Date.now()}`;
+    link.href = '/admin/admin-suite-shell.css';
     link.dataset.adminSuite = 'true';
     document.head.append(link);
   }
@@ -287,7 +287,7 @@
     if(id==='dashboard'){ node.innerHTML = dashboardMarkup(); syncDashboard(); return; }
     const section = document.querySelector(`[data-workspace="${id}"]`);
     const tab = section?.dataset.activeTab || TABS[id]?.[0] || '';
-    if(state.loadingViews.has(viewKey(id,tab))){ node.innerHTML = loadingState(); return; }
+    if(state.loadingViews.has(viewKey(id,tab)) && !node.childElementCount){ node.innerHTML = loadingState(); return; }
     const error = state.viewErrors.get(viewKey(id,tab));
     if(error){ node.innerHTML = errorState(error); return; }
     if(id==='settlement' && tab==='Workflow'){ node.innerHTML = settlementWorkflowMarkup(); return; }
@@ -329,10 +329,16 @@
       window.dispatchEvent(new CustomEvent('sra:admin-dashboard-refresh'));
       return;
     }
-    const node = recordsBody(id);
-    if(node) node.innerHTML = loadingState();
-    const tab=document.querySelector(`[data-workspace="${id}"]`)?.dataset.activeTab||'';
+    const section=document.querySelector(`[data-workspace="${id}"]`);
+    const refreshButton=section?.querySelector(`[data-refresh-workspace="${id}"]`);
+    const tab=section?.dataset.activeTab||'';
+    section?.setAttribute('aria-busy','true');
+    if(refreshButton){refreshButton.disabled=true;refreshButton.textContent='Refreshing…';}
     try { await loadWorkspaceData(true,id,tab); } catch {}
+    finally {
+      section?.removeAttribute('aria-busy');
+      if(refreshButton){refreshButton.disabled=false;refreshButton.textContent='Refresh';}
+    }
     renderWorkspace(id);
     syncDashboard();
   }
