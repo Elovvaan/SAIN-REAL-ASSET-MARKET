@@ -2,11 +2,51 @@ import crypto from 'node:crypto';
 import { ensurePlatformAdministrator } from './admin-bootstrap-service.js';
 
 const CAPACITY_DEFINITIONS = {
-  UNIVERSAL: { label: 'Universal Account', tier: 'FREE', feeBasis: 'No account fee. Participation-specific terms may still apply.', activation: 'AUTOMATIC', selfService: false },
-  ASSET_PROVIDER: { label: 'Asset Provider', tier: 'PAID', feeBasis: 'V4V intake, verification, listing, and project-related fees.', activation: 'APPLICATION', selfService: true },
-  MARKET_PROFESSIONAL: { label: 'Market Professional', tier: 'PAID', feeBasis: 'Professional subscription, credential review, matching, and transaction fees.', activation: 'APPLICATION', selfService: true },
-  INSTITUTIONAL_OPERATOR: { label: 'Institutional Operator', tier: 'AGREEMENT', feeBasis: 'Institutional agreement and authorization.', activation: 'INSTITUTIONAL_APPROVAL', selfService: false },
-  PLATFORM_ADMIN: { label: 'Platform Administration', tier: 'INTERNAL', feeBasis: 'Internal platform authorization only.', activation: 'INTERNAL_AUTHORIZATION', selfService: false }
+  UNIVERSAL: {
+    label: 'Universal Account',
+    tier: 'FREE',
+    feeBasis: 'No account fee. Participation-specific terms may still apply.',
+    activation: 'AUTOMATIC',
+    selfService: false,
+    activationGate: 'AUTOMATIC',
+    upgradeFlow: ['ACCOUNT_CREATED', 'ACTIVE']
+  },
+  ASSET_PROVIDER: {
+    label: 'Asset Provider',
+    tier: 'PAID',
+    feeBasis: 'V4V intake, verification, listing, and project-related fees.',
+    activation: 'APPLICATION',
+    selfService: true,
+    activationGate: 'FEE_SCHEDULE_SETTLEMENT_AND_REVIEW',
+    upgradeFlow: ['APPLICATION', 'FEE_SCHEDULE', 'PAYMENT_SETTLEMENT', 'REVIEW', 'ACTIVE']
+  },
+  MARKET_PROFESSIONAL: {
+    label: 'Market Professional',
+    tier: 'PAID',
+    feeBasis: 'Professional subscription, credential review, matching, and transaction fees.',
+    activation: 'APPLICATION',
+    selfService: true,
+    activationGate: 'FEE_SCHEDULE_SETTLEMENT_AND_REVIEW',
+    upgradeFlow: ['APPLICATION', 'FEE_SCHEDULE', 'PAYMENT_SETTLEMENT', 'REVIEW', 'ACTIVE']
+  },
+  INSTITUTIONAL_OPERATOR: {
+    label: 'Institutional Operator',
+    tier: 'AGREEMENT',
+    feeBasis: 'Institutional agreement and authorization.',
+    activation: 'INSTITUTIONAL_APPROVAL',
+    selfService: false,
+    activationGate: 'INSTITUTIONAL_AGREEMENT_AND_APPROVAL',
+    upgradeFlow: ['AGREEMENT', 'INSTITUTIONAL_REVIEW', 'APPROVAL', 'ACTIVE']
+  },
+  PLATFORM_ADMIN: {
+    label: 'Platform Administration',
+    tier: 'INTERNAL',
+    feeBasis: 'Internal platform authorization only.',
+    activation: 'INTERNAL_AUTHORIZATION',
+    selfService: false,
+    activationGate: 'INTERNAL_AUTHORIZATION',
+    upgradeFlow: ['INTERNAL_AUTHORIZATION', 'ACTIVE']
+  }
 };
 
 const CAPACITY_STATES = ['NOT_ADDED','APPLICATION_STARTED','INFORMATION_REQUIRED','UNDER_REVIEW','ACTIVE','SUSPENDED','CLOSED'];
@@ -81,7 +121,20 @@ export class AccessService {
   capabilityProjection(user) {
     return Object.entries(CAPACITY_DEFINITIONS).map(([id, definition]) => {
       const record = user.capabilityRecords[id] || { id, state: 'NOT_ADDED' };
-      return { id, label: definition.label, tier: definition.tier, feeBasis: definition.feeBasis, activation: definition.activation, selfService: definition.selfService, state: record.state, appliedAt: record.appliedAt || null, activatedAt: record.activatedAt || null, updatedAt: record.updatedAt || null };
+      return {
+        id,
+        label: definition.label,
+        tier: definition.tier,
+        feeBasis: definition.feeBasis,
+        activation: definition.activation,
+        activationGate: definition.activationGate,
+        upgradeFlow: [...definition.upgradeFlow],
+        selfService: definition.selfService,
+        state: record.state,
+        appliedAt: record.appliedAt || null,
+        activatedAt: record.activatedAt || null,
+        updatedAt: record.updatedAt || null
+      };
     });
   }
 
@@ -161,21 +214,23 @@ export class AccessService {
 
   async applyForCapacity(token, capacity) {
     const tokenHash = hashToken(token || '');
-    const session = this.sessions.get(tokenHash);
+    const session = this.sessions.get(tokenHash) || RUNTIME_SESSIONS.get(tokenHash)?.session;
     if (!session) throw new Error('Session not found.');
     const definition = CAPACITY_DEFINITIONS[capacity];
     if (!definition || !definition.selfService) throw new Error('That capacity requires institutional or internal authorization.');
-    const user = this.users.get(session.email);
-    const record = user.capabilityRecords[capacity];
-    if (!record || !CAPACITY_STATES.includes(record.state)) throw new Error('Capacity record unavailable.');
+    const user = this.users.get(session.email) || RUNTIME_SESSIONS.get(tokenHash)?.user;
+    const record = user?.capabilityRecords?.[capacity];
+    if (!user || !record || !CAPACITY_STATES.includes(record.state)) throw new Error('Capacity record unavailable.');
     if (record.state !== 'ACTIVE') {
       const now = new Date().toISOString();
       record.state = record.state === 'NOT_ADDED' ? 'APPLICATION_STARTED' : record.state;
       record.appliedAt = record.appliedAt || now;
       record.updatedAt = now;
+      this.users.set(user.email, user);
+      RUNTIME_SESSIONS.set(tokenHash, { session, user });
       if (this.database) {
         await this.database.putUser(user.email, user);
-        await this.database.audit({ actorId: user.id, eventType: 'CAPACITY_APPLICATION_STARTED', objectType: 'CAPACITY', objectId: capacity });
+        await this.database.audit({ actorId: user.id, eventType: 'CAPACITY_APPLICATION_STARTED', objectType: 'CAPACITY', objectId: capacity, payload: { tier: definition.tier, activationGate: definition.activationGate } });
       }
     }
     return this.sanitizeUser(user, session.activeCapacity);
@@ -186,25 +241,15 @@ export class AccessService {
     const session = this.sessions.get(tokenHash) || RUNTIME_SESSIONS.get(tokenHash)?.session;
     if (!session) throw new Error('Session not found.');
     const definition = CAPACITY_DEFINITIONS[capacity];
-    if (!definition || !definition.selfService) throw new Error('That capacity requires institutional authorization.');
+    if (!definition) throw new Error('Capacity definition unavailable.');
     const user = this.users.get(session.email) || RUNTIME_SESSIONS.get(tokenHash)?.user;
-    const record = user.capabilityRecords[capacity];
-    const now = new Date().toISOString();
-    if (!user.capacities.includes(capacity)) user.capacities.push(capacity);
-    record.state = 'ACTIVE';
-    record.appliedAt = record.appliedAt || now;
-    record.activatedAt = now;
-    record.updatedAt = now;
-    session.activeCapacity = capacity;
-    this.sessions.set(tokenHash, session);
-    this.users.set(user.email, user);
-    RUNTIME_SESSIONS.set(tokenHash, { session, user });
-    if (this.database) {
-      await this.database.putUser(user.email, user);
-      await this.database.putSession(tokenHash, session);
-      await this.database.audit({ actorId: user.id, eventType: 'CAPACITY_ACTIVATED', objectType: 'CAPACITY', objectId: capacity });
+    const record = user?.capabilityRecords?.[capacity];
+    if (!user || !record) throw new Error('Capacity record unavailable.');
+    if (record.state === 'ACTIVE') return this.sanitizeUser(user, session.activeCapacity);
+    if (definition.tier === 'PAID') {
+      throw new Error('Paid operating tiers cannot be activated from the participant browser. The applicable SRA fee schedule must be presented and settled, required review must be completed, and activation must then be recorded by an authorized platform workflow.');
     }
-    return this.sanitizeUser(user, capacity);
+    throw new Error('That operating tier requires its authorized approval workflow before activation.');
   }
 
   async signout(token) {
