@@ -247,9 +247,9 @@ export class AccessService {
       return null;
     }
     let user = this.users.get(session.email) || runtime?.user || null;
-    if ((!user || this.database) && this.database) {
+    if (!user && this.database) {
       const users = await this.refreshPersistedUsers();
-      user = users.find((candidate) => candidate.email === session.email) || user;
+      user = users.find((candidate) => candidate.email === session.email) || null;
     }
     if (!user) return null;
     this.sessions.set(tokenHash, session);
