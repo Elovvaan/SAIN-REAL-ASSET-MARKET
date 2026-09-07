@@ -217,10 +217,10 @@ export class CoinbaseTransactionAssetPipelineService {
     if (result.created) this.instrumentsCreated += 1;
 
     let instrument = result.instrument;
-    if (instrument.state === 'DRAFT') {
+    if (['DRAFT', 'RECORDED'].includes(String(instrument.state || '').toUpperCase())) {
       instrument = await this.instrumentEngine.changeState(instrument.instrumentId, {
-        state: 'RECORDED',
-        reason: 'Recorded market transaction instrument formalized from the existing SRA Coin Position and its inherited rights, obligations, restrictions, and source lineage.'
+        state: 'REVIEW_REQUIRED',
+        reason: 'Coin Position propagation is complete. The obligation-bearing SRA instrument is queued for Platform Administration approval before downstream representation or marketplace use.'
       }, ACTOR_ID);
     }
     return instrument;
