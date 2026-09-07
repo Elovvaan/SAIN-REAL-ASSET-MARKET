@@ -159,11 +159,12 @@ export class InstrumentEngineService {
     const instrument = this.get(instrumentId);
     if (!instrument) throw new Error('Instrument not found.');
     const state = requireText(input.state, 'state').toUpperCase();
-    if (!['DRAFT', 'RECORDED', 'ACTIVE', 'RESTRICTED', 'MATURED', 'CANCELLED', 'CLOSED'].includes(state)) throw new Error('Unsupported instrument state.');
+    if (!['DRAFT', 'PENDING_REVIEW', 'REVIEW_REQUIRED', 'RECORDED', 'APPROVED', 'ACTIVE', 'RESTRICTED', 'MATURED', 'CANCELLED', 'CLOSED'].includes(state)) throw new Error('Unsupported instrument state.');
     const now = new Date().toISOString();
     const updated = {
       ...instrument,
       state,
+      status: state,
       statusHistory: [...(instrument.statusHistory || []), { state, actorId, occurredAt: now, reason: input.reason || null }],
       activatedAt: state === 'ACTIVE' && !instrument.activatedAt ? now : instrument.activatedAt || null,
       maturedAt: state === 'MATURED' ? now : instrument.maturedAt || null,
