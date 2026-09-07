@@ -1,6 +1,6 @@
 import { RECORD_TYPES } from './persistent-domain-service.js';
 
-const APPROVABLE_STATES = new Set(['DRAFT', 'PENDING', 'PENDING_REVIEW', 'IN_REVIEW', 'REVIEW_REQUIRED', 'AWAITING_APPROVAL']);
+const APPROVABLE_STATES = new Set(['DRAFT', 'PENDING', 'PENDING_REVIEW', 'IN_REVIEW', 'REVIEW_REQUIRED', 'AWAITING_APPROVAL', 'RECORDED']);
 
 function stateOf(record) {
   return String(record?.state || record?.status || '').toUpperCase();
