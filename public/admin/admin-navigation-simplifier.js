@@ -48,11 +48,17 @@
 
   function buildPrimaryNavigation(admin) {
     const rail = admin.querySelector('.admin-suite-rail');
-    const legacyNav = rail?.querySelector('.admin-suite-nav');
-    if (!rail || !legacyNav) return;
+    if (!rail) return;
 
-    legacyNav.dataset.legacyWorkspaceNavigation = 'true';
-    legacyNav.setAttribute('aria-hidden', 'true');
+    let legacyNav = rail.querySelector('[data-legacy-workspace-navigation="true"]');
+    if (!legacyNav) {
+      legacyNav = [...rail.querySelectorAll('.admin-suite-nav')]
+        .find(node => !node.hasAttribute('data-sra-simplified-nav')) || null;
+      if (legacyNav) {
+        legacyNav.dataset.legacyWorkspaceNavigation = 'true';
+        legacyNav.setAttribute('aria-hidden', 'true');
+      }
+    }
 
     let nav = rail.querySelector('[data-sra-simplified-nav]');
     if (!nav) {
@@ -61,12 +67,33 @@
       nav.dataset.sraSimplifiedNav = 'true';
       nav.setAttribute('aria-label', 'Administration');
       nav.innerHTML = GROUPS.map(group => `<button type="button" data-admin-group="${group.id}"><strong>${group.label}</strong></button>`).join('');
-      legacyNav.before(nav);
+      if (legacyNav) legacyNav.before(nav);
+      else rail.append(nav);
       nav.addEventListener('click', event => {
         const button = event.target.closest('[data-admin-group]');
         if (!button) return;
         const group = GROUPS.find(item => item.id === button.dataset.adminGroup);
         if (group) openWorkspace(group.defaultWorkspace);
+      });
+    }
+
+    nav.removeAttribute('data-legacy-workspace-navigation');
+    nav.removeAttribute('aria-hidden');
+
+    const brand = rail.querySelector('.admin-suite-brand');
+    if (brand && !brand.dataset.dashboardNavigationInstalled) {
+      brand.dataset.dashboardNavigationInstalled = 'true';
+      brand.setAttribute('role', 'button');
+      brand.setAttribute('tabindex', '0');
+      brand.setAttribute('aria-label', 'Back to Dashboard');
+      brand.style.cursor = 'pointer';
+      const goDashboard = () => openWorkspace('dashboard');
+      brand.addEventListener('click', goDashboard);
+      brand.addEventListener('keydown', event => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          goDashboard();
+        }
       });
     }
   }
