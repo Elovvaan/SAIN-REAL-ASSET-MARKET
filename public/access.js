@@ -1,4 +1,4 @@
-const accessState={session:null,publicData:null,mode:'signin',capacityMessage:null};
+const accessState={session:null,publicData:null,mode:'signin',capacityMessage:null,capacityPayments:{}};
 window.accessState=accessState;
 const accessEscape=value=>String(value??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;');
 const accessMoney=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:2});
@@ -43,7 +43,7 @@ function setAccessMode(mode){accessState.mode=mode;const signup=mode==='signup';
 function openAccessModal(mode='signin'){ensureAccessModal();setAccessMode(mode);document.querySelector('#access-modal').classList.add('open')}
 function closeAccessModal(){document.querySelector('#access-modal')?.classList.remove('open')}
 async function submitAccessForm(event){event.preventDefault();const form=new FormData(event.currentTarget);const body=Object.fromEntries(form.entries());const error=document.querySelector('#access-error');error.textContent='';try{const response=await fetch(`/api/access/${accessState.mode}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const payload=await response.json();if(!response.ok)throw new Error(payload.error||'Access request failed.');accessState.session=payload.session;closeAccessModal();applyAccessShell()}catch(err){error.textContent=err.message}}
-async function signout(){await fetch('/api/access/signout',{method:'POST'});accessState.session=null;applyAccessShell()}
+async function signout(){await fetch('/api/access/signout',{method:'POST'});accessState.session=null;accessState.capacityPayments={};applyAccessShell()}
 async function switchTier(tier){const response=await fetch('/api/access/role',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({role:tier})});const payload=await response.json();if(response.ok){accessState.session=payload.session;applyAccessShell()}}
 function flowLabel(value){return String(value||'').replaceAll('_',' ').replace(/\b\w/g,character=>character.toUpperCase())}
 function capabilityById(capacity){return accessState.session?.capabilities?.find(item=>item.id===capacity)||null}
@@ -52,6 +52,7 @@ async function applyCapacity(capacity){
   const response=await fetch('/api/access/capacity-upgrade/apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({capacity})});
   const payload=await response.json().catch(()=>({}));
   if(payload.session)accessState.session=payload.session;
+  if(payload.paymentInstruction)accessState.capacityPayments[capacity]=payload.paymentInstruction;
   if(!response.ok)accessState.capacityMessage={type:'error',capacity,text:payload.error||'Capability application could not be prepared.'};
   else accessState.capacityMessage={type:'success',capacity,text:'Application recorded. The current SRA fee schedule has been attached to this upgrade.'};
   renderCapabilities();
@@ -60,17 +61,23 @@ async function createCapacityPayment(capacity){
   accessState.capacityMessage=null;
   const capability=capabilityById(capacity);
   if(!capability?.invoiceId){accessState.capacityMessage={type:'error',capacity,text:'No fee invoice is attached to this capability yet.'};renderCapabilities();return}
-  const response=await fetch('/api/access/funding/fee-instructions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({invoiceId:capability.invoiceId,rail:'EXTERNAL_TRANSFER'})});
+  const response=await fetch(`/api/access/capacity-upgrade/payment/${encodeURIComponent(capacity)}`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
   const payload=await response.json().catch(()=>({}));
+  if(payload.session)accessState.session=payload.session;
+  if(payload.paymentInstruction)accessState.capacityPayments[capacity]=payload.paymentInstruction;
   if(!response.ok){accessState.capacityMessage={type:'error',capacity,text:payload.error||'Payment instructions could not be created.'};renderCapabilities();return}
-  accessState.capacityMessage={type:'success',capacity,text:`Payment instruction ${payload.instruction?.fundingInstructionId||''} created. Complete the external payment using that reference; the tier remains locked until settlement is confirmed.`};
-  await refreshCapacityStatus(capacity,false);
+  const instruction=payload.paymentInstruction;
+  accessState.capacityMessage={type:'success',capacity,text:`Payment instruction ${instruction?.fundingInstructionId||''} ${payload.reused?'is already open':'was created'}. Complete the external payment using that reference; the tier remains locked until settlement is confirmed.`};
+  renderCapabilities();
 }
 async function refreshCapacityStatus(capacity,showMessage=true){
   const response=await fetch(`/api/access/capacity-upgrade/status/${encodeURIComponent(capacity)}`);
   const payload=await response.json().catch(()=>({}));
-  if(response.ok&&payload.session){accessState.session=payload.session;if(showMessage)accessState.capacityMessage={type:'success',capacity,text:'Capability status refreshed from the authoritative fee and review records.'}}
-  else if(showMessage)accessState.capacityMessage={type:'error',capacity,text:payload.error||'Capability status could not be refreshed.'};
+  if(response.ok&&payload.session){
+    accessState.session=payload.session;
+    accessState.capacityPayments[capacity]=payload.paymentInstruction||null;
+    if(showMessage)accessState.capacityMessage={type:'success',capacity,text:'Capability status refreshed from the authoritative fee and review records.'};
+  }else if(showMessage)accessState.capacityMessage={type:'error',capacity,text:payload.error||'Capability status could not be refreshed.'};
   renderCapabilities();
 }
 function capabilityFlow(capability){
@@ -82,17 +89,23 @@ function capabilityFlow(capability){
 function capacityMessage(capability){const message=accessState.capacityMessage;if(!message||message.capacity!==capability.id)return '';return `<div style="margin-top:10px;border:1px solid ${message.type==='error'?'#7b3333':'#4f4422'};border-radius:8px;padding:9px 10px;font-size:12px">${accessEscape(message.text)}</div>`}
 function feeSummary(capability){
   if(capability.tier!=='PAID')return '';
-  if(capability.feeTotal!=null&&capability.invoiceId)return `<div style="margin-top:10px;border:1px solid #303030;border-radius:10px;padding:10px"><small style="display:block;opacity:.65">CURRENT FEE SCHEDULE</small><strong style="display:block;font-size:20px;margin-top:3px">${accessMoney.format(Number(capability.feeTotal||0))}</strong><span style="display:block;font-size:11px;opacity:.72;margin-top:3px">Invoice ${accessEscape(capability.invoiceId)} · ${accessEscape(capability.billingState||'INVOICED')}</span></div>`;
+  const instruction=accessState.capacityPayments[capability.id];
+  const paymentLine=instruction?`<span style="display:block;font-size:11px;opacity:.72;margin-top:3px">Payment ${accessEscape(instruction.fundingInstructionId)} · ${accessEscape(flowLabel(instruction.state))}</span>`:'';
+  if(capability.feeTotal!=null&&capability.invoiceId)return `<div style="margin-top:10px;border:1px solid #303030;border-radius:10px;padding:10px"><small style="display:block;opacity:.65">CURRENT FEE SCHEDULE</small><strong style="display:block;font-size:20px;margin-top:3px">${accessMoney.format(Number(capability.feeTotal||0))}</strong><span style="display:block;font-size:11px;opacity:.72;margin-top:3px">Invoice ${accessEscape(capability.invoiceId)} · ${accessEscape(capability.billingState||'INVOICED')}</span>${paymentLine}</div>`;
   if(capability.billingState==='FEE_SCHEDULE_UNAVAILABLE')return '<div style="margin-top:10px"><span class="badge">FEE SCHEDULE UNAVAILABLE</span></div>';
   if(capability.billingState==='FEE_RULE_REQUIRED')return '<div style="margin-top:10px"><span class="badge">ACTIVE FEE RULE REQUIRED</span></div>';
   return '';
 }
 function capabilityAction(capability){
+  const instruction=accessState.capacityPayments[capability.id];
   if(capability.state==='ACTIVE')return '<span class="badge open">ACTIVE</span>';
   if(!capability.selfService)return `<span class="badge">${accessEscape(flowLabel(capability.activation))}</span>`;
   if(capability.state==='NOT_ADDED')return `<button class="secondary-button" data-apply-capacity="${capability.id}">Start application</button>`;
   if(capability.state==='APPLICATION_STARTED'&&!capability.invoiceId)return `<button class="secondary-button" data-apply-capacity="${capability.id}">Load fee schedule</button>`;
-  if(capability.state==='INFORMATION_REQUIRED'&&capability.invoiceId&&capability.billingState!=='PAID')return `<button class="primary-button" data-pay-capacity="${capability.id}">Create payment instructions · ${accessEscape(accessMoney.format(Number(capability.feeTotal||0)))}</button><button class="secondary-button" style="margin-left:6px" data-refresh-capacity="${capability.id}">Refresh payment status</button>`;
+  if(capability.state==='INFORMATION_REQUIRED'&&capability.invoiceId&&capability.billingState!=='PAID'){
+    if(instruction&&instruction.state!=='CONFIRMED')return `<span class="badge">PAYMENT INSTRUCTIONS OPEN</span><button class="secondary-button" style="margin-left:6px" data-refresh-capacity="${capability.id}">Refresh payment status</button>`;
+    return `<button class="primary-button" data-pay-capacity="${capability.id}">Create payment instructions · ${accessEscape(accessMoney.format(Number(capability.feeTotal||0)))}</button><button class="secondary-button" style="margin-left:6px" data-refresh-capacity="${capability.id}">Refresh payment status</button>`;
+  }
   if(capability.state==='UNDER_REVIEW')return `<span class="badge">PAYMENT CONFIRMED · REVIEW PENDING</span><button class="secondary-button" style="margin-left:6px" data-refresh-capacity="${capability.id}">Refresh</button>`;
   return `<span class="badge">${accessEscape(flowLabel(capability.state))}</span><button class="secondary-button" style="margin-left:6px" data-refresh-capacity="${capability.id}">Refresh</button>`;
 }
