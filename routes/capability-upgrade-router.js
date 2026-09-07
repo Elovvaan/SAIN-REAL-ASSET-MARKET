@@ -156,16 +156,14 @@ export function createCapabilityUpgradeRouter({ accessService, economicsService,
       billingState: 'INVOICED',
       reviewState: 'NOT_STARTED'
     }, session.id, 'CAPACITY_FEE_INVOICE_CREATED');
-    return billingFor(await accessService.getSession(readCookie({ headers: { cookie: `sra_session=` } }, 'sra_session')) || session, capacity).catch(async () => {
-      const user = await accessService.getUserById(session.id);
-      const refreshed = accessService.sanitizeUser(user, session.activeCapacity);
-      return {
-        session: refreshed,
-        capability: capabilityOf(refreshed, capacity),
-        invoice: invoiceProjection(invoice),
-        paymentInstruction: null
-      };
-    });
+    const user = await accessService.getUserById(session.id);
+    const refreshed = accessService.sanitizeUser(user, session.activeCapacity);
+    return {
+      session: refreshed,
+      capability: capabilityOf(refreshed, capacity),
+      invoice: invoiceProjection(invoice),
+      paymentInstruction: null
+    };
   }
 
   router.post('/apply', async (req, res) => {
@@ -180,6 +178,38 @@ export function createCapabilityUpgradeRouter({ accessService, economicsService,
       const session = await accessService.getSession(readCookie(req, 'sra_session')).catch(() => null);
       return res.status(error.code ? 409 : 400).json({ error: error.message, code: error.code || 'CAPACITY_UPGRADE_APPLICATION_FAILED', session });
     }
+  });
+
+  router.post('/payment/:capacity', async (req, res) => {
+    try {
+      const session = await participantSession(req, res); if (!session) return;
+      const capacity = String(req.params.capacity || '').toUpperCase();
+      const current = await billingFor(session, capacity);
+      if (!current.capability?.invoiceId || !current.invoice) return res.status(409).json({ error: 'A fee invoice must be created before payment instructions are available.' });
+      if (current.invoice.state === 'PAID') return res.status(409).json({ error: 'That capability fee invoice is already paid.', ...current });
+      const existing = latestPaymentInstruction(current.invoice.invoiceId);
+      if (existing && existing.state !== 'CONFIRMED') {
+        return res.json({ ...current, paymentInstruction: instructionProjection(existing), reused: true });
+      }
+      const createdAt = now();
+      const record = {
+        fundingInstructionId: id('PAY'),
+        purpose: 'PLATFORM_FEE_PAYMENT',
+        participantId: session.id,
+        accountId: session.universalAccountId,
+        invoiceId: current.invoice.invoiceId,
+        amount: current.invoice.total,
+        currency: current.invoice.currency || 'USD',
+        rail: 'EXTERNAL_TRANSFER',
+        destinationType: 'SRA_OPERATING_ACCOUNT',
+        state: 'AWAITING_EXTERNAL_TRANSFER',
+        createdBy: session.id,
+        createdAt,
+        updatedAt: createdAt
+      };
+      await domain.put(RECORD_TYPES.FUNDING_INSTRUCTION, record.fundingInstructionId, record, { actorId: session.id, eventType: 'FEE_PAYMENT_INSTRUCTION_CREATED' });
+      return res.status(201).json({ ...current, paymentInstruction: instructionProjection(record), reused: false });
+    } catch (error) { return res.status(400).json({ error: error.message || 'Fee payment instructions could not be created.' }); }
   });
 
   router.get('/status/:capacity', async (req, res) => {
