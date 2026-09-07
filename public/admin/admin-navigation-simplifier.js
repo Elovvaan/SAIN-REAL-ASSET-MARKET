@@ -48,17 +48,11 @@
 
   function buildPrimaryNavigation(admin) {
     const rail = admin.querySelector('.admin-suite-rail');
-    if (!rail) return;
+    const legacyNav = rail?.querySelector('.admin-suite-nav:not([data-sra-simplified-nav])');
+    if (!rail || !legacyNav) return;
 
-    let legacyNav = rail.querySelector('[data-legacy-workspace-navigation="true"]');
-    if (!legacyNav) {
-      legacyNav = [...rail.querySelectorAll('.admin-suite-nav')]
-        .find(node => !node.hasAttribute('data-sra-simplified-nav')) || null;
-      if (legacyNav) {
-        legacyNav.dataset.legacyWorkspaceNavigation = 'true';
-        legacyNav.setAttribute('aria-hidden', 'true');
-      }
-    }
+    legacyNav.dataset.legacyWorkspaceNavigation = 'true';
+    legacyNav.setAttribute('aria-hidden', 'true');
 
     let nav = rail.querySelector('[data-sra-simplified-nav]');
     if (!nav) {
@@ -67,8 +61,7 @@
       nav.dataset.sraSimplifiedNav = 'true';
       nav.setAttribute('aria-label', 'Administration');
       nav.innerHTML = GROUPS.map(group => `<button type="button" data-admin-group="${group.id}"><strong>${group.label}</strong></button>`).join('');
-      if (legacyNav) legacyNav.before(nav);
-      else rail.append(nav);
+      legacyNav.before(nav);
       nav.addEventListener('click', event => {
         const button = event.target.closest('[data-admin-group]');
         if (!button) return;
@@ -77,24 +70,37 @@
       });
     }
 
-    nav.removeAttribute('data-legacy-workspace-navigation');
-    nav.removeAttribute('aria-hidden');
-
     const brand = rail.querySelector('.admin-suite-brand');
-    if (brand && !brand.dataset.dashboardNavigationInstalled) {
-      brand.dataset.dashboardNavigationInstalled = 'true';
+    if (brand && !brand.dataset.dashboardLink) {
+      brand.dataset.dashboardLink = 'true';
       brand.setAttribute('role', 'button');
       brand.setAttribute('tabindex', '0');
       brand.setAttribute('aria-label', 'Back to Dashboard');
-      brand.style.cursor = 'pointer';
-      const goDashboard = () => openWorkspace('dashboard');
-      brand.addEventListener('click', goDashboard);
+      brand.addEventListener('click', () => openWorkspace('dashboard'));
       brand.addEventListener('keydown', event => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
-          goDashboard();
+          openWorkspace('dashboard');
         }
       });
+    }
+  }
+
+  function ensureInstrumentLifecycleTabs(admin) {
+    const workspace = admin.querySelector('[data-workspace="instruments"]');
+    const tablist = workspace?.querySelector('.admin-workspace-tabs');
+    if (!workspace || !tablist) return;
+
+    const required = ['Approval','On-Chain'];
+    for (const label of required) {
+      if (tablist.querySelector(`[data-admin-tab="${label}"]`)) continue;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.setAttribute('role', 'tab');
+      button.setAttribute('aria-selected', 'false');
+      button.dataset.adminTab = label;
+      button.textContent = label;
+      tablist.append(button);
     }
   }
 
@@ -136,6 +142,7 @@
   function sync(admin = document.querySelector('#admin-view:not(.hidden)')) {
     if (!admin?.querySelector('.admin-suite')) return;
     buildPrimaryNavigation(admin);
+    ensureInstrumentLifecycleTabs(admin);
     const workspaceId = currentWorkspace();
     const group = groupForWorkspace(workspaceId);
     admin.querySelectorAll('[data-admin-group]').forEach(button => {
