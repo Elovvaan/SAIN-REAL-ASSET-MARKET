@@ -1,5 +1,5 @@
 const TYPE = 'INSTRUMENT_REPRESENTATION_APPROVAL';
-const ELIGIBLE_STATES = new Set(['APPROVED', 'ISSUED', 'ACTIVE', 'RECORDED']);
+const ELIGIBLE_STATES = new Set(['APPROVED', 'ISSUED', 'ACTIVE']);
 
 function now() { return new Date().toISOString(); }
 function text(value) { return String(value ?? '').trim(); }
@@ -36,17 +36,17 @@ export class InstrumentRepresentationApprovalService {
     }
     return instruments.map((instrument) => {
       const instrumentId = instrument.instrumentId || instrument.id;
-    const state = stateOf(instrument);
-    const blockers = [];
-    if (!ELIGIBLE_STATES.has(state)) blockers.push('INSTRUMENT_NOT_APPROVED_OR_ISSUED');
-    return {
-      eligible: blockers.length === 0,
-      instrumentId,
-      state,
-      blockers,
-      existingApproval: approvalsByInstrument.get(instrumentId) || null,
-      linkedCoinPositionIds: linkedByInstrument.get(instrumentId) || [],
-    };
+      const state = stateOf(instrument);
+      const blockers = [];
+      if (!ELIGIBLE_STATES.has(state)) blockers.push('INSTRUMENT_NOT_APPROVED_OR_ISSUED');
+      return {
+        eligible: blockers.length === 0,
+        instrumentId,
+        state,
+        blockers,
+        existingApproval: approvalsByInstrument.get(instrumentId) || null,
+        linkedCoinPositionIds: linkedByInstrument.get(instrumentId) || [],
+      };
     });
   }
 
