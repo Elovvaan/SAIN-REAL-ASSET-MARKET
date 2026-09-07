@@ -7,7 +7,7 @@
   const cache = new Map();
   const inFlight = new Map();
   const FRESH_TTL_MS = 30_000;
-  const STALE_TTL_MS = 120_000;
+  const STALE_TTL_MS = 300_000;
   let generation = 0;
 
   function rawUrl(input) {
@@ -64,6 +64,13 @@
   function invalidate() {
     generation += 1;
     cache.clear();
+  }
+
+  function markStale() {
+    const staleAt = Date.now() - FRESH_TTL_MS - 1;
+    for (const value of cache.values()) {
+      value.storedAt = Math.min(value.storedAt, staleAt);
+    }
   }
 
   function invalidateKey(key) {
@@ -158,7 +165,7 @@
     });
   }
 
-  window.addEventListener('sra:admin-mutated', invalidate);
+  window.addEventListener('sra:admin-mutated', markStale);
   window.addEventListener('sra:admin-refresh', invalidate);
   window.addEventListener('sra-admin-session-expired', invalidate);
   window.addEventListener('sra-admin-session-restored', invalidate);
