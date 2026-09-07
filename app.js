@@ -5,6 +5,7 @@ import { createSeededDomainStore } from './services/domain-store.js';
 import { createOnboardingRouter } from './routes/onboarding-router.js';
 import { createCustodyRouter } from './routes/custody-router.js';
 import { createAccessRouter } from './routes/access-router.js';
+import { createCapabilityUpgradeRouter } from './routes/capability-upgrade-router.js';
 import { createParticipationRouter } from './routes/participation-router.js';
 import { createInstitutionParticipationRouter } from './routes/institution-participation-router.js';
 import { createSettlementRailGatewayRouter } from './routes/settlement-rail-gateway-router.js';
@@ -205,6 +206,7 @@ export async function createApp(options = {}) {
   });
   if (options.serveStatic !== false) app.use(express.static(path.join(__dirname, 'public')));
 
+  app.use('/api/access/capacity-upgrade', createCapabilityUpgradeRouter({ accessService, economicsService: platformEconomicsService, domain: persistentDomain }));
   app.use('/api/access', createAccessRouter(marketplace, accessService));
   app.use('/api/participation', createParticipationRouter(marketplace, accessService, persistentDomain));
   app.use('/api/institutions', createInstitutionParticipationRouter(institutionParticipationService, accessService));
