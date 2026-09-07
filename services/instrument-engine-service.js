@@ -34,13 +34,55 @@ export class InstrumentEngineService {
     return this.persistentDomain.get(RECORD_TYPES.SRA_INSTRUMENT, instrumentId);
   }
 
+  async ensureCoinPositionInstrumentLink(position, instrument, actorId) {
+    if (!position || !instrument) return position;
+    const instrumentId = instrument.instrumentId;
+    const alreadyLinked = position.instrumentId === instrumentId
+      && position.linkedInstrumentId === instrumentId
+      && position.sourceLineage?.instrumentId === instrumentId;
+    if (alreadyLinked) return position;
+
+    const now = new Date().toISOString();
+    const updated = {
+      ...position,
+      instrumentId,
+      linkedInstrumentId: instrumentId,
+      instrumentLinkedAt: position.instrumentLinkedAt || now,
+      sourceLineage: {
+        ...(position.sourceLineage || {}),
+        instrumentId
+      },
+      updatedAt: now
+    };
+
+    await this.persistentDomain.put(RECORD_TYPES.COIN_POSITION, position.coinPositionId, updated, {
+      actorId,
+      eventType: 'COIN_POSITION_INSTRUMENT_LINKED'
+    });
+    await this.persistentDomain.lifecycle({
+      objectType: RECORD_TYPES.COIN_POSITION,
+      objectId: position.coinPositionId,
+      eventType: 'COIN_POSITION_INSTRUMENT_LINKED',
+      actorId,
+      payload: {
+        instrumentId,
+        instrumentType: instrument.instrumentType,
+        relationship: 'OBLIGATION_BEARING_INSTRUMENT'
+      }
+    });
+    return updated;
+  }
+
   async createFromCoinPosition(coinPositionId, input = {}, actorId = 'SAIN_AGENT') {
     const position = this.persistentDomain.get(RECORD_TYPES.COIN_POSITION, coinPositionId);
     if (!position) throw new Error('Coin position not found.');
     if (!['REPRESENTED', 'ACTIVE', 'RESTRICTED'].includes(position.state)) throw new Error('Only an open coin position can support an instrument.');
 
     const existing = this.list({ coinPositionId }).find((instrument) => !['CANCELLED', 'MATURED', 'CLOSED'].includes(instrument.state));
-    if (existing) return { instrument: existing, created: false };
+    if (existing) {
+      await this.ensureCoinPositionInstrumentLink(position, existing, actorId);
+      return { instrument: existing, created: false };
+    }
 
     const principalQuantity = finitePositive(input.principalQuantity ?? position.quantity, 'principalQuantity');
     if (principalQuantity > Number(position.quantity)) throw new Error('principalQuantity cannot exceed the coin position quantity.');
@@ -57,6 +99,7 @@ export class InstrumentEngineService {
       instrumentType,
       name: requireText(input.name || `${position.symbol} Instrument ${instrumentId}`, 'name'),
       coinPositionId,
+      linkedCoinPositionIds: [coinPositionId],
       coinAccountId: position.coinAccountId,
       financialRecordId: position.financialRecordId,
       financialAccountId: position.financialAccountId,
@@ -101,6 +144,7 @@ export class InstrumentEngineService {
     };
 
     await this.persistentDomain.put(RECORD_TYPES.SRA_INSTRUMENT, instrumentId, instrument, { actorId, eventType: 'SRA_INSTRUMENT_CREATED' });
+    await this.ensureCoinPositionInstrumentLink(position, instrument, actorId);
     await this.persistentDomain.lifecycle({
       objectType: RECORD_TYPES.SRA_INSTRUMENT,
       objectId: instrumentId,
