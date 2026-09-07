@@ -20,6 +20,17 @@
     return String(workspace?.dataset?.activeTab || '') === 'Pending Review';
   }
 
+  function recordsHost(workspace) {
+    return workspace?.querySelector('.admin-workspace-records') || null;
+  }
+
+  function setQueuePresentation(workspace, enabled) {
+    const records = recordsHost(workspace);
+    if (!records) return;
+    if (enabled) records.style.display = 'none';
+    else records.style.removeProperty('display');
+  }
+
   function host(workspace) {
     const root = workspace?.querySelector('.admin-workspace-controls');
     if (!root) return null;
@@ -35,6 +46,7 @@
 
   function clear(workspace) {
     workspace?.querySelector('[data-instrument-review-workstation]')?.remove();
+    setQueuePresentation(workspace, false);
   }
 
   function amountOf(instrument) {
@@ -72,6 +84,7 @@
       clear(workspace);
       return;
     }
+    setQueuePresentation(workspace, true);
     const panel = host(workspace);
     if (!panel) return;
     panel.innerHTML = '<header><strong>Instrument Approval Queue</strong><em>LOADING</em></header><p style="color:#9a9a9a">Reading instruments that completed Coin Position propagation and require Platform Administration approval…</p>';
