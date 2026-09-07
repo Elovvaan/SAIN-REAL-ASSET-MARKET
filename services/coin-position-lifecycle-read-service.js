@@ -6,6 +6,8 @@ const stateOf = (record) => String(record?.state || 'UNKNOWN').toUpperCase();
 const sourceUnit = (record) => String(record?.sourcePosition?.unit || record?.nativeUnit || record?.sourceUnit || 'SOURCE').toUpperCase();
 const sourceAmount = (record) => n(record?.sourcePosition?.amount ?? record?.nativeQuantity ?? record?.sourceQuantity);
 const CHAIN_TYPE = 'SRA_COIN_CHAIN_PROJECTION';
+const PLATFORM_ASSET_CODE = 'SRA_PLATFORM_ASSET';
+const PLATFORM_OWNER_ID = 'SRA_PLATFORM';
 
 function isDerivative(record) {
   const id = idOf(record);
@@ -26,6 +28,25 @@ function representedUsd(position, financialRecord) {
   return candidates.map(Number).find((value) => Number.isFinite(value) && value > 0) || 0;
 }
 
+function isSraPosition(record) {
+  return String(record?.symbol || '').toUpperCase() === 'SRA' || record?.assetCode === PLATFORM_ASSET_CODE;
+}
+
+function ownershipTime(record) {
+  return String(record?.recognizedAt || record?.settledAt || record?.completedAt || record?.updatedAt || record?.createdAt || '');
+}
+
+function ownershipOwner(record) {
+  return record?.ownerId || record?.participantId || record?.ownerParticipantId || record?.accountHolderId || null;
+}
+
+function ownershipFor(domain, position, instrumentId = null) {
+  const positionId = idOf(position);
+  return domain.list(RECORD_TYPES.OWNERSHIP_RECOGNITION)
+    .filter((record) => record?.positionId === positionId || record?.coinPositionId === positionId || (instrumentId && record?.instrumentId === instrumentId))
+    .sort((a, b) => ownershipTime(a).localeCompare(ownershipTime(b)));
+}
+
 function uniquePositions(domain) {
   const types = [...new Set([RECORD_TYPES.COIN_POSITION, 'SRA_COIN_POSITION'])];
   const byId = new Map();
@@ -35,7 +56,7 @@ function uniquePositions(domain) {
       if (id && !byId.has(id)) byId.set(id, record);
     }
   }
-  return [...byId.values()].filter((record) => String(record.symbol || '').toUpperCase() === 'SRA');
+  return [...byId.values()].filter(isSraPosition);
 }
 
 export class CoinPositionLifecycleReadService {
@@ -48,6 +69,8 @@ export class CoinPositionLifecycleReadService {
     const coinAccounts = this.domain.list(RECORD_TYPES.COIN_ACCOUNT);
     const lifecycleEvents = this.domain.list(RECORD_TYPES.LIFECYCLE_EVENT || 'LIFECYCLE_EVENT');
     const chainProjection = this.domain.get(CHAIN_TYPE, 'SRA-SOLANA') || null;
+    const instruments = this.domain.list(RECORD_TYPES.SRA_INSTRUMENT);
+    const instrumentByPosition = new Map(instruments.filter((record) => record?.coinPositionId).map((record) => [record.coinPositionId, record]));
 
     const roots = positions.filter((position) => !isDerivative(position));
     const derivatives = positions.filter(isDerivative);
@@ -57,9 +80,16 @@ export class CoinPositionLifecycleReadService {
     const rows = activeRoots.map((position) => {
       const record = recordsById.get(position.financialRecordId) || null;
       const basisUsd = representedUsd(position, record);
+      const instrument = instrumentByPosition.get(idOf(position)) || null;
+      const ownership = ownershipFor(this.domain, position, position.instrumentId || instrument?.instrumentId || null);
+      const firstOwnership = ownership[0] || null;
+      const latestOwnership = ownership.at(-1) || null;
+      const initialOwnerId = position.initialOwnerId || ownershipOwner(firstOwnership) || (position.assetCode === PLATFORM_ASSET_CODE ? PLATFORM_OWNER_ID : null);
+      const currentOwnerId = ownershipOwner(latestOwnership) || position.ownerId || position.participantId || initialOwnerId;
       return {
         coinPositionId: idOf(position),
         financialRecordId: position.financialRecordId || null,
+        instrumentId: position.instrumentId || instrument?.instrumentId || null,
         state: stateOf(position),
         sourceAmount: sourceAmount(position),
         sourceUnit: sourceUnit(position),
@@ -69,6 +99,18 @@ export class CoinPositionLifecycleReadService {
         reservedSra: n(position.reservedQuantity),
         externalizedSra: n(position.externalizedQuantity ?? position.externallyTransferredQuantity),
         childPositionCount: Array.isArray(position.childPositionIds) ? position.childPositionIds.length : 0,
+        initialOwnerId,
+        currentOwnerId,
+        ownershipState: latestOwnership?.ownershipState || latestOwnership?.state || position.ownershipState || null,
+        ownershipRecognitionCount: ownership.length,
+        ownershipHistory: ownership.map((entry) => ({
+          ownershipRecognitionId: entry.ownershipRecognitionId || entry.id || null,
+          previousOwnerId: entry.previousOwnerId ?? null,
+          ownerId: ownershipOwner(entry),
+          recognitionType: entry.recognitionType || null,
+          state: entry.state || null,
+          recognizedAt: entry.recognizedAt || entry.settledAt || entry.completedAt || entry.createdAt || null,
+        })),
       };
     });
 
@@ -76,6 +118,8 @@ export class CoinPositionLifecycleReadService {
     const recognizedUsd = rows.reduce((sum, row) => sum + row.recognizedUsd, 0);
     const missingBasis = rows.filter((row) => !row.recognizedUsd).length;
     const mismatch = rows.filter((row) => row.recognizedUsd > 0 && Math.abs(row.representedSra - row.recognizedUsd) > 0.00000001).length;
+    const missingInitialOwner = rows.filter((row) => !row.initialOwnerId).length;
+    const missingCurrentOwner = rows.filter((row) => !row.currentOwnerId).length;
     const positionReserved = rows.reduce((sum, row) => sum + row.reservedSra, 0);
     const positionExternalized = rows.reduce((sum, row) => sum + row.externalizedSra, 0);
     const chainExternalized = Math.max(0, n(chainProjection?.issuedOnChainSupply));
@@ -102,6 +146,14 @@ export class CoinPositionLifecycleReadService {
         accountIssuedSra: accountIssuance,
         recognizedUsd,
       },
+      ownership: {
+        platformOwnerId: PLATFORM_OWNER_ID,
+        positionCountWithInitialOwner: rows.length - missingInitialOwner,
+        positionCountWithCurrentOwner: rows.length - missingCurrentOwner,
+        missingInitialOwnerCount: missingInitialOwner,
+        missingCurrentOwnerCount: missingCurrentOwner,
+        recognitionCount: rows.reduce((sum, row) => sum + row.ownershipRecognitionCount, 0),
+      },
       onChain: chainProjection ? {
         network: chainProjection.network || 'SOLANA',
         mintAddress: chainProjection.mintAddress || null,
@@ -117,12 +169,14 @@ export class CoinPositionLifecycleReadService {
         mismatchCount: mismatch,
         parDeltaSra: representedSra - recognizedUsd,
         representationCoveragePct: rows.length ? ((rows.length - missingBasis) / rows.length) * 100 : 100,
+        ownershipCoveragePct: rows.length ? ((rows.length - missingCurrentOwner) / rows.length) * 100 : 100,
         restrictedRootPositionCount: restricted,
         chainSupplyDeltaSra: representedSra - chainExternalized,
       },
       sourceMix,
       history: {
         representationEventCount: lifecycleEvents.filter((event) => /COIN_POSITION_REPRESENTED|COIN_REPRESENTATION_CREATED|MINT/i.test(eventText(event))).length,
+        ownershipEventCount: lifecycleEvents.filter((event) => /OWNERSHIP/i.test(eventText(event))).length,
         adjustmentEventCount: lifecycleEvents.filter((event) => /ADJUST|RESTAT|CORRECT/i.test(eventText(event))).length,
         retirementEventCount: lifecycleEvents.filter((event) => /RETIR/i.test(eventText(event))).length,
         chainSynchronizationEventCount: lifecycleEvents.filter((event) => /SRA_COIN_PUT_ON_CHAIN|SRA_COIN_ON_CHAIN_SUPPLY_SYNCHRONIZED/i.test(eventText(event))).length,
