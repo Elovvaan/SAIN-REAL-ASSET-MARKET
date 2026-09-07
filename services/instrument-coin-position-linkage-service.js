@@ -6,6 +6,10 @@ const POSITION_TYPES = [POSITION_TYPE, 'SRA_COIN_POSITION'];
 const APPROVAL_TYPE = 'INSTRUMENT_REPRESENTATION_APPROVAL';
 const EVENT_TYPE = 'LIFECYCLE_EVENT';
 const INSTRUMENT_STATES = new Set(['APPROVED', 'ISSUED', 'ACTIVE', 'RECORDED', 'DEPOSITED_RECOGNIZED_USD']);
+const DISPLAY_INSTRUMENT_STATES = new Set([
+  ...INSTRUMENT_STATES,
+  'DRAFT', 'PENDING', 'PENDING_REVIEW', 'IN_REVIEW', 'REVIEW_REQUIRED', 'AWAITING_APPROVAL'
+]);
 const POSITION_STATES = new Set(['ACTIVE', 'REPRESENTED', 'AVAILABLE', 'RECORDED']);
 
 const text = (value) => String(value ?? '').trim();
@@ -134,20 +138,38 @@ export class InstrumentCoinPositionLinkageService {
 
   read() {
     const instruments = this.domain.list(INSTRUMENT_TYPE)
-      .filter((item) => INSTRUMENT_STATES.has(upper(item.state || item.status)))
+      .filter((item) => DISPLAY_INSTRUMENT_STATES.has(upper(item.state || item.status)))
       .map((instrument) => {
         const instrumentId = instrumentIdOf(instrument);
+        const state = upper(instrument.state || instrument.status);
         const approval = this.domain.get(APPROVAL_TYPE, approvalId(instrumentId));
+        const coinPositionId = instrumentPositionId(instrument);
+        const approvalLinks = approval?.linkedCoinPositionIds || [];
+        const sourceLinked = Boolean(coinPositionId);
+        const linkageRegistered = Boolean(coinPositionId && approvalLinks.includes(coinPositionId));
+        const instrumentApproved = ['APPROVED', 'ISSUED', 'ACTIVE', 'RECORDED', 'DEPOSITED_RECOGNIZED_USD'].includes(state);
+        const representationApproved = approval?.state === 'APPROVED';
+        const nextStage = !instrumentApproved
+          ? 'INSTRUMENT_APPROVAL'
+          : !representationApproved
+            ? 'REPRESENTATION_APPROVAL'
+            : !linkageRegistered
+              ? 'COIN_POSITION_LINKAGE'
+              : 'ON_CHAIN_PREPARATION';
         return {
           instrumentId,
-          state: upper(instrument.state || instrument.status),
+          state,
           instrumentType: instrument.instrumentType || instrument.type || 'INSTRUMENT',
           authorizedQuantity: authorizedQuantity(instrument),
           financialRecordId: instrument.financialRecordId || null,
           obligationId: instrument.obligationId || null,
           collateralId: instrument.collateralId || instrument.assetId || null,
-          coinPositionId: instrumentPositionId(instrument),
-          representationApproved: approval?.state === 'APPROVED',
+          coinPositionId,
+          sourceLinked,
+          linkageRegistered,
+          instrumentApproved,
+          representationApproved,
+          nextStage,
         };
       });
     const positions = uniquePositions(this.domain).map(({ position, recordType }) => ({
