@@ -51,6 +51,7 @@
       ['/admin/admin-stellar-transfer.js', 'data-sra-admin-stellar-transfer'],
     ],
     instruments: [
+      ['/admin/admin-instrument-review-workstation.js', 'data-sra-admin-instrument-review-workstation'],
       ['/admin/admin-on-chain-issuance-controls.js', 'data-sra-admin-on-chain-issuance-controls'],
     ],
     system: [
@@ -175,7 +176,9 @@
       return;
     }
     if (workspaceId === 'instruments') {
-      window.mountAdminOnChainIssuanceControls?.(admin.querySelector('[data-workspace="instruments"]'));
+      const instruments = admin.querySelector('[data-workspace="instruments"]');
+      window.mountAdminInstrumentReviewWorkstation?.(instruments);
+      window.mountAdminOnChainIssuanceControls?.(instruments);
       return;
     }
     if (workspaceId === 'system') {
