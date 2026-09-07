@@ -35,21 +35,43 @@ function requireParPolicy(input = {}) {
   const method = String(input.askingPriceMethod || SRA_PAR_PRICING_METHOD).toUpperCase();
   if (![SRA_PAR_PRICING_METHOD, 'ADMIN_APPROVED_SRA_USD_UNIT_PRICE'].includes(method)) throw new Error('Unsupported SRA/USD pricing method.');
 }
+function policyFrom(input = {}) {
+  requireParPolicy(input);
+  return {
+    askingPriceMethod: SRA_PAR_PRICING_METHOD,
+    unitPrice: 1,
+    currency: 'USD',
+    eligibilityRule: String(input.eligibilityRule || 'SRA_REGISTERED_PARTICIPANTS').toUpperCase(),
+    minimumOrder: finitePositive(input.minimumOrder || 1, 'minimumOrder'),
+    transactionRouteId: String(input.transactionRouteId || 'SRA_INTERNAL_MARKETPLACE').toUpperCase(),
+    settlementRouteId: String(input.settlementRouteId || 'SRA_INTERNAL_SETTLEMENT').toUpperCase(),
+  };
+}
+function listingEligible(listing) {
+  if (!listing || listing.state !== 'PREPARED' || listing.platformAssetCode === 'SRA_PLATFORM_ASSET') return false;
+  const blockers = Array.isArray(listing.blockers) ? listing.blockers : [];
+  return blockers.every((blocker) => ELIGIBLE_BLOCKERS.has(blocker));
+}
+function readyListing(listing, policy, actorId, batchId, approvedAt) {
+  const recordedValueUsd = recordedValue(listing);
+  return {
+    ...listing,
+    quantity: recordedValueUsd, verifiedRecordedValueUsd: recordedValueUsd, recordedValueUsd, faceValueUsd: recordedValueUsd,
+    pricing: { ...(listing.pricing || {}), state: 'CONFIGURED', method: SRA_PAR_PRICING_METHOD, askingPrice: 1, unitPrice: 1, currency: 'USD', faceValueUsd: recordedValueUsd, recordedValueUsd, parReference: '1 SRA = 1 USD' },
+    access: { ...(listing.access || {}), state: 'CONFIGURED', eligibilityRule: policy.eligibilityRule, minimumOrder: policy.minimumOrder },
+    transactionRouteId: policy.transactionRouteId, settlementRouteId: policy.settlementRouteId,
+    readiness: { instrumentReviewed: true, pricingApproved: true, accessRulesApproved: true, transactionRouteConnected: true, settlementRouteConnected: true },
+    blockers: [], status: 'READY_FOR_PUBLICATION_APPROVAL', readinessBatchId: batchId, readinessApprovedBy: actorId, readinessApprovedAt: approvedAt, updatedAt: approvedAt,
+  };
+}
 
 export class ListingReadinessBatchService {
   constructor(domain) { this.domain = domain; }
 
-  eligibleListings() {
-    return this.domain.list(LISTING_TYPE).filter((listing) => {
-      if (listing.state !== 'PREPARED') return false;
-      if (listing.platformAssetCode === 'SRA_PLATFORM_ASSET') return false;
-      const blockers = Array.isArray(listing.blockers) ? listing.blockers : [];
-      return blockers.length > 0 && blockers.every((blocker) => ELIGIBLE_BLOCKERS.has(blocker));
-    });
-  }
+  eligibleListings() { return this.domain.list(LISTING_TYPE).filter(listingEligible); }
 
   preview(input = {}) {
-    requireParPolicy(input);
+    const policy = policyFrom(input);
     const listings = this.eligibleListings();
     const valid = [];
     const invalid = [];
@@ -57,16 +79,12 @@ export class ListingReadinessBatchService {
       try { valid.push({ listing, recordedValueUsd: recordedValue(listing) }); }
       catch (error) { invalid.push({ listingId: listing.listingId, error: error.message }); }
     }
-    const eligibilityRule = String(input.eligibilityRule || 'SRA_REGISTERED_PARTICIPANTS').toUpperCase();
-    const transactionRouteId = String(input.transactionRouteId || 'SRA_INTERNAL_MARKETPLACE').toUpperCase();
-    const settlementRouteId = String(input.settlementRouteId || 'SRA_INTERNAL_SETTLEMENT').toUpperCase();
-    const minimumOrder = finitePositive(input.minimumOrder || 1, 'minimumOrder');
     return {
       action: 'LISTING_READINESS_BATCH_PREVIEW', readOnly: true,
       eligibleListingCount: valid.length, invalidListingCount: invalid.length, invalidListings: invalid,
       market: 'SRA / USD',
       scope: { listingIds: valid.map(({ listing }) => listing.listingId), listingState: 'PREPARED', excludesNativePlatformAsset: true },
-      policy: { askingPriceMethod: SRA_PAR_PRICING_METHOD, unitPrice: 1, currency: 'USD', eligibilityRule, minimumOrder, transactionRouteId, settlementRouteId },
+      policy,
       effect: 'Preserve the verified recorded USD value as SRA quantity at the fixed $1.00 SRA/USD par reference, clear the remaining readiness blockers, and mark covered listings READY_FOR_PUBLICATION_APPROVAL.',
       doesNot: ['REPRICE_SOURCE_ASSETS','USE_SOURCE_TOKEN_QUANTITY_AS_SRA_QUANTITY','PUBLISH_LISTINGS','CREATE_TRANSACTIONS','ALLOCATE_POSITIONS','SETTLE_VALUE','RECOGNIZE_OWNERSHIP','CREATE_EXPORT_PACKAGES'],
       approvalRequired: true,
@@ -108,6 +126,23 @@ export class ListingReadinessBatchService {
     return { action: 'INSTRUMENT_APPROVAL', batchId: instrumentId, instrument: approved, changed: true, updatedListingCount: linkedListings.length, linkedListingIds: linkedListings.map((listing) => listing.listingId), policy: { unitPrice: 1 } };
   }
 
+  async approveListing(listingId, input = {}, actorId = 'SRA-COIN-AGENT') {
+    const listing = this.domain.get(LISTING_TYPE, listingId);
+    if (!listing) throw new Error(`Listing ${listingId} was not found.`);
+    if (listing.status === 'READY_FOR_PUBLICATION_APPROVAL' && listing.state === 'PREPARED' && (!listing.blockers || listing.blockers.length === 0)) return { listing, changed: false, policy: policyFrom(input) };
+    if (!listingEligible(listing)) throw new Error(`Listing ${listingId} is not eligible for marketplace readiness.`);
+    const policy = policyFrom(input);
+    const approvedAt = now();
+    const batchId = `LRB-${listingId}`;
+    const next = readyListing(listing, policy, actorId, batchId, approvedAt);
+    await this.domain.atomicPut([
+      { type: LISTING_TYPE, id: listingId, payload: next, actorId, eventType: 'MARKETPLACE_LISTING_READINESS_APPROVED' },
+      { type: BATCH_TYPE, id: batchId, payload: { batchId, state: 'APPROVED', mode: 'TARGETED_COIN_MARKET_PROPAGATION', approvedBy: actorId, approvedAt, policy, eligibleListingCount: 1, updatedListingCount: 1, invalidListingCount: 0, listingIds: [listingId], publicationExecuted: false, protectedNextAction: 'PUBLICATION' }, actorId, eventType: 'LISTING_READINESS_BATCH_RECORDED' },
+    ]);
+    await this.domain.lifecycle?.({ objectType: LISTING_TYPE, objectId: listingId, eventType: 'MARKETPLACE_LISTING_READINESS_APPROVED', actorId, payload: { instrumentId: listing.instrumentId, market: 'SRA / USD', mode: 'TARGETED_COIN_MARKET_PROPAGATION' } });
+    return { listing: next, changed: true, policy };
+  }
+
   async approve(input = {}, actorId = 'SRA_PLATFORM_ADMIN') {
     if (String(input.approval || '').toUpperCase() !== 'APPROVE') throw new Error('Explicit administrator approval is required.');
     if (input.instrumentId) return this.approveInstrument(String(input.instrumentId), actorId);
@@ -123,16 +158,7 @@ export class ListingReadinessBatchService {
     for (const listingId of preview.scope.listingIds) {
       const listing = this.domain.get(LISTING_TYPE, listingId);
       if (!listing || listing.state !== 'PREPARED') throw new Error(`Listing ${listingId} changed before approval. Refresh the preview and try again.`);
-      const recordedValueUsd = recordedValue(listing);
-      const next = {
-        ...listing,
-        quantity: recordedValueUsd, verifiedRecordedValueUsd: recordedValueUsd, recordedValueUsd, faceValueUsd: recordedValueUsd,
-        pricing: { ...(listing.pricing || {}), state: 'CONFIGURED', method: SRA_PAR_PRICING_METHOD, askingPrice: 1, unitPrice: 1, currency: 'USD', faceValueUsd: recordedValueUsd, recordedValueUsd, parReference: '1 SRA = 1 USD' },
-        access: { ...(listing.access || {}), state: 'CONFIGURED', eligibilityRule: preview.policy.eligibilityRule, minimumOrder: preview.policy.minimumOrder },
-        transactionRouteId: preview.policy.transactionRouteId, settlementRouteId: preview.policy.settlementRouteId,
-        readiness: { instrumentReviewed: true, pricingApproved: true, accessRulesApproved: true, transactionRouteConnected: true, settlementRouteConnected: true },
-        blockers: [], status: 'READY_FOR_PUBLICATION_APPROVAL', readinessBatchId: batchId, readinessApprovedBy: actorId, readinessApprovedAt: approvedAt, updatedAt: approvedAt,
-      };
+      const next = readyListing(listing, preview.policy, actorId, batchId, approvedAt);
       changes.push({ type: LISTING_TYPE, id: listingId, payload: next, actorId, eventType: 'MARKETPLACE_LISTING_READINESS_BATCH_APPROVED' });
       updated.push(listingId);
     }
