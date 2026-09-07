@@ -6,6 +6,7 @@
   <meta name="robots" content="noindex,nofollow,noarchive">
   <title>SAIN Platform Administration</title>
   <link rel="stylesheet" href="/admin/admin-suite-shell.css" data-admin-suite>
+  <link rel="stylesheet" href="/admin/admin-navigation-simplifier.css">
   <link rel="preload" href="/admin/admin-suite-shell.js" as="script">
   <style>
     :root{color-scheme:dark;--bg:#050505;--panel:#101010;--line:#292929;--text:#f5f5f5;--muted:#a3a3a3;--gold:#d6a92f;--danger:#d96b6b}*{box-sizing:border-box}body{margin:0;background:#050505;color:var(--text);font:14px/1.5 Arial,sans-serif;min-height:100vh}button,input{font:inherit}.hidden{display:none!important}.auth-shell{min-height:100vh;display:grid;place-items:center;padding:24px;background:radial-gradient(circle at top,#17130a 0,#050505 34%)}.auth-wrap{width:min(470px,100%)}.brand{display:flex;align-items:center;gap:13px;margin-bottom:24px}.brand img{width:54px;height:54px;border-radius:50%;object-fit:contain;background:#fff}.brand strong{display:block;font-size:18px}.brand span{color:var(--muted);font-size:12px}.card{border:1px solid var(--line);background:linear-gradient(180deg,#111,#090909);border-radius:18px;padding:20px}.login h1{margin:0 0 8px}.login p{color:var(--muted)}label{display:block;margin:14px 0 6px;color:var(--muted)}input{width:100%;background:#050505;border:1px solid var(--line);border-radius:10px;color:var(--text);padding:12px}button{border:1px solid var(--line);border-radius:10px;background:#181818;color:var(--text);padding:10px 14px;cursor:pointer}button.primary{background:var(--gold);color:#090909;border-color:var(--gold);font-weight:800}button:disabled{opacity:.45;cursor:not-allowed}.error{color:var(--danger);min-height:22px}.notice{border:1px solid #4a3c19;background:#171207;border-radius:10px;padding:10px 12px;color:#e7d49b}.admin-boot-placeholder{min-height:100vh;display:grid;place-items:center;color:#a3a3a3;background:#050505;font-size:13px;letter-spacing:.02em}
@@ -81,6 +82,7 @@
     checkSession().catch(error=>{showAuthentication(loginView);loginError.textContent=error.message});
   </script>
   <script src="/admin/admin-bootstrap.js" defer></script>
+  <script src="/admin/admin-navigation-simplifier.js" defer></script>
   <script src="/admin/capability-review.js" defer></script>
 </body>
 </html>
