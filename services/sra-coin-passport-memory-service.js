@@ -16,13 +16,14 @@ function idOf(record) {
     record?.executionAuthorizationId,
     record?.transferResultId,
     record?.exportPackageId,
+    record?.ownershipRecognitionId,
     record?.listingId,
     record?.id,
   );
 }
 
 function timeOf(record) {
-  return first(record?.completedAt, record?.settledAt, record?.approvedAt, record?.updatedAt, record?.createdAt);
+  return first(record?.recognizedAt, record?.completedAt, record?.settledAt, record?.approvedAt, record?.updatedAt, record?.createdAt);
 }
 
 function participantId(record) {
@@ -78,8 +79,9 @@ export class SraCoinPassportMemoryService {
     return {
       transactions: relatedTransactions,
       listings: this.domain.list('MARKETPLACE_LISTING').filter((record) => instrument && instrumentId(record) === instrument),
-      ownership: this.domain.list('OWNERSHIP_RECOGNITION').filter((record) => record.positionId === positionId
-        || (agent.participantId && instrument && participantId(record) === agent.participantId && instrumentId(record) === instrument)),
+      ownership: this.domain.list('OWNERSHIP_RECOGNITION')
+        .filter((record) => record.positionId === positionId || record.coinPositionId === positionId || (instrument && instrumentId(record) === instrument))
+        .sort((a, b) => String(timeOf(a) || '').localeCompare(String(timeOf(b) || ''))),
       exports: this.domain.list('EXPORT_PACKAGE').filter((record) => record.positionId === positionId
         || settlementIds.has(record.settlementId) || exportIds.has(record.exportPackageId)),
     };
@@ -94,6 +96,16 @@ export class SraCoinPassportMemoryService {
       .filter((record) => first(record.parentPositionId, record.sourcePositionId) === agent.positionId)
       .map((record) => first(record.coinPositionId, record.positionId, record.id))
       .filter(Boolean);
+    const ownershipHistory = related.ownership.map((record) => ({
+      ownershipRecognitionId: first(record.ownershipRecognitionId, record.id),
+      previousOwnerId: record.previousOwnerId ?? null,
+      ownerId: participantId(record),
+      ownerType: record.ownerType || null,
+      recognitionType: record.recognitionType || null,
+      recognitionBasis: record.recognitionBasis || null,
+      state: stateOf(record),
+      recognizedAt: timeOf(record),
+    }));
 
     return {
       passportType: 'SRA_COIN_AGENT_PASSPORT',
@@ -112,6 +124,9 @@ export class SraCoinPassportMemoryService {
       reservedQuantity: agent.reservedQuantity,
       externallyTransferredQuantity: agent.externallyTransferredQuantity,
       participantId: agent.participantId,
+      initialOwnerId: agent.initialOwnerId || ownershipHistory[0]?.ownerId || null,
+      currentOwnerId: agent.currentOwnerId || ownershipHistory.at(-1)?.ownerId || agent.participantId || null,
+      ownershipHistory,
       instrumentId: agent.instrumentId,
       ownershipState: agent.ownershipState,
       currentState: agent.currentState,
@@ -144,14 +159,16 @@ export class SraCoinPassportMemoryService {
       recordId: agent.positionId,
       state: agent.currentState,
       occurredAt: null,
-      detail: `SRA Coin Position ${agent.positionId} represents ${agent.quantity} ${agent.denomination}. Its native market is SRA/USD at the platform par reference of 1 SRA to 1 USD.`,
+      detail: `SRA Coin Position ${agent.positionId} represents ${agent.quantity} ${agent.denomination}. Initial owner: ${agent.initialOwnerId || 'UNRESOLVED'}. Current owner: ${agent.currentOwnerId || agent.participantId || 'UNRESOLVED'}.`,
     });
 
     for (const listing of related.listings) {
       events.push(event('MARKETPLACE_LISTING', listing, `Listing ${idOf(listing)} entered ${stateOf(listing)}.`, agent.positionId));
     }
     for (const ownership of related.ownership) {
-      events.push(event('OWNERSHIP_RECOGNITION', ownership, `Ownership was recorded for ${participantId(ownership) || agent.participantId || 'the controlling participant'}.`, agent.positionId));
+      const owner = participantId(ownership) || agent.participantId || 'the controlling participant';
+      const previous = ownership.previousOwnerId ? ` from ${ownership.previousOwnerId}` : '';
+      events.push(event('OWNERSHIP_RECOGNITION', ownership, `Ownership was recorded${previous} to ${owner}.`, agent.positionId));
     }
     for (const record of related.transactions) {
       const type = String(record.transactionType || 'SRA_TRANSACTION').toUpperCase();
@@ -176,6 +193,8 @@ export class SraCoinPassportMemoryService {
       nativeMarketPair: 'SRA/USD',
       agentId: agent.agentId,
       positionId: agent.positionId,
+      initialOwnerId: agent.initialOwnerId || null,
+      currentOwnerId: agent.currentOwnerId || agent.participantId || null,
       authoritativeSource: 'DERIVED_FROM_CANONICAL_PLATFORM_RECORDS',
       eventCount: deduped.length,
       participationCounts: counts,
