@@ -47,13 +47,25 @@ export class PersistentDomainService {
   }
 
   async hydrate(types = Object.values(RECORD_TYPES)) {
-    for (const type of types) {
-      const records = await this.database.listRecords(type);
-      for (const record of records) {
-        const id = recordId(record);
-        if (id) this.cacheRecord(type, id, record);
+    const requestedTypes = [...new Set(types)];
+    if (!requestedTypes.length) return this.snapshot();
+
+    const poolCapacity = Number(this.database?.pool?.options?.max) || 1;
+    const concurrency = Math.max(1, Math.min(poolCapacity, requestedTypes.length));
+    let cursor = 0;
+
+    const hydrateNext = async () => {
+      while (cursor < requestedTypes.length) {
+        const type = requestedTypes[cursor++];
+        const records = await this.database.listRecords(type);
+        for (const record of records) {
+          const id = recordId(record);
+          if (id) this.cacheRecord(type, id, record);
+        }
       }
-    }
+    };
+
+    await Promise.all(Array.from({ length: concurrency }, () => hydrateNext()));
     return this.snapshot();
   }
 
