@@ -20,7 +20,7 @@
     treasury:['Overview','Commercial Instruments','Cash Position','Available Financing','Funding Capacity','Journal Entries','Treasury Wallets','Ledger','Treasury Reports'],
     'native-asset':['Current Asset','Approval Status','Listing','Marketplace Status','Export Status','Ownership','Recognitions','Asset History','Publishing','Governance'],
     marketplace:['Investor Funding Flow','Prepared','Ready','Published','Orders','Reservations','Allocations','Settlement','Historical Listings'],
-    instruments:['Overview','Pending Review','Approved','Published','History'],
+    instruments:['Overview','Pending Review','Approved','Published','History','Approval','On-Chain'],
     records:['Recognitions','Observations','Financial Records','Evidence','Origin Records','Trace','Audit'],
     'coin-positions':['Current Supply','Represented Value','Legacy Corrections','Coin Intelligence','Instrument Linkage','Mint History','XRPL Exchange','Retirements','Adjustments'],
     transactions:['All','Pending','Completed','Failed','Exported','Imported','Settlement','Search'],
@@ -30,6 +30,7 @@
     users:['Overview','Administrators','Roles','Permissions','Sessions','Access History'],
     system:['Overview','Core Services','Diagnostics','Protected Actions','Alerts','Audit State']
   };
+  const FEATURE_ONLY_TABS = new Set(['instruments::Approval','instruments::On-Chain']);
   const state = { mounted:false, workspaceData:null, loading:null, loadingScope:null, loadedScopes:new Set(), loadedViews:new Set(), loadingViews:new Map(), viewErrors:new Map() };
   const esc = value => String(value ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;');
   const recordsBody = id => document.querySelector(`[data-workspace="${id}"] .admin-workspace-records`);
@@ -74,7 +75,7 @@
       section.dataset.activeTab = button.dataset.adminTab;
       renderWorkspace(id);
       window.dispatchEvent(new CustomEvent('sra:admin-tab-selected', { detail:{ workspaceId:id, tab:button.dataset.adminTab } }));
-      void ensureSelectedTab(id);
+      if(!FEATURE_ONLY_TABS.has(`${id}::${button.dataset.adminTab}`)) void ensureSelectedTab(id);
     });
     return section;
   }
@@ -156,6 +157,7 @@
       if(tab==='Historical Listings') return combined(r.marketplaceListings,list(r.lifecycleEvents).filter(item=>/LISTING|MARKETPLACE/i.test(JSON.stringify(item))));
     }
     if(id==='instruments'){
+      if(['Approval','On-Chain'].includes(tab)) return [];
       if(tab==='Pending Review') return byState(r.instruments,['DRAFT','PENDING','PENDING_REVIEW','IN_REVIEW','REVIEW_REQUIRED','AWAITING_APPROVAL']);
       if(tab==='Approved') return byState(r.instruments,['APPROVED','AUTHORIZED','ISSUED','DEPOSITED_RECOGNIZED_USD']);
       if(tab==='Published') return byState(r.instruments,['PUBLISHED','ACTIVE','LISTED']);
@@ -245,6 +247,7 @@
     if(id==='dashboard'){ node.innerHTML = dashboardMarkup(); syncDashboard(); return; }
     const section = document.querySelector(`[data-workspace="${id}"]`);
     const tab = section?.dataset.activeTab || TABS[id]?.[0] || '';
+    if(FEATURE_ONLY_TABS.has(`${id}::${tab}`)){ node.innerHTML = ''; return; }
     if(state.loadingViews.has(viewKey(id,tab)) && !node.childElementCount){ node.innerHTML = loadingState(); return; }
     const error = state.viewErrors.get(viewKey(id,tab));
     if(error){ node.innerHTML = errorState(error); return; }
@@ -275,6 +278,7 @@
   async function ensureSelectedTab(id){
     if(id==='dashboard') return;
     const tab=document.querySelector(`[data-workspace="${id}"]`)?.dataset.activeTab||'';
+    if(FEATURE_ONLY_TABS.has(`${id}::${tab}`)) return;
     const key=viewKey(id,tab);
     if(state.loadedViews.has(key)) return;
     const pending=loadWorkspaceData(false,id,tab);
@@ -290,6 +294,10 @@
     const section=document.querySelector(`[data-workspace="${id}"]`);
     const refreshButton=section?.querySelector(`[data-refresh-workspace="${id}"]`);
     const tab=section?.dataset.activeTab||'';
+    if(FEATURE_ONLY_TABS.has(`${id}::${tab}`)){
+      window.dispatchEvent(new CustomEvent('sra:admin-workspace-synchronized',{detail:{workspaceId:id,source:'feature-only-refresh'}}));
+      return;
+    }
     section?.setAttribute('aria-busy','true');
     if(refreshButton){refreshButton.disabled=true;refreshButton.textContent='Refreshing…';}
     try { await loadWorkspaceData(true,id,tab); } catch {}
