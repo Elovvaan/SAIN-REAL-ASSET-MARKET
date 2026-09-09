@@ -1,9 +1,0 @@
-.admin-suite-nav[data-legacy-workspace-navigation="true"]{display:none!important}
-.admin-simplified-nav{display:flex!important;flex-direction:column;gap:4px}
-.admin-simplified-nav button{width:100%;text-align:left}
-.admin-workflow-navigation{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:0 0 18px;padding:10px 0 14px;border-bottom:1px solid #242424}
-.admin-workflow-navigation>span{color:#8e8e8e;font-size:10px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;white-space:nowrap}
-.admin-workflow-navigation>div{display:flex;gap:7px;flex-wrap:wrap}
-.admin-workflow-navigation button{padding:8px 11px;border-radius:9px;background:#0c0c0c;border:1px solid #292929;color:#d7d7d7;font-size:12px}
-.admin-workflow-navigation button.active{background:#d6a92f;border-color:#d6a92f;color:#080808;font-weight:800}
-@media(max-width:900px){.admin-workflow-navigation{align-items:flex-start;flex-direction:column}.admin-workflow-navigation>div{width:100%;overflow-x:auto;flex-wrap:nowrap;padding-bottom:3px}.admin-workflow-navigation button{white-space:nowrap}}
