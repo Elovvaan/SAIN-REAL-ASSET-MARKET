@@ -98,19 +98,6 @@
       || 'dashboard';
   }
 
-  function configureConnectionTabs(admin) {
-    const workspace = admin?.querySelector('[data-workspace="connections"]');
-    if (!workspace) return;
-    for (const tab of ['Ethereum', 'Bitcoin']) {
-      workspace.querySelector(`[data-admin-tab="${tab}"]`)?.remove();
-    }
-    const formerSolana = workspace.querySelector('[data-admin-tab="Solana"]');
-    if (formerSolana) {
-      formerSolana.dataset.adminTab = 'Stellar';
-      formerSolana.textContent = 'Stellar';
-    }
-  }
-
   function removeBootPlaceholder(admin) {
     admin?.querySelector('[data-admin-boot-placeholder]')?.remove();
   }
@@ -159,7 +146,7 @@
     }
     if (workspaceId === 'marketplace') {
       const marketplaceWorkspace = admin.querySelector('[data-workspace="marketplace"]');
-      window.mountAdminMarketplaceLifecycleWorkstation?.(admin.querySelector('[data-workspace="marketplace"]'));
+      window.mountAdminMarketplaceLifecycleWorkstation?.(marketplaceWorkspace);
       window.mountAdminMarketplaceStageActions?.(marketplaceWorkspace);
       return;
     }
@@ -192,8 +179,8 @@
     const featureList = WORKSPACE_FEATURES[workspaceId] || [];
     if (!featureList.length) return;
     if (workspaceLoads.has(workspaceId)) {
-      const loaded=workspaceLoads.get(workspaceId);
-      return loaded.then(()=>mountWorkspaceFeatures(workspaceId,admin));
+      const loaded = workspaceLoads.get(workspaceId);
+      return loaded.then(() => mountWorkspaceFeatures(workspaceId, admin));
     }
 
     const pending = Promise.all(featureList.map(([source, marker]) => loadScript(source, marker)))
@@ -230,7 +217,6 @@
       await loadScript(source, marker);
       const admin = document.querySelector('#admin-view:not(.hidden)');
       if (!admin?.querySelector('.admin-suite')) throw new Error('Administration shell did not mount.');
-      configureConnectionTabs(admin);
       admin.querySelector('#admin-suite-account .top')?.style.removeProperty('display');
       removeBootPlaceholder(admin);
       admin.dataset.presentationOwner = 'admin-suite';
