@@ -70,7 +70,7 @@ const ADMIN_WORKSPACE_SOURCES = Object.freeze({
   transactions: ['transactions','fundingInstructions','paymentReceipts','settlements','settlementRecords','lifecycleEvents'],
   settlement: ['exportPackages','settlementInstructions','settlementAdapters','settlements','settlementRecords','paymentReceipts','lifecycleEvents'],
   agent: ['transactions','settlementInstructions','treasuryExceptions','lifecycleEvents'],
-  connections: ['settlementAdapters','treasuryBankConnections','treasuryWallets','connectorDefinitions','enterpriseConnections','extractionRequests','extractionResults','outboundEvents','lifecycleEvents'],
+  connections: ['networkAccounts','settlementAdapters','treasuryBankConnections','treasuryWallets','connectorDefinitions','enterpriseConnections','extractionRequests','extractionResults','outboundEvents','lifecycleEvents'],
   users: ['users','participants','lifecycleEvents'],
   system: ['treasuryExceptions','outboundEvents','lifecycleEvents'],
 });
@@ -124,8 +124,10 @@ const ADMIN_TAB_SOURCES = Object.freeze({
     'Incomplete Workflows':['transactions','settlementInstructions','treasuryExceptions'], 'Explain Record':[], 'Trace Instrument':[], 'Platform Questions':[], Diagnostics:['lifecycleEvents'],
   },
   connections: {
-    Coinbase:['settlementAdapters','treasuryWallets','enterpriseConnections'], Ethereum:['treasuryWallets','settlementAdapters'], Solana:['treasuryWallets','settlementAdapters'],
-    Bitcoin:['treasuryWallets','settlementAdapters'], 'Export Adapters':['settlementAdapters','connectorDefinitions','enterpriseConnections'],
+    Coinbase:['settlementAdapters','treasuryWallets','enterpriseConnections'],
+    Stellar:['networkAccounts','treasuryWallets','settlementAdapters'],
+    XRPL:['networkAccounts','treasuryWallets','settlementAdapters'],
+    'Export Adapters':['settlementAdapters','connectorDefinitions','enterpriseConnections'],
     'Connector Logs':['extractionRequests','extractionResults','outboundEvents','lifecycleEvents'], Synchronization:['enterpriseConnections','extractionRequests','extractionResults','outboundEvents'],
   },
   users: {
