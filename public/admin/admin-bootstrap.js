@@ -25,6 +25,7 @@
       ['/admin/admin-treasury-workstation.js', 'data-sra-admin-treasury-workstation'],
       ['/admin/admin-treasury-presentation-owner.js', 'data-sra-admin-treasury-presentation-owner'],
       ['/admin/admin-treasury-cash-recording.js', 'data-sra-admin-treasury-cash-recording'],
+      ['/admin/admin-treasury-instrument-recording.js', 'data-sra-admin-treasury-instrument-recording'],
     ],
     'native-asset': [
       ['/admin/admin-native-platform-asset-workstation.js', 'data-sra-admin-native-platform-asset-workstation'],
@@ -43,6 +44,7 @@
     ],
     users: [
       ['/admin/admin-users-permissions-workstation.js', 'data-sra-admin-users-permissions-workstation'],
+      ['/admin/capability-review.js', 'data-sra-admin-capability-review'],
     ],
     agent: [
       ['/admin/admin-agent-operations-workstation.js', 'data-sra-admin-agent-operations-workstation'],
