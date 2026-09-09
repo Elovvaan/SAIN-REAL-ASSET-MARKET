@@ -26,14 +26,13 @@
     transactions:['All','Pending','Completed','Failed','Exported','Imported','Settlement','Search'],
     settlement:['Export Packages','Settlement Instructions','External Confirmation','Destination Verification','Export History','Settlement Logs','Workflow'],
     agent:['Conversation','Capital Activation','Workforce','Suggested Actions','Workflow Approvals','Incomplete Workflows','Explain Record','Trace Instrument','Platform Questions','Diagnostics'],
-    connections:['Coinbase','Ethereum','Solana','Bitcoin','Export Adapters','Connector Logs','Synchronization'],
+    connections:['Coinbase','Stellar','XRPL','Export Adapters','Connector Logs','Synchronization'],
     users:['Overview','Administrators','Roles','Permissions','Sessions','Access History'],
     system:['Overview','Core Services','Diagnostics','Protected Actions','Alerts','Audit State']
   };
-  const state = { mounted:false, routed:new WeakSet(), observer:null, workspaceData:null, loading:null, loadingScope:null, loadedScopes:new Set(), loadedViews:new Set(), loadingViews:new Map(), viewErrors:new Map() };
+  const state = { mounted:false, workspaceData:null, loading:null, loadingScope:null, loadedScopes:new Set(), loadedViews:new Set(), loadingViews:new Map(), viewErrors:new Map() };
   const esc = value => String(value ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;');
   const recordsBody = id => document.querySelector(`[data-workspace="${id}"] .admin-workspace-records`);
-  const controlsBody = id => document.querySelector(`[data-workspace="${id}"] .admin-workspace-controls`);
   const firstId = record => record?.instrumentId || record?.listingId || record?.financialRecordId || record?.recognitionId || record?.observationId || record?.coinPositionId || record?.transactionId || record?.exportPackageId || record?.instructionId || record?.settlementId || record?.adapterId || record?.entryId || record?.accountId || record?.paymentOrderId || record?.statementId || record?.walletId || record?.connectionId || record?.eventId || record?.id || record?.userId || record?.email || 'Unidentified record';
   const recordState = record => String(record?.state || record?.status || record?.lifecycleState || record?.financingState || record?.treasuryState || 'UNKNOWN').toUpperCase();
   const dateValue = record => record?.updatedAt || record?.createdAt || record?.occurredAt || record?.recordedAt || record?.issuedAt || record?.publishedAt || record?.confirmedAt || record?.settledAt || record?.postedAt || null;
@@ -52,12 +51,10 @@
     document.head.append(link);
   }
   async function requestJson(url,options={}){
-    try {
-      const response = await fetch(url,{cache:'default',...options,headers:{Accept:'application/json',...(options.headers||{})}});
-      const payload = await response.json().catch(() => ({}));
-      if(!response.ok) throw new Error(payload.error || `Request failed with ${response.status}.`);
-      return payload;
-    } catch(error) { throw error; }
+    const response = await fetch(url,{cache:'default',...options,headers:{Accept:'application/json',...(options.headers||{})}});
+    const payload = await response.json().catch(() => ({}));
+    if(!response.ok) throw new Error(payload.error || `Request failed with ${response.status}.`);
+    return payload;
   }
 
   function makeWorkspace([id,label,description]){
@@ -113,45 +110,6 @@
       ['Settlement Logs',logs.length]
     ];
     return `<section class="admin-record-card"><header><strong>Export & Settlement Workflow</strong><em>LIVE</em></header><div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-top:12px">${stages.map(([label,count],index)=>`<div style="border:1px solid #292929;border-radius:12px;padding:14px;background:#090909;min-width:0"><span style="display:block;color:#9a9a9a;font-size:10px;text-transform:uppercase">Stage ${index+1}</span><strong style="display:block;margin-top:5px">${esc(label)}</strong><b style="display:block;font-size:22px;margin-top:8px">${Number(count).toLocaleString()}</b></div>`).join('')}</div><p style="color:#9a9a9a;margin:14px 0 0">Export Package → Destination → Settlement Instruction → External Confirmation → Settlement Log</p></section>`;
-  }
-
-  function nearestCard(node){ return node?.closest?.('section.card,article.card,.card'); }
-  function moveCard(node,id){
-    const card = nearestCard(node);
-    const destination = controlsBody(id);
-    if(!card || !destination || state.routed.has(card) || card.closest('.admin-workspace')) return false;
-    state.routed.add(card);
-    destination.append(card);
-    return true;
-  }
-  function routeCard(card){
-    if(!card || state.routed.has(card) || card.closest('.admin-workspace')) return;
-    const text = (card.querySelector('h2,h3,.section-title')?.textContent || card.textContent || '').toLowerCase();
-    if(card.querySelector('#asset-details') || text.includes('native platform asset')) moveCard(card,'native-asset');
-    else if(card.querySelector('#connector-details') || text.includes('platform and market connections')) moveCard(card,'connections');
-    else if(card.querySelector('#listing-details') || text.includes('marketplace listing') || text.includes('sra/usd market lifecycle')) moveCard(card,'marketplace');
-    else if(text.includes('treasury') || text.includes('balanced entry') || text.includes('recorded value representation')) moveCard(card,'treasury');
-    else if(text.includes('unified market operations') || card.matches('[id*="operations-queue"],[class*="operations-queue"]')) moveCard(card,'operations');
-    else if(text.includes('administrative agent') || card.querySelector('#chat-log')) moveCard(card,'agent');
-    else if(text.includes('core services') || text.includes('protected actions') || card.querySelector('#protected-areas')) moveCard(card,'system');
-    else if(card.matches('[id*="listing-authorization"],[id*="listing-readiness"],[class*="listing-authorization"],[id*="hybrid-liquidity"],[class*="hybrid-liquidity"]')) moveCard(card,'marketplace');
-  }
-  function routeKnownSections(root=document){
-    const cards = [];
-    if(root instanceof Element && root.matches('section.card,article.card,.card')) cards.push(root);
-    if(root.querySelectorAll) cards.push(...root.querySelectorAll('#admin-view section.card,#admin-view article.card'));
-    [...new Set(cards)].forEach(routeCard);
-  }
-  function observeSource(admin){
-    if(state.observer) state.observer.disconnect();
-    state.observer = new MutationObserver(records => {
-      for(const record of records){
-        for(const node of record.addedNodes){
-          if(node instanceof Element && !node.closest('.admin-suite')) routeKnownSections(node);
-        }
-      }
-    });
-    state.observer.observe(admin,{childList:true,subtree:true});
   }
 
   function workspaceRecords(id,tab){
@@ -242,7 +200,7 @@
     }
     if(id==='connections'){
       if(tab==='Coinbase') return combined(contains(r.settlementAdapters,/COINBASE/i),list(r.treasuryWallets).filter(item=>/COINBASE/i.test(JSON.stringify(item))),list(r.enterpriseConnections).filter(item=>/COINBASE/i.test(JSON.stringify(item))));
-      if(['Ethereum','Solana','Bitcoin'].includes(tab)) return combined(list(r.treasuryWallets).filter(item=>new RegExp(tab,'i').test(JSON.stringify(item))),list(r.settlementAdapters).filter(item=>new RegExp(tab,'i').test(JSON.stringify(item))));
+      if(['Stellar','XRPL'].includes(tab)) return combined(list(r.networkAccounts).filter(item=>new RegExp(tab,'i').test(JSON.stringify(item))),list(r.treasuryWallets).filter(item=>new RegExp(tab,'i').test(JSON.stringify(item))),list(r.settlementAdapters).filter(item=>new RegExp(tab,'i').test(JSON.stringify(item))));
       if(tab==='Export Adapters') return combined(r.settlementAdapters,r.connectorDefinitions,r.enterpriseConnections);
       if(tab==='Connector Logs') return combined(r.extractionRequests,r.extractionResults,r.outboundEvents,contains(r.lifecycleEvents,/CONNECT|ADAPTER|RAIL|COINBASE/i));
       if(tab==='Synchronization') return combined(r.enterpriseConnections,r.extractionRequests,r.extractionResults,r.outboundEvents);
@@ -371,7 +329,6 @@
     document.body.classList.add('admin-suite-ready');
     const top = admin.querySelector('.top');
     const oldLayout = admin.querySelector('.layout');
-    if(oldLayout) oldLayout.classList.add('admin-legacy-source-root');
     const suite = document.createElement('div');
     suite.className = 'admin-suite';
     suite.innerHTML = `<aside class="admin-suite-rail"><div class="admin-suite-brand"><img src="/brand-logo" alt="SRA"><div><strong>SAIN Platform</strong><span>Administration</span></div></div><nav class="admin-suite-nav">${WORKSPACES.map(([id,label],index)=>`<button type="button" data-admin-workspace="${id}" class="${index===0?'active':''}"><strong>${esc(label)}</strong></button>`).join('')}</nav></aside><main class="admin-suite-main"><header class="admin-suite-header"><div><h1 id="admin-suite-title">Dashboard</h1><p id="admin-suite-subtitle">Executive platform status</p></div><div id="admin-suite-account"></div></header><div class="admin-suite-content"></div></main>`;
@@ -379,10 +336,7 @@
     WORKSPACES.forEach(def=>content.append(makeWorkspace(def)));
     admin.insertBefore(suite,admin.firstChild);
     if(top){ suite.querySelector('#admin-suite-account').append(top); top.classList.remove('card'); }
-    admin.querySelector('#metrics')?.classList.add('admin-source-metrics');
-    routeKnownSections(oldLayout || admin);
-    observeSource(admin);
-    if(oldLayout) oldLayout.classList.add('admin-source-layout');
+    oldLayout?.remove();
     suite.addEventListener('click',event=>{
       const button = event.target.closest('[data-admin-workspace],[data-open-workspace]');
       if(button) open(button.dataset.adminWorkspace||button.dataset.openWorkspace);
