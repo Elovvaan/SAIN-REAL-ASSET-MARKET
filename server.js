@@ -121,7 +121,10 @@ bootstrap.post('/api/production/alerts/test', async (req, res) => {
   await emitOperationalAlert({ severity: 'TEST', event: 'SRA_ALERT_TEST', requestId: req.sraRequestId, actorId: req.sraIdentity?.actorId || null, at: new Date().toISOString() });
   return res.json({ delivered: Boolean(process.env.SRA_ALERT_WEBHOOK_URL), requestId: req.sraRequestId });
 });
-bootstrap.get('/api/startup', (_req, res) => res.status(startupState === 'FAILED' ? 500 : 200).json({ startupState, startupError, nativePlatformAsset: nativePlatformAssetService?.status?.() || null, startedAt, timestamp: new Date().toISOString() }));
+bootstrap.get('/api/startup', (_req, res) => {
+  const statusCode = startupState === 'READY' ? 200 : startupState === 'FAILED' ? 500 : 503;
+  return res.status(statusCode).json({ startupState, startupError, nativePlatformAsset: nativePlatformAssetService?.status?.() || null, startedAt, timestamp: new Date().toISOString() });
+});
 bootstrap.get('/api/marketplace-listings/status', (_req, res) => marketplaceListingService ? res.json(marketplaceListingService.status()) : res.status(503).json({ error: 'Marketplace Listing Layer is still initializing.' }));
 bootstrap.get('/api/marketplace-listings', (req, res) => marketplaceListingService ? res.json(marketplaceListingService.page({ state: req.query.state, instrumentId: req.query.instrumentId }, { page: req.query.page, limit: req.query.limit })) : res.status(503).json({ error: 'Marketplace Listing Layer is still initializing.' }));
 
