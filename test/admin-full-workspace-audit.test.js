@@ -108,9 +108,9 @@ test('administration loads the single suite shell before lazy workspace controls
 test('workspace reads are view-specific and only render the selected view after completion', () => {
   assert.match(shell, /loadWorkspaceData\(false,id,tab\)/);
   assert.match(shell, /workspace=\$\{encodeURIComponent\(scope\)\}&tab=\$\{encodeURIComponent\(tab\)\}&limit=100/);
-  assert.match(shell, /loadedViews=new Set\(\)/);
-  assert.match(shell, /loadingViews=new Map\(\)/);
-  assert.match(shell, /viewErrors=new Map\(\)/);
+  assert.match(shell, /loadedViews\s*:\s*new Set\(\)/);
+  assert.match(shell, /loadingViews\s*:\s*new Map\(\)/);
+  assert.match(shell, /viewErrors\s*:\s*new Map\(\)/);
   assert.match(shell, /activeWorkspaceId\(\)===id/);
 });
 
