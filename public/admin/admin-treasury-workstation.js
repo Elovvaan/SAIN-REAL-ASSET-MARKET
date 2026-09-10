@@ -19,13 +19,24 @@
   function clear(workspace) { controls(workspace)?.querySelectorAll('[data-treasury-workstation-card]').forEach((node) => node.remove()); }
 
   async function load(tab = 'Overview', includeUsdc = false) {
-    const requests = [
-      request('/api/admin/treasury'),
-      request('/api/admin/treasury/funding-instrument-deposits/eligible-instruments'),
-      request(`/api/admin/workspaces?workspace=treasury&tab=${encodeURIComponent(tab)}&limit=100`),
-    ];
-    if (includeUsdc) requests.push(request('/api/platform-treasury/profiles'),request('/api/platform-treasury/usdc-conversions'),request('/api/platform-treasury/cctp/status'),request('/api/platform-treasury/cctp/transfers'));
-    const [treasury, eligible, workspace, profiles, conversions, cctpStatus, cctpTransfers] = await Promise.all(requests);
+    const needsEligibleInstrument = ['Overview','Commercial Instruments','Available Financing','Funding Capacity'].includes(tab);
+    const needsWorkspaceRecords = ['Commercial Instruments','Journal Entries','Treasury Wallets','Ledger','Treasury Reports'].includes(tab);
+    const treasuryPromise = request('/api/admin/treasury');
+    const eligiblePromise = needsEligibleInstrument
+      ? request('/api/admin/treasury/funding-instrument-deposits/eligible-instruments')
+      : Promise.resolve({ instruments: [], canonicalInstrumentId: null });
+    const workspacePromise = needsWorkspaceRecords
+      ? request(`/api/admin/workspaces?workspace=treasury&tab=${encodeURIComponent(tab)}&limit=100`)
+      : Promise.resolve({ records: {} });
+    const usdcPromises = includeUsdc
+      ? [request('/api/platform-treasury/profiles'),request('/api/platform-treasury/usdc-conversions'),request('/api/platform-treasury/cctp/status'),request('/api/platform-treasury/cctp/transfers')]
+      : [Promise.resolve(null),Promise.resolve(null),Promise.resolve(null),Promise.resolve(null)];
+    const [treasury, eligible, workspace, profiles, conversions, cctpStatus, cctpTransfers] = await Promise.all([
+      treasuryPromise,
+      eligiblePromise,
+      workspacePromise,
+      ...usdcPromises,
+    ]);
     return { treasury, eligible, records: workspace?.records || {}, profiles:profiles?.profiles || [], conversions:conversions?.conversions || [], cctpStatus:cctpStatus||{}, cctpTransfers:cctpTransfers?.transfers||[] };
   }
 
