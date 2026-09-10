@@ -7,6 +7,7 @@ const shell = fs.readFileSync(new URL('../public/admin/admin-suite-shell.js', im
 const css = fs.readFileSync(new URL('../public/admin/admin-suite-shell.css', import.meta.url), 'utf8');
 const bootstrap = fs.readFileSync(new URL('../public/admin/admin-bootstrap.js', import.meta.url), 'utf8');
 const client = fs.readFileSync(new URL('../public/admin/admin-data-client.js', import.meta.url), 'utf8');
+const workstation = fs.readFileSync(new URL('../public/admin/admin-workstation-controls.js', import.meta.url), 'utf8');
 
 const workspaceIds = [
   'dashboard','operations','treasury','native-asset','marketplace','instruments','records',
@@ -17,7 +18,7 @@ test('every administration workspace is declared in the shell', () => {
   for (const id of workspaceIds) assert.match(shell, new RegExp(`\\['${id}'`));
 });
 
-test('workspace API exposes the complete domain sources used by all tabs', () => {
+test('workspace API scopes reads to the active workspace and tab', () => {
   const requiredSources = [
     'instruments','marketplaceListings','marketplaceCommitments','marketplacePositions','marketplaceAllocations',
     'financialRecords','verifiedValueRecords','coinPositions','transactions','exportPackages','settlementInstructions',
@@ -26,17 +27,19 @@ test('workspace API exposes the complete domain sources used by all tabs', () =>
   ];
   for (const source of requiredSources) assert.match(router, new RegExp(`${source}:`));
   assert.match(router, /const ADMIN_WORKSPACE_SOURCES = Object\.freeze/);
-  assert.match(router, /requestedKeys = requestedWorkspace \? new Set\(ADMIN_WORKSPACE_SOURCES\[requestedWorkspace\]\)/);
+  assert.match(router, /const ADMIN_TAB_SOURCES = Object\.freeze/);
+  assert.match(router, /const tabSources = requestedWorkspace && requestedTab \? ADMIN_TAB_SOURCES\[requestedWorkspace\]\?\.\[requestedTab\] : null/);
+  assert.match(router, /new Set\(tabSources \|\| ADMIN_WORKSPACE_SOURCES\[requestedWorkspace\]\)/);
   assert.match(router, /workspaces,/);
 });
 
-test('administration assets cannot remain stale after deployment', () => {
+test('administration assets are delivered and read without stale cache', () => {
   assert.match(router, /Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate/);
   assert.match(router, /etag: false/);
   assert.match(router, /lastModified: false/);
   assert.match(router, /maxAge: 0/);
-  assert.match(client, /cache: 'no-store'/);
-  assert.match(shell, /admin-suite-shell\.css\?v=\$\{Date\.now\(\)\}/);
+  assert.match(client, /cache:isAdminRequest\?'no-store':\(options\.cache\|\|'default'\)/);
+  assert.match(client, /'Cache-Control':'no-cache'/);
 });
 
 test('all workspace groups have dedicated record mappings', () => {
@@ -45,14 +48,28 @@ test('all workspace groups have dedicated record mappings', () => {
   }
 });
 
-test('legacy action panels are routed once into visible workspace control containers', () => {
+test('special lifecycle tabs are owned by their dedicated lazy controls', () => {
+  assert.match(shell, /FEATURE_ONLY_TABS/);
+  assert.match(shell, /treasury::Overview/);
+  assert.match(shell, /instruments::Approval/);
+  assert.match(shell, /instruments::On-Chain/);
   assert.match(shell, /admin-workspace-controls/);
-  assert.match(shell, /admin-legacy-source-root/);
-  assert.match(shell, /routeKnownSections\(oldLayout \|\| admin\)/);
-  assert.match(shell, /#asset-details/);
-  assert.match(shell, /#listing-details/);
-  assert.match(shell, /#chat-log/);
-  assert.match(shell, /#protected-areas/);
+  assert.match(shell, /if\(FEATURE_ONLY_TABS\.has\(`\$\{id\}::\$\{tab\}`\)\)/);
+});
+
+test('operations controls cannot render inactive workspaces in the background', () => {
+  assert.match(workstation, /data-workspace="operations"/);
+  assert.match(workstation, /classList\.contains\('active'\)/);
+  assert.match(workstation, /\/api\/sane\/operations-queue/);
+  assert.match(workstation, /\/api\/sane\/coin-agents\//);
+  assert.doesNotMatch(workstation, /renderAll/);
+  assert.doesNotMatch(workstation, /renderTreasury/);
+  assert.doesNotMatch(workstation, /renderMarketplace/);
+  assert.doesNotMatch(workstation, /renderSystem/);
+  assert.doesNotMatch(workstation, /renderInstruments/);
+  assert.doesNotMatch(workstation, /\/api\/admin\/treasury/);
+  assert.doesNotMatch(workstation, /\/api\/admin\/recorded-value-representation/);
+  assert.doesNotMatch(workstation, /SRA Platform Treasury Controls/);
 });
 
 test('only one administration shell is visible', () => {
@@ -88,10 +105,13 @@ test('administration loads the single suite shell before lazy workspace controls
   assert.doesNotMatch(bootstrap, /revealAdminSuite/);
 });
 
-test('workspace opened during the shared initial request is rendered when that request settles', () => {
-  assert.match(shell, /const pending = loadWorkspaceData\(false,id\)/);
-  assert.match(shell, /activeWorkspaceId\(\)/);
-  assert.match(shell, /pending\.catch\(\(\)=>\{\}\)\.finally/);
+test('workspace reads are view-specific and only render the selected view after completion', () => {
+  assert.match(shell, /loadWorkspaceData\(false,id,tab\)/);
+  assert.match(shell, /workspace=\$\{encodeURIComponent\(scope\)\}&tab=\$\{encodeURIComponent\(tab\)\}&limit=100/);
+  assert.match(shell, /loadedViews=new Set\(\)/);
+  assert.match(shell, /loadingViews=new Map\(\)/);
+  assert.match(shell, /viewErrors=new Map\(\)/);
+  assert.match(shell, /activeWorkspaceId\(\)===id/);
 });
 
 test('successful admin mutations synchronize through the consolidated data client and bootstrap', () => {
@@ -99,7 +119,8 @@ test('successful admin mutations synchronize through the consolidated data clien
   assert.match(client, /'\/api\/admin\/'/);
   assert.match(client, /'\/api\/financing-closing'/);
   assert.match(client, /isAdminOperationPath\(url\.pathname\)/);
-  assert.match(client, /!\['GET', 'HEAD', 'OPTIONS'\]\.includes\(method\)/);
+  assert.match(client, /const SAFE_METHODS = new Set\(\['GET', 'HEAD', 'OPTIONS'\]\)/);
+  assert.match(client, /const isMutation=!\['GET','HEAD','OPTIONS'\]\.includes\(method\)/);
   assert.match(client, /sra:admin-mutated/);
   assert.match(bootstrap, /sra:admin-mutated/);
   assert.match(bootstrap, /data-refresh-workspace/);
