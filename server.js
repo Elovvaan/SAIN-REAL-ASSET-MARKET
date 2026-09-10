@@ -60,42 +60,36 @@ function mountExtension(prefix, router) {
   return mounted;
 }
 
+function createSingleFlightInitializer(label, initializer) {
+  let value = null;
+  let pending = null;
+  return async () => {
+    if (value) return value;
+    if (!pending) {
+      pending = Promise.resolve()
+        .then(initializer)
+        .then((created) => {
+          value = created;
+          console.log(JSON.stringify({ level: 'info', event: 'LAZY_SERVICE_READY', service: label, at: new Date().toISOString() }));
+          return created;
+        })
+        .catch((error) => {
+          pending = null;
+          console.error(JSON.stringify({ level: 'error', event: 'LAZY_SERVICE_FAILED', service: label, message: error?.message || String(error), at: new Date().toISOString() }));
+          throw error;
+        });
+    }
+    return pending;
+  };
+}
+
+let createdApp = null;
 let platformApp = null;
-let platformExtensions = null;
 let coinbaseExtension = null;
 let privateAdminExtension = null;
-let onChainProjectionExtension = null;
-let fundingOpportunityExtension = null;
-let fundingVerificationExtension = null;
-let fundingValuePreparationExtension = null;
-let fundingModelSelectionExtension = null;
-let fundingInstrumentSelectionExtension = null;
-let fundingInstrumentReviewExtension = null;
-let fundingInstrumentIssuanceExtension = null;
-let fundingMarketplacePreparationExtension = null;
-let fundingMarketplacePublicationExtension = null;
-let fundingMarketplaceCommitmentExtension = null;
-let fundingMarketplaceAllocationExtension = null;
-let fundingMarketplaceSettlementExtension = null;
-let fundingOperationsExtension = null;
-let financingClosingExtension = null;
 let sainOperationsIntelligenceExtension = null;
 let productionReadinessExtension = null;
 let onChainProjectionService = null;
-let fundingOpportunityService = null;
-let fundingVerificationService = null;
-let fundingValuePreparationService = null;
-let fundingModelSelectionService = null;
-let fundingInstrumentSelectionService = null;
-let fundingInstrumentReviewService = null;
-let fundingInstrumentIssuanceService = null;
-let fundingMarketplacePreparationService = null;
-let fundingMarketplacePublicationService = null;
-let fundingMarketplaceCommitmentService = null;
-let fundingMarketplaceAllocationService = null;
-let fundingMarketplaceSettlementService = null;
-let fundingOperationsService = null;
-let financingClosingService = null;
 let sainOperationsIntelligenceService = null;
 let productionReadinessService = null;
 let nativePlatformAssetService = null;
@@ -150,28 +144,55 @@ bootstrap.get('/api/startup', (_req, res) => {
 bootstrap.get('/api/marketplace-listings/status', (_req, res) => marketplaceListingService ? res.json(marketplaceListingService.status()) : res.status(503).json({ error: 'Marketplace Listing Layer is still initializing.' }));
 bootstrap.get('/api/marketplace-listings', (req, res) => marketplaceListingService ? res.json(marketplaceListingService.page({ state: req.query.state, instrumentId: req.query.instrumentId }, { page: req.query.page, limit: req.query.limit })) : res.status(503).json({ error: 'Marketplace Listing Layer is still initializing.' }));
 
+let ensurePlatformExtensions;
+let ensureFundingOpportunity;
+let ensureFundingVerification;
+let ensureFundingValuePreparation;
+let ensureFundingModelSelection;
+let ensureFundingInstrumentSelection;
+let ensureFundingInstrumentReview;
+let ensureFundingInstrumentIssuance;
+let ensureFundingMarketplacePreparation;
+let ensureFundingMarketplacePublication;
+let ensureFundingMarketplaceCommitment;
+let ensureFundingMarketplaceAllocation;
+let ensureFundingMarketplaceSettlement;
+let ensureFundingOperations;
+let ensureFinancingClosing;
+let ensureOnChainProjection;
+
+async function routeLazy(req, res, next, ensureExtension) {
+  try {
+    const extension = await ensureExtension();
+    return extension(req, res, next);
+  } catch (error) {
+    return next(error);
+  }
+}
+
 bootstrap.use(async (req, res, next) => {
   if (privateAdminExtension && (req.path === '/admin' || req.path.startsWith('/admin/') || req.path.startsWith('/api/admin/'))) return privateAdminExtension(req, res, next);
   if (database && req.method === 'POST' && req.path === '/api/access/signin') return rejectPlatformAdminPublicSignin(req, res, next, database);
   if (productionReadinessExtension && req.path.startsWith('/api/production')) return productionReadinessExtension(req, res, next);
   if (sainOperationsIntelligenceExtension && req.path.startsWith('/api/sain/intelligence')) return sainOperationsIntelligenceExtension(req, res, next);
-  if (financingClosingExtension && req.path.startsWith('/api/financing-closing')) return financingClosingExtension(req, res, next);
-  if (fundingOperationsExtension && req.path.startsWith('/api/funding-operations')) return fundingOperationsExtension(req, res, next);
-  if (fundingMarketplaceSettlementExtension && req.path.startsWith('/api/funding-marketplace-settlement')) return fundingMarketplaceSettlementExtension(req, res, next);
-  if (fundingMarketplaceAllocationExtension && req.path.startsWith('/api/funding-marketplace-allocation')) return fundingMarketplaceAllocationExtension(req, res, next);
-  if (fundingMarketplaceCommitmentExtension && req.path.startsWith('/api/funding-marketplace-commitment')) return fundingMarketplaceCommitmentExtension(req, res, next);
-  if (fundingMarketplacePublicationExtension && req.path.startsWith('/api/funding-marketplace-publication')) return fundingMarketplacePublicationExtension(req, res, next);
-  if (fundingMarketplacePreparationExtension && req.path.startsWith('/api/funding-marketplace')) return fundingMarketplacePreparationExtension(req, res, next);
-  if (fundingInstrumentIssuanceExtension && req.path.startsWith('/api/funding-instrument-issuance')) return fundingInstrumentIssuanceExtension(req, res, next);
-  if (fundingInstrumentReviewExtension && req.path.startsWith('/api/funding-instrument-review')) return fundingInstrumentReviewExtension(req, res, next);
-  if (fundingInstrumentSelectionExtension && req.path.startsWith('/api/funding-instrument')) return fundingInstrumentSelectionExtension(req, res, next);
-  if (fundingModelSelectionExtension && req.path.startsWith('/api/funding-model')) return fundingModelSelectionExtension(req, res, next);
-  if (fundingValuePreparationExtension && req.path.startsWith('/api/funding-value')) return fundingValuePreparationExtension(req, res, next);
-  if (fundingVerificationExtension && req.path.startsWith('/api/funding-verification')) return fundingVerificationExtension(req, res, next);
-  if (fundingOpportunityExtension && req.path.startsWith('/api/funding')) return fundingOpportunityExtension(req, res, next);
-  if (onChainProjectionExtension && req.path.startsWith('/api/on-chain')) return onChainProjectionExtension(req, res, next);
+
+  if (ensureFinancingClosing && req.path.startsWith('/api/financing-closing')) return routeLazy(req, res, next, ensureFinancingClosing);
+  if (ensureFundingOperations && req.path.startsWith('/api/funding-operations')) return routeLazy(req, res, next, ensureFundingOperations);
+  if (ensureFundingMarketplaceSettlement && req.path.startsWith('/api/funding-marketplace-settlement')) return routeLazy(req, res, next, ensureFundingMarketplaceSettlement);
+  if (ensureFundingMarketplaceAllocation && req.path.startsWith('/api/funding-marketplace-allocation')) return routeLazy(req, res, next, ensureFundingMarketplaceAllocation);
+  if (ensureFundingMarketplaceCommitment && req.path.startsWith('/api/funding-marketplace-commitment')) return routeLazy(req, res, next, ensureFundingMarketplaceCommitment);
+  if (ensureFundingMarketplacePublication && req.path.startsWith('/api/funding-marketplace-publication')) return routeLazy(req, res, next, ensureFundingMarketplacePublication);
+  if (ensureFundingMarketplacePreparation && req.path.startsWith('/api/funding-marketplace')) return routeLazy(req, res, next, ensureFundingMarketplacePreparation);
+  if (ensureFundingInstrumentIssuance && req.path.startsWith('/api/funding-instrument-issuance')) return routeLazy(req, res, next, ensureFundingInstrumentIssuance);
+  if (ensureFundingInstrumentReview && req.path.startsWith('/api/funding-instrument-review')) return routeLazy(req, res, next, ensureFundingInstrumentReview);
+  if (ensureFundingInstrumentSelection && req.path.startsWith('/api/funding-instrument')) return routeLazy(req, res, next, ensureFundingInstrumentSelection);
+  if (ensureFundingModelSelection && req.path.startsWith('/api/funding-model')) return routeLazy(req, res, next, ensureFundingModelSelection);
+  if (ensureFundingValuePreparation && req.path.startsWith('/api/funding-value')) return routeLazy(req, res, next, ensureFundingValuePreparation);
+  if (ensureFundingVerification && req.path.startsWith('/api/funding-verification')) return routeLazy(req, res, next, ensureFundingVerification);
+  if (ensureFundingOpportunity && req.path.startsWith('/api/funding')) return routeLazy(req, res, next, ensureFundingOpportunity);
+  if (ensureOnChainProjection && req.path.startsWith('/api/on-chain')) return routeLazy(req, res, next, ensureOnChainProjection);
   if (coinbaseExtension && req.path.startsWith('/api/connectors/coinbase-public')) return coinbaseExtension(req, res, next);
-  if (platformExtensions && (req.path.startsWith('/api/blockchain-accounts') || (req.method === 'POST' && req.path === '/api/access/funding/crypto-instructions'))) return platformExtensions(req, res, next);
+  if (ensurePlatformExtensions && (req.path.startsWith('/api/blockchain-accounts') || (req.method === 'POST' && req.path === '/api/access/funding/crypto-instructions'))) return routeLazy(req, res, next, ensurePlatformExtensions);
   if (platformApp) return platformApp(req, res, next);
   return res.status(503).json({ error: startupState === 'FAILED' ? 'The platform failed during initialization. Check /api/startup.' : 'The platform is still initializing.', startupState });
 });
@@ -189,82 +210,110 @@ process.once('SIGTERM', () => void shutdown('SIGTERM'));
 process.once('SIGINT', () => void shutdown('SIGINT'));
 
 try {
-  const created = await createApp();
-  database = created.database;
-  platformApp = created.app;
+  createdApp = await createApp();
+  database = createdApp.database;
+  platformApp = createdApp.app;
   startupMilestones.coreAppReadyAt = new Date().toISOString();
 
-  sainOperationsIntelligenceService = new SainOperationsIntelligenceService(created.persistentDomain);
+  sainOperationsIntelligenceService = new SainOperationsIntelligenceService(createdApp.persistentDomain);
   await sainOperationsIntelligenceService.initialize();
   sainOperationsIntelligenceExtension = createSainOperationsIntelligenceRouter(sainOperationsIntelligenceService);
-  productionReadinessService = new ProductionReadinessService({ database: created.database, domain: created.persistentDomain, intelligence: sainOperationsIntelligenceService });
-  productionReadinessExtension = createProductionReadinessRouter({ readinessService: productionReadinessService, database: created.database });
-  nativePlatformAssetService = new NativePlatformAssetService(created.persistentDomain, productionReadinessService.internalLifecycle);
+  productionReadinessService = new ProductionReadinessService({ database: createdApp.database, domain: createdApp.persistentDomain, intelligence: sainOperationsIntelligenceService });
+  productionReadinessExtension = createProductionReadinessRouter({ readinessService: productionReadinessService, database: createdApp.database });
+  nativePlatformAssetService = new NativePlatformAssetService(createdApp.persistentDomain, productionReadinessService.internalLifecycle);
 
-  coinbaseTransactionAssetPipeline = new CoinbaseTransactionAssetPipelineService({ observationLayerService: created.observationLayerService, financialRecordService: created.financialRecordService, persistentDomain: created.persistentDomain });
-  marketplaceListingService = new MarketplaceListingService(created.persistentDomain);
-  coinbasePublicMarket = new CoinbasePublicMarketService({ observationLayerService: created.observationLayerService, transactionAssetPipeline: coinbaseTransactionAssetPipeline });
+  coinbaseTransactionAssetPipeline = new CoinbaseTransactionAssetPipelineService({ observationLayerService: createdApp.observationLayerService, financialRecordService: createdApp.financialRecordService, persistentDomain: createdApp.persistentDomain });
+  marketplaceListingService = new MarketplaceListingService(createdApp.persistentDomain);
+  coinbasePublicMarket = new CoinbasePublicMarketService({ observationLayerService: createdApp.observationLayerService, transactionAssetPipeline: coinbaseTransactionAssetPipeline });
   coinbaseExtension = createCoinbasePublicMarketRouter(coinbasePublicMarket);
-  privateAdminExtension = await createPrivateAdminRouter({ database: created.database, domain: created.persistentDomain, coinbasePublicMarket, nativePlatformAsset: nativePlatformAssetService });
+  privateAdminExtension = await createPrivateAdminRouter({ database: createdApp.database, domain: createdApp.persistentDomain, coinbasePublicMarket, nativePlatformAsset: nativePlatformAssetService });
   coinbasePublicMarket.start();
   startupMilestones.adminReadyAt = new Date().toISOString();
 
-  platformExtensions = await createUniversalAccountBlockchainRouter(created.persistentDomain, created.database);
+  const domain = createdApp.persistentDomain;
 
-  fundingOpportunityService = new FundingOpportunityIntakeService(created.persistentDomain);
-  fundingVerificationService = new FundingOpportunityVerificationService(created.persistentDomain);
-  fundingValuePreparationService = new FundingOpportunityValuePreparationService(created.persistentDomain);
-  fundingModelSelectionService = new FundingModelSelectionService(created.persistentDomain);
-  fundingInstrumentSelectionService = new FundingInstrumentSelectionService(created.persistentDomain);
-  fundingInstrumentReviewService = new FundingInstrumentReviewService(created.persistentDomain);
-  fundingInstrumentIssuanceService = new FundingInstrumentIssuanceService(created.persistentDomain);
-  fundingMarketplacePreparationService = new FundingMarketplacePreparationService(created.persistentDomain);
-  fundingMarketplacePublicationService = new FundingMarketplacePublicationService(created.persistentDomain);
-  fundingMarketplaceCommitmentService = new FundingMarketplaceCommitmentService(created.persistentDomain);
-  fundingMarketplaceAllocationService = new FundingMarketplaceAllocationService(created.persistentDomain);
-  fundingMarketplaceSettlementService = new FundingMarketplaceSettlementService(created.persistentDomain);
-  fundingOperationsService = new FundingOperationsService(created.persistentDomain);
-  financingClosingService = new FinancingClosingService(created.persistentDomain, new AssetServicingService(created.persistentDomain));
-  onChainProjectionService = new OnChainProjectionService(created.persistentDomain);
+  ensurePlatformExtensions = createSingleFlightInitializer('Universal Account Blockchain Router', async () => createUniversalAccountBlockchainRouter(domain, createdApp.database));
 
-  await Promise.all([
-    fundingOpportunityService.initialize(),
-    fundingVerificationService.initialize(),
-    fundingValuePreparationService.initialize(),
-    fundingModelSelectionService.initialize(),
-    fundingInstrumentSelectionService.initialize(),
-    fundingInstrumentReviewService.initialize(),
-    fundingInstrumentIssuanceService.initialize(),
-    fundingMarketplacePreparationService.initialize(),
-    fundingMarketplacePublicationService.initialize(),
-    fundingMarketplaceCommitmentService.initialize(),
-    fundingMarketplaceAllocationService.initialize(),
-    fundingMarketplaceSettlementService.initialize(),
-    fundingOperationsService.initialize(),
-    financingClosingService.initialize(),
-    onChainProjectionService.initialize(),
-  ]);
-
-  fundingOpportunityExtension = mountExtension('/api/funding', createFundingOpportunityRouter(fundingOpportunityService));
-  fundingVerificationExtension = mountExtension('/api/funding-verification', createFundingOpportunityVerificationRouter(fundingVerificationService));
-  fundingValuePreparationExtension = mountExtension('/api/funding-value', createFundingOpportunityValuePreparationRouter(fundingValuePreparationService));
-  fundingModelSelectionExtension = mountExtension('/api/funding-model', createFundingModelSelectionRouter(fundingModelSelectionService));
-  fundingInstrumentSelectionExtension = mountExtension('/api/funding-instrument', createFundingInstrumentSelectionRouter(fundingInstrumentSelectionService));
-  fundingInstrumentReviewExtension = mountExtension('/api/funding-instrument-review', createFundingInstrumentReviewRouter(fundingInstrumentReviewService));
-  fundingInstrumentIssuanceExtension = mountExtension('/api/funding-instrument-issuance', createFundingInstrumentIssuanceRouter(fundingInstrumentIssuanceService));
-  fundingMarketplacePreparationExtension = mountExtension('/api/funding-marketplace', createFundingMarketplacePreparationRouter(fundingMarketplacePreparationService));
-  fundingMarketplacePublicationExtension = mountExtension('/api/funding-marketplace-publication', createFundingMarketplacePublicationRouter(fundingMarketplacePublicationService));
-  fundingMarketplaceCommitmentExtension = mountExtension('/api/funding-marketplace-commitment', createFundingMarketplaceCommitmentRouter(fundingMarketplaceCommitmentService));
-  fundingMarketplaceAllocationExtension = mountExtension('/api/funding-marketplace-allocation', createFundingMarketplaceAllocationRouter(fundingMarketplaceAllocationService));
-  fundingMarketplaceSettlementExtension = mountExtension('/api/funding-marketplace-settlement', createFundingMarketplaceSettlementRouter(fundingMarketplaceSettlementService));
-  fundingOperationsExtension = mountExtension('/api/funding-operations', createFundingOperationsRouter(fundingOperationsService));
-  financingClosingExtension = mountExtension('/api/financing-closing', createFinancingClosingRouter(financingClosingService));
-  onChainProjectionExtension = createOnChainProjectionRouter(onChainProjectionService);
+  ensureFundingOpportunity = createSingleFlightInitializer('Funding Opportunity Intake', async () => {
+    const service = new FundingOpportunityIntakeService(domain);
+    await service.initialize();
+    return mountExtension('/api/funding', createFundingOpportunityRouter(service));
+  });
+  ensureFundingVerification = createSingleFlightInitializer('Funding Opportunity Verification', async () => {
+    const service = new FundingOpportunityVerificationService(domain);
+    await service.initialize();
+    return mountExtension('/api/funding-verification', createFundingOpportunityVerificationRouter(service));
+  });
+  ensureFundingValuePreparation = createSingleFlightInitializer('Funding Value Preparation', async () => {
+    const service = new FundingOpportunityValuePreparationService(domain);
+    await service.initialize();
+    return mountExtension('/api/funding-value', createFundingOpportunityValuePreparationRouter(service));
+  });
+  ensureFundingModelSelection = createSingleFlightInitializer('Funding Model Selection', async () => {
+    const service = new FundingModelSelectionService(domain);
+    await service.initialize();
+    return mountExtension('/api/funding-model', createFundingModelSelectionRouter(service));
+  });
+  ensureFundingInstrumentSelection = createSingleFlightInitializer('Funding Instrument Selection', async () => {
+    const service = new FundingInstrumentSelectionService(domain);
+    await service.initialize();
+    return mountExtension('/api/funding-instrument', createFundingInstrumentSelectionRouter(service));
+  });
+  ensureFundingInstrumentReview = createSingleFlightInitializer('Funding Instrument Review', async () => {
+    const service = new FundingInstrumentReviewService(domain);
+    await service.initialize();
+    return mountExtension('/api/funding-instrument-review', createFundingInstrumentReviewRouter(service));
+  });
+  ensureFundingInstrumentIssuance = createSingleFlightInitializer('Funding Instrument Issuance', async () => {
+    const service = new FundingInstrumentIssuanceService(domain);
+    await service.initialize();
+    return mountExtension('/api/funding-instrument-issuance', createFundingInstrumentIssuanceRouter(service));
+  });
+  ensureFundingMarketplacePreparation = createSingleFlightInitializer('Funding Marketplace Preparation', async () => {
+    const service = new FundingMarketplacePreparationService(domain);
+    await service.initialize();
+    return mountExtension('/api/funding-marketplace', createFundingMarketplacePreparationRouter(service));
+  });
+  ensureFundingMarketplacePublication = createSingleFlightInitializer('Funding Marketplace Publication', async () => {
+    const service = new FundingMarketplacePublicationService(domain);
+    await service.initialize();
+    return mountExtension('/api/funding-marketplace-publication', createFundingMarketplacePublicationRouter(service));
+  });
+  ensureFundingMarketplaceCommitment = createSingleFlightInitializer('Funding Marketplace Commitment', async () => {
+    const service = new FundingMarketplaceCommitmentService(domain);
+    await service.initialize();
+    return mountExtension('/api/funding-marketplace-commitment', createFundingMarketplaceCommitmentRouter(service));
+  });
+  ensureFundingMarketplaceAllocation = createSingleFlightInitializer('Funding Marketplace Allocation', async () => {
+    const service = new FundingMarketplaceAllocationService(domain);
+    await service.initialize();
+    return mountExtension('/api/funding-marketplace-allocation', createFundingMarketplaceAllocationRouter(service));
+  });
+  ensureFundingMarketplaceSettlement = createSingleFlightInitializer('Funding Marketplace Settlement', async () => {
+    const service = new FundingMarketplaceSettlementService(domain);
+    await service.initialize();
+    return mountExtension('/api/funding-marketplace-settlement', createFundingMarketplaceSettlementRouter(service));
+  });
+  ensureFundingOperations = createSingleFlightInitializer('Funding Operations', async () => {
+    const service = new FundingOperationsService(domain);
+    await service.initialize();
+    return mountExtension('/api/funding-operations', createFundingOperationsRouter(service));
+  });
+  ensureFinancingClosing = createSingleFlightInitializer('Financing Closing', async () => {
+    const service = new FinancingClosingService(domain, new AssetServicingService(domain));
+    await service.initialize();
+    return mountExtension('/api/financing-closing', createFinancingClosingRouter(service));
+  });
+  ensureOnChainProjection = createSingleFlightInitializer('On-Chain Projection', async () => {
+    onChainProjectionService = new OnChainProjectionService(domain);
+    await onChainProjectionService.initialize();
+    return createOnChainProjectionRouter(onChainProjectionService);
+  });
 
   startupState = 'READY';
   startupError = null;
   startupMilestones.fullyReadyAt = new Date().toISOString();
-  console.log(JSON.stringify({ level: 'info', event: 'PLATFORM_INITIALIZATION_COMPLETED', nativePlatformAsset: nativePlatformAssetService.status(), ...startupSnapshot() }));
+  console.log(JSON.stringify({ level: 'info', event: 'PLATFORM_INITIALIZATION_COMPLETED', mode: 'ROUTE_SCOPED_HEAVY_SERVICES', nativePlatformAsset: nativePlatformAssetService.status(), ...startupSnapshot() }));
 } catch (error) {
   startupState = 'FAILED';
   startupError = { name: error?.name || 'Error', message: error?.message || String(error), stack: process.env.NODE_ENV === 'production' ? undefined : error?.stack };
