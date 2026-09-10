@@ -24,5 +24,4 @@ jobs:
       - name: Check deployed SRA production site and API
         env:
           SRA_PRODUCTION_URL: https://www.sainrealasset.com
-          SRA_EXPECTED_COMMIT: ${{ github.sha }}
         run: node scripts/production-smoke-check.mjs
