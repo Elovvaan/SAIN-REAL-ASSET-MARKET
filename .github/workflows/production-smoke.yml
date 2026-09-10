@@ -6,6 +6,18 @@ on:
       - 'scripts/production-smoke-check.mjs'
       - '.github/workflows/production-smoke.yml'
       - 'server.js'
+      - 'public/admin/**'
+      - 'routes/production-readiness-router.js'
+      - 'services/production-readiness-service.js'
+      - 'services/product-qualification-service.js'
+  push:
+    branches:
+      - main
+    paths:
+      - 'scripts/production-smoke-check.mjs'
+      - '.github/workflows/production-smoke.yml'
+      - 'server.js'
+      - 'public/admin/**'
       - 'routes/production-readiness-router.js'
       - 'services/production-readiness-service.js'
       - 'services/product-qualification-service.js'
@@ -25,7 +37,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: Check deployed SRA production API
+      - name: Check deployed SRA production site and API
         env:
-          SRA_PRODUCTION_URL: https://sain-real-asset-market-production.up.railway.app
+          SRA_PRODUCTION_URL: https://www.sainrealasset.com
         run: node scripts/production-smoke-check.mjs
