@@ -87,9 +87,10 @@ const assetPaths = new Set([
   ...(publicHtml ? localAssets(publicHtml) : []),
   ...(adminHtml ? localAssets(adminHtml) : []),
   '/admin/admin-bootstrap.js',
+  '/admin/admin-performance-runtime.js',
   '/admin/admin-suite-shell.js',
+  '/admin/admin-suite-shell.css',
   '/admin/admin-data-client.js',
-  '/admin/admin-navigation-simplifier.js',
   '/admin/admin-workstation-controls.js',
 ]);
 
