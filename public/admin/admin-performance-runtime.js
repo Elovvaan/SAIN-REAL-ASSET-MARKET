@@ -67,6 +67,7 @@
   }
 
   function markStale() {
+    generation += 1;
     const staleAt = Date.now() - FRESH_TTL_MS - 1;
     for (const value of cache.values()) {
       value.storedAt = Math.min(value.storedAt, staleAt);
@@ -148,7 +149,7 @@
   }
 
   function refresh(source = 'manual') {
-    invalidate();
+    markStale();
     if (baseClient?.refresh) return baseClient.refresh(source);
     window.dispatchEvent(new CustomEvent('sra:admin-refresh', {
       detail: { source, requestedAt: new Date().toISOString() },
@@ -166,7 +167,7 @@
   }
 
   window.addEventListener('sra:admin-mutated', markStale);
-  window.addEventListener('sra:admin-refresh', invalidate);
+  window.addEventListener('sra:admin-refresh', markStale);
   window.addEventListener('sra-admin-session-expired', invalidate);
   window.addEventListener('sra-admin-session-restored', invalidate);
 
