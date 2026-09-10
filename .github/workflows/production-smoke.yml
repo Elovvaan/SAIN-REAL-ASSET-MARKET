@@ -2,25 +2,9 @@ name: production-smoke
 
 on:
   pull_request:
-    paths:
-      - 'scripts/production-smoke-check.mjs'
-      - '.github/workflows/production-smoke.yml'
-      - 'server.js'
-      - 'public/admin/**'
-      - 'routes/production-readiness-router.js'
-      - 'services/production-readiness-service.js'
-      - 'services/product-qualification-service.js'
   push:
     branches:
       - main
-    paths:
-      - 'scripts/production-smoke-check.mjs'
-      - '.github/workflows/production-smoke.yml'
-      - 'server.js'
-      - 'public/admin/**'
-      - 'routes/production-readiness-router.js'
-      - 'services/production-readiness-service.js'
-      - 'services/product-qualification-service.js'
   workflow_dispatch:
   schedule:
     - cron: '17 * * * *'
@@ -36,8 +20,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
       - name: Check deployed SRA production site and API
         env:
           SRA_PRODUCTION_URL: https://www.sainrealasset.com
+          SRA_EXPECTED_COMMIT: ${{ github.sha }}
         run: node scripts/production-smoke-check.mjs
