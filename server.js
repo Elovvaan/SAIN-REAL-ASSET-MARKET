@@ -106,11 +106,33 @@ let marketplaceListingTimer = null;
 let database = null;
 let startupState = 'STARTING';
 let startupError = null;
-let startedAt = new Date().toISOString();
+const startedAt = new Date().toISOString();
+const startupMilestones = {
+  serverListeningAt: null,
+  coreAppReadyAt: null,
+  adminReadyAt: null,
+  fullyReadyAt: null,
+};
+const deployment = Object.freeze({
+  commitSha: process.env.RAILWAY_GIT_COMMIT_SHA || null,
+  branch: process.env.RAILWAY_GIT_BRANCH || null,
+  deploymentId: process.env.RAILWAY_DEPLOYMENT_ID || null,
+  service: process.env.RAILWAY_SERVICE_NAME || null,
+  environment: process.env.RAILWAY_ENVIRONMENT_NAME || null,
+});
+function startupSnapshot() {
+  return { startedAt, milestones: { ...startupMilestones }, deployment };
+}
 
 bootstrap.get('/api/health', async (_req, res) => {
   const dependencies = await dependencyHealth({ database, startupState });
-  return res.status(dependencies.status === 'READY' ? 200 : 503).json({ status: dependencies.status === 'READY' ? 'ok' : 'degraded', service: 'SAIN Real Asset Market', startupState, startedAt, timestamp: new Date().toISOString() });
+  return res.status(dependencies.status === 'READY' ? 200 : 503).json({
+    status: dependencies.status === 'READY' ? 'ok' : 'degraded',
+    service: 'SAIN Real Asset Market',
+    startupState,
+    ...startupSnapshot(),
+    timestamp: new Date().toISOString(),
+  });
 });
 bootstrap.get('/api/production/dependencies', async (_req, res) => {
   const report = await dependencyHealth({ database, startupState, connectors: { COINBASE_PUBLIC_MARKET: coinbasePublicMarket, MARKETPLACE_LISTING: marketplaceListingService, ON_CHAIN_PROJECTION: onChainProjectionService } });
@@ -123,7 +145,7 @@ bootstrap.post('/api/production/alerts/test', async (req, res) => {
 });
 bootstrap.get('/api/startup', (_req, res) => {
   const statusCode = startupState === 'READY' ? 200 : startupState === 'FAILED' ? 500 : 503;
-  return res.status(statusCode).json({ startupState, startupError, nativePlatformAsset: nativePlatformAssetService?.status?.() || null, startedAt, timestamp: new Date().toISOString() });
+  return res.status(statusCode).json({ startupState, startupError, nativePlatformAsset: nativePlatformAssetService?.status?.() || null, ...startupSnapshot(), timestamp: new Date().toISOString() });
 });
 bootstrap.get('/api/marketplace-listings/status', (_req, res) => marketplaceListingService ? res.json(marketplaceListingService.status()) : res.status(503).json({ error: 'Marketplace Listing Layer is still initializing.' }));
 bootstrap.get('/api/marketplace-listings', (req, res) => marketplaceListingService ? res.json(marketplaceListingService.page({ state: req.query.state, instrumentId: req.query.instrumentId }, { page: req.query.page, limit: req.query.limit })) : res.status(503).json({ error: 'Marketplace Listing Layer is still initializing.' }));
@@ -154,7 +176,10 @@ bootstrap.use(async (req, res, next) => {
   return res.status(503).json({ error: startupState === 'FAILED' ? 'The platform failed during initialization. Check /api/startup.' : 'The platform is still initializing.', startupState });
 });
 
-const server = bootstrap.listen(port, '0.0.0.0', () => console.log(JSON.stringify({ level: 'info', event: 'SERVER_LISTENING', port, service: 'SAIN_REAL_ASSET_MARKET' })));
+const server = bootstrap.listen(port, '0.0.0.0', () => {
+  startupMilestones.serverListeningAt = new Date().toISOString();
+  console.log(JSON.stringify({ level: 'info', event: 'SERVER_LISTENING', port, service: 'SAIN_REAL_ASSET_MARKET', deployment }));
+});
 server.requestTimeout = Number(process.env.SRA_REQUEST_TIMEOUT_MS) || 30000;
 server.headersTimeout = Number(process.env.SRA_HEADERS_TIMEOUT_MS) || 35000;
 server.keepAliveTimeout = Number(process.env.SRA_KEEP_ALIVE_TIMEOUT_MS) || 5000;
@@ -166,38 +191,82 @@ process.once('SIGINT', () => void shutdown('SIGINT'));
 try {
   const created = await createApp();
   database = created.database;
-  platformExtensions = await createUniversalAccountBlockchainRouter(created.persistentDomain, created.database);
-  fundingOpportunityService = new FundingOpportunityIntakeService(created.persistentDomain); await fundingOpportunityService.initialize(); fundingOpportunityExtension = mountExtension('/api/funding', createFundingOpportunityRouter(fundingOpportunityService));
-  fundingVerificationService = new FundingOpportunityVerificationService(created.persistentDomain); await fundingVerificationService.initialize(); fundingVerificationExtension = mountExtension('/api/funding-verification', createFundingOpportunityVerificationRouter(fundingVerificationService));
-  fundingValuePreparationService = new FundingOpportunityValuePreparationService(created.persistentDomain); await fundingValuePreparationService.initialize(); fundingValuePreparationExtension = mountExtension('/api/funding-value', createFundingOpportunityValuePreparationRouter(fundingValuePreparationService));
-  fundingModelSelectionService = new FundingModelSelectionService(created.persistentDomain); await fundingModelSelectionService.initialize(); fundingModelSelectionExtension = mountExtension('/api/funding-model', createFundingModelSelectionRouter(fundingModelSelectionService));
-  fundingInstrumentSelectionService = new FundingInstrumentSelectionService(created.persistentDomain); await fundingInstrumentSelectionService.initialize(); fundingInstrumentSelectionExtension = mountExtension('/api/funding-instrument', createFundingInstrumentSelectionRouter(fundingInstrumentSelectionService));
-  fundingInstrumentReviewService = new FundingInstrumentReviewService(created.persistentDomain); await fundingInstrumentReviewService.initialize(); fundingInstrumentReviewExtension = mountExtension('/api/funding-instrument-review', createFundingInstrumentReviewRouter(fundingInstrumentReviewService));
-  fundingInstrumentIssuanceService = new FundingInstrumentIssuanceService(created.persistentDomain); await fundingInstrumentIssuanceService.initialize(); fundingInstrumentIssuanceExtension = mountExtension('/api/funding-instrument-issuance', createFundingInstrumentIssuanceRouter(fundingInstrumentIssuanceService));
-  fundingMarketplacePreparationService = new FundingMarketplacePreparationService(created.persistentDomain); await fundingMarketplacePreparationService.initialize(); fundingMarketplacePreparationExtension = mountExtension('/api/funding-marketplace', createFundingMarketplacePreparationRouter(fundingMarketplacePreparationService));
-  fundingMarketplacePublicationService = new FundingMarketplacePublicationService(created.persistentDomain); await fundingMarketplacePublicationService.initialize(); fundingMarketplacePublicationExtension = mountExtension('/api/funding-marketplace-publication', createFundingMarketplacePublicationRouter(fundingMarketplacePublicationService));
-  fundingMarketplaceCommitmentService = new FundingMarketplaceCommitmentService(created.persistentDomain); await fundingMarketplaceCommitmentService.initialize(); fundingMarketplaceCommitmentExtension = mountExtension('/api/funding-marketplace-commitment', createFundingMarketplaceCommitmentRouter(fundingMarketplaceCommitmentService));
-  fundingMarketplaceAllocationService = new FundingMarketplaceAllocationService(created.persistentDomain); await fundingMarketplaceAllocationService.initialize(); fundingMarketplaceAllocationExtension = mountExtension('/api/funding-marketplace-allocation', createFundingMarketplaceAllocationRouter(fundingMarketplaceAllocationService));
-  fundingMarketplaceSettlementService = new FundingMarketplaceSettlementService(created.persistentDomain); await fundingMarketplaceSettlementService.initialize(); fundingMarketplaceSettlementExtension = mountExtension('/api/funding-marketplace-settlement', createFundingMarketplaceSettlementRouter(fundingMarketplaceSettlementService));
-  fundingOperationsService = new FundingOperationsService(created.persistentDomain); await fundingOperationsService.initialize(); fundingOperationsExtension = mountExtension('/api/funding-operations', createFundingOperationsRouter(fundingOperationsService));
-  financingClosingService = new FinancingClosingService(created.persistentDomain, new AssetServicingService(created.persistentDomain)); await financingClosingService.initialize(); financingClosingExtension = mountExtension('/api/financing-closing', createFinancingClosingRouter(financingClosingService));
-  sainOperationsIntelligenceService = new SainOperationsIntelligenceService(created.persistentDomain); await sainOperationsIntelligenceService.initialize(); sainOperationsIntelligenceExtension = createSainOperationsIntelligenceRouter(sainOperationsIntelligenceService);
+  platformApp = created.app;
+  startupMilestones.coreAppReadyAt = new Date().toISOString();
+
+  sainOperationsIntelligenceService = new SainOperationsIntelligenceService(created.persistentDomain);
+  await sainOperationsIntelligenceService.initialize();
+  sainOperationsIntelligenceExtension = createSainOperationsIntelligenceRouter(sainOperationsIntelligenceService);
   productionReadinessService = new ProductionReadinessService({ database: created.database, domain: created.persistentDomain, intelligence: sainOperationsIntelligenceService });
   productionReadinessExtension = createProductionReadinessRouter({ readinessService: productionReadinessService, database: created.database });
   nativePlatformAssetService = new NativePlatformAssetService(created.persistentDomain, productionReadinessService.internalLifecycle);
-  onChainProjectionService = new OnChainProjectionService(created.persistentDomain); await onChainProjectionService.initialize(); onChainProjectionExtension = createOnChainProjectionRouter(onChainProjectionService);
+
   coinbaseTransactionAssetPipeline = new CoinbaseTransactionAssetPipelineService({ observationLayerService: created.observationLayerService, financialRecordService: created.financialRecordService, persistentDomain: created.persistentDomain });
   marketplaceListingService = new MarketplaceListingService(created.persistentDomain);
   coinbasePublicMarket = new CoinbasePublicMarketService({ observationLayerService: created.observationLayerService, transactionAssetPipeline: coinbaseTransactionAssetPipeline });
   coinbaseExtension = createCoinbasePublicMarketRouter(coinbasePublicMarket);
   privateAdminExtension = await createPrivateAdminRouter({ database: created.database, domain: created.persistentDomain, coinbasePublicMarket, nativePlatformAsset: nativePlatformAssetService });
   coinbasePublicMarket.start();
-  platformApp = created.app;
+  startupMilestones.adminReadyAt = new Date().toISOString();
+
+  platformExtensions = await createUniversalAccountBlockchainRouter(created.persistentDomain, created.database);
+
+  fundingOpportunityService = new FundingOpportunityIntakeService(created.persistentDomain);
+  fundingVerificationService = new FundingOpportunityVerificationService(created.persistentDomain);
+  fundingValuePreparationService = new FundingOpportunityValuePreparationService(created.persistentDomain);
+  fundingModelSelectionService = new FundingModelSelectionService(created.persistentDomain);
+  fundingInstrumentSelectionService = new FundingInstrumentSelectionService(created.persistentDomain);
+  fundingInstrumentReviewService = new FundingInstrumentReviewService(created.persistentDomain);
+  fundingInstrumentIssuanceService = new FundingInstrumentIssuanceService(created.persistentDomain);
+  fundingMarketplacePreparationService = new FundingMarketplacePreparationService(created.persistentDomain);
+  fundingMarketplacePublicationService = new FundingMarketplacePublicationService(created.persistentDomain);
+  fundingMarketplaceCommitmentService = new FundingMarketplaceCommitmentService(created.persistentDomain);
+  fundingMarketplaceAllocationService = new FundingMarketplaceAllocationService(created.persistentDomain);
+  fundingMarketplaceSettlementService = new FundingMarketplaceSettlementService(created.persistentDomain);
+  fundingOperationsService = new FundingOperationsService(created.persistentDomain);
+  financingClosingService = new FinancingClosingService(created.persistentDomain, new AssetServicingService(created.persistentDomain));
+  onChainProjectionService = new OnChainProjectionService(created.persistentDomain);
+
+  await Promise.all([
+    fundingOpportunityService.initialize(),
+    fundingVerificationService.initialize(),
+    fundingValuePreparationService.initialize(),
+    fundingModelSelectionService.initialize(),
+    fundingInstrumentSelectionService.initialize(),
+    fundingInstrumentReviewService.initialize(),
+    fundingInstrumentIssuanceService.initialize(),
+    fundingMarketplacePreparationService.initialize(),
+    fundingMarketplacePublicationService.initialize(),
+    fundingMarketplaceCommitmentService.initialize(),
+    fundingMarketplaceAllocationService.initialize(),
+    fundingMarketplaceSettlementService.initialize(),
+    fundingOperationsService.initialize(),
+    financingClosingService.initialize(),
+    onChainProjectionService.initialize(),
+  ]);
+
+  fundingOpportunityExtension = mountExtension('/api/funding', createFundingOpportunityRouter(fundingOpportunityService));
+  fundingVerificationExtension = mountExtension('/api/funding-verification', createFundingOpportunityVerificationRouter(fundingVerificationService));
+  fundingValuePreparationExtension = mountExtension('/api/funding-value', createFundingOpportunityValuePreparationRouter(fundingValuePreparationService));
+  fundingModelSelectionExtension = mountExtension('/api/funding-model', createFundingModelSelectionRouter(fundingModelSelectionService));
+  fundingInstrumentSelectionExtension = mountExtension('/api/funding-instrument', createFundingInstrumentSelectionRouter(fundingInstrumentSelectionService));
+  fundingInstrumentReviewExtension = mountExtension('/api/funding-instrument-review', createFundingInstrumentReviewRouter(fundingInstrumentReviewService));
+  fundingInstrumentIssuanceExtension = mountExtension('/api/funding-instrument-issuance', createFundingInstrumentIssuanceRouter(fundingInstrumentIssuanceService));
+  fundingMarketplacePreparationExtension = mountExtension('/api/funding-marketplace', createFundingMarketplacePreparationRouter(fundingMarketplacePreparationService));
+  fundingMarketplacePublicationExtension = mountExtension('/api/funding-marketplace-publication', createFundingMarketplacePublicationRouter(fundingMarketplacePublicationService));
+  fundingMarketplaceCommitmentExtension = mountExtension('/api/funding-marketplace-commitment', createFundingMarketplaceCommitmentRouter(fundingMarketplaceCommitmentService));
+  fundingMarketplaceAllocationExtension = mountExtension('/api/funding-marketplace-allocation', createFundingMarketplaceAllocationRouter(fundingMarketplaceAllocationService));
+  fundingMarketplaceSettlementExtension = mountExtension('/api/funding-marketplace-settlement', createFundingMarketplaceSettlementRouter(fundingMarketplaceSettlementService));
+  fundingOperationsExtension = mountExtension('/api/funding-operations', createFundingOperationsRouter(fundingOperationsService));
+  financingClosingExtension = mountExtension('/api/financing-closing', createFinancingClosingRouter(financingClosingService));
+  onChainProjectionExtension = createOnChainProjectionRouter(onChainProjectionService);
+
   startupState = 'READY';
   startupError = null;
-  console.log(JSON.stringify({ level: 'info', event: 'PLATFORM_INITIALIZATION_COMPLETED', nativePlatformAsset: nativePlatformAssetService.status(), startedAt }));
+  startupMilestones.fullyReadyAt = new Date().toISOString();
+  console.log(JSON.stringify({ level: 'info', event: 'PLATFORM_INITIALIZATION_COMPLETED', nativePlatformAsset: nativePlatformAssetService.status(), ...startupSnapshot() }));
 } catch (error) {
   startupState = 'FAILED';
   startupError = { name: error?.name || 'Error', message: error?.message || String(error), stack: process.env.NODE_ENV === 'production' ? undefined : error?.stack };
-  console.error(JSON.stringify({ level: 'error', event: 'PLATFORM_INITIALIZATION_FAILED', error: startupError }));
+  console.error(JSON.stringify({ level: 'error', event: 'PLATFORM_INITIALIZATION_FAILED', error: startupError, ...startupSnapshot() }));
 }
