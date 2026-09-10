@@ -43,7 +43,7 @@ await requestText('/', '<html');
 await requestText('/admin/', 'admin-bootstrap.js');
 await Promise.all([
   requestText('/admin/admin-bootstrap.js', '__sraAdminBootstrapInstalled'),
-  requestText('/admin/admin-suite-shell.js', '__sraAdminSuiteShellInstalled'),
+  requestText('/admin/admin-suite-shell.js', 'const WORKSPACES = ['),
   requestText('/admin/admin-data-client.js', 'SRAAdminDataClient'),
   requestText('/admin/admin-navigation-simplifier.js', '__sraAdminNavigationSimplifierInstalled'),
   requestText('/admin/admin-workstation-controls.js', '__sraAdminWorkstationControlsInstalled'),
@@ -62,7 +62,7 @@ assert(Array.isArray(catalog.products), 'Product catalog did not return a produc
 assert(catalog.products.some((product) => product.productCode === 'TRUE_BILL'), 'TRUE_BILL is missing from the hydrated product catalog.');
 
 const trueBill = await requestJson('/api/production/products/TRUE_BILL');
-assert(trueBill.productCode === 'TRUE_BILL', 'TRUE_BILL product lookup returned the wrong product.');
+assert(trueBill.productCode === 'TRUE_BILL', 'TRUE_BILL product lookup returned the wrong product code.');
 assert(trueBill.state === 'ACTIVE', `TRUE_BILL state is ${trueBill.state || 'missing'}.`);
 
 const candidates = await requestJson('/api/production/products/TRUE_BILL/qualification-candidates');
