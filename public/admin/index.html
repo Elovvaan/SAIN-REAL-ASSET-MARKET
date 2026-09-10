@@ -33,25 +33,28 @@
     const adminView=document.querySelector('#admin-view');
     const setupError=document.querySelector('#setup-error');
     const loginError=document.querySelector('#login-error');
+    let authRecoveryInFlight=null;
 
     async function json(url,options={}){
       if(window.SRAAdminDataClient)return window.SRAAdminDataClient.json(url,options);
-      const response=await fetch(url,options);
+      const response=await fetch(url,{credentials:'include',...options});
       const payload=await response.json().catch(()=>({}));
-      if(!response.ok){const error=new Error(payload.error||'Request failed.');error.payload=payload;throw error}
+      if(!response.ok){const error=new Error(payload.error||'Request failed.');error.payload=payload;error.status=response.status;throw error}
       return payload;
     }
-    function showAuthentication(view){
+    function showAuthentication(view,message=''){
       authShell.classList.remove('hidden');
       setupView.classList.add('hidden');
       loginView.classList.add('hidden');
       adminView.classList.add('hidden');
       view?.classList.remove('hidden');
+      if(view===loginView&&message)loginError.textContent=message;
     }
     function showAdmin(session){
       authShell.classList.add('hidden');
       setupView.classList.add('hidden');
       loginView.classList.add('hidden');
+      loginError.textContent='';
       document.querySelector('#admin-name').textContent=session.displayName||'Platform Administrator';
       document.querySelector('#admin-id').textContent=`${session.email||''} · ${session.activeCapacity||'PLATFORM_ADMIN'}`;
       adminView.classList.remove('hidden');
@@ -59,14 +62,23 @@
     }
     async function checkSession(){
       const data=await json('/api/admin/session');
-      if(data.authenticated){showAdmin(data.session);return}
+      if(data.authenticated){showAdmin(data.session);return data}
       if(!data.bootstrap?.initialized){
         showAuthentication(setupView);
         document.querySelector('#setup-notice').textContent=data.bootstrap?.setupCodeConfigured?'Enter the temporary setup code stored in Railway, then create your permanent credentials.':'Add SRA_ADMIN_SETUP_CODE in Railway and redeploy once to unlock this one-time setup.';
         document.querySelector('#setup-form button').disabled=!data.bootstrap?.setupAvailable;
-        return;
+        return data;
       }
       showAuthentication(loginView);
+      return data;
+    }
+    function recoverAdminAuthentication(){
+      if(authRecoveryInFlight)return authRecoveryInFlight;
+      showAuthentication(loginView,'Your Private Platform Administration session has ended. Sign in again to continue.');
+      authRecoveryInFlight=checkSession()
+        .catch(()=>null)
+        .finally(()=>{authRecoveryInFlight=null});
+      return authRecoveryInFlight;
     }
     document.querySelector('#setup-form').addEventListener('submit',async event=>{
       event.preventDefault();setupError.textContent='';
@@ -78,7 +90,9 @@
       try{const data=await json('/api/admin/signin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:event.target.email.value,password:event.target.password.value})});showAdmin(data.session)}catch(error){loginError.textContent=error.message}
     });
     document.querySelector('#signout').addEventListener('click',async()=>{await json('/api/admin/signout',{method:'POST'});location.reload()});
-    checkSession().catch(error=>{showAuthentication(loginView);loginError.textContent=error.message});
+    window.addEventListener('sra-admin-session-expired',()=>void recoverAdminAuthentication());
+    window.addEventListener('sra-admin-session-restored',()=>void checkSession());
+    checkSession().catch(error=>{showAuthentication(loginView,error.message)});
   </script>
   <script src="/admin/admin-bootstrap.js" defer></script>
 </body>
