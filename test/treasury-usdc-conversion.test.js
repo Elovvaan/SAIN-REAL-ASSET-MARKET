@@ -38,11 +38,14 @@ test('governs USD to Stellar USDC conversion through verified receipt before rec
   const conversion = await service.authorize({ profileId:'SRA_PLATFORM_TREASURY', amount:100000, provider:'CONFIGURED_ANCHOR', destinationNetwork:'STELLAR', confirmLiveConversion:true }, 'ADMIN');
   assert.equal(conversion.state,'AUTHORIZED');
   assert.equal(conversion.destinationWallet,'GSRASTELLARDISTRIBUTOR');
+  assert.equal(conversion.environment,'MAINNET');
   assert.equal(conversion.issuerAddress,STELLAR_USDC.issuerAddress);
   assert.equal(entries.length,0);
 
   const initiated = await service.initiate(conversion.conversionId,{},'ADMIN');
   assert.equal(initiated.state,'PROVIDER_INITIATED');
+  assert.equal(initiated.destinationWallet,'GSRASTELLARDISTRIBUTOR');
+  assert.equal(initiated.environment,'MAINNET');
   assert.equal(initiated.providerTransactionReference,'ANCHOR-1');
   await service.confirmUsdFunding(conversion.conversionId,{usdFundingReference:'WIRE-100K'},'ADMIN');
   const received = await service.confirmUsdcReceipt(conversion.conversionId,{stellarTransactionId:'a'.repeat(64)},'ADMIN');
@@ -54,6 +57,29 @@ test('governs USD to Stellar USDC conversion through verified receipt before rec
   assert.equal(entries.length,1);
   assert.equal(balances['TRSY-1000-CASH-USD'],4800000);
   assert.equal(balances['TRSY-1020-USDC-STELLAR'],100000);
+});
+
+test('keeps Treasury conversion destination on the Mainnet distribution account even when SEP-24 reports sandbox', async () => {
+  const { domain, treasury, stellar } = fixture();
+  const sep24 = {
+    status:()=>({configured:true,sandbox:true,fundsAccount:'GTESTNETMONEYGRAM'}),
+    async startInteractive(){return{transactionId:'ANCHOR-SANDBOX',interactiveUrl:'https://anchor.example/tx/sandbox'};},
+  };
+  const service = new TreasuryUsdcConversionService({domain,treasury,stellar,sep24});
+  const conversion = await service.authorize({
+    profileId:'SRA_PLATFORM_TREASURY',
+    amount:20,
+    provider:'CONFIGURED_ANCHOR',
+    destinationNetwork:'STELLAR',
+    confirmLiveConversion:true,
+  }, 'ADMIN');
+  assert.equal(conversion.destinationWallet,'GSRASTELLARDISTRIBUTOR');
+  assert.equal(conversion.environment,'MAINNET');
+
+  const initiated = await service.initiate(conversion.conversionId,{},'ADMIN');
+  assert.equal(initiated.destinationWallet,'GSRASTELLARDISTRIBUTOR');
+  assert.equal(initiated.environment,'MAINNET');
+  assert.equal(initiated.providerTransactionReference,'ANCHOR-SANDBOX');
 });
 
 test('blocks invented USDC and protects committed treasury liquidity', async () => {
