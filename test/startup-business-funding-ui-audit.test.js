@@ -10,6 +10,15 @@ test('Financing exposes startup business as a first-class opportunity type', () 
   assert.match(source, /option value="STARTUP_LAUNCH">Startup \/ launch/);
 });
 
+test('Financing tailors the four transaction structures after opportunity type selection', () => {
+  assert.match(source, /Funding\/Settlement Note/);
+  assert.match(source, /Documentary Sight Draft/);
+  assert.match(source, /Secured Instrument/);
+  assert.match(source, /Digital-Asset Settlement/);
+  assert.match(source, /OPPORTUNITY_TRANSACTION_STRUCTURES/);
+  assert.match(source, /proposedTransactionStructure/);
+});
+
 test('startup business intake mirrors the funding request package sections', () => {
   for (const marker of [
     '1. Applicant & Business',

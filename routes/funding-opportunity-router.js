@@ -4,6 +4,7 @@ import multer from 'multer';
 import { PrivateDocumentService } from '../services/private-document-service.js';
 import { FinancingLifecycleService, normalizeFinancingStage } from '../services/financing-lifecycle-service.js';
 import { FinancingIntelligenceService } from '../services/financing-intelligence-service.js';
+import { assertFundingTransactionStructure } from '../services/funding-transaction-structure.js';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024, files: 10 } });
 const STAFF_ROLES = new Set(['PLATFORM_ADMIN','OPERATIONS_ADMIN','FUNDING_OPERATIONS','FUNDING_ANALYST','VERIFICATION_REVIEWER','INSTRUMENT_REVIEWER','ISSUANCE_REVIEWER','MARKETPLACE_OPERATOR','SETTLEMENT_OPERATOR','AUDITOR']);
@@ -279,6 +280,9 @@ export function createFundingOpportunityRouter(service, documentService = null) 
       const suppliedRationale = String(req.body?.rationale || '').trim();
       const rationale = suppliedRationale || current.decisionPreparation?.rationale || prepared.analysis?.decisionRationale || null;
       if (!rationale) return res.status(409).json({ error: 'Decision rationale is not available from the recorded evidence.' });
+      const approvedTransactionStructure = decision === 'APPROVE'
+        ? assertFundingTransactionStructure(req.body?.approvedTransactionStructure || current.proposedTransactionStructure, current.opportunityType)
+        : null;
       const timestamp = new Date().toISOString();
       const facility = isLineOfCredit(current) ? facilityFor(current) : null;
       const updated = {
@@ -293,6 +297,7 @@ export function createFundingOpportunityRouter(service, documentService = null) 
           decidedBy: actorId(req),
           decidedAt: timestamp,
         },
+        approvedTransactionStructure,
         ...(facility ? {
           creditFacility: {
             ...facility,

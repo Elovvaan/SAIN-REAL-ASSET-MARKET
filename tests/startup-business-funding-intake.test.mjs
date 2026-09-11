@@ -73,6 +73,7 @@ test('STARTUP_BUSINESS uses the package fields and becomes complete when the req
     title: 'Startup shirt business',
     opportunityType: 'STARTUP_BUSINESS',
     purpose: 'STARTUP_LAUNCH',
+    proposedTransactionStructure: 'FUNDING_SETTLEMENT_NOTE',
     requestedAmount: 25000,
     currency: 'USD',
     startupFundingRequest: completeStartupPackage(),
@@ -97,6 +98,7 @@ test('startup intake stays incomplete when use of funds does not equal the fundi
     title: 'Startup shirt business',
     opportunityType: 'STARTUP_BUSINESS',
     purpose: 'STARTUP_LAUNCH',
+    proposedTransactionStructure: 'FUNDING_SETTLEMENT_NOTE',
     requestedAmount: 25000,
     currency: 'USD',
     startupFundingRequest: completeStartupPackage({ useOfFunds: [{ item: 'Equipment', estimatedCost: 10000 }] }),
@@ -115,7 +117,7 @@ test('supporting evidence is recommended rather than fabricated history', async 
   await service.initialize();
   const pkg = completeStartupPackage({ supportingEvidenceChecklist: [] });
   for (const line of pkg.useOfFunds) line.evidenceSource = null;
-  const record = await service.create({ applicantParticipantId: 'P-STARTUP', title: 'Startup', opportunityType: 'STARTUP_BUSINESS', purpose: 'STARTUP_LAUNCH', requestedAmount: 25000, currency: 'USD', startupFundingRequest: pkg }, 'P-STARTUP');
+  const record = await service.create({ applicantParticipantId: 'P-STARTUP', title: 'Startup', opportunityType: 'STARTUP_BUSINESS', purpose: 'STARTUP_LAUNCH', proposedTransactionStructure: 'FUNDING_SETTLEMENT_NOTE', requestedAmount: 25000, currency: 'USD', startupFundingRequest: pkg }, 'P-STARTUP');
   const completeness = service.assessCompleteness(record.opportunityId);
   assert.equal(completeness.intakeComplete, true);
   assert.equal(completeness.recommended['startup.supportingEvidenceRegistered'], false);

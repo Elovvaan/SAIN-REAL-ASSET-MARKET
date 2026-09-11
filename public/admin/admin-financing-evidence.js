@@ -5,6 +5,24 @@
   const esc = (value) => String(value ?? '')
     .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;').replaceAll("'", '&#039;');
+  const TRANSACTION_STRUCTURE_LABELS = Object.freeze({
+    FUNDING_SETTLEMENT_NOTE: 'Funding/Settlement Note',
+    DOCUMENTARY_SIGHT_DRAFT: 'Documentary Sight Draft',
+    SECURED_INSTRUMENT: 'Secured Instrument',
+    DIGITAL_ASSET_SETTLEMENT: 'Digital-Asset Settlement',
+  });
+  const OPPORTUNITY_TRANSACTION_STRUCTURES = Object.freeze({
+    STARTUP_BUSINESS: ['FUNDING_SETTLEMENT_NOTE', 'SECURED_INSTRUMENT'],
+    BUSINESS_ACQUISITION: ['FUNDING_SETTLEMENT_NOTE', 'DOCUMENTARY_SIGHT_DRAFT', 'SECURED_INSTRUMENT'],
+    LINE_OF_CREDIT: ['FUNDING_SETTLEMENT_NOTE', 'SECURED_INSTRUMENT'],
+    PLATFORM: ['FUNDING_SETTLEMENT_NOTE', 'SECURED_INSTRUMENT', 'DIGITAL_ASSET_SETTLEMENT'],
+    PROJECT: ['FUNDING_SETTLEMENT_NOTE', 'SECURED_INSTRUMENT'],
+    CONSTRUCTION: ['FUNDING_SETTLEMENT_NOTE', 'SECURED_INSTRUMENT'],
+    EQUIPMENT: ['FUNDING_SETTLEMENT_NOTE', 'SECURED_INSTRUMENT'],
+    WORKING_CAPITAL: ['FUNDING_SETTLEMENT_NOTE', 'SECURED_INSTRUMENT'],
+    INVOICE: ['DOCUMENTARY_SIGHT_DRAFT', 'SECURED_INSTRUMENT'],
+    DIGITAL_ASSET: ['DIGITAL_ASSET_SETTLEMENT'],
+  });
 
   let currentOpportunityId = null;
 
@@ -155,10 +173,13 @@
         });
       } else if (stage === 'DECISION') {
         const amount = Number(opportunity.underwriting?.recommendedAmount || opportunity.requestedAmount || 0);
+        const transactionStructures = OPPORTUNITY_TRANSACTION_STRUCTURES[opportunity.opportunityType] || Object.keys(TRANSACTION_STRUCTURE_LABELS);
+        const transactionStructureOptions = transactionStructures.map((value) => `<option value="${value}" ${opportunity.proposedTransactionStructure === value ? 'selected' : ''}>${esc(TRANSACTION_STRUCTURE_LABELS[value])}</option>`).join('');
         panel.innerHTML = `<p class="eyebrow">CREDIT DECISION</p><h4>Record credit decision</h4>
           <form data-credit-decision-form style="display:grid;gap:10px">
             <select name="decision"><option value="APPROVE">Approve</option><option value="DECLINE">Decline</option></select>
             <input name="approvedAmount" type="number" min="1" max="${Number(opportunity.requestedAmount || 0)}" step="0.01" value="${amount}">
+            <select name="approvedTransactionStructure" required><option value="">Approved transaction structure</option>${transactionStructureOptions}</select>
             <textarea name="rationale" placeholder="Decision rationale" style="min-height:90px"></textarea>
             <button class="primary-button" type="submit">Record credit decision</button>
             <div data-result style="font-size:12px"></div>
@@ -175,6 +196,7 @@
               body: JSON.stringify({
                 decision: data.get('decision'),
                 approvedAmount: Number(data.get('approvedAmount')),
+                approvedTransactionStructure: data.get('approvedTransactionStructure') || null,
                 rationale: data.get('rationale') || null,
               }),
             });

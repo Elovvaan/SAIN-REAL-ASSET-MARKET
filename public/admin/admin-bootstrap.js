@@ -9,6 +9,7 @@
       ['/admin/admin-market-dashboard.js', 'data-sra-admin-market-dashboard'],
     ],
     operations: [
+      ['/funding-operations-ui.js', 'data-sra-admin-funding-operations'],
       ['/admin/admin-unified-financing-workstation.js', 'data-sra-admin-unified-financing-workstation'],
       ['/admin/admin-financing-evidence.js', 'data-sra-admin-financing-evidence'],
       ['/admin/admin-financing-awaiting-actions.js', 'data-sra-admin-financing-awaiting-actions'],
@@ -70,11 +71,15 @@
   let refreshInFlight = false;
   let refreshAgain = false;
 
-  function loadScript(source, marker) {
+  function loadScriptOnce(source, marker) {
     return new Promise((resolve, reject) => {
       const existing = document.querySelector(`script[${marker}]`);
       if (existing) {
         if (existing.dataset.loaded === 'true' || existing.dataset.preloaded === 'true') resolve();
+        else if (existing.dataset.failed === 'true') {
+          existing.remove();
+          reject(new Error(`Failed to load ${source}`));
+        }
         else {
           existing.addEventListener('load', resolve, { once: true });
           existing.addEventListener('error', () => reject(new Error(`Failed to load ${source}`)), { once: true });
@@ -85,13 +90,33 @@
       script.src = source;
       script.async = false;
       script.setAttribute(marker, 'true');
+      const timeout = setTimeout(() => {
+        script.dataset.failed = 'true';
+        script.remove();
+        reject(new Error(`Timed out loading ${source}`));
+      }, 12000);
       script.addEventListener('load', () => {
+        clearTimeout(timeout);
         script.dataset.loaded = 'true';
         resolve();
       }, { once: true });
-      script.addEventListener('error', () => reject(new Error(`Failed to load ${source}`)), { once: true });
+      script.addEventListener('error', () => {
+        clearTimeout(timeout);
+        script.dataset.failed = 'true';
+        script.remove();
+        reject(new Error(`Failed to load ${source}`));
+      }, { once: true });
       document.head.append(script);
     });
+  }
+
+  async function loadScript(source, marker) {
+    try {
+      return await loadScriptOnce(source, marker);
+    } catch (firstError) {
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      return loadScriptOnce(source, marker).catch(() => { throw firstError; });
+    }
   }
 
   function activeWorkspaceId() {

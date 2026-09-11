@@ -82,15 +82,18 @@
       if (existing) {
         if (existing.dataset.loaded === 'true') return resolve();
         existing.addEventListener('load', resolve, { once: true });
-        existing.addEventListener('error', reject, { once: true });
+        existing.addEventListener('error', () => reject(new Error('Funding Operations UI could not load.')), { once: true });
         return;
       }
       const script = document.createElement('script');
-      script.src = `/funding-operations-ui.js?v=${Date.now()}`;
+      script.src = '/funding-operations-ui.js';
       script.async = false;
       script.dataset.sraAdminFundingOperations = 'true';
       script.addEventListener('load', () => { script.dataset.loaded = 'true'; resolve(); }, { once: true });
-      script.addEventListener('error', () => reject(new Error('Funding Operations UI could not load.')), { once: true });
+      script.addEventListener('error', () => {
+        script.remove();
+        reject(new Error('Funding Operations UI could not load.'));
+      }, { once: true });
       document.head.append(script);
     });
   }

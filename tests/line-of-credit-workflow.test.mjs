@@ -53,6 +53,7 @@ test('line of credit uses the requested and approved limits instead of a hard-co
       title: 'Operating line',
       opportunityType: 'LINE_OF_CREDIT',
       purpose: 'WORKING_CAPITAL',
+      proposedTransactionStructure: 'FUNDING_SETTLEMENT_NOTE',
       requestedAmount: 50000,
       currency: 'USD',
     })
@@ -73,10 +74,11 @@ test('line of credit uses the requested and approved limits instead of a hard-co
 
   const decisionResponse = await request(app)
     .post(`/api/funding/opportunities/${opportunityId}/credit-decision`)
-    .send({ decision: 'APPROVE', approvedAmount: 35000, rationale: 'Approved test facility.' })
+    .send({ decision: 'APPROVE', approvedAmount: 35000, approvedTransactionStructure: 'FUNDING_SETTLEMENT_NOTE', rationale: 'Approved test facility.' })
     .expect(200);
   assert.equal(decisionResponse.body.opportunity.creditFacility.approvedLimit, 35000);
   assert.equal(decisionResponse.body.opportunity.creditFacility.availableCredit, 35000);
+  assert.equal(decisionResponse.body.opportunity.approvedTransactionStructure, 'FUNDING_SETTLEMENT_NOTE');
   assert.equal(decisionResponse.body.opportunity.financingStage, 'CLOSING');
 
   const lifecycle = new FinancingLifecycleService(domain);

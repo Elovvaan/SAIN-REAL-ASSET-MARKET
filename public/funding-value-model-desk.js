@@ -70,7 +70,7 @@
 
       detailRoot.innerHTML = `
         <div class="value-model-grid">
-          <section class="value-model-card"><p class="eyebrow">OPPORTUNITY</p><strong>${esc(opportunity.title || opportunity.opportunityId)}</strong><p>${esc(opportunity.status)} · ${esc(opportunity.fundingPhase || '')}</p><p>${money.format(Number(opportunity.requestedAmount || 0))} requested</p></section>
+          <section class="value-model-card"><p class="eyebrow">OPPORTUNITY</p><strong>${esc(opportunity.title || opportunity.opportunityId)}</strong><p>${esc(opportunity.status)} · ${esc(opportunity.fundingPhase || '')}</p><p>${money.format(Number(opportunity.requestedAmount || 0))} requested</p><p>${esc(String(opportunity.approvedTransactionStructure || opportunity.proposedTransactionStructure || 'TRANSACTION_STRUCTURE_PENDING').replaceAll('_', ' '))}</p></section>
           <section class="value-model-card"><p class="eyebrow">CURRENT STATE</p><strong>${preparation ? esc(preparation.preparationId) : 'No value preparation'}</strong><p>${esc(preparation?.status || 'Not started')}</p><p>${selected ? `Selected: ${esc(selected.selectedModel)}` : 'Funding model not selected'}</p></section>
         </div>
         ${recognizedValue ? `<section class="value-model-card" style="margin-top:12px"><p class="eyebrow">SRA RECOGNIZED VALUE</p><strong>${Number(recognizedValue.recognizedRvu || 0).toLocaleString()} SRA/RVU</strong><p>${esc(String(recognizedValue.productiveValueClass || '').replaceAll('_', ' '))} · ${esc(String(recognizedValue.economicPurposeClass || '').replaceAll('_', ' '))}</p><small>Value recognized before settlement asset selection. This record does not change the instrument, ownership, or settlement state.</small></section>` : ''}

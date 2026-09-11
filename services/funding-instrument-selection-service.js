@@ -60,6 +60,7 @@ export class FundingInstrumentSelectionService{
     const faceValue=Number(input.faceValue??request.requestedAmount);
     const instrument={
       instrumentId:input.instrumentId||id('SRAI'),instrumentFamily:selection.selectedInstrumentFamily,instrumentType:selection.selectedInstrumentFamily,fundingModel:selection.fundingModel,
+      proposedTransactionStructure:request.proposedTransactionStructure||opportunity.proposedTransactionStructure||null,approvedTransactionStructure:request.approvedTransactionStructure||opportunity.approvedTransactionStructure||null,
       opportunityId:selection.opportunityId,instrumentSelectionRequestId:selection.instrumentSelectionRequestId,instrumentSelectionId:selectionId,issuerParticipantId:input.issuerParticipantId||opportunity.applicantParticipantId,
       verifiedRecordId:opportunity.verifiedRecordId||request.verifiedRecordId||null,canonicalVerifiedValueRecordId:vvr?.verifiedValueRecordId||null,
       valueReferenceArchitecture:vvr?'CANONICAL_VVR_REFERENCE':'LEGACY_VERIFIED_RECORD_REFERENCE',referencedDeterminationId:vvr?.determinationId||request.referencedDeterminationId||null,referencedSnapshotId:vvr?.snapshotId||request.referencedSnapshotId||null,

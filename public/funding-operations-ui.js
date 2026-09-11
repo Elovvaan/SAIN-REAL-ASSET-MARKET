@@ -3,6 +3,25 @@
     .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;').replaceAll("'", '&#039;');
   const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+  const TRANSACTION_STRUCTURE_LABELS = Object.freeze({
+    FUNDING_SETTLEMENT_NOTE: 'Funding/Settlement Note',
+    DOCUMENTARY_SIGHT_DRAFT: 'Documentary Sight Draft',
+    SECURED_INSTRUMENT: 'Secured Instrument',
+    DIGITAL_ASSET_SETTLEMENT: 'Digital-Asset Settlement',
+  });
+  const OPPORTUNITY_TRANSACTION_STRUCTURES = Object.freeze({
+    STARTUP_BUSINESS: ['FUNDING_SETTLEMENT_NOTE', 'SECURED_INSTRUMENT'],
+    BUSINESS_ACQUISITION: ['FUNDING_SETTLEMENT_NOTE', 'DOCUMENTARY_SIGHT_DRAFT', 'SECURED_INSTRUMENT'],
+    LINE_OF_CREDIT: ['FUNDING_SETTLEMENT_NOTE', 'SECURED_INSTRUMENT'],
+    PLATFORM: ['FUNDING_SETTLEMENT_NOTE', 'SECURED_INSTRUMENT', 'DIGITAL_ASSET_SETTLEMENT'],
+    PROJECT: ['FUNDING_SETTLEMENT_NOTE', 'SECURED_INSTRUMENT'],
+    CONSTRUCTION: ['FUNDING_SETTLEMENT_NOTE', 'SECURED_INSTRUMENT'],
+    EQUIPMENT: ['FUNDING_SETTLEMENT_NOTE', 'SECURED_INSTRUMENT'],
+    WORKING_CAPITAL: ['FUNDING_SETTLEMENT_NOTE', 'SECURED_INSTRUMENT'],
+    INVOICE: ['DOCUMENTARY_SIGHT_DRAFT', 'SECURED_INSTRUMENT'],
+    DIGITAL_ASSET: ['DIGITAL_ASSET_SETTLEMENT'],
+  });
+  const transactionStructureLabel = (value) => TRANSACTION_STRUCTURE_LABELS[value] || String(value || '').replaceAll('_', ' ');
 
   function style() {
     if (document.querySelector('#funding-operations-style')) return;
@@ -63,7 +82,7 @@
     return `<section class="funding-intake-modal" id="funding-intake-modal"><div class="funding-panel-head"><div><p class="eyebrow">FINANCING</p><h3>Start a funding opportunity</h3><p>Capture the financing request.</p></div><button class="secondary-button" type="button" id="funding-intake-close">Close</button></div><form id="funding-opportunity-form" class="funding-intake-grid">
       <div class="applicant-mode"><select name="applicantSource" id="funding-applicant-source"><option value="EXISTING">Existing participant / account</option><option value="MANUAL">Manual applicant entry</option></select><input name="applicantParticipantId" id="funding-applicant-reference" placeholder="Participant ID, account ID, email, or exact participant name"></div>
       <div class="applicant-manual" id="funding-manual-applicant"><input name="applicantDisplayName" placeholder="Applicant / entity name"><select name="applicantType"><option value="ORGANIZATION">Organization</option><option value="PERSON">Person</option><option value="TRUST">Trust</option><option value="SPV">SPV / acquisition entity</option></select><input name="applicantEmail" type="email" placeholder="Applicant email (optional)"><input name="applicantPhone" placeholder="Applicant phone (optional)"></div>
-      <input name="title" placeholder="Opportunity title" required><select name="opportunityType" id="funding-opportunity-type" required><option value="">Opportunity type</option><option value="STARTUP_BUSINESS">Startup business</option><option value="BUSINESS_ACQUISITION">Business acquisition</option><option value="LINE_OF_CREDIT">Line of credit</option><option value="PLATFORM">Platform</option><option value="PROJECT">Project</option><option value="CONSTRUCTION">Construction</option><option value="EQUIPMENT">Equipment</option><option value="WORKING_CAPITAL">Working capital</option><option value="INVOICE">Invoice</option></select><select name="purpose" required><option value="">Purpose</option><option value="STARTUP_LAUNCH">Startup / launch</option><option value="BUILD">Build</option><option value="DEVELOP">Develop</option><option value="EXPAND">Expand</option><option value="PURCHASE">Purchase</option><option value="WORKING_CAPITAL">Working capital</option><option value="REFINANCE">Refinance</option></select><input name="requestedAmount" type="number" min="0.01" step="0.01" placeholder="Requested amount / credit limit" required><select name="currency"><option value="USD">USD</option></select><textarea class="wide" name="description" placeholder="Describe what is being funded and the expected result."></textarea>${startupFields()}<button class="primary-button" type="submit">Create opportunity record</button><div class="funding-intake-result" id="funding-intake-result"></div></form></section>`;
+      <input name="title" placeholder="Opportunity title" required><select name="opportunityType" id="funding-opportunity-type" required><option value="">Opportunity type</option><option value="STARTUP_BUSINESS">Startup business</option><option value="BUSINESS_ACQUISITION">Business acquisition</option><option value="LINE_OF_CREDIT">Line of credit</option><option value="PLATFORM">Platform</option><option value="PROJECT">Project</option><option value="CONSTRUCTION">Construction</option><option value="EQUIPMENT">Equipment</option><option value="WORKING_CAPITAL">Working capital</option><option value="INVOICE">Invoice</option><option value="DIGITAL_ASSET">Token, coin, or on-chain asset</option></select><select name="purpose" required><option value="">Purpose</option><option value="STARTUP_LAUNCH">Startup / launch</option><option value="BUILD">Build</option><option value="DEVELOP">Develop</option><option value="EXPAND">Expand</option><option value="PURCHASE">Purchase</option><option value="WORKING_CAPITAL">Working capital</option><option value="REFINANCE">Refinance</option></select><select name="proposedTransactionStructure" id="funding-transaction-structure" required disabled><option value="">Select opportunity type first</option></select><input name="requestedAmount" type="number" min="0.01" step="0.01" placeholder="Requested amount / credit limit" required><select name="currency"><option value="USD">USD</option></select><textarea class="wide" name="description" placeholder="Describe what is being funded and the expected result."></textarea>${startupFields()}<button class="primary-button" type="submit">Create opportunity record</button><div class="funding-intake-result" id="funding-intake-result"></div></form></section>`;
   }
 
   function startupPayload(formData) {
@@ -165,7 +184,7 @@
       const evidence = detail.intake?.evidence || [];
       const recognizedValue = (detail.recognizedValues || []).at(-1) || null;
       const completeness = await request(`/api/funding/opportunities/${encodeURIComponent(opportunityId)}/completeness`).catch(() => null);
-      panel.innerHTML = `<div class="funding-panel-head"><div><p class="eyebrow">OPPORTUNITY</p><h3>${esc(record.title || record.opportunityId)}</h3><p>${esc(record.opportunityId)} · ${esc(record.status)}</p></div><button class="secondary-button" data-action="close-detail">Close</button></div><div class="funding-detail-grid"><div class="funding-detail-card"><strong>${money.format(Number(record.requestedAmount || 0))}</strong><span>${record.opportunityType === 'LINE_OF_CREDIT' ? 'Requested credit limit' : 'Requested funding'} · ${esc(record.currency || '')}</span></div><div class="funding-detail-card"><strong>${esc(record.applicantParticipantId || 'Not linked')}</strong><span>Applicant participant</span></div><div class="funding-detail-card"><strong>${esc(record.opportunityType || '')}</strong><span>Opportunity type</span></div><div class="funding-detail-card"><strong>${esc(record.purpose || '')}</strong><span>Purpose</span></div>${recognizedValue ? `<div class="funding-detail-card"><strong>${Number(recognizedValue.recognizedRvu || 0).toLocaleString()} SRA/RVU</strong><span>Recognized productive value</span></div><div class="funding-detail-card"><strong>${esc(String(recognizedValue.economicPurposeClass || '').replaceAll('_',' '))}</strong><span>${esc(String(recognizedValue.productiveValueClass || '').replaceAll('_',' '))}</span></div>` : ''}</div>${startupDetail(record, completeness)}${lineOfCreditDetail(record)}<section class="funding-ops-panel"><p class="eyebrow">REQUEST INFORMATION</p><strong>${completeness?.intakeComplete ? 'Information captured' : 'Additional information required'}</strong><p>${completeness?.missingRequired?.length ? `Missing required: ${esc(completeness.missingRequired.join(', '))}` : 'Required intake fields are present.'}</p></section><section class="funding-ops-panel"><p class="eyebrow">EVIDENCE & REFERENCES</p><div class="funding-evidence-list">${evidence.length ? evidence.map((item) => `<div class="funding-evidence-item"><strong>${esc(item.title || item.evidenceType)}</strong><span>${esc(item.sourceReference || '')}</span></div>`).join('') : '<div class="funding-ops-empty">No supporting records are attached.</div>'}</div></section>`;
+      panel.innerHTML = `<div class="funding-panel-head"><div><p class="eyebrow">OPPORTUNITY</p><h3>${esc(record.title || record.opportunityId)}</h3><p>${esc(record.opportunityId)} · ${esc(record.status)}</p></div><button class="secondary-button" data-action="close-detail">Close</button></div><div class="funding-detail-grid"><div class="funding-detail-card"><strong>${money.format(Number(record.requestedAmount || 0))}</strong><span>${record.opportunityType === 'LINE_OF_CREDIT' ? 'Requested credit limit' : 'Requested funding'} · ${esc(record.currency || '')}</span></div><div class="funding-detail-card"><strong>${esc(record.applicantParticipantId || 'Not linked')}</strong><span>Applicant participant</span></div><div class="funding-detail-card"><strong>${esc(record.opportunityType || '')}</strong><span>Opportunity type</span></div><div class="funding-detail-card"><strong>${esc(record.purpose || '')}</strong><span>Purpose</span></div><div class="funding-detail-card"><strong>${esc(transactionStructureLabel(record.proposedTransactionStructure) || 'Not selected')}</strong><span>Proposed transaction structure</span></div><div class="funding-detail-card"><strong>${esc(transactionStructureLabel(record.approvedTransactionStructure) || 'Pending decision')}</strong><span>Approved transaction structure</span></div>${recognizedValue ? `<div class="funding-detail-card"><strong>${Number(recognizedValue.recognizedRvu || 0).toLocaleString()} SRA/RVU</strong><span>Recognized productive value</span></div><div class="funding-detail-card"><strong>${esc(String(recognizedValue.economicPurposeClass || '').replaceAll('_',' '))}</strong><span>${esc(String(recognizedValue.productiveValueClass || '').replaceAll('_',' '))}</span></div>` : ''}</div>${startupDetail(record, completeness)}${lineOfCreditDetail(record)}<section class="funding-ops-panel"><p class="eyebrow">REQUEST INFORMATION</p><strong>${completeness?.intakeComplete ? 'Information captured' : 'Additional information required'}</strong><p>${completeness?.missingRequired?.length ? `Missing required: ${esc(completeness.missingRequired.join(', '))}` : 'Required intake fields are present.'}</p></section><section class="funding-ops-panel"><p class="eyebrow">EVIDENCE & REFERENCES</p><div class="funding-evidence-list">${evidence.length ? evidence.map((item) => `<div class="funding-evidence-item"><strong>${esc(item.title || item.evidenceType)}</strong><span>${esc(item.sourceReference || '')}</span></div>`).join('') : '<div class="funding-ops-empty">No supporting records are attached.</div>'}</div></section>`;
       panel.querySelector('[data-action="close-detail"]')?.addEventListener('click', () => panel.classList.remove('open'));
       bindLineOfCreditActions(panel, root, opportunityId);
     } catch (error) {
@@ -176,64 +195,90 @@
   async function render(root) {
     if (!root) return;
     style();
-    root.innerHTML = '<div class="loading-state">Loading funding operations…</div>';
+    root.innerHTML = `<section class="funding-ops"><div class="funding-ops-hero"><p class="eyebrow">UNIFIED MARKET OPERATIONS</p><h2>Financing opportunities</h2><div class="funding-metrics"><div class="funding-metric"><strong data-funding-metric="opportunities">—</strong><span>Funding opportunities</span></div><div class="funding-metric"><strong data-funding-metric="totalRequested">—</strong><span>Total requested</span></div><div class="funding-metric"><strong data-funding-metric="totalRecognizedRvu">—</strong><span>SRA/RVU recognized</span></div><div class="funding-metric"><strong data-funding-metric="activeQueueItems">—</strong><span>Active records</span></div></div><div class="funding-ops-actions"><button class="primary-button" id="funding-ops-new">Start opportunity intake</button><button class="secondary-button" id="funding-ops-refresh">Refresh operations</button></div></div>${intakeForm()}<section class="funding-detail" id="funding-detail"></section><section class="funding-ops-panel"><div class="funding-panel-head"><div><p class="eyebrow">OPPORTUNITIES</p><h3>Financing records</h3></div><span data-funding-record-count>Loading…</span></div><div class="funding-ops-list"><div class="funding-ops-empty">Loading financing records…</div></div></section></section>`;
+    const modal = root.querySelector('#funding-intake-modal');
+    const typeSelect = root.querySelector('#funding-opportunity-type');
+    const structureSelect = root.querySelector('#funding-transaction-structure');
+    const startupIntake = root.querySelector('#startup-business-intake');
+    const applicantSource = root.querySelector('#funding-applicant-source');
+    const applicantReference = root.querySelector('#funding-applicant-reference');
+    const manualApplicant = root.querySelector('#funding-manual-applicant');
+    const syncApplicantMode = () => {
+      const manual = applicantSource?.value === 'MANUAL';
+      manualApplicant?.classList.toggle('open', manual);
+      if (applicantReference) {
+        applicantReference.required = !manual;
+        applicantReference.disabled = manual;
+      }
+      const manualName = manualApplicant?.querySelector('[name="applicantDisplayName"]');
+      if (manualName) manualName.required = manual;
+    };
+    const syncTransactionStructures = () => {
+      if (!structureSelect) return;
+      const structures = OPPORTUNITY_TRANSACTION_STRUCTURES[typeSelect?.value] || [];
+      structureSelect.innerHTML = structures.length
+        ? `<option value="">Proposed transaction structure</option>${structures.map((value) => `<option value="${value}">${esc(TRANSACTION_STRUCTURE_LABELS[value])}</option>`).join('')}`
+        : '<option value="">Select opportunity type first</option>';
+      structureSelect.disabled = structures.length === 0;
+    };
+    root.querySelector('#funding-ops-new')?.addEventListener('click', () => modal?.classList.add('open'));
+    root.querySelector('#funding-intake-close')?.addEventListener('click', () => modal?.classList.remove('open'));
+    root.querySelector('#funding-ops-refresh')?.addEventListener('click', () => render(root));
+    applicantSource?.addEventListener('change', syncApplicantMode);
+    syncApplicantMode();
+    typeSelect?.addEventListener('change', () => {
+      startupIntake?.classList.toggle('open', typeSelect.value === 'STARTUP_BUSINESS');
+      syncTransactionStructures();
+    });
+    syncTransactionStructures();
+    root.querySelector('#funding-opportunity-form')?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const result = root.querySelector('#funding-intake-result');
+      const formData = new FormData(form);
+      const values = Object.fromEntries(formData.entries());
+      const payload = { ...values, requestedAmount: Number(values.requestedAmount) };
+      if (values.applicantSource === 'MANUAL') {
+        delete payload.applicantParticipantId;
+        payload.manualApplicant = {
+          displayName: values.applicantDisplayName,
+          type: values.applicantType || 'ORGANIZATION',
+          contactEmail: values.applicantEmail || null,
+          contactPhone: values.applicantPhone || null,
+        };
+      } else {
+        payload.relatedParticipantIds = values.applicantParticipantId ? [values.applicantParticipantId] : [];
+      }
+      if (values.opportunityType === 'STARTUP_BUSINESS') payload.startupFundingRequest = startupPayload(formData);
+      try {
+        const record = await request('/api/funding/opportunities', { method: 'POST', body: JSON.stringify(payload) });
+        if (result) result.innerHTML = `<strong>Created ${esc(record.opportunityId)}</strong> · ${esc(record.status)} · applicant ${esc(record.applicantParticipantId)}.`;
+        form.reset();
+        startupIntake?.classList.remove('open');
+        syncApplicantMode();
+        syncTransactionStructures();
+        setTimeout(() => render(root), 900);
+      } catch (error) { if (result) result.textContent = error.message; }
+    });
     try {
       const dashboard = await request('/api/funding-operations/dashboard');
       const metrics = dashboard.metrics || {};
-      root.innerHTML = `<section class="funding-ops"><div class="funding-ops-hero"><p class="eyebrow">UNIFIED MARKET OPERATIONS</p><h2>Financing opportunities</h2><div class="funding-metrics"><div class="funding-metric"><strong>${metrics.opportunities || 0}</strong><span>Funding opportunities</span></div><div class="funding-metric"><strong>${money.format(metrics.totalRequested || 0)}</strong><span>Total requested</span></div><div class="funding-metric"><strong>${Number(metrics.totalRecognizedRvu || 0).toLocaleString()}</strong><span>SRA/RVU recognized</span></div><div class="funding-metric"><strong>${metrics.activeQueueItems || 0}</strong><span>Active records</span></div></div><div class="funding-ops-actions"><button class="primary-button" id="funding-ops-new">Start opportunity intake</button><button class="secondary-button" id="funding-ops-refresh">Refresh operations</button></div></div>${intakeForm()}<section class="funding-detail" id="funding-detail"></section><section class="funding-ops-panel"><div class="funding-panel-head"><div><p class="eyebrow">OPPORTUNITIES</p><h3>Financing records</h3></div><span>${dashboard.queue?.length || 0} records</span></div><div class="funding-ops-list">${dashboard.queue?.length ? dashboard.queue.map(queueRow).join('') : '<div class="funding-ops-empty">No funding opportunities have been created yet.</div>'}</div></section></section>`;
-      const modal = root.querySelector('#funding-intake-modal');
-      root.querySelector('#funding-ops-new')?.addEventListener('click', () => modal?.classList.add('open'));
-      root.querySelector('#funding-intake-close')?.addEventListener('click', () => modal?.classList.remove('open'));
-      root.querySelector('#funding-ops-refresh')?.addEventListener('click', () => render(root));
+      const setMetric = (name, value) => { const node = root.querySelector(`[data-funding-metric="${name}"]`); if (node) node.textContent = value; };
+      setMetric('opportunities', metrics.opportunities || 0);
+      setMetric('totalRequested', money.format(metrics.totalRequested || 0));
+      setMetric('totalRecognizedRvu', Number(metrics.totalRecognizedRvu || 0).toLocaleString());
+      setMetric('activeQueueItems', metrics.activeQueueItems || 0);
+      const recordCount = root.querySelector('[data-funding-record-count]');
+      if (recordCount) recordCount.textContent = `${dashboard.queue?.length || 0} records`;
+      const list = root.querySelector('.funding-ops-list');
+      if (list) list.innerHTML = dashboard.queue?.length ? dashboard.queue.map(queueRow).join('') : '<div class="funding-ops-empty">No funding opportunities have been created yet.</div>';
       root.querySelectorAll('[data-opportunity-id]').forEach((row) => row.addEventListener('click', () => openDetail(root, row.dataset.opportunityId)));
-      const typeSelect = root.querySelector('#funding-opportunity-type');
-      const startupIntake = root.querySelector('#startup-business-intake');
-      const applicantSource = root.querySelector('#funding-applicant-source');
-      const applicantReference = root.querySelector('#funding-applicant-reference');
-      const manualApplicant = root.querySelector('#funding-manual-applicant');
-      const syncApplicantMode = () => {
-        const manual = applicantSource?.value === 'MANUAL';
-        manualApplicant?.classList.toggle('open', manual);
-        if (applicantReference) {
-          applicantReference.required = !manual;
-          applicantReference.disabled = manual;
-        }
-        const manualName = manualApplicant?.querySelector('[name="applicantDisplayName"]');
-        if (manualName) manualName.required = manual;
-      };
-      applicantSource?.addEventListener('change', syncApplicantMode);
-      syncApplicantMode();
-      typeSelect?.addEventListener('change', () => startupIntake?.classList.toggle('open', typeSelect.value === 'STARTUP_BUSINESS'));
-      root.querySelector('#funding-opportunity-form')?.addEventListener('submit', async (event) => {
-        event.preventDefault();
-        const form = event.currentTarget;
-        const result = root.querySelector('#funding-intake-result');
-        const formData = new FormData(form);
-        const values = Object.fromEntries(formData.entries());
-        const payload = { ...values, requestedAmount: Number(values.requestedAmount) };
-        if (values.applicantSource === 'MANUAL') {
-          delete payload.applicantParticipantId;
-          payload.manualApplicant = {
-            displayName: values.applicantDisplayName,
-            type: values.applicantType || 'ORGANIZATION',
-            contactEmail: values.applicantEmail || null,
-            contactPhone: values.applicantPhone || null,
-          };
-        } else {
-          payload.relatedParticipantIds = values.applicantParticipantId ? [values.applicantParticipantId] : [];
-        }
-        if (values.opportunityType === 'STARTUP_BUSINESS') payload.startupFundingRequest = startupPayload(formData);
-        try {
-          const record = await request('/api/funding/opportunities', { method: 'POST', body: JSON.stringify(payload) });
-          if (result) result.innerHTML = `<strong>Created ${esc(record.opportunityId)}</strong> · ${esc(record.status)} · applicant ${esc(record.applicantParticipantId)}.`;
-          form.reset();
-          startupIntake?.classList.remove('open');
-          syncApplicantMode();
-          setTimeout(() => render(root), 900);
-        } catch (error) { if (result) result.textContent = error.message; }
-      });
     } catch (error) {
-      root.innerHTML = `<div class="funding-ops-panel"><strong>Funding Operations could not load.</strong><p>${esc(error.message)}</p></div>`;
+      const count = root.querySelector('[data-funding-record-count]');
+      if (count) count.textContent = 'Unavailable';
+      const list = root.querySelector('.funding-ops-list');
+      if (list) list.innerHTML = `<div class="funding-ops-empty"><strong>Financing records could not load.</strong><p>${esc(error.message)}</p><button class="secondary-button" type="button" data-funding-record-retry>Retry records</button></div>`;
+      root.querySelector('[data-funding-record-retry]')?.addEventListener('click', () => render(root));
     }
   }
 

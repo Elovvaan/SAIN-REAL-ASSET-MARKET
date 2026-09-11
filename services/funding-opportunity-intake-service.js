@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { assertFundingTransactionStructure, normalizeFundingTransactionStructure } from './funding-transaction-structure.js';
 
 const RECORD_TYPE = 'FUNDING_OPPORTUNITY';
 const EVIDENCE_RECORD_TYPE = 'FUNDING_OPPORTUNITY_EVIDENCE';
@@ -197,6 +198,9 @@ export class FundingOpportunityIntakeService {
       throw new Error('Requested amount must be greater than zero.');
     }
     const opportunityType = String(input.opportunityType).toUpperCase();
+    const proposedTransactionStructure = input.proposedTransactionStructure
+      ? assertFundingTransactionStructure(input.proposedTransactionStructure, opportunityType)
+      : null;
     const startupFundingRequest = opportunityType === STARTUP_TYPE ? normalizeStartupPackage(input.startupFundingRequest || {}) : null;
 
     const record = {
@@ -206,6 +210,8 @@ export class FundingOpportunityIntakeService {
       title: input.title,
       opportunityType,
       purpose: input.purpose,
+      proposedTransactionStructure,
+      approvedTransactionStructure: null,
       description: input.description || startupFundingRequest?.businessDescription || null,
       requestedAmount,
       currency: String(input.currency).toUpperCase(),
@@ -256,6 +262,7 @@ export class FundingOpportunityIntakeService {
       payload: {
         applicantParticipantId: record.applicantParticipantId,
         opportunityType: record.opportunityType,
+        proposedTransactionStructure: record.proposedTransactionStructure,
         requestedAmount: record.requestedAmount,
         currency: record.currency,
       },
@@ -268,6 +275,9 @@ export class FundingOpportunityIntakeService {
     if (!current) throw new Error('Funding opportunity was not found.');
     if (current.status === 'WITHDRAWN') throw new Error('A withdrawn opportunity cannot be updated.');
     const opportunityType = String(input.opportunityType ?? current.opportunityType).toUpperCase();
+    const proposedTransactionStructure = input.proposedTransactionStructure === undefined
+      ? current.proposedTransactionStructure || null
+      : assertFundingTransactionStructure(input.proposedTransactionStructure, opportunityType);
     const startupFundingRequest = opportunityType === STARTUP_TYPE
       ? normalizeStartupPackage(input.startupFundingRequest === undefined ? current.startupFundingRequest || {} : input.startupFundingRequest, current.startupFundingRequest || {})
       : null;
@@ -277,6 +287,7 @@ export class FundingOpportunityIntakeService {
       title: input.title ?? current.title,
       opportunityType,
       purpose: input.purpose ?? current.purpose,
+      proposedTransactionStructure,
       description: input.description ?? startupFundingRequest?.businessDescription ?? current.description,
       requestedAmount: input.requestedAmount == null ? current.requestedAmount : Number(input.requestedAmount),
       currency: input.currency ? String(input.currency).toUpperCase() : current.currency,
@@ -363,6 +374,7 @@ export class FundingOpportunityIntakeService {
       title: Boolean(record.title),
       opportunityType: Boolean(record.opportunityType),
       purpose: Boolean(record.purpose),
+      proposedTransactionStructure: Boolean(normalizeFundingTransactionStructure(record.proposedTransactionStructure)),
       requestedAmount: Number(record.requestedAmount) > 0,
       currency: Boolean(record.currency),
       relatedParticipants: Array.isArray(record.relatedParticipantIds) && record.relatedParticipantIds.length > 0,

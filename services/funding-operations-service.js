@@ -71,6 +71,8 @@ export class FundingOperationsService {
           title: record.title,
           applicantParticipantId: record.applicantParticipantId,
           opportunityType: record.opportunityType,
+          proposedTransactionStructure: record.proposedTransactionStructure || null,
+          approvedTransactionStructure: record.approvedTransactionStructure || null,
           requestedAmount: record.requestedAmount,
           currency: record.currency,
           status: financingStage,
