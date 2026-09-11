@@ -47,6 +47,14 @@ export function createFundingOpportunityValuePreparationRouter(service) {
     return res.json(record);
   });
 
+  router.get('/recognized-values', (req, res) => {
+    res.json({ records: service.listRecognizedValues(req.query.opportunityId || null) });
+  });
+
+  router.get('/settlement-equivalences', (req, res) => {
+    res.json({ records: service.listSettlementEquivalences(req.query.opportunityId || null) });
+  });
+
   router.post('/opportunities/:opportunityId/preparations', requireAuthenticatedActor, async (req, res) => {
     try {
       requireApplicantInformationComplete(service, req.params.opportunityId);
@@ -80,6 +88,11 @@ export function createFundingOpportunityValuePreparationRouter(service) {
 
   router.post('/preparations/:preparationId/complete', requireAuthenticatedActor, async (req, res) => {
     try { return res.json(await service.completePreparation(req.params.preparationId, actorId(req))); }
+    catch (error) { return handle(res, error); }
+  });
+
+  router.post('/opportunities/:opportunityId/settlement-equivalences', requireAuthenticatedActor, async (req, res) => {
+    try { return res.status(201).json(await service.recordSettlementEquivalence(req.params.opportunityId, req.body, actorId(req))); }
     catch (error) { return handle(res, error); }
   });
 

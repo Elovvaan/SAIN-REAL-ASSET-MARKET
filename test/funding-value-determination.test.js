@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { FundingOpportunityValuePreparationService } from '../services/funding-opportunity-value-preparation-service.js';
 import { FundingInstrumentSelectionService } from '../services/funding-instrument-selection-service.js';
 import { DETERMINATION_RECORD_TYPES } from '../services/determination-engine-service.js';
+import { RECORD_TYPES } from '../services/persistent-domain-service.js';
 
 class MemoryDomain {
   constructor() { this.records = new Map(); this.lifecycleEvents = []; }
@@ -49,7 +50,7 @@ test('funding value preparation produces a canonical VVR and writes its lineage 
     valueDimensions: { existingVerifiedValue: 100000, collateralOrAssetSupport: 100000 },
   }, 'ADMIN-1');
   const completed = await service.completePreparation(preparation.preparationId, 'ADMIN-1');
-  assert.equal(completed.preparation.valueReferenceArchitecture, 'CANONICAL_VVR_REFERENCE');
+  assert.equal(completed.preparation.valueReferenceArchitecture, 'CANONICAL_VVR_WITH_SRA_RVU_RECOGNITION');
   assert.ok(completed.preparation.canonicalVerifiedValueRecordId);
   assert.equal(completed.canonicalVerifiedValueRecord.value, 100000);
   assert.equal(completed.canonicalVerifiedValueRecord.state, 'CANONICAL');
@@ -61,6 +62,10 @@ test('funding value preparation produces a canonical VVR and writes its lineage 
   assert.equal(opportunity.determinationId, completed.preparation.determinationId);
   assert.equal(opportunity.snapshotId, completed.preparation.snapshotId);
   assert.equal(domain.list(DETERMINATION_RECORD_TYPES.VERIFIED_VALUE).length, 1);
+  assert.equal(completed.recognizedValue.recognitionUnit, 'SRA/RVU');
+  assert.equal(completed.recognizedValue.recognizedRvu, 100000);
+  assert.equal(completed.recognizedValue.boundaries.createsCurrency, false);
+  assert.equal(domain.list(RECORD_TYPES.SRA_RVU_RECOGNITION).length, 1);
 });
 
 test('unrelated PATCH updates preserve an explicit recognized value', async () => {
@@ -91,6 +96,50 @@ test('completion is idempotent and reuses the canonical VVR on retry', async () 
   assert.equal(domain.list(DETERMINATION_RECORD_TYPES.VERIFIED_VALUE).length, 1);
   assert.equal(domain.list(DETERMINATION_RECORD_TYPES.DETERMINATION).length, 1);
   assert.equal(domain.list(DETERMINATION_RECORD_TYPES.SNAPSHOT).length, 1);
+  assert.equal(domain.list(RECORD_TYPES.SRA_RVU_RECOGNITION).length, 1);
+});
+
+test('FedEx acquisition value is recognized before its settlement asset is selected', async () => {
+  const domain = new MemoryDomain();
+  await seedVerifiedOpportunity(domain);
+  await domain.put(OPPORTUNITY, 'FO-1', {
+    ...domain.get(OPPORTUNITY, 'FO-1'),
+    title: 'FedEx Linehaul Acquisition',
+    opportunityType: 'BUSINESS_ACQUISITION',
+    purpose: 'ACQUIRE PRODUCTIVE ROUTE CONTRACTS',
+    requestedAmount: 3900000,
+  });
+  const service = new FundingOpportunityValuePreparationService(domain);
+  await service.initialize();
+  const preparation = await service.createPreparation('FO-1', {
+    recognizedValue: 3900000,
+    recognizedCurrency: 'USD',
+    productiveValueClass: 'AVAILABLE_PRODUCTION',
+    economicPurposeClass: 'ACQUISITION',
+    deliverability: { basis: 'ROUTE_CONTRACT_TRANSFER_AND_PROCESSING_CONFIRMATION' },
+    valueDimensions: { existingVerifiedValue: 3900000, productiveCapacity: 1, revenueCapacity: 1, agreementSupport: 1 },
+  }, 'ADMIN-1');
+  const completed = await service.completePreparation(preparation.preparationId, 'ADMIN-1');
+  assert.equal(completed.recognizedValue.recognizedRvu, 3900000);
+  assert.equal(completed.recognizedValue.economicPurposeClass, 'ACQUISITION');
+  assert.equal(completed.recognizedValue.productiveValueClass, 'AVAILABLE_PRODUCTION');
+  assert.equal(completed.recognizedValue.boundaries.changesInstrumentIdentity, false);
+  assert.equal(service.listSettlementEquivalences('FO-1').length, 0);
+
+  const settlement = await service.recordSettlementEquivalence('FO-1', {
+    recognizedRvu: 1000,
+    settlementAssetCode: 'XRP',
+    settlementAssetAmount: 400,
+    network: 'XRPL',
+    executionReference: 'EXEC-FEDEX-1',
+    confirmationReference: 'CONF-FEDEX-1',
+    transactionId: 'XRPL-TX-1',
+    pricingSource: 'EXECUTED_SETTLEMENT_RECORD',
+    settledAt: '2026-09-11T12:00:00.000Z',
+  }, 'ADMIN-1');
+  assert.equal(settlement.state, 'RECONCILED');
+  assert.equal(settlement.changesUnderlyingRecognizedValue, false);
+  assert.equal(service.listSettlementEquivalences('FO-1').length, 1);
 });
 
 test('draft instrument automatically inherits the canonical VVR from the prepared opportunity', async () => {

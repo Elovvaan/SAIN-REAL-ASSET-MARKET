@@ -165,6 +165,15 @@ Responsible for:
 
 Verified Value precedes any True Bill or protection-instrument activation.
 
+Canonical Verified Value may also be expressed through the SRA Recognized
+Value Unit (`SRA/RVU`). SRA/RVU is a neutral internal accounting measurement,
+not a currency, token, settlement asset, ownership record, or instrument. It
+preserves the recognized productive value before a participant selects a
+settlement medium. Executed settlement quantities are captured separately in
+Settlement Equivalence Records and never rewrite the underlying verified value.
+
+See `docs/architecture/sra-recognized-value-unit.md`.
+
 EDX prepares approved normalized records and Verified Snapshots for the Verified Value Engine. EDX does not independently determine final marketplace eligibility.
 
 ------------------------------------------------------------------------
@@ -418,6 +427,9 @@ See `docs/architecture/direct-multi-asset-account-and-native-funding.md`.
 15. The SRA settlement coin is optional and never replaces the authoritative SRA record.
 16. Every settlement, transfer, redeployment, or cross-platform route returns through reconciliation.
 17. A position closes only after the selected path is completed and no unresolved position remains.
+18. Productive value is recognized before the settlement medium is selected.
+19. SRA/RVU measurement does not change instrument identity, ownership, or settlement state.
+20. Settlement Equivalence Records require actual execution evidence and preserve the executed asset identity.
 
 ------------------------------------------------------------------------
 

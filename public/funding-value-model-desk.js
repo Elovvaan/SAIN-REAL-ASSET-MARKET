@@ -58,6 +58,8 @@
       const latestAssessment = assessments[assessments.length - 1] || null;
       const selections = detail.modelSelections || [];
       const selected = selections[selections.length - 1] || null;
+      const recognizedValues = detail.recognizedValues || [];
+      const recognizedValue = recognizedValues[recognizedValues.length - 1] || null;
 
       let liveAssessment = null;
       if (preparation) {
@@ -71,8 +73,10 @@
           <section class="value-model-card"><p class="eyebrow">OPPORTUNITY</p><strong>${esc(opportunity.title || opportunity.opportunityId)}</strong><p>${esc(opportunity.status)} · ${esc(opportunity.fundingPhase || '')}</p><p>${money.format(Number(opportunity.requestedAmount || 0))} requested</p></section>
           <section class="value-model-card"><p class="eyebrow">CURRENT STATE</p><strong>${preparation ? esc(preparation.preparationId) : 'No value preparation'}</strong><p>${esc(preparation?.status || 'Not started')}</p><p>${selected ? `Selected: ${esc(selected.selectedModel)}` : 'Funding model not selected'}</p></section>
         </div>
+        ${recognizedValue ? `<section class="value-model-card" style="margin-top:12px"><p class="eyebrow">SRA RECOGNIZED VALUE</p><strong>${Number(recognizedValue.recognizedRvu || 0).toLocaleString()} SRA/RVU</strong><p>${esc(String(recognizedValue.productiveValueClass || '').replaceAll('_', ' '))} · ${esc(String(recognizedValue.economicPurposeClass || '').replaceAll('_', ' '))}</p><small>Value recognized before settlement asset selection. This record does not change the instrument, ownership, or settlement state.</small></section>` : ''}
         ${!preparation && opportunity.status === 'VERIFIED' ? `<section class="value-model-card" style="margin-top:12px"><p class="eyebrow">CREATE VERIFIED VALUE PREPARATION</p><div class="value-model-grid"><input id="vv-existing" type="number" min="0" step="0.01" placeholder="Existing verified value"><input id="vv-productive" type="number" min="0" step="0.01" placeholder="Productive capacity"><input id="vv-revenue" type="number" min="0" step="0.01" placeholder="Revenue capacity"><input id="vv-completion" type="number" min="0" step="0.01" placeholder="Completion capacity"><input id="vv-asset" type="number" min="0" step="0.01" placeholder="Asset support"><input id="vv-agreement" type="number" min="0" step="0.01" placeholder="Agreement support"><input id="vv-transaction" type="number" min="0" step="0.01" placeholder="Transaction support"><textarea id="vv-assumptions" placeholder="Assumptions, separated by line"></textarea><textarea id="vv-exclusions" placeholder="Exclusions, separated by line"></textarea></div><div class="value-model-actions"><button class="primary-button" data-vmaction="create-preparation">Create preparation</button></div></section>` : ''}
         ${preparation && preparation.status === 'PREPARATION_IN_PROGRESS' ? `<section class="value-model-card" style="margin-top:12px"><p class="eyebrow">UPDATE VALUE DIMENSIONS</p><div class="value-model-grid"><input id="vv-existing" type="number" min="0" step="0.01" value="${preparation.valueDimensions?.existingVerifiedValue ?? ''}" placeholder="Existing verified value"><input id="vv-productive" type="number" min="0" step="0.01" value="${preparation.valueDimensions?.productiveCapacity ?? ''}" placeholder="Productive capacity"><input id="vv-revenue" type="number" min="0" step="0.01" value="${preparation.valueDimensions?.revenueCapacity ?? ''}" placeholder="Revenue capacity"><input id="vv-completion" type="number" min="0" step="0.01" value="${preparation.valueDimensions?.completionCapacity ?? ''}" placeholder="Completion capacity"><input id="vv-asset" type="number" min="0" step="0.01" value="${preparation.valueDimensions?.collateralOrAssetSupport ?? ''}" placeholder="Asset support"><input id="vv-agreement" type="number" min="0" step="0.01" value="${preparation.valueDimensions?.agreementSupport ?? ''}" placeholder="Agreement support"><input id="vv-transaction" type="number" min="0" step="0.01" value="${preparation.valueDimensions?.transactionSupport ?? ''}" placeholder="Transaction support"><textarea id="vv-assumptions" placeholder="Assumptions, separated by line">${esc((preparation.assumptions || []).join('\n'))}</textarea><textarea id="vv-exclusions" placeholder="Exclusions, separated by line">${esc((preparation.exclusions || []).join('\n'))}</textarea></div><div class="value-model-actions"><button class="secondary-button" data-vmaction="save-preparation">Save preparation</button><button class="primary-button" data-vmaction="complete-preparation">Complete and assess models</button></div></section>` : ''}
+        ${((!preparation && opportunity.status === 'VERIFIED') || preparation?.status === 'PREPARATION_IN_PROGRESS') ? `<section class="value-model-card" style="margin-top:12px"><p class="eyebrow">PRODUCTIVE VALUE CLASSIFICATION</p><div class="value-model-grid"><select id="vv-productive-class"><option value="UNCLASSIFIED">Select productive value class</option>${['EXISTING_ASSET','AVAILABLE_PRODUCTION','COMMITTED_PRODUCTION','POTENTIAL_CAPACITY','COMPLETED_WORK','RECEIVABLE','ESSENTIAL_RESOURCE','INFRASTRUCTURE_CAPACITY','MIXED'].map((value) => `<option value="${value}" ${preparation?.productiveValueClass === value ? 'selected' : ''}>${value.replaceAll('_',' ')}</option>`).join('')}</select><select id="vv-purpose-class"><option value="UNCLASSIFIED">Select economic purpose</option>${['PRODUCTIVE','ACQUISITION','INFRASTRUCTURE','WORKING_CAPITAL','SETTLEMENT','PROTECTION','RECOVERY','CONSUMPTION'].map((value) => `<option value="${value}" ${preparation?.economicPurposeClass === value ? 'selected' : ''}>${value.replaceAll('_',' ')}</option>`).join('')}</select></div><small>Classification describes the verified value and funding purpose. It does not rename or replace the instrument.</small></section>` : ''}
         ${preparation ? `<section class="value-model-card" style="margin-top:12px"><p class="eyebrow">FUNDING MODEL ASSESSMENT</p><div class="model-assessment-list">${assessmentItems.length ? assessmentItems.map((item) => `<div class="model-assessment-row"><div><strong>${esc(item.model.replaceAll('_', ' '))}</strong><span>${esc((item.reasons || []).join(' · '))}</span></div><strong>${item.score}</strong></div>`).join('') : '<div class="funding-ops-empty">Complete preparation to produce a model assessment.</div>'}</div></section>` : ''}
         ${opportunity.status === 'VALUE_PREPARED' && !selected ? `<section class="value-model-card" style="margin-top:12px"><p class="eyebrow">SELECT FUNDING MODEL</p><select id="funding-model-choice">${modelOptions}</select><textarea id="funding-model-rationale" placeholder="Selection rationale"></textarea><div class="value-model-actions"><button class="primary-button" data-vmaction="select-model">Record model selection</button></div></section>` : ''}
         ${selected && !selected.instrumentSelectionRequestId ? `<section class="value-model-card" style="margin-top:12px"><p class="eyebrow">INSTRUMENT HANDOFF</p><strong>${esc(selected.selectedModel)}</strong><p>The funding model has been selected. Create the controlled instrument-selection request.</p><div class="value-model-actions"><button class="primary-button" data-vmaction="instrument-request">Create instrument selection request</button></div></section>` : ''}
@@ -89,26 +93,30 @@
         transactionSupport: numericValue(detailRoot, '#vv-transaction'),
       });
       const lines = (selector) => (detailRoot.querySelector(selector)?.value || '').split('\n').map((line) => line.trim()).filter(Boolean);
+      const recognitionFields = () => ({
+        productiveValueClass: detailRoot.querySelector('#vv-productive-class')?.value || preparation?.productiveValueClass || 'UNCLASSIFIED',
+        economicPurposeClass: detailRoot.querySelector('#vv-purpose-class')?.value || preparation?.economicPurposeClass || 'UNCLASSIFIED',
+      });
 
       detailRoot.querySelector('[data-vmaction="create-preparation"]')?.addEventListener('click', async () => {
         try {
-          await request(`/api/funding-value/opportunities/${encodeURIComponent(opportunityId)}/preparations`, { method: 'POST', body: JSON.stringify({ valueDimensions: valueDimensions(), assumptions: lines('#vv-assumptions'), exclusions: lines('#vv-exclusions') }) });
+          await request(`/api/funding-value/opportunities/${encodeURIComponent(opportunityId)}/preparations`, { method: 'POST', body: JSON.stringify({ valueDimensions: valueDimensions(), ...recognitionFields(), assumptions: lines('#vv-assumptions'), exclusions: lines('#vv-exclusions') }) });
           result.textContent = 'Verified Value preparation created.';
           setTimeout(() => loadOpportunity(root), 500);
         } catch (error) { result.textContent = error.message; }
       });
       detailRoot.querySelector('[data-vmaction="save-preparation"]')?.addEventListener('click', async () => {
         try {
-          await request(`/api/funding-value/preparations/${encodeURIComponent(preparation.preparationId)}`, { method: 'PATCH', body: JSON.stringify({ valueDimensions: valueDimensions(), assumptions: lines('#vv-assumptions'), exclusions: lines('#vv-exclusions') }) });
+          await request(`/api/funding-value/preparations/${encodeURIComponent(preparation.preparationId)}`, { method: 'PATCH', body: JSON.stringify({ valueDimensions: valueDimensions(), ...recognitionFields(), assumptions: lines('#vv-assumptions'), exclusions: lines('#vv-exclusions') }) });
           result.textContent = 'Verified Value preparation saved.';
           setTimeout(() => loadOpportunity(root), 500);
         } catch (error) { result.textContent = error.message; }
       });
       detailRoot.querySelector('[data-vmaction="complete-preparation"]')?.addEventListener('click', async () => {
         try {
-          await request(`/api/funding-value/preparations/${encodeURIComponent(preparation.preparationId)}`, { method: 'PATCH', body: JSON.stringify({ valueDimensions: valueDimensions(), assumptions: lines('#vv-assumptions'), exclusions: lines('#vv-exclusions') }) });
+          await request(`/api/funding-value/preparations/${encodeURIComponent(preparation.preparationId)}`, { method: 'PATCH', body: JSON.stringify({ valueDimensions: valueDimensions(), ...recognitionFields(), assumptions: lines('#vv-assumptions'), exclusions: lines('#vv-exclusions') }) });
           await request(`/api/funding-value/preparations/${encodeURIComponent(preparation.preparationId)}/complete`, { method: 'POST', body: '{}' });
-          result.textContent = 'Verified Value preparation completed and funding models assessed.';
+          result.textContent = 'Verified Value completed, SRA/RVU recognized, and funding models assessed.';
           setTimeout(() => loadOpportunity(root), 500);
         } catch (error) { result.textContent = error.message; }
       });
