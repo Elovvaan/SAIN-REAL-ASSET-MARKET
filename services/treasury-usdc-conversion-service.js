@@ -26,30 +26,17 @@ export class TreasuryUsdcConversionService {
     try { return this.sep24?.status?.() || {}; } catch { return {}; }
   }
 
-  conversionDestination(provider = '') {
-    const normalizedProvider = text(provider).toUpperCase();
-    const sep24 = this.sep24Status();
-    if (normalizedProvider === 'CONFIGURED_ANCHOR' && sep24.sandbox === true && text(sep24.fundsAccount)) {
-      return text(sep24.fundsAccount);
-    }
+  conversionDestination() {
     return this.stellar.distributionAddress();
-  }
-
-  normalizeSandboxRecord(record) {
-    if (!record || text(record.provider).toUpperCase() !== 'CONFIGURED_ANCHOR') return record;
-    const sep24 = this.sep24Status();
-    if (sep24.sandbox !== true || !text(sep24.fundsAccount)) return record;
-    if (!ACTIVE.has(record.state)) return record;
-    return { ...record, destinationWallet:text(sep24.fundsAccount), environment:'TESTNET' };
   }
 
   list(filters = {}) {
     return this.domain.list(TYPE).filter((record) => (!filters.profileId || record.profileId === filters.profileId)
-      && (!filters.state || record.state === filters.state)).map((record) => this.normalizeSandboxRecord(record))
+      && (!filters.state || record.state === filters.state))
       .sort((a,b) => new Date(b.updatedAt) - new Date(a.updatedAt));
   }
 
-  get(conversionId) { return this.normalizeSandboxRecord(this.domain.get(TYPE, conversionId)); }
+  get(conversionId) { return this.domain.get(TYPE, conversionId); }
 
   async save(record, actorId, eventType) {
     const updated = { ...record, updatedAt: now() };
@@ -79,17 +66,16 @@ export class TreasuryUsdcConversionService {
     const provider = required(input.provider, 'provider').toUpperCase();
     const network = text(input.destinationNetwork || 'STELLAR').toUpperCase();
     if (network !== 'STELLAR') throw new Error('Treasury USDC conversion currently supports Stellar only.');
-    const configuredDestination = this.conversionDestination(provider);
+    const configuredDestination = this.conversionDestination();
     const suppliedDestination = text(input.destinationWallet);
-    if (suppliedDestination && suppliedDestination !== configuredDestination) throw new Error('destinationWallet must match the configured SRA Stellar account for the selected provider environment.');
-    const sep24 = this.sep24Status();
+    if (suppliedDestination && suppliedDestination !== configuredDestination) throw new Error('destinationWallet must match the configured SRA Stellar distribution account.');
     const conversionId = input.conversionId || id();
     const timestamp = now();
     return this.save({
       conversionId, profileId, sourceReservePositionId:text(input.sourceReservePositionId) || `TREASURY-POSITION:${profileId}`, sourceCashAccountId:CASH_ACCOUNT_ID,
       amountUsd:requested, expectedUsdc:requested, conversionRate:'1.00', fromCurrency:'USD', toCurrency:'USDC',
       network, issuerAddress:STELLAR_USDC.issuerAddress, destinationWallet:configuredDestination, provider,
-      environment:provider === 'CONFIGURED_ANCHOR' && sep24.sandbox === true ? 'TESTNET' : 'MAINNET',
+      environment:'MAINNET',
       state:'AUTHORIZED', providerTransactionReference:null, providerInteractiveUrl:null, usdFundingReference:null,
       stellarTransactionId:null, receivedUsdc:null, receiptLedger:null, ledgerEntryId:null,
       authorizedBy:actorId, authorizedAt:timestamp, createdAt:timestamp, updatedAt:timestamp,
@@ -108,7 +94,7 @@ export class TreasuryUsdcConversionService {
     } else if (!providerTransactionReference) {
       throw new Error('providerTransactionReference is required for a non-anchor conversion provider.');
     }
-    return this.save({ ...record, destinationWallet:this.conversionDestination(record.provider), state:'PROVIDER_INITIATED', providerTransactionReference,
+    return this.save({ ...record, destinationWallet:this.conversionDestination(), environment:'MAINNET', state:'PROVIDER_INITIATED', providerTransactionReference,
       providerInteractiveUrl, initiatedBy:actorId, initiatedAt:now() }, actorId, 'TREASURY_USDC_PROVIDER_INITIATED');
   }
 
