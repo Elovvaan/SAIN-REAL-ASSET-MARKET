@@ -62,7 +62,7 @@
         card.querySelector('[data-mg-progress]').textContent=`${(payload.completedTests||[]).length} / 3`;
         records.innerHTML=recordsMarkup(payload.tests||[]);
         for(const button of records.querySelectorAll('[data-mg-refresh]')) button.addEventListener('click',async()=>{
-          button.disabled=true; message.textContent='Refreshing MoneyGram sandbox status…';
+          button.disabled=true; message.textContent='Refreshing MoneyGram status and completing any required Stellar Testnet transfer…';
           try{await api(`/api/settlement-rails/stellar-usdc/sep24/sandbox-tests/${encodeURIComponent(button.dataset.mgRefresh)}/refresh`,{method:'POST'});message.textContent='Status and evidence refreshed.';await render();}
           catch(error){message.textContent=error.message;} finally{button.disabled=false;}
         });

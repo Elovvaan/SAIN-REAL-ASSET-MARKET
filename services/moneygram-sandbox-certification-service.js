@@ -31,11 +31,15 @@ function publicTransaction(value = {}) {
 }
 
 export class MoneyGramSandboxCertificationService {
-  constructor({ domain, sep24 }) { this.domain=domain; this.sep24=sep24; }
+  constructor({ domain, sep24 }) { this.domain=domain; this.sep24=sep24; this.refreshes=new Map(); }
   status(){
     const sep24=this.sep24.status();
     const tests=this.list();
-    return { ...sep24, sandboxOnly:true, tests, completedTests:[...new Set(tests.filter((item)=>['completed','refunded'].includes(String(item.anchorStatus).toLowerCase())).map((item)=>item.testType))] };
+    const completed=tests.filter((item)=>{
+      if(!['completed','refunded'].includes(String(item.anchorStatus).toLowerCase()))return false;
+      return item.kind==='deposit' ? item.evidence?.depositVerification?.confirmed===true : Boolean(item.evidence?.stellarTransactionId);
+    });
+    return { ...sep24, sandboxOnly:true, tests, completedTests:[...new Set(completed.map((item)=>item.testType))] };
   }
   list(){ return this.domain.list(TYPE).sort((a,b)=>String(b.updatedAt).localeCompare(String(a.updatedAt))); }
   get(id){ return this.domain.get(TYPE,id); }
@@ -56,14 +60,30 @@ export class MoneyGramSandboxCertificationService {
     return record;
   }
   async refresh(id,actorId=null){
+    if(this.refreshes.has(id))return this.refreshes.get(id);
+    const pending=this.refreshOnce(id,actorId).finally(()=>this.refreshes.delete(id));
+    this.refreshes.set(id,pending);
+    return pending;
+  }
+  async refreshOnce(id,actorId=null){
     const current=this.get(id);
     if(!current) throw new Error('MoneyGram sandbox certification test not found.');
-    const result=await this.sep24.getTransaction({ transactionId:current.transactionId, userId:current.userId });
-    const transaction=publicTransaction(result);
+    let result=await this.sep24.getTransaction({ transactionId:current.transactionId, userId:current.userId });
+    let transaction=publicTransaction(result);
+    let submittedWithdrawal=current.evidence?.submittedWithdrawal || null;
+    if(current.kind==='withdraw'&&transaction.status.toLowerCase()==='pending_user_transfer_start'&&!submittedWithdrawal){
+      submittedWithdrawal=await this.sep24.submitWithdrawal({ destination:transaction.withdrawAnchorAccount, memo:transaction.withdrawMemo, memoType:transaction.withdrawMemoType, amount:transaction.amountIn || current.amount });
+      result=await this.sep24.getTransaction({ transactionId:current.transactionId, userId:current.userId });
+      transaction=publicTransaction(result);
+    }
+    let depositVerification=current.evidence?.depositVerification || null;
+    if(current.kind==='deposit'&&transaction.stellarTransactionId){
+      depositVerification=await this.sep24.verifyDeposit({ transactionId:transaction.stellarTransactionId, amount:transaction.amountOut || current.amount });
+    }
     const anchorStatus=transaction.status || current.anchorStatus;
     const timestamp=now();
     const changed=anchorStatus!==current.anchorStatus;
-    const record={ ...current, anchorStatus, transaction, interactiveUrl:transaction.moreInfoUrl || current.interactiveUrl, evidence:{ transactionId:current.transactionId, stellarTransactionId:transaction.stellarTransactionId, externalTransactionId:transaction.externalTransactionId }, statusHistory:changed?[...(current.statusHistory||[]),{status:anchorStatus,at:timestamp}]:current.statusHistory, updatedAt:timestamp };
+    const record={ ...current, anchorStatus, transaction, interactiveUrl:transaction.moreInfoUrl || current.interactiveUrl, evidence:{ transactionId:current.transactionId, stellarTransactionId:transaction.stellarTransactionId || submittedWithdrawal?.transactionId || null, externalTransactionId:transaction.externalTransactionId, submittedWithdrawal, depositVerification }, statusHistory:changed?[...(current.statusHistory||[]),{status:anchorStatus,at:timestamp}]:current.statusHistory, updatedAt:timestamp };
     await this.domain.put(TYPE,id,record,{actorId,eventType:'MONEYGRAM_SANDBOX_CERTIFICATION_TEST_REFRESHED'});
     return record;
   }

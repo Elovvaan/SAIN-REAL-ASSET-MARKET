@@ -119,3 +119,43 @@ for (const kind of ['withdraw', 'deposit']) {
     assert.equal(result.transactionId, `mg-${kind}`);
   });
 }
+
+test('SEP-24 sandbox withdrawal signs and submits USDC from the dedicated funds account with the anchor memo', async () => {
+  const auth = StellarSdk.Keypair.random();
+  const funds = StellarSdk.Keypair.random();
+  const anchor = StellarSdk.Keypair.random();
+  let submitted;
+  const horizonServer = {
+    async loadAccount(address) {
+      assert.equal(address, funds.publicKey());
+      return new StellarSdk.Account(address, '1');
+    },
+    async submitTransaction(transaction) {
+      submitted = transaction;
+      return { hash:'stellar-withdrawal-1', ledger:123 };
+    },
+  };
+  const service = new StellarSep24ClientService({
+    stellar:{}, horizonServer,
+    environment:{ STELLAR_SEP24_MODE:'SANDBOX', MONEYGRAM_AUTH_SECRET:auth.secret(), MONEYGRAM_FUNDS_SECRET:funds.secret() },
+  });
+  const result = await service.submitWithdrawal({ destination:anchor.publicKey(), amount:'25', memo:'4242', memoType:'id' });
+  assert.equal(result.transactionId, 'stellar-withdrawal-1');
+  assert.equal(submitted.source, funds.publicKey());
+  assert.equal(submitted.memo.type, 'id');
+  assert.equal(submitted.operations[0].destination, anchor.publicKey());
+  assert.equal(submitted.operations[0].amount, '25.0000000');
+  assert.equal(submitted.operations[0].asset.code, 'USDC');
+  assert.equal(StellarSdk.WebAuth.verifyTxSignedBy(submitted, funds.publicKey()), true);
+});
+
+test('SEP-24 sandbox deposit verification requires the reported USDC payment to the funds account', async () => {
+  const auth = StellarSdk.Keypair.random();
+  const funds = StellarSdk.Keypair.random();
+  const issuer = 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5';
+  const horizonServer = { operations(){ return { forTransaction(hash){ assert.equal(hash,'stellar-deposit-1'); return { async call(){ return { records:[{ type:'payment',to:funds.publicKey(),asset_code:'USDC',asset_issuer:issuer,amount:'25.0000000' }] }; } }; } }; } };
+  const service = new StellarSep24ClientService({ stellar:{}, horizonServer, environment:{ STELLAR_SEP24_MODE:'SANDBOX', MONEYGRAM_AUTH_SECRET:auth.secret(), MONEYGRAM_FUNDS_SECRET:funds.secret() } });
+  const result = await service.verifyDeposit({ transactionId:'stellar-deposit-1', amount:'25' });
+  assert.equal(result.confirmed, true);
+  assert.equal(result.destinationAccount, funds.publicKey());
+});

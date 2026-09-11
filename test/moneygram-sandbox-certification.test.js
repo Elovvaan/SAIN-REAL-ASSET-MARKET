@@ -28,3 +28,23 @@ test('MoneyGram certification workflow refuses production mode',async()=>{
   const service=new MoneyGramSandboxCertificationService({domain:domain(),sep24:{status(){return {ready:true,mode:'PRODUCTION',network:'PUBLIC'};}}});
   await assert.rejects(()=>service.start({testType:'CASH_IN',amount:'1'},'ADMIN'),/locked to SEP-24 SANDBOX/);
 });
+
+test('MoneyGram cash-out refresh submits the requested Testnet USDC leg once and records its hash',async()=>{
+  const store=domain();
+  let reads=0;
+  let submissions=0;
+  const sep24={
+    status(){return {ready:true,mode:'SANDBOX',network:'TESTNET'};},
+    async startInteractive(){return {anchorDomain:'anchor.example',kind:'withdraw',account:'GFUNDS',authAccount:'GAUTH',userId:'42',transactionId:'mg-2',interactiveUrl:'https://anchor.example/transaction/mg-2'};},
+    async getTransaction(){reads+=1;return {transaction:{id:'mg-2',status:reads===1?'pending_user_transfer_start':'pending_anchor',amount_in:'25',withdraw_anchor_account:'GANCHOR',withdraw_memo:'42',withdraw_memo_type:'id'}};},
+    async submitWithdrawal(input){submissions+=1;assert.deepEqual(input,{destination:'GANCHOR',memo:'42',memoType:'id',amount:'25'});return {transactionId:'stellar-2',ledger:10};},
+  };
+  const service=new MoneyGramSandboxCertificationService({domain:store,sep24});
+  const started=await service.start({testType:'CASH_OUT',amount:'25',userId:'42'},'ADMIN');
+  const refreshed=await service.refresh(started.certificationTestId,'ADMIN');
+  assert.equal(refreshed.anchorStatus,'pending_anchor');
+  assert.equal(refreshed.evidence.stellarTransactionId,'stellar-2');
+  assert.equal(submissions,1);
+  await service.refresh(started.certificationTestId,'ADMIN');
+  assert.equal(submissions,1);
+});

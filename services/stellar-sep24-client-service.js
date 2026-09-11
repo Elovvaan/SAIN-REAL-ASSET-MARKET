@@ -2,6 +2,14 @@ import * as StellarSdk from '@stellar/stellar-sdk';
 
 function text(value) { return String(value ?? '').trim(); }
 
+function stellarAmount(value) {
+  const raw = text(value);
+  if (!/^\d+(?:\.\d{1,7})?$/.test(raw) || Number(raw) <= 0) {
+    throw new Error('MoneyGram USDC amount must be positive with no more than 7 decimal places.');
+  }
+  return raw;
+}
+
 function mode(environment) {
   const value = text(environment.STELLAR_SEP24_MODE || 'SANDBOX').toUpperCase();
   if (!['SANDBOX', 'PRODUCTION'].includes(value)) throw new Error('STELLAR_SEP24_MODE must be SANDBOX or PRODUCTION.');
@@ -41,6 +49,27 @@ function httpsEndpoint(value, field) {
   return url.toString().replace(/\/$/, '');
 }
 
+function transactionMemo(value, type) {
+  const memo = text(value);
+  const memoType = text(type || 'text').toLowerCase();
+  if (!memo) return null;
+  if (memoType === 'text') {
+    if (Buffer.byteLength(memo, 'utf8') > 28) throw new Error('MoneyGram text memo exceeds Stellar\'s 28-byte limit.');
+    return StellarSdk.Memo.text(memo);
+  }
+  if (memoType === 'id') {
+    if (!/^\d+$/.test(memo) || BigInt(memo) > 18_446_744_073_709_551_615n) throw new Error('MoneyGram ID memo is invalid.');
+    return StellarSdk.Memo.id(memo);
+  }
+  if (memoType === 'hash' || memoType === 'return') {
+    const bytes = /^[0-9a-f]{64}$/i.test(memo) ? Buffer.from(memo, 'hex') : Buffer.from(memo, 'base64');
+    if (bytes.length !== 32) throw new Error('MoneyGram hash memo must contain exactly 32 bytes.');
+    return memoType === 'hash' ? StellarSdk.Memo.hash(bytes) : StellarSdk.Memo.return(bytes);
+  }
+  if (memoType === 'none') return null;
+  throw new Error(`MoneyGram memo type ${memoType} is not supported.`);
+}
+
 async function jsonResponse(response, context) {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error || `${context} failed with HTTP ${response.status}.`);
@@ -48,10 +77,31 @@ async function jsonResponse(response, context) {
 }
 
 export class StellarSep24ClientService {
-  constructor({ stellar, environment = process.env, fetchImpl = fetch } = {}) {
+  constructor({ stellar, environment = process.env, fetchImpl = fetch, horizonServer = null } = {}) {
     this.stellar = stellar;
     this.environment = environment;
     this.fetch = fetchImpl;
+    this.horizonServer = horizonServer;
+  }
+
+
+  server() {
+    if (this.horizonServer) return this.horizonServer;
+    const environmentMode = mode(this.environment);
+    const configured = text(this.environment.STELLAR_SEP24_HORIZON_URL);
+    const endpoint = configured || (environmentMode === 'SANDBOX' ? 'https://horizon-testnet.stellar.org' : 'https://horizon.stellar.org');
+    this.horizonServer = new StellarSdk.Horizon.Server(httpsEndpoint(endpoint, 'STELLAR_SEP24_HORIZON_URL'));
+    return this.horizonServer;
+  }
+
+  usdcAsset() {
+    const environmentMode = mode(this.environment);
+    const fallback = environmentMode === 'SANDBOX'
+      ? 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5'
+      : 'GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN';
+    const issuer = text(this.environment.MONEYGRAM_USDC_ISSUER || fallback);
+    if (!StellarSdk.StrKey.isValidEd25519PublicKey(issuer)) throw new Error('MONEYGRAM_USDC_ISSUER is not a valid Stellar public key.');
+    return new StellarSdk.Asset('USDC', issuer);
   }
 
   status() {
@@ -149,5 +199,46 @@ export class StellarSep24ClientService {
       headers:{ Authorization:`Bearer ${token}`, Accept:'application/json' },
     }), 'SEP-24 transaction status');
     return { anchorDomain:discovery.anchorDomain, transaction:result.transaction || result };
+  }
+
+
+  async submitWithdrawal(input = {}) {
+    if (mode(this.environment) !== 'SANDBOX') throw new Error('MoneyGram certification transfers are restricted to Stellar Testnet.');
+    const destination = text(input.destination || input.withdraw_anchor_account);
+    if (!StellarSdk.StrKey.isValidEd25519PublicKey(destination)) throw new Error('MoneyGram withdrawal anchor account is missing or invalid.');
+    const transferAmount = stellarAmount(input.amount || input.amount_in);
+    const funds = moneyGramKeypair(this.environment, 'MONEYGRAM_FUNDS_SECRET');
+    if (!funds) throw new Error('MONEYGRAM_FUNDS_SECRET is required to fund a MoneyGram withdrawal.');
+    const server = this.server();
+    const source = await server.loadAccount(funds.publicKey());
+    const builder = new StellarSdk.TransactionBuilder(source, {
+      fee:StellarSdk.BASE_FEE,
+      networkPassphrase:StellarSdk.Networks.TESTNET,
+    }).addOperation(StellarSdk.Operation.payment({ destination, asset:this.usdcAsset(), amount:transferAmount }));
+    const memo = transactionMemo(input.memo || input.withdraw_memo, input.memoType || input.withdraw_memo_type);
+    if (memo) builder.addMemo(memo);
+    const transaction = builder.setTimeout(100).build();
+    transaction.sign(funds);
+    const result = await server.submitTransaction(transaction);
+    return { transactionId:text(result.hash), ledger:result.ledger ?? null, sourceAccount:funds.publicKey(), destinationAccount:destination, amount:transferAmount };
+  }
+
+  async verifyDeposit(input = {}) {
+    if (mode(this.environment) !== 'SANDBOX') throw new Error('MoneyGram certification verification is restricted to Stellar Testnet.');
+    const transactionId = text(input.transactionId || input.stellar_transaction_id);
+    if (!transactionId) return { confirmed:false, reason:'MoneyGram has not reported a Stellar transaction ID.' };
+    const funds = moneyGramKeypair(this.environment, 'MONEYGRAM_FUNDS_SECRET');
+    if (!funds) throw new Error('MONEYGRAM_FUNDS_SECRET is required to verify a MoneyGram deposit.');
+    const operations = await this.server().operations().forTransaction(transactionId).call();
+    const expectedAmount = input.amount ? stellarAmount(input.amount) : null;
+    const issuer = this.usdcAsset().issuer;
+    const payment = (operations.records || []).find((operation) => operation.type === 'payment'
+      && text(operation.to) === funds.publicKey()
+      && text(operation.asset_code) === 'USDC'
+      && text(operation.asset_issuer) === issuer
+      && (!expectedAmount || Number(operation.amount) === Number(expectedAmount)));
+    return payment
+      ? { confirmed:true, transactionId, destinationAccount:funds.publicKey(), amount:text(payment.amount) }
+      : { confirmed:false, transactionId, reason:'The reported Stellar transaction does not contain the expected USDC payment to the MoneyGram funds account.' };
   }
 }
