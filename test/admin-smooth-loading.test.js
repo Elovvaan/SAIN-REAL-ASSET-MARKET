@@ -46,9 +46,10 @@ test('invalidated in-flight reads cannot repopulate either cache layer', () => {
   assert.match(dataClient, /inFlightReads\.set\(readKey, \{ generation: requestGeneration, promise: pending \}\)/);
 });
 
-test('admin bootstrap installs the performance runtime before the shell and parallelizes feature loading', () => {
+test('admin bootstrap installs the performance runtime before the shell and isolates parallel feature failures', () => {
   assert.match(bootstrap, /admin-performance-runtime\.js/);
   assert.match(bootstrap, /await ensurePerformanceRuntime\(\)/);
-  assert.match(bootstrap, /Promise\.all\(featureList\.map/);
+  assert.match(bootstrap, /Promise\.allSettled\(featureList\.map/);
+  assert.match(bootstrap, /failedFeatureCount: failures\.length/);
   assert.doesNotMatch(bootstrap, /for \(const \[source, marker\] of featureList\) await loadScript/);
 });
