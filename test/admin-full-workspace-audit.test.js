@@ -142,6 +142,14 @@ test('active bootstrap has one lazy feature ownership path', () => {
   assert.doesNotMatch(bootstrap, /admin-settlement-destination\.js/);
 });
 
+test('one failed feature cannot blank an entire administration workspace', () => {
+  assert.match(bootstrap, /Promise\.allSettled\(featureList\.map/);
+  assert.match(bootstrap, /mountWorkspaceFeatures\(workspaceId, admin\)/);
+  assert.match(bootstrap, /reportWorkspaceFeatureFailures\(workspaceId, admin, failures\)/);
+  assert.match(bootstrap, /data-retry-admin-features/);
+  assert.match(bootstrap, /failedFeatureCount: failures\.length/);
+});
+
 test('marketplace status counts every source displayed by its tabs', () => {
   for (const source of ['marketplaceListings','marketplaceCommitmentWindows','marketplaceCommitments','marketplacePositions','marketplaceAllocations','marketplaceSettlementPreparations','marketplaceSettlementReviews','marketplaceSettlementAuthorizations','transactions','settlements','lifecycleEvents']) {
     assert.match(shell, new RegExp(`marketplaceDisplayedCount[\\s\\S]*${source}`));
