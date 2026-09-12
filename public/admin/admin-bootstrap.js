@@ -129,6 +129,20 @@
     admin?.querySelector('[data-admin-boot-placeholder]')?.remove();
   }
 
+  function reportWorkspaceFeatureFailures(workspaceId, admin, failures = []) {
+    const workspace = admin?.querySelector(`[data-workspace="${CSS.escape(workspaceId)}"]`);
+    const controls = workspace?.querySelector('.admin-workspace-controls');
+    if (!controls) return;
+    controls.querySelector('[data-admin-feature-load-failure]')?.remove();
+    if (!failures.length) return;
+    const notice = document.createElement('section');
+    notice.className = 'admin-record-card';
+    notice.dataset.adminFeatureLoadFailure = 'true';
+    notice.innerHTML = `<header><strong>Some ${workspaceId.replaceAll('-', ' ')} controls did not load</strong><em>RETRY AVAILABLE</em></header><p>The available controls remain usable. Retry only the missing ${failures.length === 1 ? 'panel' : 'panels'} without reloading the entire administration portal.</p><button type="button" data-retry-admin-features="${workspaceId}">Retry missing controls</button>`;
+    notice.querySelector('[data-retry-admin-features]')?.addEventListener('click', () => void loadWorkspaceFeatures(workspaceId, true));
+    controls.prepend(notice);
+  }
+
   function mountWorkspaceFeatures(workspaceId, admin) {
     if (!admin) return;
     if (workspaceId === 'dashboard') {
@@ -200,22 +214,30 @@
     }
   }
 
-  async function loadWorkspaceFeatures(workspaceId = activeWorkspaceId()) {
+  async function loadWorkspaceFeatures(workspaceId = activeWorkspaceId(), forceRetry = false) {
     const admin = document.querySelector('#admin-view:not(.hidden)');
     if (!admin) return;
     const featureList = WORKSPACE_FEATURES[workspaceId] || [];
     if (!featureList.length) return;
-    if (workspaceLoads.has(workspaceId)) {
+    if (workspaceLoads.has(workspaceId) && !forceRetry) {
       const loaded = workspaceLoads.get(workspaceId);
       return loaded.then(() => mountWorkspaceFeatures(workspaceId, admin));
     }
 
-    const pending = Promise.all(featureList.map(([source, marker]) => loadScript(source, marker)))
-      .then(() => {
+    if (forceRetry) workspaceLoads.delete(workspaceId);
+
+    const pending = Promise.allSettled(featureList.map(([source, marker]) => loadScript(source, marker)))
+      .then((results) => {
+        const failures = results
+          .map((result, index) => result.status === 'rejected' ? { source: featureList[index][0], error: result.reason } : null)
+          .filter(Boolean);
         mountWorkspaceFeatures(workspaceId, admin);
+        reportWorkspaceFeatureFailures(workspaceId, admin, failures);
+        if (failures.length) workspaceLoads.delete(workspaceId);
         window.dispatchEvent(new CustomEvent('sra:admin-workspace-features-ready', {
-          detail: { workspaceId, featureCount: featureList.length, loadedAt: new Date().toISOString() },
+          detail: { workspaceId, featureCount: featureList.length - failures.length, failedFeatureCount: failures.length, loadedAt: new Date().toISOString() },
         }));
+        return { loaded: featureList.length - failures.length, failures };
       })
       .catch((error) => {
         workspaceLoads.delete(workspaceId);
