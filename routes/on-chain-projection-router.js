@@ -123,6 +123,7 @@ export function createOnChainProjectionRouter(service) {
   const issuanceSourcesInFlight = new Set();
   const swapsInFlight = new Set();
   const marketActivationsInFlight = new Set();
+  const nativeMarketActivationsInFlight = new Set();
 
   const stellar = new StellarTransferService({ domain: service.domain });
   const bitcoin = new BitcoinTransferService();
@@ -401,6 +402,53 @@ export function createOnChainProjectionRouter(service) {
         .sort((left,right)=>String(right.createdAt || '').localeCompare(String(left.createdAt || '')));
       const readiness = service.domain.list('ON_CHAIN_USDC_MARKET_READINESS').filter((record)=>!requested.size || requested.has(record.assetId));
       return res.json({ records, readiness });
+    } catch (error) { return handle(res, error); }
+  });
+
+  router.get('/native-markets', (req, res) => {
+    try {
+      const requested = new Set(text(req.query.assetIds).split(',').filter(Boolean));
+      const records = service.domain.list('ON_CHAIN_NATIVE_MARKET')
+        .filter((record)=>!requested.size || requested.has(record.assetId))
+        .sort((left,right)=>String(right.createdAt || '').localeCompare(String(left.createdAt || '')));
+      return res.json({ records });
+    } catch (error) { return handle(res, error); }
+  });
+
+  router.post('/assets/:assetId/markets/native/activate', async (req, res) => {
+    const assetId = req.params.assetId;
+    try {
+      const actor = requireActor(req);
+      if (req.body?.confirmMarketActivation !== true) throw new Error('Explicit SRA/XLM market activation confirmation is required.');
+      const asset = service.getAsset(assetId);
+      if (!asset) throw new Error('On-chain asset not found.');
+      if (upper(asset.network) !== 'STELLAR') throw new Error('Two-sided native market activation currently requires a Stellar-issued SRA asset.');
+      if (Number(asset.issuedSupply || 0) <= 0) throw new Error('Issue SRA supply before activating its XLM market.');
+      if (nativeMarketActivationsInFlight.has(assetId)) throw Object.assign(new Error('This SRA/XLM market activation is already in progress.'), {code:'SRA_XLM_MARKET_IN_PROGRESS'});
+      nativeMarketActivationsInFlight.add(assetId);
+      try {
+        const activation = await adapters.get('STELLAR').activateNativeMarket(asset, req.body || {});
+        if (activation?.confirmation?.state !== 'CONFIRMED') throw Object.assign(new Error('Stellar SRA/XLM market activation was not confirmed.'), {code:'SRA_XLM_MARKET_NOT_CONFIRMED'});
+        const createdAt = new Date().toISOString();
+        const marketId = `OCNM-${activation.transactionId}`;
+        const record = {id:marketId,marketId,assetId:asset.assetId,instrumentId:asset.instrumentId || null,...activation,createdBy:actor,createdAt,updatedAt:createdAt};
+        await service.domain.put('ON_CHAIN_NATIVE_MARKET',marketId,record,{actorId:actor,eventType:'SRA_XLM_MARKET_ACTIVATED'});
+        return res.status(201).json(record);
+      } finally { nativeMarketActivationsInFlight.delete(assetId); }
+    } catch (error) { return handle(res, error); }
+  });
+
+  router.post('/assets/:assetId/markets/native/:marketId/reconcile', async (req, res) => {
+    try {
+      const actor = requireActor(req);
+      const asset = service.getAsset(req.params.assetId);
+      if (!asset) throw new Error('On-chain asset not found.');
+      const market = service.domain.get('ON_CHAIN_NATIVE_MARKET',req.params.marketId);
+      if (!market || market.assetId !== asset.assetId) throw new Error('SRA/XLM market record was not found for this asset.');
+      const inspection = await adapters.get('STELLAR').inspectNativeMarket(asset);
+      const updated = {...market,...inspection,state:inspection.state,updatedBy:actor,updatedAt:new Date().toISOString()};
+      await service.domain.put('ON_CHAIN_NATIVE_MARKET',market.marketId,updated,{actorId:actor,eventType:'SRA_XLM_MARKET_RECONCILED'});
+      return res.json(updated);
     } catch (error) { return handle(res, error); }
   });
 

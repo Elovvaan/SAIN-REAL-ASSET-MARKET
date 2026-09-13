@@ -91,6 +91,12 @@ The same workstation can activate the maker side of that market by allocating li
 
 USDC identity follows `STELLAR_NETWORK`: the official public-network issuer is used for Mainnet and the official Testnet issuer is used for Testnet. `STELLAR_USDC_ISSUER` may override the issuer explicitly when required by the selected environment.
 
+### Funded SRA / XLM market
+
+The Instruments → On-Chain workstation can activate and monitor a two-sided Stellar SRA/XLM order book without requiring USDC inventory. The distribution account allocates genuine issued SRA to the ask side and genuine spendable XLM to the bid side in one confirmed transaction. Before submission, SRA reads the current network base reserve, account sponsorship entries, and selling liabilities so minimum-reserve XLM is never offered as market inventory.
+
+Market activation requires an administrator-approved XLM-per-SRA reference price, positive allocations on both sides, live Mainnet signer readiness, and explicit confirmation. Issuance, market allocation, order-book state, and later fills remain separate records.
+
 ## Repository Rule
 
 `SRA_MASTER_ARCHITECTURE.md` is the current architectural source of truth for SRA. The implementation should follow that document and should not redefine Verified Value or import unrelated architecture from outside the repository.

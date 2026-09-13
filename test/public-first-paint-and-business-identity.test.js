@@ -10,9 +10,11 @@ const home = read('../public/public-home.js');
 const chat = read('../public/public-chat-runtime.js');
 const css = read('../public/access.css');
 const accessRouter = read('../routes/access-router.js');
+const server = read('../server.js');
 
-test('public shell stays hidden until one resolved access render is complete', () => {
+test('public shell resolves access once with a bounded visible fallback', () => {
   assert.match(index, /<body class="sra-access-resolving">/);
+  assert.match(index, /setTimeout\(\(\) => document\.body\.classList\.remove\('sra-access-resolving'\), 8000\)/);
   assert.match(css, /body\.sra-access-resolving \.app-shell\{visibility:hidden\}/);
   assert.match(bootstrap, /'\/public-home\.js'/);
   assert.match(access, /let accessInitialization=null/);
@@ -20,6 +22,14 @@ test('public shell stays hidden until one resolved access render is complete', (
   assert.match(access, /classList\.remove\('sra-access-resolving'\)/);
   assert.doesNotMatch(access, /setTimeout\(initializeAccess/);
   assert.doesNotMatch(home, /setTimeout\(queueSync/);
+});
+
+test('production serves public files before API middleware with bounded caching', () => {
+  const staticMount = server.indexOf("bootstrap.use(express.static(new URL('./public', import.meta.url).pathname");
+  const runtimeMount = server.indexOf('bootstrap.use(productionRuntime)');
+  assert.ok(staticMount >= 0 && staticMount < runtimeMount);
+  assert.match(server, /public, max-age=300, stale-while-revalidate=60/);
+  assert.match(server, /filePath\.endsWith\('\.html'\).*no-cache/);
 });
 
 test('nonessential marketplace heartbeat waits for the completed first paint', () => {

@@ -23,6 +23,10 @@
   <link rel="stylesheet" href="/platform-admin-workspace.css">
 </head>
 <body class="sra-access-resolving">
+  <script>
+    // Never leave the public site blank if a cold deployment delays bootstrap.
+    window.setTimeout(() => document.body.classList.remove('sra-access-resolving'), 8000);
+  </script>
   <div class="app-shell">
     <aside class="sidebar">
       <div class="brand-block"><img class="brand-logo" src="/brand-logo" alt="SRA — SAIN Real Asset Market"><div><strong>SAIN Real Assets</strong><span>Verified Value Market</span></div></div>

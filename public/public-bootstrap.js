@@ -2,12 +2,12 @@
   if (window.__sraPublicBootstrapInstalled) return;
   window.__sraPublicBootstrapInstalled = true;
 
+  const ACCESS_FEATURE = '/access.js';
   const CORE_PARALLEL_FEATURES = [
     '/sane-skills.js',
     '/public-chat-runtime.js',
     '/public-home.js',
     '/sane-chat-format.js',
-    '/access.js',
     '/sra-authenticated-fetch.js',
   ];
 
@@ -77,17 +77,20 @@
   }
 
   async function loadCore() {
-    await Promise.all(CORE_PARALLEL_FEATURES.map(loadScript));
+    // Access controls first paint. Do not make it wait for chat and workspace
+    // enhancements, which may be slow on a cold production instance.
+    await loadScript(ACCESS_FEATURE);
 
     if (document.readyState !== 'loading' && typeof window.initializeAccess === 'function') {
       await window.initializeAccess();
     }
 
+    await Promise.all(CORE_PARALLEL_FEATURES.map(loadScript));
     await Promise.all(CORE_FINAL_FEATURES.map(loadScript));
 
     window.dispatchEvent(new CustomEvent('sra:public-booted', {
       detail: {
-        featureCount: CORE_PARALLEL_FEATURES.length + CORE_FINAL_FEATURES.length,
+        featureCount: 1 + CORE_PARALLEL_FEATURES.length + CORE_FINAL_FEATURES.length,
         lazyWorkspaceCount: Object.keys(VIEW_FEATURES).length,
         bootedAt: new Date().toISOString(),
       },
@@ -138,5 +141,6 @@
   void loadCore()
     .catch((error) => {
       console.error('SRA public bootstrap failed.', error);
+      document.body.classList.remove('sra-access-resolving');
     });
 })();

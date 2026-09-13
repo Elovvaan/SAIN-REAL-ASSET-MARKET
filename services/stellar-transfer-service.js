@@ -98,7 +98,7 @@ export class StellarTransferService {
       distributorConfigured,
       configured: issuerConfigured && distributorConfigured && Boolean(this.horizonUrl) && Boolean(this.passphrase),
       ready: issuerConfigured && distributorConfigured && Boolean(this.horizonUrl) && Boolean(this.passphrase),
-      capabilities: ['CREATE_ASSET', 'ISSUE_ASSET', 'TRANSFER_NATIVE', 'TRANSFER_ASSET', 'CREATE_DEX_OFFER', 'CREATE_USDC_MARKET', 'SWAP_FOR_USDC'],
+      capabilities: ['CREATE_ASSET', 'ISSUE_ASSET', 'TRANSFER_NATIVE', 'TRANSFER_ASSET', 'CREATE_DEX_OFFER', 'CREATE_NATIVE_MARKET', 'CREATE_USDC_MARKET', 'SWAP_FOR_USDC'],
     };
   }
 
@@ -313,6 +313,75 @@ export class StellarTransferService {
       transactionId: result.hash,
       confirmation: { state: 'CONFIRMED', transactionId: result.hash, ledger: result.ledger },
       state: 'CONFIRMED',
+    };
+  }
+
+  async nativeMarketInventory(record) {
+    const { server, distributor } = this.ensure();
+    const account = await server.loadAccount(distributor.publicKey());
+    const [latestLedger] = (await server.ledgers().order('desc').limit(1).call()).records || [];
+    if (!latestLedger?.base_reserve_in_stroops) throw new Error('Stellar base reserve could not be read from Horizon.');
+    const native = account.balances.find((balance) => balance.asset_type === 'native');
+    const xlmBalance = Number(native?.balance || 0);
+    const xlmSellingLiabilities = Number(native?.selling_liabilities || 0);
+    const reserveUnits = Math.max(2, 2 + Number(account.subentry_count || 0) + Number(account.num_sponsoring || 0) - Number(account.num_sponsored || 0));
+    const minimumReserve = reserveUnits * (Number(latestLedger.base_reserve_in_stroops) / 10_000_000);
+    const transactionFeeReserve = (Number(StellarSdk.BASE_FEE) * 2) / 10_000_000;
+    const xlmAvailable = Math.max(0, xlmBalance - xlmSellingLiabilities - minimumReserve - transactionFeeReserve);
+    const sraBalance = await this.assetBalance(record.assetAddress);
+    return {
+      account: distributor.publicKey(), sraBalance:sraBalance.balance, sraAvailable:sraBalance.available,
+      xlmBalance:xlmBalance.toFixed(7), xlmSellingLiabilities:xlmSellingLiabilities.toFixed(7),
+      minimumReserve:minimumReserve.toFixed(7), xlmAvailable:xlmAvailable.toFixed(7),
+    };
+  }
+
+  async activateNativeMarket(record, input = {}) {
+    const { server, distributor } = this.ensure();
+    const sra = this.stellarAsset(record);
+    const xlm = StellarSdk.Asset.native();
+    const sraSellAmount = amount(input.sraSellAmount);
+    const xlmSellAmount = amount(input.xlmSellAmount);
+    const xlmPerSra = amount(input.xlmPerSra);
+    const referencePrice = Number(xlmPerSra);
+    const spreadBps = Number(input.spreadBps ?? 100);
+    if (!Number.isFinite(referencePrice) || referencePrice <= 0) throw new Error('XLM per SRA must be greater than zero.');
+    if (!Number.isInteger(spreadBps) || spreadBps < 1 || spreadBps > 2500) throw new Error('spreadBps must be an integer from 1 to 2500.');
+    const askXlmPerSra = referencePrice * (1 + spreadBps / 10000);
+    const bidXlmPerSra = referencePrice * (1 - spreadBps / 10000);
+    const inventory = await this.nativeMarketInventory(record);
+    if (Number(sraSellAmount) > Number(inventory.sraAvailable)) throw new Error(`Market allocation exceeds the live uncommitted distribution balance of ${inventory.sraAvailable} ${record.asset || record.symbol}.`);
+    if (Number(xlmSellAmount) > Number(inventory.xlmAvailable)) throw new Error(`Market allocation exceeds the live spendable distribution balance of ${inventory.xlmAvailable} XLM after Stellar reserve and existing liabilities.`);
+    const account = await server.loadAccount(distributor.publicKey());
+    const tx = new StellarSdk.TransactionBuilder(account, { fee:String(Number(StellarSdk.BASE_FEE) * 2), networkPassphrase:this.passphrase })
+      .addOperation(StellarSdk.Operation.manageSellOffer({ selling:sra, buying:xlm, amount:sraSellAmount, price:askXlmPerSra.toFixed(7) }))
+      .addOperation(StellarSdk.Operation.manageSellOffer({ selling:xlm, buying:sra, amount:xlmSellAmount, price:(1 / bidXlmPerSra).toFixed(7) }))
+      .setTimeout(100).build();
+    tx.sign(distributor);
+    const result = await server.submitTransaction(tx);
+    return {
+      network:NETWORK, market:`${record.asset || record.symbol}/XLM`, marketType:'STELLAR_ORDER_BOOK',
+      account:distributor.publicKey(), sraAssetAddress:record.assetAddress, counterAsset:'XLM',
+      sraSellAmount, xlmSellAmount, referenceXlmPerSra:referencePrice.toFixed(7), spreadBps,
+      askXlmPerSra:askXlmPerSra.toFixed(7), bidXlmPerSra:bidXlmPerSra.toFixed(7),
+      reserveEvidence:{minimumReserve:inventory.minimumReserve,xlmAvailableBefore:inventory.xlmAvailable},
+      transactionId:result.hash, confirmation:{state:'CONFIRMED',transactionId:result.hash,ledger:result.ledger}, state:'ACTIVE',
+    };
+  }
+
+  async inspectNativeMarket(record) {
+    const { server } = this.ensure();
+    const sra = this.stellarAsset(record);
+    const xlm = StellarSdk.Asset.native();
+    const [inventory, orderBook] = await Promise.all([
+      this.nativeMarketInventory(record),
+      server.orderbook(sra, xlm).limit(20).call(),
+    ]);
+    return {
+      network:NETWORK, market:`${record.asset || record.symbol}/XLM`, ...inventory,
+      bids:(orderBook?.bids || []).map((item)=>({price:text(item.price),amount:text(item.amount)})),
+      asks:(orderBook?.asks || []).map((item)=>({price:text(item.price),amount:text(item.amount)})),
+      lastReadAt:new Date().toISOString(), state:(orderBook?.bids?.length && orderBook?.asks?.length) ? 'TWO_SIDED' : 'ONE_SIDED_OR_EMPTY',
     };
   }
 
