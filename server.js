@@ -138,7 +138,7 @@ bootstrap.post('/api/production/alerts/test', async (req, res) => {
   return res.json({ delivered: Boolean(process.env.SRA_ALERT_WEBHOOK_URL), requestId: req.sraRequestId });
 });
 bootstrap.get('/api/startup', (_req, res) => {
-  const statusCode = startupState === 'READY' ? 200 : startupState === 'FAILED' ? 500 : 503;
+  const statusCode = startupState === 'FAILED' ? 500 : 200;
   return res.status(statusCode).json({ startupState, startupError, nativePlatformAsset: nativePlatformAssetService?.status?.() || null, ...startupSnapshot(), timestamp: new Date().toISOString() });
 });
 bootstrap.get('/api/marketplace-listings/status', (_req, res) => marketplaceListingService ? res.json(marketplaceListingService.status()) : res.status(503).json({ error: 'Marketplace Listing Layer is still initializing.' }));

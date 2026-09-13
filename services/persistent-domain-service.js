@@ -51,6 +51,15 @@ export class PersistentDomainService {
     const requestedTypes = [...new Set(types)];
     if (!requestedTypes.length) return this.snapshot();
 
+    if (typeof this.database?.listRecordsByTypes === 'function') {
+      const records = await this.database.listRecordsByTypes(requestedTypes);
+      for (const { recordType, payload } of records) {
+        const id = recordId(payload);
+        if (id) this.cacheRecord(recordType, id, payload);
+      }
+      return this.snapshot();
+    }
+
     const poolCapacity = Number(this.database?.pool?.options?.max) || 1;
     const concurrency = Math.max(1, Math.min(poolCapacity, requestedTypes.length));
     let cursor = 0;

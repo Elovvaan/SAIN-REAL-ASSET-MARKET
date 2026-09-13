@@ -186,6 +186,22 @@ export class DatabaseService {
     return result.rows.map((row) => row.payload);
   }
 
+  async listRecordsByTypes(recordTypes = []) {
+    const requestedTypes = [...new Set(recordTypes.map((value) => String(value || '').trim()).filter(Boolean))];
+    if (!requestedTypes.length) return [];
+    if (!this.pool) {
+      const allowed = new Set(requestedTypes);
+      return [...this.memory.records.entries()]
+        .map(([key, payload]) => ({ recordType: key.slice(0, key.indexOf(':')), payload: clone(payload) }))
+        .filter((record) => allowed.has(record.recordType));
+    }
+    const result = await this.pool.query(
+      'SELECT record_type, payload FROM sra_domain_records WHERE record_type = ANY($1::text[]) ORDER BY record_type, created_at',
+      [requestedTypes]
+    );
+    return result.rows.map((row) => ({ recordType: row.record_type, payload: row.payload }));
+  }
+
   async claimIdempotency({ key, fingerprint, actorId = null, resourceKey, ttlMs }) {
     const expiresAt = new Date(Date.now() + ttlMs);
     if (!this.pool) {
