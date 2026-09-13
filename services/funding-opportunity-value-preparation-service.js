@@ -82,6 +82,7 @@ export class FundingOpportunityValuePreparationService {
       preparationId: input.preparationId || id('FVP'), opportunityId, verifiedRecordId: verifiedRecord.verifiedRecordId,
       applicantParticipantId: opportunity.applicantParticipantId, opportunityType: opportunity.opportunityType, purpose: opportunity.purpose,
       requestedAmount: opportunity.requestedAmount, currency: opportunity.currency,
+      homeEquityFunding: opportunity.homeEquityFunding ? structuredClone(opportunity.homeEquityFunding) : null,
       evidenceIds: unique(verifiedRecord.evidenceIds || []), agreementIds: unique(verifiedRecord.agreementIds || []), transactionIds: unique(verifiedRecord.transactionIds || []),
       relatedAssetIds: unique(opportunity.relatedAssetIds || []), relatedProjectIds: unique(opportunity.relatedProjectIds || []),
       valueDimensions, recognizedValue, recognizedCurrency: input.recognizedCurrency || opportunity.currency,
@@ -129,7 +130,7 @@ export class FundingOpportunityValuePreparationService {
     if (!preparation) throw new Error('Value preparation record was not found.');
     const opportunityType = String(preparation.opportunityType || '').toUpperCase();
     const purpose = String(preparation.purpose || '').toUpperCase();
-    const assetSupport = Number(preparation.valueDimensions?.collateralOrAssetSupport || 0) > 0 || preparation.relatedAssetIds.length > 0;
+    const assetSupport = Number(preparation.valueDimensions?.collateralOrAssetSupport || 0) > 0 || preparation.relatedAssetIds.length > 0 || opportunityType === 'HOME_EQUITY';
     const revenueSupport = Number(preparation.valueDimensions?.revenueCapacity || 0) > 0;
     const agreementSupport = preparation.agreementIds.length > 0;
     const transactionSupport = preparation.transactionIds.length > 0;
@@ -140,6 +141,7 @@ export class FundingOpportunityValuePreparationService {
       if (model === 'CONSTRUCTION_FUNDING' && (opportunityType.includes('CONSTRUCTION') || purpose.includes('BUILD'))) { score += 60; reasons.push('Construction or build purpose identified.'); }
       if (model === 'REVENUE_PARTICIPATION' && revenueSupport) { score += 55; reasons.push('Verified revenue capacity entered.'); }
       if (model === 'ASSET_BACKED_FUNDING' && assetSupport) { score += 55; reasons.push('Asset support identified.'); }
+      if (model === 'ASSET_BACKED_FUNDING' && opportunityType === 'HOME_EQUITY') { score += 35; reasons.push('Verified home equity secures the closed-end transaction.'); }
       if (model === 'PURCHASE_ORDER_FUNDING' && agreementSupport && purpose.includes('PURCHASE')) { score += 55; reasons.push('Purchase purpose and agreement support identified.'); }
       if (model === 'INVOICE_FUNDING' && transactionSupport && opportunityType.includes('INVOICE')) { score += 55; reasons.push('Invoice transaction support identified.'); }
       if (model === 'WORKING_CAPITAL' && purpose.includes('WORKING')) { score += 55; reasons.push('Working-capital purpose identified.'); }

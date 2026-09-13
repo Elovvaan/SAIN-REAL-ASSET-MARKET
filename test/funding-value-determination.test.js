@@ -142,6 +142,31 @@ test('FedEx acquisition value is recognized before its settlement asset is selec
   assert.equal(service.listSettlementEquivalences('FO-1').length, 1);
 });
 
+test('home equity preparation preserves secured terms and recommends asset-backed funding', async () => {
+  const domain = new MemoryDomain();
+  await seedVerifiedOpportunity(domain);
+  const homeEquityFunding = {
+    transactionForm: 'CLOSED_END_FIXED_RETURN',
+    property: { address: '100 Equity Way, Ogden, Utah', parcelId: '19-001-0001' },
+    appraisedValue: 500000,
+    existingLienBalance: 200000,
+    principalAdvance: 100000,
+    fixedReturnAmount: 12000,
+    totalRepaymentObligation: 112000,
+    maximumPrincipalAdvance: 175000,
+    settlementAsset: 'SRA_COIN',
+    settlementAssetCode: 'SRA',
+  };
+  await domain.put(OPPORTUNITY, 'FO-1', { ...domain.get(OPPORTUNITY, 'FO-1'), opportunityType: 'HOME_EQUITY', purpose: 'HOME_EQUITY_ACCESS', homeEquityFunding, relatedAssetIds: [] });
+  const service = new FundingOpportunityValuePreparationService(domain);
+  await service.initialize();
+  const preparation = await service.createPreparation('FO-1', { recognizedValue: 500000 }, 'ADMIN-1');
+  assert.deepEqual(preparation.homeEquityFunding, homeEquityFunding);
+  const assessment = service.assessModels(preparation.preparationId);
+  assert.equal(assessment.recommendedModel, 'ASSET_BACKED_FUNDING');
+  assert.equal(assessment.assessments[0].score, 100);
+});
+
 test('draft instrument automatically inherits the canonical VVR from the prepared opportunity', async () => {
   const domain = new MemoryDomain();
   await seedVerifiedOpportunity(domain);
@@ -164,6 +189,21 @@ test('draft instrument automatically inherits the canonical VVR from the prepare
   assert.equal(instrument.referencedDeterminationId, completed.preparation.determinationId);
   assert.equal(instrument.referencedSnapshotId, completed.preparation.snapshotId);
   assert.equal(instrument.valueReferenceArchitecture, 'CANONICAL_VVR_REFERENCE');
+});
+
+test('home equity draft note defaults face value to principal plus fixed return', async () => {
+  const domain = new MemoryDomain();
+  await seedVerifiedOpportunity(domain);
+  const homeEquityFunding = { transactionForm: 'CLOSED_END_FIXED_RETURN', principalAdvance: 100000, fixedReturnAmount: 12000, totalRepaymentObligation: 112000, settlementAsset: 'SRA_COIN', settlementAssetCode: 'SRA' };
+  await domain.put(OPPORTUNITY, 'FO-1', { ...domain.get(OPPORTUNITY, 'FO-1'), opportunityType: 'HOME_EQUITY', purpose: 'HOME_EQUITY_ACCESS', requestedAmount: 100000, homeEquityFunding });
+  await domain.put(INSTRUMENT_REQUEST, 'FISR-HOME', { instrumentSelectionRequestId: 'FISR-HOME', opportunityId: 'FO-1', fundingModel: 'ASSET_BACKED_FUNDING', requestedAmount: 100000, currency: 'USD', candidateInstrumentFamilies: ['ASSET_BACKED_NOTE'], requiredCharacteristics: {}, verifiedRecordId: 'FVRD-1', homeEquityFunding });
+  await domain.put(INSTRUMENT_SELECTION, 'FIS-HOME', { instrumentSelectionId: 'FIS-HOME', instrumentSelectionRequestId: 'FISR-HOME', opportunityId: 'FO-1', fundingModel: 'ASSET_BACKED_FUNDING', selectedInstrumentFamily: 'ASSET_BACKED_NOTE', terms: {}, restrictions: [], status: 'SELECTED' });
+  const service = new FundingInstrumentSelectionService(domain);
+  await service.initialize();
+  const instrument = await service.createDraftInstrument('FIS-HOME', { settlementRule: 'SRA_COIN_DELIVERY', governingDocumentId: 'HOME-NOTE-001' }, 'ADMIN-1');
+  assert.equal(instrument.faceValue, 112000);
+  assert.equal(instrument.faceValueBasis, 'HOME_EQUITY_TOTAL_REPAYMENT_OBLIGATION');
+  assert.deepEqual(instrument.terms.homeEquityFunding, homeEquityFunding);
 });
 
 test('funding preparation without a recognized value remains explicitly legacy-compatible', async () => {

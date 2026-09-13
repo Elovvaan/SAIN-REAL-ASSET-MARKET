@@ -4,6 +4,7 @@
     .replaceAll('"', '&quot;').replaceAll("'", '&#039;');
   const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
   const STARTUP_TYPE = 'STARTUP_BUSINESS';
+  const HOME_EQUITY_TYPE = 'HOME_EQUITY';
 
   function ensureStyle() {
     if (document.querySelector('#participant-financing-style')) return;
@@ -19,8 +20,8 @@
       .participant-financing-form{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px}
       .participant-financing-form input,.participant-financing-form select,.participant-financing-form textarea{width:100%;box-sizing:border-box;padding:12px;border:1px solid rgba(255,255,255,.15);border-radius:11px;background:#101010;color:#fff}
       .participant-financing-form textarea{min-height:110px;resize:vertical}.participant-financing-form .wide{grid-column:1/-1}
-      .participant-startup-package{display:none;grid-column:1/-1;gap:12px;padding:16px;border:1px solid rgba(255,255,255,.12);border-radius:14px;background:rgba(255,255,255,.02)}
-      .participant-startup-package.open{display:grid}.participant-startup-package h4,.participant-startup-package p{margin:0}.participant-startup-package p{font-size:12px;opacity:.72;line-height:1.45}
+      .participant-startup-package,.participant-home-equity-package{display:none;grid-column:1/-1;gap:12px;padding:16px;border:1px solid rgba(255,255,255,.12);border-radius:14px;background:rgba(255,255,255,.02)}
+      .participant-startup-package.open,.participant-home-equity-package.open{display:grid}.participant-startup-package h4,.participant-startup-package p,.participant-home-equity-package h4,.participant-home-equity-package p{margin:0}.participant-startup-package p,.participant-home-equity-package p{font-size:12px;opacity:.72;line-height:1.45}
       .participant-startup-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.participant-startup-grid .wide{grid-column:1/-1}
       .participant-startup-use{display:grid;grid-template-columns:1.2fr .6fr 1fr;gap:8px}.participant-startup-use input{min-width:0}
       .participant-startup-checks{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.participant-startup-checks label,.participant-startup-cert label{display:flex;gap:8px;align-items:flex-start;padding:9px;border-radius:9px;background:rgba(255,255,255,.035);font-size:12px;line-height:1.4}.participant-startup-checks input,.participant-startup-cert input{width:auto;margin-top:2px}
@@ -133,6 +134,10 @@
     </section>`;
   }
 
+  function homeEquityMarkup() {
+    return `<section class="participant-home-equity-package" id="participant-home-equity-package"><div><p class="eyebrow">SRA HOME EQUITY FUNDING</p><h4>Closed-end secured transaction</h4><p>Provide the property, equity, fixed-return, settlement-asset, and verified repayment information for this request.</p></div><div class="participant-startup-grid"><input name="homeEquityOwnerName" placeholder="Property owner name"><input name="homeEquityPropertyAddress" placeholder="Property address"><input name="homeEquityParcelId" placeholder="Parcel ID"><select name="homeEquityOccupancyType"><option value="">Occupancy</option><option value="PRIMARY_RESIDENCE">Primary residence</option><option value="SECOND_HOME">Second home</option><option value="INVESTMENT_PROPERTY">Investment property</option></select><input name="homeEquityAppraisedValue" type="number" min="0.01" step="0.01" placeholder="Verified property value"><input name="homeEquityValuationDate" type="date" aria-label="Valuation date"><input name="homeEquityValuationReference" placeholder="Valuation / appraisal reference"><input name="homeEquityExistingLienBalance" type="number" min="0" step="0.01" placeholder="Existing lien balance"><input name="homeEquityExistingLienReference" placeholder="Title / existing lien reference"><input name="homeEquityLienPosition" placeholder="Proposed lien position"><input name="homeEquityMaxCltv" type="number" min="0.01" max="99.99" step="0.01" placeholder="Maximum combined LTV %"><input name="homeEquityFixedReturnAmount" type="number" min="0" step="0.01" placeholder="Fixed return amount"><input name="homeEquityTermMonths" type="number" min="1" step="1" placeholder="Term in months"><select name="homeEquityRepaymentFrequency"><option value="">Repayment frequency</option><option value="MONTHLY">Monthly</option><option value="QUARTERLY">Quarterly</option><option value="AT_MATURITY">At maturity</option></select><input name="homeEquityVerifiedMonthlyIncome" type="number" min="0.01" step="0.01" placeholder="Verified monthly income"><input name="homeEquityMonthlyHousingExpense" type="number" min="0" step="0.01" placeholder="Monthly housing expense"><input name="homeEquityOtherMonthlyObligations" type="number" min="0" step="0.01" placeholder="Other monthly obligations"><input name="homeEquityRepaymentEvidenceReference" placeholder="Repayment-support evidence reference"><select name="homeEquitySettlementAsset"><option value="">Settlement asset</option><option value="SRA_COIN">SRA coin</option><option value="EXTERNAL_DIGITAL_ASSET">External digital asset received by SRA</option></select><input name="homeEquitySettlementAssetCode" placeholder="External asset code (when applicable)"><input name="homeEquitySettlementNetwork" placeholder="Settlement network"><select name="homeEquityRepaymentDenomination"><option value="">Repayment denomination</option><option value="SRA_COIN">SRA coin</option><option value="USD_REFERENCE">USD reference value</option><option value="SETTLEMENT_ASSET">Settlement asset</option></select></div></section>`;
+  }
+
   function formMarkup() {
     const session = window.accessState?.session || {};
     return `<section class="participant-financing">
@@ -156,6 +161,7 @@
             <option value="">Financing type</option>
             <option value="BUSINESS_ACQUISITION">Business acquisition</option>
             <option value="STARTUP_BUSINESS">Startup business</option>
+            <option value="HOME_EQUITY">Home equity funding</option>
             <option value="LINE_OF_CREDIT">Line of credit</option>
             <option value="EQUIPMENT">Equipment</option>
             <option value="WORKING_CAPITAL">Working capital</option>
@@ -166,6 +172,7 @@
           <select name="purpose" required>
             <option value="">Purpose</option>
             <option value="PURCHASE">Purchase</option>
+            <option value="HOME_EQUITY_ACCESS">Home equity access</option>
             <option value="STARTUP_LAUNCH">Startup / launch</option>
             <option value="BUILD">Build</option>
             <option value="DEVELOP">Develop</option>
@@ -175,7 +182,7 @@
           </select>
           <input name="requestedAmount" id="participant-financing-amount" type="number" min="0.01" step="0.01" placeholder="Requested amount" required>
           <textarea class="wide" name="description" placeholder="Describe what you want financed and what the financing will accomplish."></textarea>
-          ${startupMarkup()}
+          ${startupMarkup()}${homeEquityMarkup()}
           <div class="participant-financing-documents">
             <strong>Supporting documents</strong>
             <p>Attach the documents that support this request now so SRA receives one complete intake package.</p>
@@ -278,6 +285,13 @@
     return true;
   }
 
+  function homeEquityPayload(formData) {
+    return {
+      property: { ownerName: formData.get('homeEquityOwnerName'), address: formData.get('homeEquityPropertyAddress'), parcelId: formData.get('homeEquityParcelId'), occupancyType: formData.get('homeEquityOccupancyType') },
+      appraisedValue: formData.get('homeEquityAppraisedValue'), valuationDate: formData.get('homeEquityValuationDate'), valuationReference: formData.get('homeEquityValuationReference'), existingLienBalance: formData.get('homeEquityExistingLienBalance'), existingLienReference: formData.get('homeEquityExistingLienReference'), lienPosition: formData.get('homeEquityLienPosition'), maxCombinedLtvPercent: formData.get('homeEquityMaxCltv'), fixedReturnAmount: formData.get('homeEquityFixedReturnAmount'), termMonths: formData.get('homeEquityTermMonths'), repaymentFrequency: formData.get('homeEquityRepaymentFrequency'), repaymentSupport: { verifiedMonthlyIncome: formData.get('homeEquityVerifiedMonthlyIncome'), monthlyHousingExpense: formData.get('homeEquityMonthlyHousingExpense'), otherMonthlyObligations: formData.get('homeEquityOtherMonthlyObligations'), evidenceReference: formData.get('homeEquityRepaymentEvidenceReference') }, settlementAsset: formData.get('homeEquitySettlementAsset'), settlementAssetCode: formData.get('homeEquitySettlementAssetCode'), settlementNetwork: formData.get('homeEquitySettlementNetwork'), repaymentDenomination: formData.get('homeEquityRepaymentDenomination'),
+    };
+  }
+
   function bind(root) {
     const form = root.querySelector('#participant-financing-form');
     const submit = root.querySelector('#participant-financing-submit');
@@ -285,15 +299,21 @@
     const documentInput = root.querySelector('#participant-financing-documents');
     const typeSelect = root.querySelector('#participant-financing-type');
     const startupSection = root.querySelector('#participant-startup-package');
+    const homeEquitySection = root.querySelector('#participant-home-equity-package');
     const amountInput = root.querySelector('#participant-financing-amount');
     const totalNode = root.querySelector('#participant-startup-total');
 
     const syncStartup = () => {
       const startup = typeSelect?.value === STARTUP_TYPE;
+      const homeEquity = typeSelect?.value === HOME_EQUITY_TYPE;
       startupSection?.classList.toggle('open', startup);
+      homeEquitySection?.classList.toggle('open', homeEquity);
       startupSection?.querySelectorAll('input,textarea').forEach((field) => {
         if (field.name === 'startupBusinessTradeName' || field.name.startsWith('startupUse') || field.name === 'startupReadiness') return;
         field.required = startup;
+      });
+      homeEquitySection?.querySelectorAll('input,select').forEach((field) => {
+        field.required = homeEquity && field.name !== 'homeEquitySettlementAssetCode';
       });
     };
     const syncUseTotal = () => {
@@ -344,6 +364,10 @@
         description: String(values.description || '').trim(),
       };
       if (payload.opportunityType === STARTUP_TYPE) payload.startupFundingRequest = startupPayload(formData);
+      if (payload.opportunityType === HOME_EQUITY_TYPE) {
+        payload.proposedTransactionStructure = 'SECURED_INSTRUMENT';
+        payload.homeEquityFunding = homeEquityPayload(formData);
+      }
 
       submit.disabled = true;
       submit.textContent = 'Submitting…';

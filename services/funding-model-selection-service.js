@@ -119,6 +119,7 @@ export class FundingModelSelectionService {
       economicReferenceArchitecture: selection.economicReferenceArchitecture || 'LEGACY_REQUESTED_AMOUNT_REFERENCE',
       requestedToRecognizedRatio: selection.requestedToRecognizedRatio ?? null,
       purpose: opportunity.purpose, opportunityType: opportunity.opportunityType,
+      homeEquityFunding: opportunity.homeEquityFunding ? structuredClone(opportunity.homeEquityFunding) : null,
       proposedTransactionStructure: opportunity.proposedTransactionStructure || null,
       approvedTransactionStructure: opportunity.approvedTransactionStructure || selection.approvedTransactionStructure || null,
       verifiedRecordId: opportunity.verifiedRecordId || null, valuePreparationId: opportunity.valuePreparationId || null, modelAssessmentId: selection.assessmentId,

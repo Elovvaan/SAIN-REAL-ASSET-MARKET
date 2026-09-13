@@ -238,6 +238,7 @@ export class FundingOpportunityVerificationService {
         currency: opportunity.currency,
         opportunityType: opportunity.opportunityType,
         purpose: opportunity.purpose,
+        homeEquityFunding: opportunity.homeEquityFunding ? structuredClone(opportunity.homeEquityFunding) : null,
         evidenceIds: unique(request.evidenceIds || []),
         agreementIds: unique(request.relatedAgreementIds || []),
         transactionIds: unique(request.sourceTransactionIds || []),

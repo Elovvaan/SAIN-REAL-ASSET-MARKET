@@ -40,6 +40,15 @@ const REQUIREMENTS = Object.freeze({
     'Entity and authorization documents required to complete the financing',
     'Final beneficiary and settlement instructions',
   ],
+  HOME_EQUITY: [
+    'Executed SRA Home Equity Funding Note and transaction documents',
+    'Current appraisal or verified property valuation',
+    'Title report confirming ownership, existing liens, and lien priority',
+    'Recorded mortgage or deed of trust securing the transaction',
+    'Evidence of current property taxes and required property insurance',
+    'Final settlement-asset delivery instructions',
+    'Applicable closed-end dwelling-secured disclosures and cancellation notices',
+  ],
   WORKING_CAPITAL: [
     'Final use-of-funds documentation applicable to the approved financing',
     'Current business and entity authorization documents required for closing',

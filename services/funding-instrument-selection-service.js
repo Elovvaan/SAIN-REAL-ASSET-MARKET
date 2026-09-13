@@ -57,7 +57,9 @@ export class FundingInstrumentSelectionService{
     const vvr=canonicalVvr(this.domain,canonicalVerifiedValueRecordId);
     const requestedAmount=Number(request.requestedAmount);
     const recognizedReferenceValue=vvr?Number(vvr.value):Number.isFinite(Number(request.recognizedReferenceValue))?Number(request.recognizedReferenceValue):null;
-    const faceValue=Number(input.faceValue??request.requestedAmount);
+    const homeEquityFunding=request.homeEquityFunding||opportunity.homeEquityFunding||null;
+    const defaultFaceValue=homeEquityFunding?.transactionForm==='CLOSED_END_FIXED_RETURN'?homeEquityFunding.totalRepaymentObligation:request.requestedAmount;
+    const faceValue=Number(input.faceValue??defaultFaceValue);
     const instrument={
       instrumentId:input.instrumentId||id('SRAI'),instrumentFamily:selection.selectedInstrumentFamily,instrumentType:selection.selectedInstrumentFamily,fundingModel:selection.fundingModel,
       proposedTransactionStructure:request.proposedTransactionStructure||opportunity.proposedTransactionStructure||null,approvedTransactionStructure:request.approvedTransactionStructure||opportunity.approvedTransactionStructure||null,
@@ -65,9 +67,9 @@ export class FundingInstrumentSelectionService{
       verifiedRecordId:opportunity.verifiedRecordId||request.verifiedRecordId||null,canonicalVerifiedValueRecordId:vvr?.verifiedValueRecordId||null,
       valueReferenceArchitecture:vvr?'CANONICAL_VVR_REFERENCE':'LEGACY_VERIFIED_RECORD_REFERENCE',referencedDeterminationId:vvr?.determinationId||request.referencedDeterminationId||null,referencedSnapshotId:vvr?.snapshotId||request.referencedSnapshotId||null,
       requestedAmount,recognizedReferenceValue,recognizedReferenceCurrency:vvr?.currency||request.recognizedReferenceCurrency||null,
-      faceValue,faceValueBasis:input.faceValue!==undefined?'EXPLICIT_STRUCTURING_DECISION':'REQUESTED_AMOUNT_DEFAULT',faceValueToRecognizedRatio:ratio(faceValue,recognizedReferenceValue),requestedToRecognizedRatio:ratio(requestedAmount,recognizedReferenceValue),
+      faceValue,faceValueBasis:input.faceValue!==undefined?'EXPLICIT_STRUCTURING_DECISION':homeEquityFunding?.transactionForm==='CLOSED_END_FIXED_RETURN'?'HOME_EQUITY_TOTAL_REPAYMENT_OBLIGATION':'REQUESTED_AMOUNT_DEFAULT',faceValueToRecognizedRatio:ratio(faceValue,recognizedReferenceValue),requestedToRecognizedRatio:ratio(requestedAmount,recognizedReferenceValue),
       verifiedValuePackageId:input.verifiedValuePackageId||null,purpose:opportunity.purpose,currency:input.currency||request.currency,denomination:input.denomination||null,maturityDate:input.maturityDate||null,transferabilityStatus:input.transferabilityStatus||'RESTRICTED',settlementRule:input.settlementRule||null,governingDocumentId:input.governingDocumentId||null,
-      terms:{...(selection.terms||{}),...(input.terms||{})},restrictions:unique([...(selection.restrictions||[]),...(input.restrictions||[])]),state:'DRAFT',status:'DRAFT',issuanceStatus:'NOT_ISSUED',createdBy:actorId,createdAt:now(),updatedAt:now(),
+      terms:{...(selection.terms||{}),...(homeEquityFunding?{homeEquityFunding:structuredClone(homeEquityFunding)}:{}),...(input.terms||{})},restrictions:unique([...(selection.restrictions||[]),...(input.restrictions||[])]),state:'DRAFT',status:'DRAFT',issuanceStatus:'NOT_ISSUED',createdBy:actorId,createdAt:now(),updatedAt:now(),
     };
     if(!Number.isFinite(instrument.faceValue)||instrument.faceValue<=0)throw new Error('Draft instrument face value must be greater than zero.');
     await this.domain.put(TYPES.SRA_INSTRUMENT,instrument.instrumentId,instrument,{actorId,eventType:'SRA_INSTRUMENT_DRAFT_CREATED'});

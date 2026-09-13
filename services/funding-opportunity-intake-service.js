@@ -13,6 +13,10 @@ const STATES = Object.freeze([
   'WITHDRAWN',
 ]);
 const STARTUP_TYPE = 'STARTUP_BUSINESS';
+const HOME_EQUITY_TYPE = 'HOME_EQUITY';
+const HOME_EQUITY_OCCUPANCY_TYPES = new Set(['PRIMARY_RESIDENCE', 'SECOND_HOME', 'INVESTMENT_PROPERTY']);
+const HOME_EQUITY_SETTLEMENT_ASSETS = new Set(['SRA_COIN', 'EXTERNAL_DIGITAL_ASSET']);
+const HOME_EQUITY_REPAYMENT_DENOMINATIONS = new Set(['SRA_COIN', 'USD_REFERENCE', 'SETTLEMENT_ASSET']);
 const STARTUP_READINESS_KEYS = Object.freeze([
   'entityFormation', 'equipmentIdentified', 'suppliersIdentified', 'pricingEstablished',
   'workspaceIdentified', 'salesChannelPlan', 'licensesPermitsResearched', 'insuranceNeedsIdentified',
@@ -98,6 +102,102 @@ function normalizeStartupPackage(input = {}, current = {}) {
   };
 }
 
+function requiredText(value, field) {
+  const normalized = String(value || '').trim();
+  if (!normalized) throw new Error(`${field} is required.`);
+  return normalized;
+}
+
+function positiveNumber(value, field) {
+  const normalized = Number(value);
+  if (!Number.isFinite(normalized) || normalized <= 0) throw new Error(`${field} must be greater than zero.`);
+  return Number(normalized.toFixed(2));
+}
+
+function nonNegativeNumber(value, field) {
+  const normalized = Number(value);
+  if (!Number.isFinite(normalized) || normalized < 0) throw new Error(`${field} must be zero or greater.`);
+  return Number(normalized.toFixed(2));
+}
+
+function allowedValue(value, field, allowed) {
+  const normalized = requiredText(value, field).toUpperCase();
+  if (!allowed.has(normalized)) throw new Error(`${field} is not supported.`);
+  return normalized;
+}
+
+function normalizeHomeEquityPackage(input = {}, requestedAmount, current = {}) {
+  const merged = { ...(current || {}), ...(input || {}) };
+  const property = { ...(current?.property || {}), ...(input?.property || {}) };
+  const appraisedValue = positiveNumber(merged.appraisedValue, 'homeEquityFunding.appraisedValue');
+  const existingLienBalance = nonNegativeNumber(merged.existingLienBalance, 'homeEquityFunding.existingLienBalance');
+  const maxCombinedLtvPercent = positiveNumber(merged.maxCombinedLtvPercent, 'homeEquityFunding.maxCombinedLtvPercent');
+  if (maxCombinedLtvPercent >= 100) throw new Error('homeEquityFunding.maxCombinedLtvPercent must be less than 100.');
+  const principalAdvance = positiveNumber(requestedAmount, 'requestedAmount');
+  const fixedReturnAmount = nonNegativeNumber(merged.fixedReturnAmount, 'homeEquityFunding.fixedReturnAmount');
+  const termMonths = Number(merged.termMonths);
+  if (!Number.isInteger(termMonths) || termMonths <= 0) throw new Error('homeEquityFunding.termMonths must be a positive whole number.');
+  const verifiedEquity = Number(Math.max(0, appraisedValue - existingLienBalance).toFixed(2));
+  const requiredEquityCushion = Number((appraisedValue * (1 - maxCombinedLtvPercent / 100)).toFixed(2));
+  const maximumPrincipalAdvance = Number(Math.max(0, appraisedValue * (maxCombinedLtvPercent / 100) - existingLienBalance).toFixed(2));
+  const projectedCombinedLtvPercent = Number((((existingLienBalance + principalAdvance) / appraisedValue) * 100).toFixed(4));
+  const withinAdvanceLimit = principalAdvance <= maximumPrincipalAdvance;
+  if (!withinAdvanceLimit) {
+    const error = new Error(`Requested amount exceeds the home equity advance limit of ${maximumPrincipalAdvance.toFixed(2)}.`);
+    error.code = 'HOME_EQUITY_LIMIT_EXCEEDED';
+    throw error;
+  }
+  const settlementAsset = allowedValue(merged.settlementAsset, 'homeEquityFunding.settlementAsset', HOME_EQUITY_SETTLEMENT_ASSETS);
+  const repaymentSupportInput = { ...(current?.repaymentSupport || {}), ...(input?.repaymentSupport || {}) };
+  const verifiedMonthlyIncome = positiveNumber(repaymentSupportInput.verifiedMonthlyIncome, 'homeEquityFunding.repaymentSupport.verifiedMonthlyIncome');
+  const monthlyHousingExpense = nonNegativeNumber(repaymentSupportInput.monthlyHousingExpense, 'homeEquityFunding.repaymentSupport.monthlyHousingExpense');
+  const otherMonthlyObligations = nonNegativeNumber(repaymentSupportInput.otherMonthlyObligations, 'homeEquityFunding.repaymentSupport.otherMonthlyObligations');
+  const monthlyAvailableForRepayment = Number((verifiedMonthlyIncome - monthlyHousingExpense - otherMonthlyObligations).toFixed(2));
+  const monthlyEquivalentPayment = Number(((principalAdvance + fixedReturnAmount) / termMonths).toFixed(2));
+  const paymentCoverageRatio = monthlyEquivalentPayment > 0 ? Number((monthlyAvailableForRepayment / monthlyEquivalentPayment).toFixed(4)) : null;
+  return {
+    transactionForm: 'CLOSED_END_FIXED_RETURN',
+    property: {
+      address: requiredText(property.address, 'homeEquityFunding.property.address'),
+      parcelId: requiredText(property.parcelId, 'homeEquityFunding.property.parcelId'),
+      ownerName: requiredText(property.ownerName, 'homeEquityFunding.property.ownerName'),
+      occupancyType: allowedValue(property.occupancyType, 'homeEquityFunding.property.occupancyType', HOME_EQUITY_OCCUPANCY_TYPES),
+    },
+    appraisedValue,
+    valuationDate: requiredText(merged.valuationDate, 'homeEquityFunding.valuationDate'),
+    valuationReference: requiredText(merged.valuationReference, 'homeEquityFunding.valuationReference'),
+    existingLienBalance,
+    existingLienReference: requiredText(merged.existingLienReference, 'homeEquityFunding.existingLienReference'),
+    lienPosition: requiredText(merged.lienPosition, 'homeEquityFunding.lienPosition').toUpperCase(),
+    maxCombinedLtvPercent,
+    principalAdvance,
+    fixedReturnAmount,
+    totalRepaymentObligation: Number((principalAdvance + fixedReturnAmount).toFixed(2)),
+    termMonths,
+    repaymentFrequency: requiredText(merged.repaymentFrequency, 'homeEquityFunding.repaymentFrequency').toUpperCase(),
+    settlementAsset,
+    settlementAssetCode: settlementAsset === 'SRA_COIN'
+      ? 'SRA'
+      : requiredText(merged.settlementAssetCode, 'homeEquityFunding.settlementAssetCode').toUpperCase(),
+    settlementNetwork: requiredText(merged.settlementNetwork, 'homeEquityFunding.settlementNetwork'),
+    repaymentDenomination: allowedValue(merged.repaymentDenomination, 'homeEquityFunding.repaymentDenomination', HOME_EQUITY_REPAYMENT_DENOMINATIONS),
+    repaymentSupport: {
+      verifiedMonthlyIncome,
+      monthlyHousingExpense,
+      otherMonthlyObligations,
+      evidenceReference: requiredText(repaymentSupportInput.evidenceReference, 'homeEquityFunding.repaymentSupport.evidenceReference'),
+      monthlyAvailableForRepayment,
+      monthlyEquivalentPayment,
+      paymentCoverageRatio,
+    },
+    verifiedEquity,
+    requiredEquityCushion,
+    maximumPrincipalAdvance,
+    projectedCombinedLtvPercent,
+    withinAdvanceLimit,
+  };
+}
+
 function startupCompleteness(record) {
   const startup = record.startupFundingRequest || {};
   const business = startup.applicantBusiness || {};
@@ -164,6 +264,7 @@ export class FundingOpportunityIntakeService {
       evidenceCount: this.domain.list(EVIDENCE_RECORD_TYPE).length,
       verificationRequestCount: this.domain.list(VERIFICATION_REQUEST_TYPE).length,
       startupBusinessCount: this.domain.list(RECORD_TYPE).filter((record) => record.opportunityType === STARTUP_TYPE).length,
+      homeEquityCount: this.domain.list(RECORD_TYPE).filter((record) => record.opportunityType === HOME_EQUITY_TYPE).length,
     };
   }
 
@@ -202,6 +303,9 @@ export class FundingOpportunityIntakeService {
       ? assertFundingTransactionStructure(input.proposedTransactionStructure, opportunityType)
       : null;
     const startupFundingRequest = opportunityType === STARTUP_TYPE ? normalizeStartupPackage(input.startupFundingRequest || {}) : null;
+    const homeEquityFunding = opportunityType === HOME_EQUITY_TYPE
+      ? normalizeHomeEquityPackage(input.homeEquityFunding || {}, requestedAmount)
+      : null;
 
     const record = {
       opportunityId: input.opportunityId || id('FOR'),
@@ -219,6 +323,7 @@ export class FundingOpportunityIntakeService {
       expectedCompletionDate: input.expectedCompletionDate || null,
       fundingStages: input.fundingStages || [],
       startupFundingRequest,
+      homeEquityFunding,
       supportingDocumentIds: unique(input.supportingDocumentIds || []),
       evidenceRecordIds: [],
       relatedParticipantIds: unique([input.applicantParticipantId, ...(input.relatedParticipantIds || [])]),
@@ -281,6 +386,10 @@ export class FundingOpportunityIntakeService {
     const startupFundingRequest = opportunityType === STARTUP_TYPE
       ? normalizeStartupPackage(input.startupFundingRequest === undefined ? current.startupFundingRequest || {} : input.startupFundingRequest, current.startupFundingRequest || {})
       : null;
+    const nextRequestedAmount = input.requestedAmount == null ? current.requestedAmount : Number(input.requestedAmount);
+    const homeEquityFunding = opportunityType === HOME_EQUITY_TYPE
+      ? normalizeHomeEquityPackage(input.homeEquityFunding === undefined ? current.homeEquityFunding || {} : input.homeEquityFunding, nextRequestedAmount, current.homeEquityFunding || {})
+      : null;
 
     const updated = {
       ...current,
@@ -289,12 +398,13 @@ export class FundingOpportunityIntakeService {
       purpose: input.purpose ?? current.purpose,
       proposedTransactionStructure,
       description: input.description ?? startupFundingRequest?.businessDescription ?? current.description,
-      requestedAmount: input.requestedAmount == null ? current.requestedAmount : Number(input.requestedAmount),
+      requestedAmount: nextRequestedAmount,
       currency: input.currency ? String(input.currency).toUpperCase() : current.currency,
       preferredFundingDate: input.preferredFundingDate ?? startupFundingRequest?.requestedLaunchDate ?? current.preferredFundingDate,
       expectedCompletionDate: input.expectedCompletionDate ?? current.expectedCompletionDate,
       fundingStages: input.fundingStages ?? current.fundingStages,
       startupFundingRequest,
+      homeEquityFunding,
       supportingDocumentIds: unique(input.supportingDocumentIds ?? current.supportingDocumentIds),
       relatedParticipantIds: unique(input.relatedParticipantIds ?? current.relatedParticipantIds),
       relatedAgreementIds: unique(input.relatedAgreementIds ?? current.relatedAgreementIds),
@@ -396,6 +506,21 @@ export class FundingOpportunityIntakeService {
       Object.assign(required, Object.fromEntries(Object.entries(startup.required).map(([key, value]) => [`startup.${key}`, value])));
       Object.assign(recommended, Object.fromEntries(Object.entries(startup.recommended).map(([key, value]) => [`startup.${key}`, value])));
     }
+    if (record.opportunityType === HOME_EQUITY_TYPE) {
+      const homeEquity = record.homeEquityFunding || {};
+      Object.assign(required, {
+        'homeEquity.transactionForm': homeEquity.transactionForm === 'CLOSED_END_FIXED_RETURN',
+        'homeEquity.propertyAddress': hasValue(homeEquity.property?.address),
+        'homeEquity.parcelId': hasValue(homeEquity.property?.parcelId),
+        'homeEquity.ownerName': hasValue(homeEquity.property?.ownerName),
+        'homeEquity.valuationReference': hasValue(homeEquity.valuationReference),
+        'homeEquity.existingLienReference': hasValue(homeEquity.existingLienReference),
+        'homeEquity.withinAdvanceLimit': homeEquity.withinAdvanceLimit === true,
+        'homeEquity.settlementAsset': hasValue(homeEquity.settlementAsset),
+        'homeEquity.repaymentDenomination': hasValue(homeEquity.repaymentDenomination),
+        'homeEquity.repaymentSupport': hasValue(homeEquity.repaymentSupport?.evidenceReference) && Number(homeEquity.repaymentSupport?.verifiedMonthlyIncome) > 0,
+      });
+    }
 
     const missingRequired = Object.entries(required).filter(([, present]) => !present).map(([field]) => field);
     const missingRecommended = Object.entries(recommended).filter(([, present]) => !present).map(([field]) => field);
@@ -479,6 +604,14 @@ export class FundingOpportunityIntakeService {
       'STARTUP_DEMAND_EVIDENCE',
       'STARTUP_READINESS_EVIDENCE',
     ] : [];
+    const homeEquityChecks = opportunity.opportunityType === HOME_EQUITY_TYPE ? [
+      'PROPERTY_OWNERSHIP_AND_TITLE',
+      'PROPERTY_VALUATION',
+      'EXISTING_LIENS_AND_PRIORITY',
+      'EQUITY_AND_COMBINED_LTV',
+      'PROPERTY_TAX_AND_INSURANCE_STATUS',
+      'SETTLEMENT_ASSET_AND_REPAYMENT_TERMS',
+    ] : [];
     const request = {
       verificationRequestId: input.verificationRequestId || id('FVR'),
       opportunityId,
@@ -496,6 +629,7 @@ export class FundingOpportunityIntakeService {
         'AMOUNT_CONSISTENCY',
         'RELATIONSHIP_CONSISTENCY',
         ...startupChecks,
+        ...homeEquityChecks,
       ],
       status: 'PENDING',
       requestedBy: actorId,
