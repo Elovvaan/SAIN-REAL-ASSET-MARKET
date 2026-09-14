@@ -124,7 +124,18 @@ export async function createApp(options = {}) {
   const database = options.database || new DatabaseService({ connectionString: options.connectionString });
   await database.initialize();
   const persistentDomain = new PersistentDomainService(database);
-  await persistentDomain.hydrate();
+  // Hydrate only records required to construct the first public/admin shells.
+  // Feature services and admin workspaces hydrate their own records on demand.
+  await persistentDomain.hydrate([
+    RECORD_TYPES.ASSET_ACCOUNT,
+    RECORD_TYPES.PROJECT_ACCOUNT,
+    RECORD_TYPES.LEDGER_ACCOUNT,
+    RECORD_TYPES.TRANSFERABLE_POSITION,
+    RECORD_TYPES.VERIFIED_VALUE_RECORD,
+    RECORD_TYPES.MARKET_SIGNAL,
+    RECORD_TYPES.CANONICAL_ASSET,
+    RECORD_TYPES.PLATFORM_TREASURY_PROFILE,
+  ]);
   const domainStore = options.domainStore || createSeededDomainStore();
   const accessService = new AccessService({ database });
   await accessService.initialize();

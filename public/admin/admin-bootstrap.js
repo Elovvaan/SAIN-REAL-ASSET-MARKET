@@ -71,7 +71,7 @@
   let refreshInFlight = false;
   let refreshAgain = false;
 
-  function loadScriptOnce(source, marker) {
+  function loadScriptOnce(source, marker, timeoutMs = 4000) {
     return new Promise((resolve, reject) => {
       const existing = document.querySelector(`script[${marker}]`);
       if (existing) {
@@ -94,7 +94,7 @@
         script.dataset.failed = 'true';
         script.remove();
         reject(new Error(`Timed out loading ${source}`));
-      }, 12000);
+      }, timeoutMs);
       script.addEventListener('load', () => {
         clearTimeout(timeout);
         script.dataset.loaded = 'true';
@@ -110,12 +110,14 @@
     });
   }
 
-  async function loadScript(source, marker) {
+  async function loadScript(source, marker, options = {}) {
+    const { retry = true, timeoutMs = 4000 } = options;
     try {
-      return await loadScriptOnce(source, marker);
+      return await loadScriptOnce(source, marker, timeoutMs);
     } catch (firstError) {
+      if (!retry) throw firstError;
       await new Promise((resolve) => setTimeout(resolve, 350));
-      return loadScriptOnce(source, marker).catch(() => { throw firstError; });
+      return loadScriptOnce(source, marker, timeoutMs).catch(() => { throw firstError; });
     }
   }
 
@@ -251,7 +253,7 @@
 
   async function ensurePerformanceRuntime() {
     if (performanceLoad) return performanceLoad;
-    performanceLoad = loadScript(...PERFORMANCE_RUNTIME).catch((error) => {
+    performanceLoad = loadScript(...PERFORMANCE_RUNTIME, { retry: false, timeoutMs: 3000 }).catch((error) => {
       performanceLoad = null;
       throw error;
     });
@@ -261,14 +263,16 @@
   async function ensureShell() {
     if (shellLoad) return shellLoad;
     shellLoad = (async () => {
-      await ensurePerformanceRuntime();
       const [source, marker] = SHELL;
-      await loadScript(source, marker);
+      await loadScript(source, marker, { retry: false, timeoutMs: 4000 });
       const admin = document.querySelector('#admin-view:not(.hidden)');
       if (!admin?.querySelector('.admin-suite')) throw new Error('Administration shell did not mount.');
       admin.querySelector('#admin-suite-account .top')?.style.removeProperty('display');
       removeBootPlaceholder(admin);
       admin.dataset.presentationOwner = 'admin-suite';
+      void ensurePerformanceRuntime().catch((error) => {
+        console.warn('SAIN Administration performance enhancement did not load; the shell remains available.', error);
+      });
       return admin;
     })().catch((error) => {
       shellLoad = null;

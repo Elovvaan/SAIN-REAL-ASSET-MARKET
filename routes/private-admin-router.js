@@ -415,6 +415,10 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
     if (requestedWorkspace && !ADMIN_WORKSPACE_SOURCES[requestedWorkspace]) return res.status(400).json({ error:'Unknown administration workspace.' });
     const tabSources = requestedWorkspace && requestedTab ? ADMIN_TAB_SOURCES[requestedWorkspace]?.[requestedTab] : null;
     const requestedKeys = requestedWorkspace ? new Set(tabSources || ADMIN_WORKSPACE_SOURCES[requestedWorkspace]) : new Set([...Object.keys(ADMIN_RECORD_TYPES),'users']);
+    const requestedRecordTypes = [...requestedKeys]
+      .map((key) => ADMIN_RECORD_TYPES[key])
+      .filter(Boolean);
+    await domain.hydrate(requestedRecordTypes);
     const records = {};
     for (const key of requestedKeys) {
       if (key === 'users') {
