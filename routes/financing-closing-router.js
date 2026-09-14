@@ -15,28 +15,31 @@ function dateLabel(value) { const date = new Date(value || Date.now()); return N
 export function createFinancingClosingRouter(service) {
   const router = express.Router();
   const positionDistribution = new FinancedPositionDistributionService(service.domain);
-  const distributionReady = positionDistribution.initialize();
   const loanFinancing = new GovernedLoanFinancingService(service.domain);
-  const loanFinancingReady = loanFinancing.initialize();
   const achSettlementPacket = new AchSettlementPacketService(service.domain);
   const settlementRoutes = new SettlementRouteSelectionService(service.domain);
-  const settlementRoutesReady = settlementRoutes.initialize();
+  let distributionReady = null;
+  let loanFinancingReady = null;
+  let settlementRoutesReady = null;
+  const ensurePositionDistribution = () => (distributionReady ||= positionDistribution.initialize());
+  const ensureLoanFinancing = () => (loanFinancingReady ||= loanFinancing.initialize());
+  const ensureSettlementRoutes = () => (settlementRoutesReady ||= settlementRoutes.initialize());
 
-  router.get('/status', async (_req, res) => { await settlementRoutesReady; return res.json({ ...service.status(), positionDistribution: positionDistribution.status(), loanFinancing: loanFinancing.status(), settlementRoutes: settlementRoutes.status() }); });
-  router.get('/settlement-routes', async (_req, res) => { await settlementRoutesReady; return res.json({ routes: settlementRoutes.availableRoutes() }); });
-  router.get('/exports/:exportPackageId/settlement-route', async (req, res) => { try { await settlementRoutesReady; return res.json(settlementRoutes.current(req.params.exportPackageId)); } catch (error) { return fail(res, error); } });
+  router.get('/status', async (_req, res) => { await Promise.all([ensurePositionDistribution(), ensureLoanFinancing(), ensureSettlementRoutes()]); return res.json({ ...service.status(), positionDistribution: positionDistribution.status(), loanFinancing: loanFinancing.status(), settlementRoutes: settlementRoutes.status() }); });
+  router.get('/settlement-routes', async (_req, res) => { await ensureSettlementRoutes(); return res.json({ routes: settlementRoutes.availableRoutes() }); });
+  router.get('/exports/:exportPackageId/settlement-route', async (req, res) => { try { await ensureSettlementRoutes(); return res.json(settlementRoutes.current(req.params.exportPackageId)); } catch (error) { return fail(res, error); } });
   router.post('/exports/:exportPackageId/settlement-route', async (req, res) => {
     const actor = actorId(req); if (!actor) return res.status(401).json({ error: 'An authenticated financing-operations identity is required.' });
-    try { await settlementRoutesReady; return res.status(201).json(await settlementRoutes.select(req.params.exportPackageId, req.body || {}, actor)); }
+    try { await ensureSettlementRoutes(); return res.status(201).json(await settlementRoutes.select(req.params.exportPackageId, req.body || {}, actor)); }
     catch (error) { return fail(res, error); }
   });
   router.get('/escrow-settlements/:escrowSettlementId', async (req, res) => {
-    try { await settlementRoutesReady; const detail = settlementRoutes.escrow.detail(req.params.escrowSettlementId); return detail ? res.json(detail) : res.status(404).json({ error: 'Escrow settlement was not found.' }); }
+    try { await ensureSettlementRoutes(); const detail = settlementRoutes.escrow.detail(req.params.escrowSettlementId); return detail ? res.json(detail) : res.status(404).json({ error: 'Escrow settlement was not found.' }); }
     catch (error) { return fail(res, error); }
   });
   router.post('/escrow-settlements/:escrowSettlementId/transition', async (req, res) => {
     const actor = actorId(req); if (!actor) return res.status(401).json({ error: 'An authenticated financing-operations identity is required.' });
-    try { await settlementRoutesReady; return res.json(await settlementRoutes.escrow.transition(req.params.escrowSettlementId, req.body || {}, actor)); }
+    try { await ensureSettlementRoutes(); return res.json(await settlementRoutes.escrow.transition(req.params.escrowSettlementId, req.body || {}, actor)); }
     catch (error) { return fail(res, error); }
   });
   router.get('/authorizations', (req, res) => {
@@ -104,7 +107,7 @@ export function createFinancingClosingRouter(service) {
       return res.send(pdf);
     } catch (error) { return fail(res, error); }
   });
-  router.post('/authorizations/opportunities/:opportunityId/approve', async (req, res) => { const administrator = actorId(req); if (!administrator) return res.status(401).json({ error: 'An authenticated administrator identity is required.' }); try { await loanFinancingReady; return res.status(201).json(await loanFinancing.approveOpportunity(req.params.opportunityId, req.body || {}, administrator)); } catch (error) { return fail(res, error); } });
+  router.post('/authorizations/opportunities/:opportunityId/approve', async (req, res) => { const administrator = actorId(req); if (!administrator) return res.status(401).json({ error: 'An authenticated administrator identity is required.' }); try { await ensureLoanFinancing(); return res.status(201).json(await loanFinancing.approveOpportunity(req.params.opportunityId, req.body || {}, administrator)); } catch (error) { return fail(res, error); } });
   router.get('/closings', (req, res) => res.json({ records: service.list({ status: req.query.status, opportunityId: req.query.opportunityId }) }));
   router.get('/closings/:closingId', (req, res) => { const detail = service.detail(req.params.closingId); return detail ? res.json(detail) : res.status(404).json({ error: 'Financing closing was not found.' }); });
   router.post('/closings', async (req, res) => { try { return res.status(201).json(await service.open(req.body || {}, actorId(req))); } catch (error) { return fail(res, error); } });
@@ -115,9 +118,9 @@ export function createFinancingClosingRouter(service) {
   router.post('/closings/:closingId/disbursements/:disbursementId/submit', async (req, res) => { try { return res.json(await service.submitDisbursement(req.params.closingId, req.params.disbursementId, req.body || {}, actorId(req))); } catch (error) { return fail(res, error); } });
   router.post('/closings/:closingId/disbursements/:disbursementId/settlement', async (req, res) => { try { return res.json(await service.recordSettlement(req.params.closingId, req.params.disbursementId, req.body || {}, actorId(req))); } catch (error) { return fail(res, error); } });
   router.post('/closings/:closingId/board-servicing', async (req, res) => { try { return res.status(201).json(await service.boardToServicing(req.params.closingId, req.body || {}, actorId(req))); } catch (error) { return fail(res, error); } });
-  router.get('/positions', async (req, res) => { try { await distributionReady; return res.json({ records: positionDistribution.listPositions({ status: req.query.status, distributionStatus: req.query.distributionStatus, opportunityId: req.query.opportunityId }) }); } catch (error) { return fail(res, error); } });
-  router.get('/positions/:positionId', async (req, res) => { try { await distributionReady; const detail = positionDistribution.detail(req.params.positionId); return detail ? res.json(detail) : res.status(404).json({ error: 'Financed position was not found.' }); } catch (error) { return fail(res, error); } });
-  router.get('/positions/:positionId/distribution-assessment', async (req, res) => { try { await distributionReady; return res.json(positionDistribution.assessDistributionEligibility(req.params.positionId)); } catch (error) { return fail(res, error); } });
-  router.post('/positions/:positionId/make-available', async (req, res) => { try { await distributionReady; return res.status(201).json(await positionDistribution.makeAvailable(req.params.positionId, req.body || {}, actorId(req))); } catch (error) { return fail(res, error); } });
+  router.get('/positions', async (req, res) => { try { await ensurePositionDistribution(); return res.json({ records: positionDistribution.listPositions({ status: req.query.status, distributionStatus: req.query.distributionStatus, opportunityId: req.query.opportunityId }) }); } catch (error) { return fail(res, error); } });
+  router.get('/positions/:positionId', async (req, res) => { try { await ensurePositionDistribution(); const detail = positionDistribution.detail(req.params.positionId); return detail ? res.json(detail) : res.status(404).json({ error: 'Financed position was not found.' }); } catch (error) { return fail(res, error); } });
+  router.get('/positions/:positionId/distribution-assessment', async (req, res) => { try { await ensurePositionDistribution(); return res.json(positionDistribution.assessDistributionEligibility(req.params.positionId)); } catch (error) { return fail(res, error); } });
+  router.post('/positions/:positionId/make-available', async (req, res) => { try { await ensurePositionDistribution(); return res.status(201).json(await positionDistribution.makeAvailable(req.params.positionId, req.body || {}, actorId(req))); } catch (error) { return fail(res, error); } });
   return router;
 }

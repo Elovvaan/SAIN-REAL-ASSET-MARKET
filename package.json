@@ -25,9 +25,12 @@
     "test:load": "node scripts/load-qualification.mjs",
     "backup:create": "node scripts/backup-database.mjs",
     "restore:verify": "node scripts/verify-restore.mjs",
-    "test:integration": "npm run test:security && npm run test:transaction-safety && npm run test:settlement && npm run test:runtime && npm run test:lifecycle && npm run test:products && npm run test:production-routing && npm run test:admin-agent && npm run test:platform-asset && npm run test:admin-platform-asset-ui && npm run test:financial-history && npm run test:relationships && node --test --test-concurrency=1 test/edx-pipeline.test.js test/funding-engine.integration.test.js"
+    "test:integration": "npm run test:security && npm run test:transaction-safety && npm run test:settlement && npm run test:runtime && npm run test:lifecycle && npm run test:products && npm run test:production-routing && npm run test:admin-agent && npm run test:platform-asset && npm run test:admin-platform-asset-ui && npm run test:financial-history && npm run test:relationships && node --test --test-concurrency=1 test/edx-pipeline.test.js test/funding-engine.integration.test.js",
+    "test:operations-flow": "node --test --test-concurrency=1 test/admin-full-workspace-audit.test.js tests/unified-market-operations-diagnostics.test.mjs tests/persistent-domain-bulk-hydration.test.mjs"
   },
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "@solana/web3.js": "1.98.4",
     "@stellar/stellar-sdk": "15.1.0",
@@ -41,5 +44,7 @@
     "ws": "^8.18.3",
     "xrpl": "5.0.0"
   },
-  "devDependencies": { "supertest": "^7.1.4" }
+  "devDependencies": {
+    "supertest": "^7.1.4"
+  }
 }
