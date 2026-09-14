@@ -20,6 +20,11 @@ const RECORDS = Object.freeze({
   SETTLEMENT_EQUIVALENCE: 'SRA_SETTLEMENT_EQUIVALENCE',
 });
 
+const INITIAL_RECORDS = Object.freeze([
+  RECORDS.OPPORTUNITY,
+  RECORDS.RVU_RECOGNITION,
+]);
+
 function newest(records, limit = 25) {
   return [...records]
     .sort((a, b) => String(b.updatedAt || b.createdAt || b.recordedAt || '').localeCompare(String(a.updatedAt || a.createdAt || a.recordedAt || '')))
@@ -34,7 +39,9 @@ export class FundingOperationsService {
   constructor(persistentDomain) { this.domain = persistentDomain; }
 
   async initialize() {
-    await this.domain.hydrate(Object.values(RECORDS));
+    // The Financing landing view needs only its opportunity queue and RVU total.
+    // Later lifecycle stages hydrate their own record classes when opened.
+    await this.domain.hydrate(INITIAL_RECORDS);
     return this.status();
   }
 
