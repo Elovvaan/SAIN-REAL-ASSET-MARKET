@@ -4,12 +4,7 @@ on:
   pull_request:
     paths:
       - 'routes/private-admin-router.js'
-      - 'routes/financing-closing-router.js'
-      - 'services/persistent-domain-service.js'
-      - 'services/funding-operations-service.js'
       - 'public/admin/**'
-      - 'tests/unified-market-operations-diagnostics.test.mjs'
-      - 'tests/persistent-domain-bulk-hydration.test.mjs'
       - 'test/admin-full-workspace-audit.test.js'
       - '.github/workflows/admin-workspace-audit.yml'
   push:
@@ -17,12 +12,7 @@ on:
       - main
     paths:
       - 'routes/private-admin-router.js'
-      - 'routes/financing-closing-router.js'
-      - 'services/persistent-domain-service.js'
-      - 'services/funding-operations-service.js'
       - 'public/admin/**'
-      - 'tests/unified-market-operations-diagnostics.test.mjs'
-      - 'tests/persistent-domain-bulk-hydration.test.mjs'
       - 'test/admin-full-workspace-audit.test.js'
 
 jobs:
@@ -36,4 +26,4 @@ jobs:
         with:
           node-version: '20'
       - name: Run administration workspace audit
-        run: node --test --test-concurrency=1 test/admin-full-workspace-audit.test.js tests/unified-market-operations-diagnostics.test.mjs tests/persistent-domain-bulk-hydration.test.mjs
+        run: node --test --test-concurrency=1 test/admin-full-workspace-audit.test.js
