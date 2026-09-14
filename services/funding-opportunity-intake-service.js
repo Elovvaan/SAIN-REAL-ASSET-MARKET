@@ -251,7 +251,7 @@ export class FundingOpportunityIntakeService {
   }
 
   async initialize() {
-    await this.domain.hydrate([RECORD_TYPE, EVIDENCE_RECORD_TYPE, VERIFICATION_REQUEST_TYPE]);
+    await this.domain.hydrate([RECORD_TYPE, 'PARTICIPANT']);
     return this.status();
   }
 

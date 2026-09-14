@@ -175,7 +175,15 @@
         await request(`/api/funding/opportunities/${encodeURIComponent(opportunityId)}/line-of-credit/draws`, { method: 'POST', body: JSON.stringify({ ...data, amount: Number(data.amount) }) });
         if (result) result.textContent = 'Settled draw recorded.';
         await openDetail(root, opportunityId);
-      } catch (error) { if (result) result.textContent = error.message; }
+      } catch (error) {
+        if (result) result.textContent = error.message;
+      } finally {
+        delete form.dataset.submitting;
+        if (submitButton) {
+          submitButton.disabled = false;
+          submitButton.textContent = submitLabel;
+        }
+      }
     });
     panel.querySelector('[data-loc-repayment]')?.addEventListener('submit', async (event) => {
       event.preventDefault();
@@ -254,7 +262,16 @@
     root.querySelector('#funding-opportunity-form')?.addEventListener('submit', async (event) => {
       event.preventDefault();
       const form = event.currentTarget;
+      if (form.dataset.submitting === 'true') return;
       const result = root.querySelector('#funding-intake-result');
+      const submitButton = form.querySelector('button[type="submit"]');
+      const submitLabel = submitButton?.textContent || 'Create opportunity record';
+      form.dataset.submitting = 'true';
+      if (submitButton) {
+        submitButton.disabled = true;
+        submitButton.textContent = 'Creating opportunity…';
+      }
+      if (result) result.textContent = 'Creating opportunity record…';
       const formData = new FormData(form);
       const values = Object.fromEntries(formData.entries());
       const payload = { ...values, requestedAmount: Number(values.requestedAmount) };
