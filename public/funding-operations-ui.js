@@ -218,11 +218,38 @@
     }
   }
 
+  const financingRecordLoads = new WeakMap();
+
+  async function loadFinancingRecords(root) {
+    if (!root) return;
+    const existing = financingRecordLoads.get(root);
+    if (existing) return existing;
+    const panel = root.querySelector('#funding-records-panel');
+    const count = root.querySelector('[data-funding-record-count]');
+    const list = root.querySelector('.funding-ops-list');
+    if (panel) panel.hidden = false;
+    if (count) count.textContent = 'Loading…';
+    if (list) list.innerHTML = '<div class="funding-ops-empty">Loading financing records…</div>';
+    const operation = request('/api/funding/opportunities')
+      .then((payload) => {
+        const records = Array.isArray(payload.records) ? payload.records : [];
+        if (count) count.textContent = `${records.length} records`;
+        if (list) list.innerHTML = records.length ? records.map(queueRow).join('') : '<div class="funding-ops-empty">No funding opportunities have been created yet.</div>';
+        root.querySelectorAll('[data-opportunity-id]').forEach((row) => row.addEventListener('click', () => openDetail(root, row.dataset.opportunityId)));
+      })
+      .catch((error) => {
+        if (count) count.textContent = 'Unavailable';
+        if (list) list.innerHTML = `<div class="funding-ops-empty"><strong>Financing records could not load.</strong><p>${esc(error.message)}</p><button class="secondary-button" type="button" data-funding-record-retry>Retry records</button></div>`;
+        root.querySelector('[data-funding-record-retry]')?.addEventListener('click', () => void loadFinancingRecords(root));
+      })
+      .finally(() => financingRecordLoads.delete(root));
+    financingRecordLoads.set(root, operation);
+    return operation;
+  }
   async function render(root) {
     if (!root) return;
     style();
-    root.innerHTML = `<section class="funding-ops"><div class="funding-ops-hero"><p class="eyebrow">UNIFIED MARKET OPERATIONS</p><h2>Financing opportunities</h2><div class="funding-metrics"><div class="funding-metric"><strong data-funding-metric="opportunities">—</strong><span>Funding opportunities</span></div><div class="funding-metric"><strong data-funding-metric="totalRequested">—</strong><span>Total requested</span></div><div class="funding-metric"><strong data-funding-metric="totalRecognizedRvu">—</strong><span>SRA/RVU recognized</span></div><div class="funding-metric"><strong data-funding-metric="activeQueueItems">—</strong><span>Active records</span></div></div><div class="funding-ops-actions"><button class="primary-button" id="funding-ops-new">Start opportunity intake</button><button class="secondary-button" id="funding-ops-refresh">Refresh operations</button></div></div>${intakeForm()}<section class="funding-detail" id="funding-detail"></section><section class="funding-ops-panel"><div class="funding-panel-head"><div><p class="eyebrow">OPPORTUNITIES</p><h3>Financing records</h3></div><span data-funding-record-count>Loading…</span></div><div class="funding-ops-list"><div class="funding-ops-empty">Loading financing records…</div></div></section></section>`;
-    const modal = root.querySelector('#funding-intake-modal');
+    root.innerHTML = `<section class="funding-ops"><div class="funding-ops-hero"><p class="eyebrow">UNIFIED MARKET OPERATIONS</p><h2>Finance an opportunity</h2><p>Start with the opportunity intake. Financing records and later workflow stages load only when you reach them.</p><div class="funding-ops-actions"><button class="primary-button" id="funding-ops-new">Start opportunity intake</button><button class="secondary-button" id="funding-ops-records">View financing records</button></div></div>${intakeForm()}<section class="funding-detail" id="funding-detail"></section><section class="funding-ops-panel" id="funding-records-panel" hidden><div class="funding-panel-head"><div><p class="eyebrow">OPPORTUNITIES</p><h3>Financing records</h3></div><span data-funding-record-count></span></div><div class="funding-ops-list"></div></section></section>`;    const modal = root.querySelector('#funding-intake-modal');
     const typeSelect = root.querySelector('#funding-opportunity-type');
     const structureSelect = root.querySelector('#funding-transaction-structure');
     const startupIntake = root.querySelector('#startup-business-intake');
@@ -250,7 +277,7 @@
     };
     root.querySelector('#funding-ops-new')?.addEventListener('click', () => modal?.classList.add('open'));
     root.querySelector('#funding-intake-close')?.addEventListener('click', () => modal?.classList.remove('open'));
-    root.querySelector('#funding-ops-refresh')?.addEventListener('click', () => render(root));
+    root.querySelector('#funding-ops-records')?.addEventListener('click', () => void loadFinancingRecords(root));
     applicantSource?.addEventListener('change', syncApplicantMode);
     syncApplicantMode();
     typeSelect?.addEventListener('change', () => {
@@ -296,29 +323,20 @@
         homeEquityIntake?.classList.remove('open');
         syncApplicantMode();
         syncTransactionStructures();
-        setTimeout(() => render(root), 900);
-      } catch (error) { if (result) result.textContent = error.message; }
+        modal?.classList.remove('open');
+        window.dispatchEvent(new CustomEvent('sra:funding-opportunity-created', { detail: { opportunityId: record.opportunityId } }));
+        void loadFinancingRecords(root);
+      } catch (error) {
+        if (result) result.textContent = error.message;
+      } finally {
+        delete form.dataset.submitting;
+        if (submitButton) {
+          submitButton.disabled = false;
+          submitButton.textContent = submitLabel;
+        }
+      }
     });
-    try {
-      const dashboard = await request('/api/funding-operations/dashboard');
-      const metrics = dashboard.metrics || {};
-      const setMetric = (name, value) => { const node = root.querySelector(`[data-funding-metric="${name}"]`); if (node) node.textContent = value; };
-      setMetric('opportunities', metrics.opportunities || 0);
-      setMetric('totalRequested', money.format(metrics.totalRequested || 0));
-      setMetric('totalRecognizedRvu', Number(metrics.totalRecognizedRvu || 0).toLocaleString());
-      setMetric('activeQueueItems', metrics.activeQueueItems || 0);
-      const recordCount = root.querySelector('[data-funding-record-count]');
-      if (recordCount) recordCount.textContent = `${dashboard.queue?.length || 0} records`;
-      const list = root.querySelector('.funding-ops-list');
-      if (list) list.innerHTML = dashboard.queue?.length ? dashboard.queue.map(queueRow).join('') : '<div class="funding-ops-empty">No funding opportunities have been created yet.</div>';
-      root.querySelectorAll('[data-opportunity-id]').forEach((row) => row.addEventListener('click', () => openDetail(root, row.dataset.opportunityId)));
-    } catch (error) {
-      const count = root.querySelector('[data-funding-record-count]');
-      if (count) count.textContent = 'Unavailable';
-      const list = root.querySelector('.funding-ops-list');
-      if (list) list.innerHTML = `<div class="funding-ops-empty"><strong>Financing records could not load.</strong><p>${esc(error.message)}</p><button class="secondary-button" type="button" data-funding-record-retry>Retry records</button></div>`;
-      root.querySelector('[data-funding-record-retry]')?.addEventListener('click', () => render(root));
-    }
+    /* Financing records intentionally wait for creation or an explicit request. */
   }
 
   window.renderParticipantFundingOperations = render;

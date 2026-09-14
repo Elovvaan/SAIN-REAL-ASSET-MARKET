@@ -25,10 +25,7 @@
 
   function operationsRoot() { return document.querySelector('[data-workspace="operations"]'); }
   function activeMode(root) {
-    const tab = root?.dataset.activeTab;
-    if (tab === 'Awaiting Actions') return 'AWAITING';
-    if (tab === 'Financing') return 'FINANCING';
-    return null;
+    return root?.dataset.activeTab === 'Awaiting Actions' ? 'AWAITING' : null;
   }
   function financingStage(record = {}) {
     const status = String(record.status || '').toUpperCase();
@@ -50,19 +47,7 @@
   }
 
   function actionHost(root) {
-    const mode = activeMode(root);
-    const recordsRoot = root?.querySelector('.admin-workspace-records');
-    if (!mode || !recordsRoot) return null;
-    if (mode === 'AWAITING') return recordsRoot;
-    let shell = recordsRoot.querySelector('[data-financing-continuous-actions]');
-    if (!shell) {
-      shell = document.createElement('section');
-      shell.className = 'financing-continuous-actions';
-      shell.dataset.financingContinuousActions = 'true';
-      shell.innerHTML = '<header><p class="eyebrow">CLOSING & FUNDING</p><h3>Continue this financing workflow</h3><p>Closing, ready-to-fund, and funding authorization stay inside Financing.</p></header><div data-financing-continuous-actions-body></div>';
-      recordsRoot.append(shell);
-    }
-    return shell.querySelector('[data-financing-continuous-actions-body]');
+    return activeMode(root) ? root?.querySelector('.admin-workspace-records') || null : null;
   }
   function closingForOpportunity(closings, opportunityId) { return closings.find((record) => record.opportunityId === opportunityId && record.status !== 'CANCELLED') || null; }
   function conditionsMarkup(closingDetail) {
@@ -152,12 +137,11 @@
     if (!root || root.dataset.financingAwaitingActionsBound === 'true') return;
     root.dataset.financingAwaitingActionsBound = 'true';
     root.addEventListener('click', (event) => {
-      const tab = event.target.closest('[data-admin-tab="Awaiting Actions"],[data-admin-tab="Financing"]'); if (tab) setTimeout(() => void load(), 0);
+      const tab = event.target.closest('[data-admin-tab="Awaiting Actions"]'); if (tab) setTimeout(() => void load(), 0);
       const button = event.target.closest('[data-record-financing-authorization],[data-open-financing-closing],[data-add-financing-condition],[data-satisfy-financing-condition],[data-waive-financing-condition],[data-ready-financing-closing],[data-authorize-financing-closing]');
       if (button) { event.preventDefault(); void act(button); }
     });
-    window.addEventListener('sra:admin-financing-rendered', () => { if (activeMode(root) === 'FINANCING') void load(); });
-    window.addEventListener('sra:admin-workspace-synchronized', (event) => { if (event.detail?.workspaceId === 'operations' && activeMode(root)) void load(); });
+    window.addEventListener('sra:admin-workspace-synchronized', (event) => { if (event.detail?.workspaceId === 'operations' && activeMode(root) === 'AWAITING') void load(); });
     if (activeMode(root)) void load();
   }
 
