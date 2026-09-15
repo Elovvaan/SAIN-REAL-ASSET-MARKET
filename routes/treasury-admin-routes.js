@@ -87,14 +87,38 @@ function eligibleFundingInstruments(domain) {
 export async function installTreasuryAdminRoutes({ router, domain, requireAdmin, database = null }) {
   const treasury = new TreasuryLedgerService(domain);
   const recordedValue = new RecordedValueRepresentationService(domain);
-  await domain.hydrate(['SRA_COIN_CHAIN_PROJECTION']);
   const coinPositionLifecycle = new CoinPositionLifecycleReadService(domain);
   const financingCapacity = new TreasuryFinancingCapacityService(domain);
-  await treasury.initialize();
-  await ensureInstrumentTreasuryAccounts(domain);
-  await ensureCanonicalPlatformFundingInstrument(domain);
   const fundingInstrumentDeposits = new PlatformFundingInstrumentDepositService(domain, treasury);
-  await fundingInstrumentDeposits.ensureCoinPosition();
+  let initialization = null;
+
+  const ensureTreasuryReady = async () => {
+    if (!initialization) {
+      initialization = Promise.resolve()
+        .then(async () => {
+          await domain.hydrate(['SRA_COIN_CHAIN_PROJECTION']);
+          await treasury.initialize();
+          await ensureInstrumentTreasuryAccounts(domain);
+          await ensureCanonicalPlatformFundingInstrument(domain);
+          await fundingInstrumentDeposits.ensureCoinPosition();
+          return true;
+        })
+        .catch((error) => {
+          initialization = null;
+          throw error;
+        });
+    }
+    return initialization;
+  };
+
+  const requireTreasuryReady = async (_req, _res, next) => {
+    try { await ensureTreasuryReady(); return next(); }
+    catch (error) { return next(error); }
+  };
+
+  router.use('/api/admin/treasury', requireTreasuryReady);
+  router.use('/api/admin/recorded-value-representation', requireTreasuryReady);
+  router.use('/api/admin/coin-position-lifecycle', requireTreasuryReady);
 
   router.get('/api/admin/treasury', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
@@ -181,5 +205,5 @@ export async function installTreasuryAdminRoutes({ router, domain, requireAdmin,
     return res.json(coinPositionLifecycle.read());
   });
 
-  return { treasury, recordedValue, coinPositionLifecycle, fundingInstrumentDeposits, financingCapacity };
+  return { treasury, recordedValue, coinPositionLifecycle, fundingInstrumentDeposits, financingCapacity, ensureTreasuryReady };
 }
