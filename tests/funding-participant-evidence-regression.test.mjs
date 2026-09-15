@@ -9,7 +9,7 @@ function domainFixture(initialParticipants = []) {
   const participants = new Map(initialParticipants.map((record) => [record.id, structuredClone(record)]));
   return {
     database: null,
-    list(type) { return type === 'PARTICIPANT' ? [...participants.values()].map(structuredClone) : []; },
+    list(type) { return type === 'PARTICIPANT' ? [...participants.values()].map((value) => structuredClone(value)) : []; },
     async put(type, id, payload) { if (type === 'PARTICIPANT') participants.set(id, structuredClone(payload)); return structuredClone(payload); },
     participants,
   };
@@ -106,7 +106,7 @@ test('invalid multi-file evidence batch is rejected before any file is stored or
 });
 
 
-test('read initialization hydrates opportunities without loading participants', async () => {
+test('read initialization stays cold and participants hydrate only when required', async () => {
   const calls = [];
   const domain = {
     async hydrate(types) { calls.push(types); },
@@ -115,7 +115,7 @@ test('read initialization hydrates opportunities without loading participants', 
   const service = new FundingOpportunityIntakeService(domain);
 
   await service.initialize();
-  assert.deepEqual(calls, [['FUNDING_OPPORTUNITY']]);
+  assert.deepEqual(calls, []);
 
   await service.ensureParticipants();
   assert.deepEqual(calls, [['PARTICIPANT']]);

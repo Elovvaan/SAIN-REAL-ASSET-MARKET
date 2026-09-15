@@ -21,7 +21,7 @@ import { createFinancingClosingRouter } from './routes/financing-closing-router.
 import { createSainOperationsIntelligenceRouter } from './routes/sain-operations-intelligence-router.js';
 import { createProductionReadinessRouter } from './routes/production-readiness-router.js';
 import { createOperationsAuthorization } from './middleware/operations-authorization.js';
-import { operationsIdempotency } from './middleware/operations-idempotency.js';
+import { createOperationsIdempotency } from './middleware/operations-idempotency.js';
 import { productionRuntime, runtimeMetrics, dependencyHealth, emitOperationalAlert } from './middleware/production-runtime.js';
 import { CoinbasePublicMarketService } from './services/coinbase-public-market-service.js';
 import { CoinbaseTransactionAssetPipelineService } from './services/coinbase-transaction-asset-pipeline-service.js';
@@ -66,7 +66,12 @@ bootstrap.use(createOperationsAuthorization({
     return createdApp.accessService;
   },
 }));
-bootstrap.use(operationsIdempotency);
+bootstrap.use(createOperationsIdempotency({
+  databaseProvider: async () => {
+    if (!createdApp?.database) throw new Error('The core database service is not ready.');
+    return createdApp.database;
+  },
+}));
 
 function mountExtension(prefix, router) {
   const mounted = express.Router();

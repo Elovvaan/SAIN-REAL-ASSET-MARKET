@@ -35,6 +35,13 @@ async function invoke(middleware, req, handler) {
   return res;
 }
 
+async function waitFor(check, timeoutMs = 100) {
+  const started = Date.now();
+  while (!check() && Date.now() - started < timeoutMs) {
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+}
+
 async function memoryDatabase() {
   const database = new DatabaseService({ connectionString: '' });
   await database.initialize();
@@ -53,12 +60,28 @@ test('completed response replays across middleware instances', async () => {
     res.status(201).json({ opportunityId: 'FOP-100', status: 'INTAKE_COMPLETE' });
   });
   assert.equal(firstResponse.statusCode, 201);
+  await waitFor(() => database.memory.idempotency.get('same-key')?.state === 'COMPLETED');
 
   const replay = await invoke(second, request({ key: 'same-key' }), () => { executions += 1; });
   assert.equal(executions, 1);
   assert.equal(replay.statusCode, 201);
   assert.equal(replay.headers['x-sra-idempotent-replay'], 'true');
   assert.deepEqual(replay.body, { opportunityId: 'FOP-100', status: 'INTAKE_COMPLETE' });
+});
+
+test('successful writes respond without waiting for idempotency bookkeeping', async () => {
+  const database = await memoryDatabase();
+  database.completeIdempotency = () => new Promise(() => {});
+  const middleware = createOperationsIdempotency({ databaseProvider: async () => database });
+
+  const started = Date.now();
+  const result = await invoke(middleware, request({ key: 'slow-finalization' }), (_req, res) => {
+    res.status(201).json({ opportunityId: 'FOP-FAST' });
+  });
+
+  assert.equal(result.statusCode, 201);
+  assert.deepEqual(result.body, { opportunityId: 'FOP-FAST' });
+  assert.ok(Date.now() - started < 100, 'response was held behind idempotency finalization');
 });
 
 test('same idempotency key with different request is rejected', async () => {

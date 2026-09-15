@@ -116,23 +116,24 @@ export function createOperationsIdempotency({ databaseProvider = defaultDatabase
         if (finalizing || finalized) return res;
         finalizing = true;
         const statusCode = res.statusCode || 200;
+        res.set('x-sra-idempotency-key', key);
+        // The governed domain write is already durable when a handler calls
+        // res.json(). Do not hold the browser response behind bookkeeping in a
+        // second transaction; finish the replay record independently.
+        originalJson(body);
         void (async () => {
           try {
             if (statusCode >= 200 && statusCode < 300) {
               const stored = await database.completeIdempotency({ key, fingerprint: currentFingerprint, statusCode, body });
               if (!stored) throw new Error('Durable idempotency record was not completed.');
-              res.set('x-sra-idempotency-key', key);
             } else {
               await database.releaseIdempotency(key);
             }
             finalized = true;
-            originalJson(body);
           } catch (error) {
             console.error('Durable idempotency finalization failed:', error);
             await database.releaseIdempotency(key).catch(() => {});
-            if (!res.headersSent) res.status(503);
             finalized = true;
-            originalJson({ error: 'SRA could not durably finalize this operation.', code: 'SRA_TRANSACTION_FINALIZATION_FAILED' });
           }
         })();
         return res;

@@ -38,6 +38,16 @@ function normalizeEmail(value) {
 function isLineOfCredit(record) {
   return String(record?.opportunityType || '').toUpperCase() === LINE_OF_CREDIT_TYPE;
 }
+function traceCreate(req, step, extra = {}) {
+  console.log(JSON.stringify({
+    level: 'info',
+    event: 'FUNDING_OPPORTUNITY_CREATE_STEP',
+    requestId: req.sraRequestId || null,
+    step,
+    ...extra,
+    at: new Date().toISOString(),
+  }));
+}
 function findParticipant(service, reference) {
   if (!reference) return null;
   const participants = service.domain.list(PARTICIPANT_TYPE);
@@ -202,25 +212,30 @@ export function createFundingOpportunityRouter(service, documentService = null) 
   });
 
   router.post('/opportunities', async (req, res) => {
+    const startedAt = Date.now();
     try {
+      traceCreate(req, 'RECEIVED');
       const staff = isStaffRequest(req);
       const serverSession = req.sraOperationsAuth?.source === 'SERVER_SESSION';
       const explicitApplicant = hasExplicitApplicantInput(req.body);
-      const participantSelfService = serverSession && !explicitApplicant;
+      const participantSelfService = serverSession && (!staff || !explicitApplicant);
       if (participantSelfService) await service.ensureParticipants();
       const authenticatedParticipantId = participantSelfService ? await resolveParticipantForIdentity(service, req.sraIdentity) : null;
       const adminParticipantId = staff && explicitApplicant ? await resolveAdminApplicant(service, req.body, actorId(req)) : null;
       const resolvedParticipantId = authenticatedParticipantId || adminParticipantId || req.body?.applicantParticipantId || null;
+      traceCreate(req, 'APPLICANT_RESOLVED', { staff, participantSelfService, durationMs: Date.now() - startedAt });
       const input = resolvedParticipantId
         ? { ...req.body, applicantParticipantId: resolvedParticipantId, relatedParticipantIds: [resolvedParticipantId, ...(req.body?.relatedParticipantIds || [])] }
         : req.body;
       const created = await service.create(input, actorId(req));
+      traceCreate(req, 'OPPORTUNITY_STORED', { opportunityId: created.opportunityId, durationMs: Date.now() - startedAt });
       if (!isLineOfCredit(created)) return res.status(201).json(created);
       const timestamp = new Date().toISOString();
       const updated = { ...created, creditFacility: initialCreditFacility(created), updatedAt: timestamp };
       await service.domain.put('FUNDING_OPPORTUNITY', created.opportunityId, updated, { actorId: actorId(req), eventType: 'LINE_OF_CREDIT_REQUEST_CREATED' });
       return res.status(201).json(updated);
     } catch (error) {
+      console.error(JSON.stringify({ level: 'error', event: 'FUNDING_OPPORTUNITY_CREATE_FAILED', requestId: req.sraRequestId || null, durationMs: Date.now() - startedAt, message: error.message, at: new Date().toISOString() }));
       return handle(res, error);
     }
   });
