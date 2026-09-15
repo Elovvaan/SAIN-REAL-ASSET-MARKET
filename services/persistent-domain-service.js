@@ -22,6 +22,8 @@ export class PersistentDomainService {
     this.cache = new Map();
     this.typeIndex = new Map();
     this.writeChains = new Map();
+    this.hydratedTypes = new Set();
+    this.hydrationByType = new Map();
     if (database) database.persistentDomain = this;
   }
 
@@ -56,23 +58,19 @@ export class PersistentDomainService {
     return record ? copy(this.cacheRecord(type, id, record)) : null;
   }
 
-  async hydrate(types = Object.values(RECORD_TYPES)) {
-    const requestedTypes = [...new Set(types)];
-    if (!requestedTypes.length) return this.snapshot();
-
+  async loadTypes(requestedTypes) {
     if (typeof this.database?.listRecordsByTypes === 'function') {
       const records = await this.database.listRecordsByTypes(requestedTypes);
       for (const { recordType, payload } of records) {
         const id = recordId(payload);
         if (id) this.cacheRecord(recordType, id, payload);
       }
-      return this.snapshot();
+      return;
     }
 
     const poolCapacity = Number(this.database?.pool?.options?.max) || 1;
     const concurrency = Math.max(1, Math.min(poolCapacity, requestedTypes.length));
     let cursor = 0;
-
     const hydrateNext = async () => {
       while (cursor < requestedTypes.length) {
         const type = requestedTypes[cursor++];
@@ -83,8 +81,27 @@ export class PersistentDomainService {
         }
       }
     };
-
     await Promise.all(Array.from({ length: concurrency }, () => hydrateNext()));
+  }
+
+  async hydrate(types = Object.values(RECORD_TYPES)) {
+    const requestedTypes = [...new Set(types)];
+    if (!requestedTypes.length) return this.snapshot();
+
+    const unloadedTypes = requestedTypes.filter((type) => !this.hydratedTypes.has(type) && !this.hydrationByType.has(type));
+    if (unloadedTypes.length) {
+      const operation = this.loadTypes(unloadedTypes)
+        .then(() => { for (const type of unloadedTypes) this.hydratedTypes.add(type); })
+        .finally(() => {
+          for (const type of unloadedTypes) {
+            if (this.hydrationByType.get(type) === operation) this.hydrationByType.delete(type);
+          }
+        });
+      for (const type of unloadedTypes) this.hydrationByType.set(type, operation);
+    }
+
+    const pending = [...new Set(requestedTypes.map((type) => this.hydrationByType.get(type)).filter(Boolean))];
+    if (pending.length) await Promise.all(pending);
     return this.snapshot();
   }
 
