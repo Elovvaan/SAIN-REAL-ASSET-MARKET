@@ -5,6 +5,8 @@ on:
     paths:
       - 'routes/private-admin-router.js'
       - 'public/admin/**'
+      - 'services/persistent-domain-service.js'
+      - 'tests/persistent-domain-bulk-hydration.test.mjs'
       - 'test/admin-full-workspace-audit.test.js'
       - '.github/workflows/admin-workspace-audit.yml'
   push:
@@ -13,7 +15,10 @@ on:
     paths:
       - 'routes/private-admin-router.js'
       - 'public/admin/**'
+      - 'services/persistent-domain-service.js'
+      - 'tests/persistent-domain-bulk-hydration.test.mjs'
       - 'test/admin-full-workspace-audit.test.js'
+      - '.github/workflows/admin-workspace-audit.yml'
 
 jobs:
   admin-workspace-audit:
@@ -26,4 +31,4 @@ jobs:
         with:
           node-version: '20'
       - name: Run administration workspace audit
-        run: node --test --test-concurrency=1 test/admin-full-workspace-audit.test.js
+        run: node --test --test-concurrency=1 test/admin-full-workspace-audit.test.js tests/persistent-domain-bulk-hydration.test.mjs
