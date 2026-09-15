@@ -125,6 +125,7 @@ async function resolveAdminApplicant(service, body, operatorId) {
   if (mode === 'MANUAL' || body?.manualApplicant || body?.applicantDisplayName) {
     return createManualParticipant(service, body, operatorId);
   }
+  await service.ensureParticipants();
   const reference = body?.applicantParticipantId || body?.applicantReference || null;
   const participant = findParticipant(service, reference);
   return participant?.id || null;
@@ -194,6 +195,7 @@ export function createFundingOpportunityRouter(service, documentService = null) 
       const serverSession = req.sraOperationsAuth?.source === 'SERVER_SESSION';
       const explicitApplicant = hasExplicitApplicantInput(req.body);
       const participantSelfService = serverSession && !explicitApplicant;
+      if (participantSelfService) await service.ensureParticipants();
       const authenticatedParticipantId = participantSelfService ? await resolveParticipantForIdentity(service, req.sraIdentity) : null;
       const adminParticipantId = staff && explicitApplicant ? await resolveAdminApplicant(service, req.body, actorId(req)) : null;
       const resolvedParticipantId = authenticatedParticipantId || adminParticipantId || req.body?.applicantParticipantId || null;

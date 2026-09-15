@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import express from 'express';
 import request from 'supertest';
 import { createFundingOpportunityRouter } from '../routes/funding-opportunity-router.js';
+import { FundingOpportunityIntakeService } from '../services/funding-opportunity-intake-service.js';
 
 function domainFixture(initialParticipants = []) {
   const participants = new Map(initialParticipants.map((record) => [record.id, structuredClone(record)]));
@@ -24,6 +25,7 @@ function serviceFixture(domain, opportunity = null) {
     status() { return {}; },
     list() { return []; },
     get(id) { return opportunity && opportunity.opportunityId === id ? opportunity : null; },
+    async ensureParticipants() {},
     async create(input) {
       const participant = domain.participants.get(input.applicantParticipantId);
       if (!participant) throw new Error('Applicant participant was not found.');
@@ -99,4 +101,20 @@ test('invalid multi-file evidence batch is rejected before any file is stored or
   assert.deepEqual(stored, []);
   assert.deepEqual(service.evidence, []);
   assert.match(response.body.error, /No documents were stored/i);
+});
+
+
+test('read initialization hydrates opportunities without loading participants', async () => {
+  const calls = [];
+  const domain = {
+    async hydrate(types) { calls.push(types); },
+    list() { return []; },
+  };
+  const service = new FundingOpportunityIntakeService(domain);
+
+  await service.initialize();
+  assert.deepEqual(calls, [['FUNDING_OPPORTUNITY']]);
+
+  await service.ensureParticipants();
+  assert.deepEqual(calls, [['FUNDING_OPPORTUNITY'], ['PARTICIPANT']]);
 });

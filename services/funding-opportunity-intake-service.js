@@ -248,11 +248,23 @@ function startupCompleteness(record) {
 export class FundingOpportunityIntakeService {
   constructor(persistentDomain) {
     this.domain = persistentDomain;
+    this.participantHydration = null;
   }
 
   async initialize() {
-    await this.domain.hydrate([RECORD_TYPE, 'PARTICIPANT']);
+    await this.domain.hydrate([RECORD_TYPE]);
     return this.status();
+  }
+
+  async ensureParticipants() {
+    if (!this.participantHydration) {
+      this.participantHydration = this.domain.hydrate(['PARTICIPANT'])
+        .catch((error) => {
+          this.participantHydration = null;
+          throw error;
+        });
+    }
+    await this.participantHydration;
   }
 
   status() {
