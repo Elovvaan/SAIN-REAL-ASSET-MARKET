@@ -7,7 +7,7 @@ export function createSainOperationsIntelligenceRouter(service) {
 
   const withIntelligence = (handler) => async (req, res, next) => {
     try {
-      await service.initialize();
+      await service.hydrate();
       return handler(req, res);
     } catch (error) {
       return next(error);
