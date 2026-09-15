@@ -24,9 +24,7 @@
   }
 
   function operationsRoot() { return document.querySelector('[data-workspace="operations"]'); }
-  function activeMode(root) {
-    return root?.dataset.activeTab === 'Awaiting Actions' ? 'AWAITING' : null;
-  }
+  function activeMode(root) { return root?.dataset.activeTab === 'Awaiting Actions' ? 'AWAITING' : null; }
   function financingStage(record = {}) {
     const status = String(record.status || '').toUpperCase();
     if (['WITHDRAWN', 'CLOSED', 'PAID_OFF', 'VERIFICATION_CLOSED', 'REJECTED'].includes(status)) return 'CLOSED';
@@ -46,9 +44,7 @@
     document.head.append(style);
   }
 
-  function actionHost(root) {
-    return activeMode(root) ? root?.querySelector('.admin-workspace-records') || null : null;
-  }
+  function actionHost(root) { return activeMode(root) ? root?.querySelector('.admin-workspace-records') || null : null; }
   function closingForOpportunity(closings, opportunityId) { return closings.find((record) => record.opportunityId === opportunityId && record.status !== 'CANCELLED') || null; }
   function conditionsMarkup(closingDetail) {
     const closing = closingDetail?.closing;
@@ -89,7 +85,7 @@
 
   async function authorizationForOpportunity(opportunityId) { const payload = await request(`/api/financing-closing/authorizations?opportunityId=${encodeURIComponent(opportunityId)}`); return payload.record || null; }
   async function detailForClosing(closing) { if (!closing?.closingId) return null; return request(`/api/financing-closing/closings/${encodeURIComponent(closing.closingId)}`); }
-  async function load() {
+  async function performLoad() {
     const root = operationsRoot(); const mode = activeMode(root); if (!root || !mode) return;
     ensureStyles(); const host = actionHost(root); if (!host) return;
     host.innerHTML = '<div class="financing-awaiting-empty">Loading financing actions…</div>';
@@ -107,6 +103,13 @@
       }
       host.innerHTML = cards.length ? `<div class="financing-awaiting">${cards.join('')}</div>` : '<div class="financing-awaiting-empty">No financing closing or funding authorization action is currently waiting.</div>';
     } catch (error) { host.innerHTML = `<div class="financing-awaiting-empty financing-awaiting-error">${esc(error.message)}</div>`; }
+  }
+
+  let loadInFlight = null;
+  function load() {
+    if (loadInFlight) return loadInFlight;
+    loadInFlight = performLoad().finally(() => { loadInFlight = null; });
+    return loadInFlight;
   }
 
   async function act(button) {
