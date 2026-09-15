@@ -163,15 +163,6 @@
     root.addEventListener('click', (event) => {
       if (event.target.closest('[data-admin-tab]')) setTimeout(() => void renderTab(false), 0);
     });
-    window.addEventListener('sra:admin-workspace-synchronized', (event) => {
-      if (event.detail?.workspaceId === 'operations') void renderTab(true);
-    });
-    window.addEventListener('sra:admin-refresh', (event) => {
-      if (event.detail?.source === 'FINANCING_AWAITING_ACTION' && activeTab() === 'Financing') {
-        void refreshFinancing(true);
-      }
-    });
-    if (root.classList.contains('active')) void renderTab(false);
   }
 
   window.refreshAdminFinancingWorkstation = refreshFinancing;
