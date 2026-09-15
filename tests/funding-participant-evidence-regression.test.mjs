@@ -24,6 +24,8 @@ function serviceFixture(domain, opportunity = null) {
     evidence,
     status() { return {}; },
     list() { return []; },
+    async listSummaries() { return []; },
+    async ensureOpportunity() { return opportunity; },
     get(id) { return opportunity && opportunity.opportunityId === id ? opportunity : null; },
     async ensureParticipants() {},
     async create(input) {
@@ -116,5 +118,23 @@ test('read initialization hydrates opportunities without loading participants', 
   assert.deepEqual(calls, [['FUNDING_OPPORTUNITY']]);
 
   await service.ensureParticipants();
-  assert.deepEqual(calls, [['FUNDING_OPPORTUNITY'], ['PARTICIPANT']]);
+  assert.deepEqual(calls, [['PARTICIPANT']]);
+});
+
+test('funding service initialization stays cold and exact records hydrate individually', async () => {
+  const calls = [];
+  const record = { opportunityId: 'FOR-ONE', title: 'One' };
+  const domain = {
+    database: null,
+    list() { return []; },
+    get() { return null; },
+    async hydrateRecord(type, id) { calls.push([type, id]); return record; },
+  };
+  const service = new FundingOpportunityIntakeService(domain);
+
+  const status = await service.initialize();
+  assert.equal(status.hydration, 'ON_DEMAND');
+  assert.deepEqual(calls, []);
+  assert.equal(await service.ensureOpportunity('FOR-ONE'), record);
+  assert.deepEqual(calls, [['FUNDING_OPPORTUNITY', 'FOR-ONE']]);
 });

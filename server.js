@@ -20,7 +20,7 @@ import { createFundingOperationsRouter } from './routes/funding-operations-route
 import { createFinancingClosingRouter } from './routes/financing-closing-router.js';
 import { createSainOperationsIntelligenceRouter } from './routes/sain-operations-intelligence-router.js';
 import { createProductionReadinessRouter } from './routes/production-readiness-router.js';
-import { authorizeOperationsRequest } from './middleware/operations-authorization.js';
+import { createOperationsAuthorization } from './middleware/operations-authorization.js';
 import { operationsIdempotency } from './middleware/operations-idempotency.js';
 import { productionRuntime, runtimeMetrics, dependencyHealth, emitOperationalAlert } from './middleware/production-runtime.js';
 import { CoinbasePublicMarketService } from './services/coinbase-public-market-service.js';
@@ -60,7 +60,12 @@ bootstrap.use(express.static(new URL('./public', import.meta.url).pathname, {
 }));
 bootstrap.use(express.json({ limit: process.env.SRA_JSON_LIMIT || '1mb' }));
 bootstrap.use(productionRuntime);
-bootstrap.use(authorizeOperationsRequest);
+bootstrap.use(createOperationsAuthorization({
+  accessServiceProvider: async () => {
+    if (!createdApp?.accessService) throw new Error('The core access service is not ready.');
+    return createdApp.accessService;
+  },
+}));
 bootstrap.use(operationsIdempotency);
 
 function mountExtension(prefix, router) {

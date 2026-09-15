@@ -47,6 +47,15 @@ export class PersistentDomainService {
     if (!typeRecords.size) this.typeIndex.delete(type);
   }
 
+  async hydrateRecord(type, id) {
+    const cached = this.get(type, id);
+    if (cached) return cached;
+    const record = typeof this.database?.getRecord === 'function'
+      ? await this.database.getRecord(type, id)
+      : (await this.database.listRecords(type)).find((candidate) => recordId(candidate) === id) || null;
+    return record ? copy(this.cacheRecord(type, id, record)) : null;
+  }
+
   async hydrate(types = Object.values(RECORD_TYPES)) {
     const requestedTypes = [...new Set(types)];
     if (!requestedTypes.length) return this.snapshot();

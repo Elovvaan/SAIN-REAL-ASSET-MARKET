@@ -252,8 +252,8 @@ export class FundingOpportunityIntakeService {
   }
 
   async initialize() {
-    await this.domain.hydrate([RECORD_TYPE]);
-    return this.status();
+    // Funding records remain cold until a compact list or one exact record is requested.
+    return { ...this.status(), hydration: 'ON_DEMAND' };
   }
 
   async ensureParticipants() {
@@ -287,6 +287,39 @@ export class FundingOpportunityIntakeService {
       if (filters.opportunityType && record.opportunityType !== filters.opportunityType) return false;
       return true;
     });
+  }
+
+  async listSummaries(filters = {}, limit = 100) {
+    const database = this.domain.database;
+    if (!database?.pool) return this.list(filters).slice(-limit).reverse();
+    const result = await database.pool.query(
+      `SELECT jsonb_build_object(
+         'opportunityId', payload->>'opportunityId',
+         'title', payload->>'title',
+         'opportunityType', payload->>'opportunityType',
+         'purpose', payload->>'purpose',
+         'requestedAmount', payload->'requestedAmount',
+         'currency', payload->>'currency',
+         'status', payload->>'status',
+         'financingStage', payload->>'financingStage',
+         'applicantParticipantId', payload->>'applicantParticipantId',
+         'createdAt', payload->>'createdAt',
+         'updatedAt', payload->>'updatedAt'
+       ) AS summary
+       FROM sra_domain_records
+       WHERE record_type = $1
+         AND ($2::text IS NULL OR payload->>'status' = $2)
+         AND ($3::text IS NULL OR payload->>'applicantParticipantId' = $3)
+         AND ($4::text IS NULL OR payload->>'opportunityType' = $4)
+       ORDER BY created_at DESC
+       LIMIT $5`,
+      [RECORD_TYPE, filters.status || null, filters.applicantParticipantId || null, filters.opportunityType || null, Math.max(1, Math.min(Number(limit) || 100, 250))]
+    );
+    return result.rows.map((row) => row.summary);
+  }
+
+  async ensureOpportunity(opportunityId) {
+    return this.get(opportunityId) || this.domain.hydrateRecord(RECORD_TYPE, opportunityId);
   }
 
   get(opportunityId) {

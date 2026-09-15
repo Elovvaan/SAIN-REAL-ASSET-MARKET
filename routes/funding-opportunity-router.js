@@ -169,14 +169,26 @@ export function createFundingOpportunityRouter(service, documentService = null) 
 
   router.get('/status', (_req, res) => res.json(service.status()));
 
-  router.get('/opportunities', (req, res) => {
-    res.json({
-      records: service.list({
+  router.get('/opportunities', async (req, res) => {
+    try {
+      const records = await service.listSummaries({
         status: req.query.status,
         applicantParticipantId: req.query.applicantParticipantId,
         opportunityType: req.query.opportunityType,
-      }),
-    });
+      }, req.query.limit);
+      return res.json({ records });
+    } catch (error) {
+      return handle(res, error);
+    }
+  });
+
+  router.param('opportunityId', async (req, _res, next, opportunityId) => {
+    try {
+      await service.ensureOpportunity(opportunityId);
+      return next();
+    } catch (error) {
+      return next(error);
+    }
   });
 
   router.get('/opportunities/:opportunityId', (req, res) => {

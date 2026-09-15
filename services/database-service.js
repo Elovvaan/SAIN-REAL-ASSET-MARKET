@@ -176,6 +176,16 @@ export class DatabaseService {
     );
   }
 
+  async getRecord(recordType, recordId) {
+    const key = `${recordType}:${recordId}`;
+    if (!this.pool) return clone(this.memory.records.get(key) || null);
+    const result = await this.pool.query(
+      'SELECT payload FROM sra_domain_records WHERE record_type = $1 AND record_id = $2 LIMIT 1',
+      [recordType, recordId]
+    );
+    return result.rows[0]?.payload || null;
+  }
+
   async listRecords(recordType) {
     if (!this.pool) {
       return [...this.memory.records.entries()]
