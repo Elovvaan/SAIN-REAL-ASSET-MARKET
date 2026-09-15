@@ -518,19 +518,11 @@ export function createFundingOpportunityRouter(service, documentService = null) 
       const queuedDocumentIds = records
         .map((item) => item.document?.id)
         .filter(Boolean);
-      setImmediate(() => {
-        Promise.all(queuedDocumentIds.map((documentId) => privateDocuments.processExtraction(documentId, {
-          retentionReferenceId: opportunity.opportunityId,
-          uploaderId: actorId(req),
-        })))
-          .then(() => financingIntelligence.refresh(opportunity.opportunityId, 'SRA-UNDERWRITING-AGENT'))
-          .catch(() => {});
-      });
       return res.status(201).json({
         records,
         retentionPolicy: 'FINANCING_APPLICATION_EVIDENCE',
         financingStage: (service.get(opportunity.opportunityId) || advanced).financingStage,
-        extractionStatus: queuedDocumentIds.length ? 'QUEUED' : 'NOT_APPLICABLE',
+        extractionStatus: queuedDocumentIds.length ? 'DEFERRED' : 'NOT_APPLICABLE',
       });
     } catch (error) {
       return handle(res, error);

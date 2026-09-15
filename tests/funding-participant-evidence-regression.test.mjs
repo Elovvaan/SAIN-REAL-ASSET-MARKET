@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import express from 'express';
 import request from 'supertest';
 import { createFundingOpportunityRouter } from '../routes/funding-opportunity-router.js';
@@ -137,4 +138,10 @@ test('funding service initialization stays cold and exact records hydrate indivi
   assert.deepEqual(calls, []);
   assert.equal(await service.ensureOpportunity('FOR-ONE'), record);
   assert.deepEqual(calls, [['FUNDING_OPPORTUNITY', 'FOR-ONE']]);
+});
+
+test('document upload does not launch extraction inside the web request process', () => {
+  const source = fs.readFileSync(new URL('../routes/funding-opportunity-router.js', import.meta.url), 'utf8');
+  assert.match(source, /extractionStatus: queuedDocumentIds\.length \? 'DEFERRED'/);
+  assert.doesNotMatch(source, /setImmediate\(\(\) => \{[\s\S]*processExtraction/);
 });
