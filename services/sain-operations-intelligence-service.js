@@ -37,22 +37,26 @@ function recordTime(record) { return record.updatedAt || record.createdAt || rec
 export class SainOperationsIntelligenceService {
   constructor(domain) {
     this.domain = domain;
-    this.initialized = false;
-    this.initialization = null;
+    this.hydrated = false;
+    this.hydration = null;
   }
 
   async initialize() {
-    if (this.initialized) return this.status();
-    if (!this.initialization) {
-      this.initialization = this.domain.hydrate(Object.values(TYPES))
-        .then(() => { this.initialized = true; return this.status(); })
-        .catch((error) => { this.initialization = null; throw error; });
+    return this.status();
+  }
+
+  async hydrate() {
+    if (this.hydrated) return this.status();
+    if (!this.hydration) {
+      this.hydration = this.domain.hydrate(Object.values(TYPES))
+        .then(() => { this.hydrated = true; return this.status(); })
+        .catch((error) => { this.hydration = null; throw error; });
     }
-    return this.initialization;
+    return this.hydration;
   }
 
   status() {
-    return { service: 'SAIN Operations Intelligence', purpose: 'INTERNAL_PLATFORM_AWARENESS_AND_OPERATIONAL_GUIDANCE', available: true, hydrated: this.initialized, generatedAt: now() };
+    return { service: 'SAIN Operations Intelligence', purpose: 'INTERNAL_PLATFORM_AWARENESS_AND_OPERATIONAL_GUIDANCE', available: true, hydrated: this.hydrated, generatedAt: now() };
   }
 
   registry() {
