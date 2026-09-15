@@ -129,7 +129,7 @@ export class PrivateDocumentService {
     return null;
   }
 
-  async store({ file, documentType = 'OTHER', uploaderId = null, retentionPolicy = 'PRIVATE_EVIDENCE', retentionReferenceId = null }) {
+  async store({ file, documentType = 'OTHER', uploaderId = null, retentionPolicy = 'PRIVATE_EVIDENCE', retentionReferenceId = null, deferExtraction = false }) {
     const validationError = this.validateFile(file);
     if (validationError) return { ok: false, error: validationError };
     await this.initialize();
@@ -141,7 +141,7 @@ export class PrivateDocumentService {
     await fs.writeFile(storagePath, protectedBody, { flag: 'wx' });
     const uploadedAt = new Date().toISOString();
     let extraction = { status: extractableMimeTypes.has(String(file.mimetype || '').toLowerCase()) ? 'PENDING' : 'NOT_APPLICABLE', documentId: id, sha256: digest, facts: null };
-    if (extractableMimeTypes.has(String(file.mimetype || '').toLowerCase())) {
+    if (!deferExtraction && extractableMimeTypes.has(String(file.mimetype || '').toLowerCase())) {
       try {
         extraction = await this.extractionService.extract({
           buffer: file.buffer,
@@ -218,6 +218,57 @@ export class PrivateDocumentService {
       });
     }
     return { ok: true, document: this.toPublicMetadata(record), mapping };
+  }
+
+  async processExtraction(id, { retentionReferenceId = null, uploaderId = null } = {}) {
+    const current = this.get(id);
+    if (!current) throw new Error('Private document was not found.');
+    if (current.extraction?.status !== 'PENDING') return { document: this.toPublicMetadata(current), mapping: null };
+
+    const buffer = await this.read(id);
+    if (!buffer) throw new Error('Private document body was not found.');
+    let extraction;
+    try {
+      extraction = await this.extractionService.extract({
+        buffer,
+        mimeType: current.mimeType,
+        filename: current.originalName,
+        documentId: id,
+        sha256: current.sha256,
+      });
+    } catch (error) {
+      extraction = { status: 'EXTRACTION_ERROR', documentId: id, sha256: current.sha256, facts: null, error: error.message, attemptedAt: new Date().toISOString() };
+    }
+
+    const updated = { ...current, extraction };
+    this.records.set(id, updated);
+    if (this.database?.pool) {
+      const persisted = { ...updated };
+      delete persisted.storagePath;
+      await this.database.pool.query(
+        `UPDATE sra_private_documents SET payload = $2::jsonb, updated_at = NOW() WHERE document_id = $1`,
+        [id, JSON.stringify(persisted)]
+      );
+    } else if (this.database) {
+      await this.database.putDocument(id, updated);
+    }
+
+    let mapping = null;
+    const domain = this.database?.persistentDomain || null;
+    const opportunityId = retentionReferenceId || current.retentionReferenceId || null;
+    if (domain && opportunityId && extraction.status === 'EXTRACTED' && domain.get('FUNDING_OPPORTUNITY', opportunityId)) {
+      mapping = await new TransactionFactsMappingService(domain).applyToOpportunity(opportunityId, this.toPublicMetadata(updated), uploaderId);
+    }
+    if (this.database?.audit) {
+      await this.database.audit({
+        actorId: uploaderId,
+        eventType: 'PRIVATE_DOCUMENT_EXTRACTION_COMPLETED',
+        objectType: 'PRIVATE_DOCUMENT',
+        objectId: id,
+        payload: { extractionStatus: extraction.status, transactionFactsMapped: Boolean(mapping?.mapped), retentionReferenceId: opportunityId },
+      });
+    }
+    return { document: this.toPublicMetadata(updated), mapping };
   }
 
   get(id) { return this.records.get(id) || null; }

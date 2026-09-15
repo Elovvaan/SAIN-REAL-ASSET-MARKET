@@ -22,6 +22,8 @@ test('Financing intake loads each workflow stage only when reached', () => {
   assert.match(financing, /await openDetail\(root, record\.opportunityId\)/);
   assert.doesNotMatch(financing, /\/api\/funding\/opportunities\/\$\{encodeURIComponent\(opportunityId\)\}\/completeness/);
   assert.match(evidence, /sra:funding-opportunity-created/);
+  assert.match(evidence, /sra:funding-opportunity-refresh-requested/);
+  assert.match(financing, /sra:funding-opportunity-refresh-requested/);
   assert.doesNotMatch(financing, /const dashboard = await request\('\/api\/funding-operations\/dashboard'\)/);
   assert.match(awaiting, /dataset\.activeTab === 'Awaiting Actions'/);
   assert.doesNotMatch(awaiting, /tab === 'Financing'/);

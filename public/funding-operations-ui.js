@@ -340,5 +340,11 @@
     /* Financing records intentionally wait for creation or an explicit request. */
   }
 
+  window.addEventListener('sra:funding-opportunity-refresh-requested', (event) => {
+    const root = event.detail?.root;
+    const opportunityId = event.detail?.opportunityId;
+    if (root && opportunityId) void openDetail(root, opportunityId);
+  });
+
   window.renderParticipantFundingOperations = render;
 })();

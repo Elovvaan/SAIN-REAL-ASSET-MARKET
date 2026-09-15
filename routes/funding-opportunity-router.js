@@ -471,6 +471,7 @@ export function createFundingOpportunityRouter(service, documentService = null) 
           uploaderId: actorId(req),
           retentionPolicy: 'FINANCING_APPLICATION_EVIDENCE',
           retentionReferenceId: opportunity.opportunityId,
+          deferExtraction: true,
         });
         if (!stored.ok) throw new Error(stored.error);
         const evidence = await service.registerEvidence(opportunity.opportunityId, {
@@ -487,12 +488,22 @@ export function createFundingOpportunityRouter(service, documentService = null) 
       const advanced = lifecycle.financingStage === 'APPLICATION'
         ? await lifecycleService.transition(opportunity.opportunityId, 'UNDERWRITING', { source: 'EVIDENCE_INGESTION' }, actorId(req))
         : lifecycle;
-      const reasoning = await financingIntelligence.refresh(opportunity.opportunityId, 'SRA-UNDERWRITING-AGENT');
+      const queuedDocumentIds = records
+        .map((item) => item.document?.id)
+        .filter(Boolean);
+      setImmediate(() => {
+        Promise.all(queuedDocumentIds.map((documentId) => privateDocuments.processExtraction(documentId, {
+          retentionReferenceId: opportunity.opportunityId,
+          uploaderId: actorId(req),
+        })))
+          .then(() => financingIntelligence.refresh(opportunity.opportunityId, 'SRA-UNDERWRITING-AGENT'))
+          .catch(() => {});
+      });
       return res.status(201).json({
         records,
         retentionPolicy: 'FINANCING_APPLICATION_EVIDENCE',
         financingStage: (service.get(opportunity.opportunityId) || advanced).financingStage,
-        neuralUnderwriting: reasoning.analysis,
+        extractionStatus: queuedDocumentIds.length ? 'QUEUED' : 'NOT_APPLICABLE',
       });
     } catch (error) {
       return handle(res, error);

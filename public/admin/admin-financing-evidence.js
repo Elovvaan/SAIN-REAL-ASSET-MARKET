@@ -44,7 +44,10 @@
   }
 
   function reopen(root) {
-    queueRow(root)?.click();
+    if (!root || !currentOpportunityId) return;
+    window.dispatchEvent(new CustomEvent('sra:funding-opportunity-refresh-requested', {
+      detail: { root, opportunityId: currentOpportunityId },
+    }));
   }
 
   function detailReady(detail) {
