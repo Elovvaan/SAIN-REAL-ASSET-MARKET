@@ -30,10 +30,6 @@ export async function installAgentWorkforceAdminRoutes({ router, domain, databas
     catch (error) { return res.status(422).json({ error:error.message, code:'SRA_CAPITAL_ACTIVATION_PROPOSAL_FAILED' }); }
   });
 
-  const synchronizedAgents = await workforce.synchronizeOperatingAgents(agentOS.registry(), { id: 'SRA_AGENT_OS' });
-  const initialQueue = await operationsQueue.explainPersisted();
-  const initialRun = await workforce.runOperationalQueue(initialQueue, { id: 'SRA_AGENT_OS' });
-
   const queueRates = (queue) => [...(queue.queue || []), ...(queue.exceptions || [])].map(entry => ({
     sourceRecordId: entry.id,
     stage: entry.stage,
@@ -87,12 +83,13 @@ export async function installAgentWorkforceAdminRoutes({ router, domain, databas
   router.get('/api/admin/agent-workforce/status', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
     const queue = await operationsQueue.explainPersisted();
+    const registeredAgents = workforce.listAgents();
     return res.json({
       workforce: workforce.status(),
       agentOS: agentOS.brief(),
       platinumPhase6: { service: 'AUTONOMOUS_OPERATIONAL_CONTINUATION', records: domain.list('AUTONOMOUS_CONTINUATION').length, followUps: domain.list('AUTONOMOUS_CONTINUATION_FOLLOW_UP').filter((record) => record.status === 'OPEN').length },
-      synchronizedAgents: { createdCount: synchronizedAgents.created.length, existingCount: synchronizedAgents.existing.length, agentCount: synchronizedAgents.agentCount },
-      initialRun: { createdCount: initialRun.createdCount, completedCount: initialRun.completedCount, skippedCount: initialRun.skippedCount },
+      synchronizedAgents: { createdCount: 0, existingCount: registeredAgents.length, agentCount: registeredAgents.length, execution: 'ON_DEMAND' },
+      initialRun: { createdCount: 0, completedCount: 0, skippedCount: 0, execution: 'ON_DEMAND' },
       serviceFeeSchedule: serviceFees.policy(),
       serviceFeeBilling: serviceFeeBilling.status(),
       workflowServiceRates: serviceFees.workflowRates(),
@@ -191,45 +188,26 @@ export async function installAgentWorkforceAdminRoutes({ router, domain, databas
     if (!current) return res.status(404).json({ error: 'Agent work order not found.', code: 'SRA_AGENT_WORK_NOT_FOUND' });
     const payerId = String(req.body?.payerId || current.serviceFeePayerId || '').trim() || null;
     try {
-      serviceFeeBilling.validateServicingTarget({
-        payerId,
-        servicingAccountId: req.body?.servicingAccountId,
-        dueDate: req.body?.dueDate,
-      });
+      serviceFeeBilling.validateServicingTarget({ payerId, servicingAccountId: req.body?.servicingAccountId, dueDate: req.body?.dueDate });
     } catch (error) {
       return res.status(422).json({ error: error.message, code: 'SRA_AGENT_SERVICE_FEE_SERVICING_VALIDATION_FAILED' });
     }
 
     let accepted;
-    try {
-      accepted = await workforce.acceptWork(req.params.workOrderId, req.body || {}, session);
-    } catch (error) {
-      return res.status(422).json({ error: error.message, code: 'SRA_AGENT_WORK_ACCEPTANCE_FAILED' });
-    }
+    try { accepted = await workforce.acceptWork(req.params.workOrderId, req.body || {}, session); }
+    catch (error) { return res.status(422).json({ error: error.message, code: 'SRA_AGENT_WORK_ACCEPTANCE_FAILED' }); }
 
     let feeAssessment;
     try {
-      feeAssessment = await serviceFeeBilling.assessAcceptedWork(accepted.work, {
-        payerId: req.body?.payerId,
-        payerType: req.body?.payerType,
-      }, session.id);
+      feeAssessment = await serviceFeeBilling.assessAcceptedWork(accepted.work, { payerId: req.body?.payerId, payerType: req.body?.payerType }, session.id);
     } catch (error) {
-      return res.json({
-        ...accepted,
-        serviceFee: serviceFees.quoteWorkOrder(accepted.work),
-        serviceFeeAssessment: { assessed: false, error: error.message, code: 'SRA_AGENT_SERVICE_FEE_ASSESSMENT_FAILED' },
-        servicing: null,
-      });
+      return res.json({ ...accepted, serviceFee: serviceFees.quoteWorkOrder(accepted.work), serviceFeeAssessment: { assessed: false, error: error.message, code: 'SRA_AGENT_SERVICE_FEE_ASSESSMENT_FAILED' }, servicing: null });
     }
 
     let servicing = null;
     if (feeAssessment.charge && req.body?.servicingAccountId && req.body?.dueDate) {
       try {
-        servicing = await serviceFeeBilling.attachChargeToServicing(feeAssessment.charge.chargeId, {
-          servicingAccountId: req.body.servicingAccountId,
-          dueDate: req.body.dueDate,
-          recurrence: req.body.recurrence || null,
-        }, session.id);
+        servicing = await serviceFeeBilling.attachChargeToServicing(feeAssessment.charge.chargeId, { servicingAccountId: req.body.servicingAccountId, dueDate: req.body.dueDate, recurrence: req.body.recurrence || null }, session.id);
       } catch (error) {
         servicing = { attached: false, error: error.message, code: 'SRA_AGENT_SERVICE_FEE_SERVICING_FAILED' };
       }
