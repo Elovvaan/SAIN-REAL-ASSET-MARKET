@@ -21,22 +21,23 @@
   async function load(tab = 'Overview', includeUsdc = false) {
     const needsEligibleInstrument = ['Overview','Commercial Instruments','Available Financing','Funding Capacity'].includes(tab);
     const needsWorkspaceRecords = ['Commercial Instruments','Journal Entries','Treasury Wallets','Ledger','Treasury Reports'].includes(tab);
-    const treasuryPromise = request('/api/admin/treasury');
-    const eligiblePromise = needsEligibleInstrument
-      ? request('/api/admin/treasury/funding-instrument-deposits/eligible-instruments')
-      : Promise.resolve({ instruments: [], canonicalInstrumentId: null });
-    const workspacePromise = needsWorkspaceRecords
-      ? request(`/api/admin/workspaces?workspace=treasury&tab=${encodeURIComponent(tab)}&limit=100`)
-      : Promise.resolve({ records: {} });
-    const usdcPromises = includeUsdc
-      ? [request('/api/platform-treasury/profiles'),request('/api/platform-treasury/usdc-conversions'),request('/api/platform-treasury/cctp/status'),request('/api/platform-treasury/cctp/transfers')]
-      : [Promise.resolve(null),Promise.resolve(null),Promise.resolve(null),Promise.resolve(null)];
-    const [treasury, eligible, workspace, profiles, conversions, cctpStatus, cctpTransfers] = await Promise.all([
-      treasuryPromise,
-      eligiblePromise,
-      workspacePromise,
-      ...usdcPromises,
-    ]);
+    const treasury = await request('/api/admin/treasury');
+    const eligible = needsEligibleInstrument
+      ? await request('/api/admin/treasury/funding-instrument-deposits/eligible-instruments')
+      : { instruments: [], canonicalInstrumentId: null };
+    const workspace = needsWorkspaceRecords
+      ? await request(`/api/admin/workspaces?workspace=treasury&tab=${encodeURIComponent(tab)}&limit=100`)
+      : { records: {} };
+    let profiles = null;
+    let conversions = null;
+    let cctpStatus = null;
+    let cctpTransfers = null;
+    if (includeUsdc) {
+      profiles = await request('/api/platform-treasury/profiles');
+      conversions = await request('/api/platform-treasury/usdc-conversions');
+      cctpStatus = await request('/api/platform-treasury/cctp/status');
+      cctpTransfers = await request('/api/platform-treasury/cctp/transfers');
+    }
     return { treasury, eligible, records: workspace?.records || {}, profiles:profiles?.profiles || [], conversions:conversions?.conversions || [], cctpStatus:cctpStatus||{}, cctpTransfers:cctpTransfers?.transfers||[] };
   }
 
@@ -108,15 +109,12 @@
 
   async function refreshLiveUsdcStatus(workspace) {
     const root=controls(workspace),balance=root?.querySelector('[data-stellar-usdc-balance] strong'),anchor=root?.querySelector('[data-stellar-sep24-status] strong');
-    try{const status=await request('/api/settlement-rails/stellar-usdc/status');if(balance)balance.textContent=status.treasury?.balance||'0';if(anchor){const sep24=status.sep24||{};anchor.textContent=sep24.ready?`${sep24.anchorDomain||'Configured'} · ${sep24.network||sep24.mode||''} ready`:sep24.configured?`${sep24.anchorDomain||'Configured'} · MoneyGram credentials required`:'Not configured';}}
-    catch(error){if(balance)balance.textContent='Unavailable';if(anchor)anchor.textContent=error.message;}
+    try{const status=await request('/api/settlement-rails/stellar-usdc/status');if(balance)balance.textContent=status.treasury?.balance||'0';if(anchor){const sep24=status.sep24||{};anchor.textContent=sep24.ready?`${sep24.anchorDomain||'Configured'} · ${sep24.assetCode||'USDC'}`:'Not configured';}}catch(error){if(balance)balance.textContent='Unavailable';if(anchor)anchor.textContent=error.message;}
   }
 
-  async function conversionAction(workspace, action, conversionId, button) {
-    const root=controls(workspace), result=root?.querySelector(`[data-conversion-result="${CSS.escape(conversionId)}"]`);
-    const value=(selector)=>root?.querySelector(`${selector}[data-conversion-id="${CSS.escape(conversionId)}"]`)?.value?.trim();
-    const routes={initiate:['initiate',{providerTransactionReference:value('[data-provider-reference]')}], 'confirm-usd':['confirm-usd-funding',{usdFundingReference:value('[data-usd-funding-reference]')}], 'confirm-usdc':['confirm-usdc-receipt',{stellarTransactionId:value('[data-stellar-transaction]')}], reconcile:['reconcile',{}], reclassify:['reclassify',{}]};
-    const [suffix,body]=routes[action]||[]; if(!suffix)return;
+  async function conversionAction(workspace,action,conversionId,button) {
+    const root=controls(workspace),result=root?.querySelector(`[data-conversion-result="${CSS.escape(conversionId)}"]`),routes={initiate:['initiate-provider',{providerReference:root?.querySelector(`[data-provider-reference][data-conversion-id="${CSS.escape(conversionId)}"]`)?.value}], 'confirm-usd':['confirm-usd-funding',{usdFundingReference:root?.querySelector(`[data-usd-funding-reference][data-conversion-id="${CSS.escape(conversionId)}"]`)?.value}], 'confirm-usdc':['confirm-usdc-receipt',{stellarTransactionId:root?.querySelector(`[data-stellar-transaction][data-conversion-id="${CSS.escape(conversionId)}"]`)?.value}],reconcile:['reconcile-on-chain',{}],reclassify:['reclassify-reserve',{}]};
+    const [suffix,body]=routes[action]||[];if(!suffix)return;
     button.disabled=true;if(result)result.textContent='Recording governed conversion stage…';
     try{await request(`/api/platform-treasury/usdc-conversions/${encodeURIComponent(conversionId)}/${suffix}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});await render(workspace);}
     catch(error){if(result)result.textContent=error.message;button.disabled=false;}
@@ -204,10 +202,6 @@
     workspace.addEventListener('click', (event) => {
       if (event.target.closest('[data-admin-tab]')) queueMicrotask(() => void render(workspace));
     });
-    window.addEventListener('sra:admin-workspace-synchronized', (event) => {
-      if (event.detail?.workspaceId === 'treasury') void render(workspace);
-    });
-    void render(workspace);
   }
 
   window.mountAdminTreasuryWorkstation = mount;
