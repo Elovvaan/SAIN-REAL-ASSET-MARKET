@@ -209,7 +209,8 @@
       const record = detail.opportunity || {};
       const evidence = detail.intake?.evidence || [];
       const recognizedValue = (detail.recognizedValues || []).at(-1) || null;
-      const completeness = await request(`/api/funding/opportunities/${encodeURIComponent(opportunityId)}/completeness`).catch(() => null);
+      // Completeness is intentionally deferred; supporting-document upload is the immediate next stage.
+      const completeness = null;
       panel.innerHTML = `<div class="funding-panel-head"><div><p class="eyebrow">OPPORTUNITY</p><h3>${esc(record.title || record.opportunityId)}</h3><p>${esc(record.opportunityId)} · ${esc(record.status)}</p></div><button class="secondary-button" data-action="close-detail">Close</button></div><div class="funding-detail-grid"><div class="funding-detail-card"><strong>${money.format(Number(record.requestedAmount || 0))}</strong><span>${record.opportunityType === 'LINE_OF_CREDIT' ? 'Requested credit limit' : 'Requested funding'} · ${esc(record.currency || '')}</span></div><div class="funding-detail-card"><strong>${esc(record.applicantParticipantId || 'Not linked')}</strong><span>Applicant participant</span></div><div class="funding-detail-card"><strong>${esc(record.opportunityType || '')}</strong><span>Opportunity type</span></div><div class="funding-detail-card"><strong>${esc(record.purpose || '')}</strong><span>Purpose</span></div><div class="funding-detail-card"><strong>${esc(transactionStructureLabel(record.proposedTransactionStructure) || 'Not selected')}</strong><span>Proposed transaction structure</span></div><div class="funding-detail-card"><strong>${esc(transactionStructureLabel(record.approvedTransactionStructure) || 'Pending decision')}</strong><span>Approved transaction structure</span></div>${recognizedValue ? `<div class="funding-detail-card"><strong>${Number(recognizedValue.recognizedRvu || 0).toLocaleString()} SRA/RVU</strong><span>Recognized productive value</span></div><div class="funding-detail-card"><strong>${esc(String(recognizedValue.economicPurposeClass || '').replaceAll('_',' '))}</strong><span>${esc(String(recognizedValue.productiveValueClass || '').replaceAll('_',' '))}</span></div>` : ''}</div>${startupDetail(record, completeness)}${lineOfCreditDetail(record)}${homeEquityDetail(record)}<section class="funding-ops-panel"><p class="eyebrow">REQUEST INFORMATION</p><strong>${completeness?.intakeComplete ? 'Information captured' : 'Additional information required'}</strong><p>${completeness?.missingRequired?.length ? `Missing required: ${esc(completeness.missingRequired.join(', '))}` : 'Required intake fields are present.'}</p></section><section class="funding-ops-panel"><p class="eyebrow">EVIDENCE & REFERENCES</p><div class="funding-evidence-list">${evidence.length ? evidence.map((item) => `<div class="funding-evidence-item"><strong>${esc(item.title || item.evidenceType)}</strong><span>${esc(item.sourceReference || '')}</span></div>`).join('') : '<div class="funding-ops-empty">No supporting records are attached.</div>'}</div></section>`;
       panel.querySelector('[data-action="close-detail"]')?.addEventListener('click', () => panel.classList.remove('open'));
       bindLineOfCreditActions(panel, root, opportunityId);
@@ -324,8 +325,8 @@
         syncApplicantMode();
         syncTransactionStructures();
         modal?.classList.remove('open');
-        window.dispatchEvent(new CustomEvent('sra:funding-opportunity-created', { detail: { opportunityId: record.opportunityId } }));
-        void loadFinancingRecords(root);
+        window.dispatchEvent(new CustomEvent('sra:funding-opportunity-created', { detail: { opportunityId: record.opportunityId, root } }));
+        await openDetail(root, record.opportunityId);
       } catch (error) {
         if (result) result.textContent = error.message;
       } finally {

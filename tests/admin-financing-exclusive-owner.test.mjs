@@ -5,6 +5,7 @@ import test from 'node:test';
 const shell = fs.readFileSync(new URL('../public/admin/admin-suite-shell.js', import.meta.url), 'utf8');
 const financing = fs.readFileSync(new URL('../public/funding-operations-ui.js', import.meta.url), 'utf8');
 const awaiting = fs.readFileSync(new URL('../public/admin/admin-financing-awaiting-actions.js', import.meta.url), 'utf8');
+const evidence = fs.readFileSync(new URL('../public/admin/admin-financing-evidence.js', import.meta.url), 'utf8');
 
 test('Financing is exclusively owned by its lazy workstation', () => {
   assert.match(shell, /FEATURE_ONLY_TABS = new Set\(\['operations::Financing'/);
@@ -18,6 +19,9 @@ test('Financing intake loads each workflow stage only when reached', () => {
   assert.match(financing, /id="funding-ops-records"/);
   assert.match(financing, /void loadFinancingRecords\(root\)/);
   assert.match(financing, /sra:funding-opportunity-created/);
+  assert.match(financing, /await openDetail\(root, record\.opportunityId\)/);
+  assert.doesNotMatch(financing, /\/api\/funding\/opportunities\/\$\{encodeURIComponent\(opportunityId\)\}\/completeness/);
+  assert.match(evidence, /sra:funding-opportunity-created/);
   assert.doesNotMatch(financing, /const dashboard = await request\('\/api\/funding-operations\/dashboard'\)/);
   assert.match(awaiting, /dataset\.activeTab === 'Awaiting Actions'/);
   assert.doesNotMatch(awaiting, /tab === 'Financing'/);

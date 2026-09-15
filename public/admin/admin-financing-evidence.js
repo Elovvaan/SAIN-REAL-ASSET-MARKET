@@ -262,4 +262,12 @@
   init();
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
   window.addEventListener('sra:funding-operations-rendered', (event) => bind(event.detail?.root));
+  window.addEventListener('sra:funding-opportunity-created', (event) => {
+    const opportunityId = event.detail?.opportunityId || null;
+    const root = event.detail?.root || document.querySelector('[data-workspace="operations"]');
+    if (!opportunityId || !root) return;
+    currentOpportunityId = opportunityId;
+    bind(root);
+    setTimeout(() => mountSoon(root), 0);
+  });
 })();
