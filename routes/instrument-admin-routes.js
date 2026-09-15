@@ -126,11 +126,5 @@ export async function installInstrumentAdminRoutes({ router, domain, requireAdmi
     }
   });
 
-  queueMicrotask(() => {
-    void marketPropagation.reconcile({ limit: 1000, actorId: 'SRA-COIN-AGENT' }).catch((error) => {
-      console.error('Coin internal marketplace reconciliation failed:', error?.message || error);
-    });
-  });
-
   return { approvals, representations, linkages, marketPropagation };
 }
