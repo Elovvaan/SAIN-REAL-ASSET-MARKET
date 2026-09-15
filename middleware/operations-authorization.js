@@ -19,6 +19,7 @@ async function defaultAccessService(){const service=new AccessService({database:
 export function createOperationsAuthorization({accessServiceProvider=defaultAccessService}={}){
   return async function authorizeOperationsRequest(req,res,next){
     if(!isProtectedOperationsPath(req.path)||isConnectorCallback(req.path))return next();
+    const startedAt=Date.now();
     try{
       const standardToken=readCookie(req,'sra_session');
       const privateAdminAllowed=req.path.startsWith('/api/on-chain')||req.path.startsWith('/api/platform-treasury')||req.path.startsWith('/api/settlement-rails')||req.path.startsWith('/api/funding')||req.path.startsWith('/api/financing-closing');
@@ -35,10 +36,11 @@ export function createOperationsAuthorization({accessServiceProvider=defaultAcce
       const roles=sessionRoles(session);
       req.sraIdentity={actorId:session.id,universalAccountId:session.universalAccountId,email:session.email,displayName:session.displayName,activeCapacity:session.activeCapacity};
       req.sraOperationsAuth={actorId:session.id,roles,source};
+      if(typeof res.setHeader==='function')res.setHeader('Server-Timing',`sra-auth;dur=${Date.now()-startedAt}`);
       if(participantSelfService&&source==='SERVER_SESSION')return next();
       if(!roles.some((role)=>required.has(role)))return res.status(403).json({error:'The authenticated account is not authorized for this SRA operation.',code:'SRA_SERVER_ROLE_REQUIRED',requiredRoles:[...required]});
       return next();
-    }catch{return res.status(500).json({error:'SRA could not validate the authenticated session.',code:'SRA_SESSION_VALIDATION_FAILED'});}
+    }catch(error){console.error(JSON.stringify({level:'error',event:'SRA_SESSION_VALIDATION_FAILED',path:req.path,durationMs:Date.now()-startedAt,message:error?.message||String(error),at:new Date().toISOString()}));return res.status(500).json({error:'SRA could not validate the authenticated session.',code:'SRA_SESSION_VALIDATION_FAILED'});}
   };
 }
 

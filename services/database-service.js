@@ -66,7 +66,9 @@ CREATE TABLE IF NOT EXISTS sra_operation_locks (
 );
 
 CREATE INDEX IF NOT EXISTS sra_sessions_expires_at_idx ON sra_sessions (expires_at);
+CREATE INDEX IF NOT EXISTS sra_sessions_email_idx ON sra_sessions ((payload->>'email'));
 CREATE INDEX IF NOT EXISTS sra_domain_records_type_idx ON sra_domain_records (record_type);
+CREATE INDEX IF NOT EXISTS sra_domain_records_type_created_idx ON sra_domain_records (record_type, created_at DESC);
 CREATE INDEX IF NOT EXISTS sra_audit_events_object_idx ON sra_audit_events (object_type, object_id);
 CREATE INDEX IF NOT EXISTS sra_audit_events_occurred_idx ON sra_audit_events (occurred_at DESC);
 CREATE INDEX IF NOT EXISTS sra_audit_events_type_idx ON sra_audit_events (event_type, occurred_at DESC);
@@ -135,6 +137,22 @@ export class DatabaseService {
     if (!this.pool) return [...this.memory.sessions.values()].map(clone);
     const result = await this.pool.query('SELECT payload FROM sra_sessions WHERE expires_at >= NOW()');
     return result.rows.map((row) => row.payload);
+  }
+
+  async getSession(tokenHash) {
+    if (!this.pool) return clone(this.memory.sessions.get(tokenHash) || null);
+    const result = await this.pool.query(
+      'SELECT payload FROM sra_sessions WHERE token_hash = $1 AND expires_at >= NOW() LIMIT 1',
+      [tokenHash]
+    );
+    return result.rows[0]?.payload || null;
+  }
+
+  async getUser(email) {
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    if (!this.pool) return clone(this.memory.users.get(normalizedEmail) || null);
+    const result = await this.pool.query('SELECT payload FROM sra_users WHERE email = $1 LIMIT 1', [normalizedEmail]);
+    return result.rows[0]?.payload || null;
   }
 
   async putSession(tokenHash, payload) {

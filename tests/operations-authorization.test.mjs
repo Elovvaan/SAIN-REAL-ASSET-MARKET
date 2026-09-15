@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createOperationsAuthorization } from '../middleware/operations-authorization.js';
+import { AccessService } from '../services/access-service.js';
 
 function req({ path = '/api/funding/opportunities', method = 'POST', cookie = '', headers = {}, body = {} } = {}) {
   return {
@@ -16,7 +17,9 @@ function res() {
   return {
     statusCode: 200,
     payload: null,
+    headers: {},
     status(code) { this.statusCode = code; return this; },
+    setHeader(name, value) { this.headers[String(name).toLowerCase()] = value; return this; },
     json(payload) { this.payload = payload; return this; },
   };
 }
@@ -191,8 +194,26 @@ test('verification reviewer cannot authorize issuance', async () => {
   assert.equal(response.statusCode, 403);
 });
 
-test('read-only operational requests remain accessible', async () => {
+test('read-only operational requests require an authenticated session', async () => {
   const middleware = createOperationsAuthorization({ accessServiceProvider: provider({}) });
-  const { nextCalled } = await run(middleware, req({ method: 'GET', path: '/api/funding-operations/dashboard' }));
-  assert.equal(nextCalled, true);
+  const { nextCalled, response } = await run(middleware, req({ method: 'GET', path: '/api/funding-operations/dashboard' }));
+  assert.equal(nextCalled, false);
+  assert.equal(response.statusCode, 401);
+  assert.equal(response.payload.code, 'SRA_AUTHENTICATION_REQUIRED');
+});
+
+test('session cache miss uses exact database lookups instead of scanning session and user tables', async () => {
+  const persistedSession = { tokenHash: 'stored-hash', userId: 'USR-ADMIN', email: 'admin@example.com', activeCapacity: 'PLATFORM_ADMIN', expiresAt: new Date(Date.now() + 60_000).toISOString() };
+  const persistedUser = { id: 'USR-ADMIN', universalAccountId: 'UA-ADMIN', displayName: 'Admin', email: 'admin@example.com', capacities: ['UNIVERSAL', 'PLATFORM_ADMIN'], capabilityRecords: {} };
+  const calls = [];
+  const database = {
+    async getSession() { calls.push('getSession'); return persistedSession; },
+    async getUser() { calls.push('getUser'); return persistedUser; },
+    async listSessions() { throw new Error('session table scan must not run'); },
+    async listUsers() { throw new Error('user table scan must not run'); },
+  };
+  const service = new AccessService({ database });
+  const session = await service.getSession('admin-token');
+  assert.equal(session.id, 'USR-ADMIN');
+  assert.deepEqual(calls, ['getSession', 'getUser']);
 });

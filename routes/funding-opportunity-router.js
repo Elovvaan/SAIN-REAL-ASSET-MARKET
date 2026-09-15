@@ -180,14 +180,17 @@ export function createFundingOpportunityRouter(service, documentService = null) 
   router.get('/status', (_req, res) => res.json(service.status()));
 
   router.get('/opportunities', async (req, res) => {
+    const startedAt = Date.now();
     try {
       const records = await service.listSummaries({
         status: req.query.status,
         applicantParticipantId: req.query.applicantParticipantId,
         opportunityType: req.query.opportunityType,
       }, req.query.limit);
+      res.append('Server-Timing', `funding-list;dur=${Date.now() - startedAt}`);
       return res.json({ records });
     } catch (error) {
+      console.error(JSON.stringify({ level: 'error', event: 'FUNDING_OPPORTUNITY_LIST_FAILED', requestId: req.sraRequestId || null, durationMs: Date.now() - startedAt, message: error?.message || String(error), at: new Date().toISOString() }));
       return handle(res, error);
     }
   });

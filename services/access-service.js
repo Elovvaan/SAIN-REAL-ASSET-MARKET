@@ -234,8 +234,9 @@ export class AccessService {
     let runtime = tokenHash ? RUNTIME_SESSIONS.get(tokenHash) : null;
     let session = tokenHash ? (this.sessions.get(tokenHash) || runtime?.session || null) : null;
     if (!session && tokenHash && this.database) {
-      const persistedSessions = await this.database.listSessions();
-      session = persistedSessions.find((candidate) => candidate.tokenHash === tokenHash) || null;
+      session = typeof this.database.getSession === 'function'
+        ? await this.database.getSession(tokenHash)
+        : (await this.database.listSessions()).find((candidate) => candidate.tokenHash === tokenHash) || null;
       if (session) this.sessions.set(tokenHash, session);
     }
     if (!session || new Date(session.expiresAt).getTime() < Date.now()) {
@@ -248,8 +249,9 @@ export class AccessService {
     }
     let user = this.users.get(session.email) || runtime?.user || null;
     if (!user && this.database) {
-      const users = await this.refreshPersistedUsers();
-      user = users.find((candidate) => candidate.email === session.email) || null;
+      user = typeof this.database.getUser === 'function'
+        ? await this.database.getUser(session.email)
+        : (await this.refreshPersistedUsers()).find((candidate) => candidate.email === session.email) || null;
     }
     if (!user) return null;
     this.sessions.set(tokenHash, session);
