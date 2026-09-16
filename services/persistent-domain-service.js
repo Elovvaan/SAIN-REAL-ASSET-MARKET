@@ -1,30 +1,20 @@
 import crypto from 'node:crypto';
 
-function copy(value) {
-  return value == null ? value : JSON.parse(JSON.stringify(value));
-}
-
-export const RECORD_TYPES = Object.freeze({
-  EVENT_MARKET: 'EVENT_MARKET', EVENT_CONTRACT: 'EVENT_CONTRACT', EVENT_ORDER: 'EVENT_ORDER', EVENT_EXECUTION: 'EVENT_EXECUTION', EVENT_POSITION: 'EVENT_POSITION', EVENT_MARKET_SIGNAL: 'EVENT_MARKET_SIGNAL', EVENT_RESOLUTION: 'EVENT_RESOLUTION', EVENT_SETTLEMENT: 'EVENT_SETTLEMENT', EVENT_SUSPENSION: 'EVENT_SUSPENSION',
-  PRODUCTIVE_BASKET: 'PRODUCTIVE_BASKET', BASKET_ASSET_ADMISSION: 'BASKET_ASSET_ADMISSION', BASKET_CONTRIBUTION: 'BASKET_CONTRIBUTION', BASKET_PARTICIPATION_POSITION: 'BASKET_PARTICIPATION_POSITION', BASKET_PERFORMANCE_EVENT: 'BASKET_PERFORMANCE_EVENT', BASKET_DISTRIBUTION: 'BASKET_DISTRIBUTION', BASKET_RECONSTITUTION: 'BASKET_RECONSTITUTION',
-  SRA_RECOGNIZED_VALUE_UNIT: 'SRA_RECOGNIZED_VALUE_UNIT', SRA_RVU_RECOGNITION: 'SRA_RVU_RECOGNITION', SRA_SETTLEMENT_EQUIVALENCE: 'SRA_SETTLEMENT_EQUIVALENCE',
-  DIRECT_VALUE_ACCOUNT: 'DIRECT_VALUE_ACCOUNT', ACCOUNT_ASSET_POSITION: 'ACCOUNT_ASSET_POSITION', CANONICAL_ASSET: 'CANONICAL_ASSET', ASSET_RAIL_REPRESENTATION: 'ASSET_RAIL_REPRESENTATION', ASSET_MOVEMENT: 'ASSET_MOVEMENT', ASSET_CONVERSION: 'ASSET_CONVERSION', ON_CHAIN_SWAP_QUOTE: 'ON_CHAIN_SWAP_QUOTE', ON_CHAIN_ASSET_SWAP: 'ON_CHAIN_ASSET_SWAP', INSTITUTIONAL_RECEIPT: 'INSTITUTIONAL_RECEIPT', OBLIGATION_RELEASE: 'OBLIGATION_RELEASE',
-  PARTICIPANT: 'PARTICIPANT', ASSET_ACCOUNT: 'ASSET_ACCOUNT', PROJECT_ACCOUNT: 'PROJECT_ACCOUNT', HOME_PROJECT: 'HOME_PROJECT', FUNDING_PLAN: 'FUNDING_PLAN', FUNDING_INSTRUCTION: 'FUNDING_INSTRUCTION', PAYMENT_RECEIPT: 'PAYMENT_RECEIPT', SRA_SETTLEMENT: 'SRA_SETTLEMENT', SRA_SETTLEMENT_RECORD: 'SRA_SETTLEMENT_RECORD', HOME_PARTICIPATION_PLAN: 'HOME_PARTICIPATION_PLAN', HOME_PARTICIPATION_COMMITMENT: 'HOME_PARTICIPATION_COMMITMENT', SETTLEMENT_RAIL_ADAPTER: 'SETTLEMENT_RAIL_ADAPTER', SETTLEMENT_RAIL_INSTRUCTION: 'SETTLEMENT_RAIL_INSTRUCTION', SRA_ANCHOR_EVENT: 'SRA_ANCHOR_EVENT', TREASURY_BANK_CONNECTION: 'TREASURY_BANK_CONNECTION', TREASURY_PAYMENT_ORDER: 'TREASURY_PAYMENT_ORDER', TREASURY_STATEMENT: 'TREASURY_STATEMENT', TREASURY_CRYPTO_WALLET: 'TREASURY_CRYPTO_WALLET', TREASURY_CRYPTO_ACTIVITY: 'TREASURY_CRYPTO_ACTIVITY', TREASURY_USDC_CONVERSION: 'TREASURY_USDC_CONVERSION', TREASURY_CCTP_TRANSFER: 'TREASURY_CCTP_TRANSFER', FEE_CATALOG_ITEM: 'FEE_CATALOG_ITEM', FEE_SCHEDULE: 'FEE_SCHEDULE', FEE_CHARGE: 'FEE_CHARGE', FEE_INVOICE: 'FEE_INVOICE', LEDGER_ACCOUNT: 'LEDGER_ACCOUNT', LEDGER_ENTRY: 'LEDGER_ENTRY', INSTITUTION_BILLING_PROFILE: 'INSTITUTION_BILLING_PROFILE', INSTITUTION_USAGE_EVENT: 'INSTITUTION_USAGE_EVENT', INSTITUTION_BILLING_RUN: 'INSTITUTION_BILLING_RUN', ASSET_SERVICING_ACCOUNT: 'ASSET_SERVICING_ACCOUNT', ASSET_SERVICING_OBLIGATION: 'ASSET_SERVICING_OBLIGATION', ASSET_SERVICING_EVENT: 'ASSET_SERVICING_EVENT', PLATFORM_TREASURY_PROFILE: 'PLATFORM_TREASURY_PROFILE', PLATFORM_TREASURY_FORECAST: 'PLATFORM_TREASURY_FORECAST', PLATFORM_TREASURY_EXCEPTION: 'PLATFORM_TREASURY_EXCEPTION', ACCOUNTING_PERIOD: 'ACCOUNTING_PERIOD', FINANCIAL_STATEMENT_SNAPSHOT: 'FINANCIAL_STATEMENT_SNAPSHOT', CAPITAL_FORMATION_OFFERING: 'CAPITAL_FORMATION_OFFERING', CAPITAL_FORMATION_SUBSCRIPTION: 'CAPITAL_FORMATION_SUBSCRIPTION', ONBOARDING_APPLICATION: 'ONBOARDING_APPLICATION', EVIDENCE_PACKAGE: 'EVIDENCE_PACKAGE', INSTITUTIONAL_REVIEW: 'INSTITUTIONAL_REVIEW', V4V_PACKAGE: 'V4V_PACKAGE', PARTICIPATION_POSITION: 'PARTICIPATION_POSITION', TRANSFERABLE_POSITION: 'TRANSFERABLE_POSITION', CREATIVE_FINANCE_STRUCTURE: 'CREATIVE_FINANCE_STRUCTURE', VERIFIED_VALUE_RECORD: 'VERIFIED_VALUE_RECORD', FINANCIAL_HISTORY_RECORD: 'FINANCIAL_HISTORY_RECORD', ASSET_RELATIONSHIP: 'ASSET_RELATIONSHIP', AUTHORITATIVE_ASSET_RELATIONSHIP: 'AUTHORITATIVE_ASSET_RELATIONSHIP', POSITION_RESERVATION: 'POSITION_RESERVATION', MARKET_SIGNAL: 'MARKET_SIGNAL', VERIFIED_MARKET_EVENT: 'VERIFIED_MARKET_EVENT', MARKET_CIRCULATION_EVENT: 'MARKET_CIRCULATION_EVENT', MARKET_OBSERVATION: 'MARKET_OBSERVATION', RECOGNITION_ASSESSMENT: 'RECOGNITION_ASSESSMENT', FINANCIAL_RECORD_ACCOUNT: 'FINANCIAL_RECORD_ACCOUNT', FINANCIAL_RECORD: 'FINANCIAL_RECORD', COIN_ACCOUNT: 'COIN_ACCOUNT', COIN_POSITION: 'COIN_POSITION', SRA_INSTRUMENT: 'SRA_INSTRUMENT', SRA_TRANSACTION: 'SRA_TRANSACTION', PROTECTION_INSTRUMENT: 'PROTECTION_INSTRUMENT', FUNDING_OPPORTUNITY: 'FUNDING_OPPORTUNITY', FUNDING_OPPORTUNITY_EVIDENCE: 'FUNDING_OPPORTUNITY_EVIDENCE', FUNDING_OPPORTUNITY_VERIFICATION_REQUEST: 'FUNDING_OPPORTUNITY_VERIFICATION_REQUEST', FUNDING_OPPORTUNITY_VERIFICATION_FINDING: 'FUNDING_OPPORTUNITY_VERIFICATION_FINDING', FUNDING_OPPORTUNITY_VERIFICATION_DECISION: 'FUNDING_OPPORTUNITY_VERIFICATION_DECISION', FUNDING_OPPORTUNITY_VALUE_PREPARATION: 'FUNDING_OPPORTUNITY_VALUE_PREPARATION', FUNDING_MODEL_ASSESSMENT: 'FUNDING_MODEL_ASSESSMENT', FUNDING_MODEL_SELECTION: 'FUNDING_MODEL_SELECTION', FUNDING_INSTRUMENT_SELECTION_REQUEST: 'FUNDING_INSTRUMENT_SELECTION_REQUEST', FUNDING_INSTRUMENT_SELECTION: 'FUNDING_INSTRUMENT_SELECTION', FUNDING_INSTRUMENT_DRAFT_REVIEW: 'FUNDING_INSTRUMENT_DRAFT_REVIEW', FUNDING_INSTRUMENT_ISSUANCE_REQUEST: 'FUNDING_INSTRUMENT_ISSUANCE_REQUEST', FUNDING_INSTRUMENT_ISSUANCE_REVIEW: 'FUNDING_INSTRUMENT_ISSUANCE_REVIEW', FUNDING_INSTRUMENT_ISSUANCE_AUTHORIZATION: 'FUNDING_INSTRUMENT_ISSUANCE_AUTHORIZATION', FUNDING_MARKETPLACE_PREPARATION: 'FUNDING_MARKETPLACE_PREPARATION', FUNDING_MARKETPLACE_PUBLICATION_REVIEW: 'FUNDING_MARKETPLACE_PUBLICATION_REVIEW', FUNDING_MARKETPLACE_PUBLICATION_AUTHORIZATION: 'FUNDING_MARKETPLACE_PUBLICATION_AUTHORIZATION', FUNDING_MARKETPLACE_COMMITMENT_WINDOW: 'FUNDING_MARKETPLACE_COMMITMENT_WINDOW', FUNDING_MARKETPLACE_COMMITMENT: 'FUNDING_MARKETPLACE_COMMITMENT', FUNDING_MARKETPLACE_ALLOCATION_REVIEW: 'FUNDING_MARKETPLACE_ALLOCATION_REVIEW', FUNDING_MARKETPLACE_POSITION: 'FUNDING_MARKETPLACE_POSITION', FUNDING_MARKETPLACE_SETTLEMENT_PREPARATION: 'FUNDING_MARKETPLACE_SETTLEMENT_PREPARATION', FUNDING_MARKETPLACE_SETTLEMENT_REVIEW: 'FUNDING_MARKETPLACE_SETTLEMENT_REVIEW', FUNDING_MARKETPLACE_SETTLEMENT_AUTHORIZATION: 'FUNDING_MARKETPLACE_SETTLEMENT_AUTHORIZATION', MARKETPLACE_LISTING: 'MARKETPLACE_LISTING', OWNERSHIP_RECOGNITION: 'OWNERSHIP_RECOGNITION', EXPORT_PACKAGE: 'EXPORT_PACKAGE', EDX_CONNECTOR_DEFINITION: 'EDX_CONNECTOR_DEFINITION', EDX_ENTERPRISE_CONNECTION: 'EDX_ENTERPRISE_CONNECTION', EDX_EXTRACTION_POLICY: 'EDX_EXTRACTION_POLICY', EDX_EXTRACTION_REQUEST: 'EDX_EXTRACTION_REQUEST', EDX_EXTRACTION_RESULT: 'EDX_EXTRACTION_RESULT', EDX_NORMALIZED_RECORD: 'EDX_NORMALIZED_RECORD', EDX_VERIFIED_SNAPSHOT: 'EDX_VERIFIED_SNAPSHOT', EDX_VERIFIED_VALUE_PACKAGE: 'EDX_VERIFIED_VALUE_PACKAGE', EDX_PUBLICATION_DECISION: 'EDX_PUBLICATION_DECISION', EDX_MARKETPLACE_PROJECTION: 'EDX_MARKETPLACE_PROJECTION', EDX_INTELLIGENCE_REPORT: 'EDX_INTELLIGENCE_REPORT', EDX_SDK_CLIENT: 'EDX_SDK_CLIENT', EDX_WEBHOOK_SUBSCRIPTION: 'EDX_WEBHOOK_SUBSCRIPTION', EDX_EVENT_STREAM_SUBSCRIPTION: 'EDX_EVENT_STREAM_SUBSCRIPTION', EDX_OUTBOUND_EVENT: 'EDX_OUTBOUND_EVENT', SRA_AGENT_WORKER: 'SRA_AGENT_WORKER', SRA_AGENT_WORK_ORDER: 'SRA_AGENT_WORK_ORDER', SRA_AGENT_COMPENSATION_RECORD: 'SRA_AGENT_COMPENSATION_RECORD', LIFECYCLE_EVENT: 'LIFECYCLE_EVENT'
+const RECORD_TYPES = Object.freeze({
+  LIFECYCLE_EVENT: 'LIFECYCLE_EVENT',
 });
 
-function recordId(record) {
-  return record?.id || record?.recognizedValueUnitId || record?.rvuRecognitionId || record?.settlementEquivalenceId || record?.quoteId || record?.swapId || record?.anchorEventId || record?.cctpTransferId || record?.conversionId || record?.agentId || record?.workOrderId || record?.compensationId || record?.relationshipId || record?.reservationId || record?.applicationId || record?.evidencePackageId || record?.institutionalReviewId || record?.assetId || record?.projectId || record?.homeProjectId || record?.fundingPlanId || record?.fundingInstructionId || record?.paymentReceiptId || record?.settlementId || record?.settlementRecordId || record?.planId || record?.commitmentId || record?.adapterId || record?.instructionId || record?.connectionId || record?.paymentOrderId || record?.statementId || record?.walletId || record?.activityId || record?.feeCode || record?.scheduleId || record?.chargeId || record?.invoiceId || record?.accountId || record?.entryId || record?.profileId || record?.usageEventId || record?.billingRunId || record?.servicingAccountId || record?.obligationId || record?.servicingEventId || record?.forecastId || record?.exceptionId || record?.periodId || record?.statementSnapshotId || record?.offeringId || record?.subscriptionId || record?.packageId || record?.positionId || record?.structureId || record?.financialHistoryRecordId || record?.signalId || record?.eventId || record?.observationId || record?.recognitionId || record?.financialRecordId || record?.financialAccountId || record?.coinAccountId || record?.coinPositionId || record?.instrumentId || record?.transactionId || record?.closingId || record?.conditionId || record?.disbursementId || record?.opportunityId || record?.opportunityEvidenceId || record?.evidenceId || record?.verificationRequestId || record?.verificationFindingId || record?.verificationDecisionId || record?.preparationId || record?.assessmentId || record?.selectionId || record?.instrumentSelectionRequestId || record?.instrumentSelectionId || record?.reviewId || record?.issuanceRequestId || record?.issuanceReviewId || record?.issuanceAuthorizationId || record?.marketplacePreparationId || record?.publicationReviewId || record?.publicationAuthorizationId || record?.windowId || record?.allocationReviewId || record?.settlementPreparationId || record?.settlementReviewId || record?.settlementAuthorizationId || record?.listingId || record?.ownershipRecognitionId || record?.exportPackageId || record?.connectorDefinitionId || record?.policyId || record?.extractionRequestId || record?.extractionResultId || record?.normalizedRecordId || record?.snapshotId || record?.valuePackageId || record?.publicationDecisionId || record?.projectionId || record?.intelligenceReportId || record?.sdkClientId || record?.webhookSubscriptionId || record?.eventStreamSubscriptionId || record?.outboundEventId || null;
-}
+function copy(value) { return value == null ? value : structuredClone(value); }
+function recordId(record) { return record?.id || record?.recordId || record?.opportunityId || record?.instrumentId || record?.positionId || record?.listingId || record?.participantId || record?.accountId || record?.transactionId || record?.eventId || record?.exportPackageId || record?.settlementInstructionId || record?.workOrderId || record?.compensationId || record?.chargeId || record?.conversionId || record?.cctpTransferId || record?.proposalId || null; }
 
 export class PersistentDomainService {
   constructor(database) {
     this.database = database;
     this.cache = new Map();
     this.typeIndex = new Map();
-    this.writeChains = new Map();
     this.hydratedTypes = new Set();
     this.hydrationByType = new Map();
-    if (database) database.persistentDomain = this;
+    this.writeChains = new Map();
   }
 
   key(type, id) { return `${type}:${id}`; }
@@ -32,80 +22,66 @@ export class PersistentDomainService {
   cacheRecord(type, id, payload) {
     const record = copy(payload);
     this.cache.set(this.key(type, id), record);
-    let typeRecords = this.typeIndex.get(type);
-    if (!typeRecords) {
-      typeRecords = new Map();
-      this.typeIndex.set(type, typeRecords);
-    }
-    typeRecords.set(id, record);
-    return record;
+    if (!this.typeIndex.has(type)) this.typeIndex.set(type, new Map());
+    this.typeIndex.get(type).set(id, record);
   }
 
   removeCachedRecord(type, id) {
     this.cache.delete(this.key(type, id));
-    const typeRecords = this.typeIndex.get(type);
-    if (!typeRecords) return;
-    typeRecords.delete(id);
-    if (!typeRecords.size) this.typeIndex.delete(type);
+    this.typeIndex.get(type)?.delete(id);
+  }
+
+  async loadTypes(requestedTypes = []) {
+    const types = [...new Set(requestedTypes.filter(Boolean))];
+    if (!types.length) return;
+    if (typeof this.database.listRecordsByTypes === 'function') {
+      const rows = await this.database.listRecordsByTypes(types);
+      for (const row of rows) this.cacheRecord(row.record_type, row.record_id || recordId(row.payload), row.payload);
+      return;
+    }
+    for (const type of types) {
+      const records = await this.database.listRecords(type);
+      for (const record of records) {
+        const id = recordId(record);
+        if (id) this.cacheRecord(type, id, record);
+      }
+    }
+  }
+
+  async hydrate(types = []) {
+    const requested = [...new Set(types.filter(Boolean))];
+    const unloaded = requested.filter((type) => !this.hydratedTypes.has(type) && !this.hydrationByType.has(type));
+    if (unloaded.length) {
+      const operation = this.loadTypes(unloaded);
+      for (const type of unloaded) this.hydrationByType.set(type, operation);
+      operation.then(() => {
+        for (const type of unloaded) {
+          this.hydratedTypes.add(type);
+          if (this.hydrationByType.get(type) === operation) this.hydrationByType.delete(type);
+        }
+      }).catch(() => {
+        for (const type of unloaded) if (this.hydrationByType.get(type) === operation) this.hydrationByType.delete(type);
+      });
+    }
+    const pending = [...new Set(requested.map((type) => this.hydrationByType.get(type)).filter(Boolean))];
+    if (pending.length) await Promise.all(pending);
+    return this;
   }
 
   async hydrateRecord(type, id) {
-    const cached = this.get(type, id);
-    if (cached) return cached;
-    const record = typeof this.database?.getRecord === 'function'
-      ? await this.database.getRecord(type, id)
-      : (await this.database.listRecords(type)).find((candidate) => recordId(candidate) === id) || null;
-    return record ? copy(this.cacheRecord(type, id, record)) : null;
-  }
-
-  async loadTypes(requestedTypes) {
-    if (typeof this.database?.listRecordsByTypes === 'function') {
-      const records = await this.database.listRecordsByTypes(requestedTypes);
-      for (const { recordType, payload } of records) {
-        const id = recordId(payload);
-        if (id) this.cacheRecord(recordType, id, payload);
-      }
-      return;
+    const existing = this.get(type, id);
+    if (existing) return existing;
+    if (typeof this.database.getRecord !== 'function') {
+      await this.hydrate([type]);
+      return this.get(type, id);
     }
-
-    const poolCapacity = Number(this.database?.pool?.options?.max) || 1;
-    const concurrency = Math.max(1, Math.min(poolCapacity, requestedTypes.length));
-    let cursor = 0;
-    const hydrateNext = async () => {
-      while (cursor < requestedTypes.length) {
-        const type = requestedTypes[cursor++];
-        const records = await this.database.listRecords(type);
-        for (const record of records) {
-          const id = recordId(record);
-          if (id) this.cacheRecord(type, id, record);
-        }
-      }
-    };
-    await Promise.all(Array.from({ length: concurrency }, () => hydrateNext()));
-  }
-
-  async hydrate(types = Object.values(RECORD_TYPES)) {
-    const requestedTypes = [...new Set(types)];
-    if (!requestedTypes.length) return this.snapshot();
-
-    const unloadedTypes = requestedTypes.filter((type) => !this.hydratedTypes.has(type) && !this.hydrationByType.has(type));
-    if (unloadedTypes.length) {
-      const operation = this.loadTypes(unloadedTypes)
-        .then(() => { for (const type of unloadedTypes) this.hydratedTypes.add(type); })
-        .finally(() => {
-          for (const type of unloadedTypes) {
-            if (this.hydrationByType.get(type) === operation) this.hydrationByType.delete(type);
-          }
-        });
-      for (const type of unloadedTypes) this.hydrationByType.set(type, operation);
-    }
-
-    const pending = [...new Set(requestedTypes.map((type) => this.hydrationByType.get(type)).filter(Boolean))];
-    if (pending.length) await Promise.all(pending);
-    return this.snapshot();
+    const record = await this.database.getRecord(type, id);
+    if (record) this.cacheRecord(type, id, record);
+    return this.get(type, id);
   }
 
   async seed(type, records = []) {
+    await this.hydrate([type]);
     const existing = this.list(type);
     if (existing.length) return existing;
     for (const record of records) {
@@ -122,12 +98,9 @@ export class PersistentDomainService {
     const operation = Promise.all(priors.map((prior) => prior.catch(() => {}))).then(task);
     const tail = operation.catch(() => {});
     for (const cacheKey of coordinatedKeys) this.writeChains.set(cacheKey, tail);
-    try {
-      return await operation;
-    } finally {
-      for (const cacheKey of coordinatedKeys) {
-        if (this.writeChains.get(cacheKey) === tail) this.writeChains.delete(cacheKey);
-      }
+    try { return await operation; }
+    finally {
+      for (const cacheKey of coordinatedKeys) if (this.writeChains.get(cacheKey) === tail) this.writeChains.delete(cacheKey);
     }
   }
 
@@ -138,7 +111,7 @@ export class PersistentDomainService {
       const previous = this.cache.get(cacheKey);
       try {
         await this.database.putRecord(type, id, record);
-        if (options.audit !== false) await this.database.audit({ actorId: options.actorId || null, eventType: options.eventType || 'DOMAIN_RECORD_UPSERTED', objectType: type, objectId: id, payload: { state: record.state || record.status || null } });
+        if (options.audit !== false) await this.database.audit({ actorId: options.actorId || null, eventType: options.eventType || 'DOMAIN_RECORD_UPSERTED', objectType: type, objectId: id, payload: options.auditPayload === undefined ? { state: record.state || record.status || null } : copy(options.auditPayload) });
         this.cacheRecord(type, id, record);
         return copy(record);
       } catch (error) {
@@ -153,7 +126,7 @@ export class PersistentDomainService {
     if (!Array.isArray(changes) || !changes.length) return [];
     const prepared = changes.map((change) => {
       if (!change?.type || !change?.id) throw new Error('Atomic domain changes require type and id.');
-      return { type: change.type, id: change.id, payload: copy(change.payload), actorId: change.actorId || null, eventType: change.eventType || 'DOMAIN_RECORD_UPSERTED', audit: change.audit !== false };
+      return { type: change.type, id: change.id, payload: copy(change.payload), actorId: change.actorId || null, eventType: change.eventType || 'DOMAIN_RECORD_UPSERTED', audit: change.audit !== false, auditPayload: change.auditPayload === undefined ? { state: change.payload?.state || change.payload?.status || null } : copy(change.auditPayload) };
     });
     const cacheKeys = prepared.map((change) => this.key(change.type, change.id));
     return this.coordinateWrites(cacheKeys, async () => {
@@ -162,7 +135,7 @@ export class PersistentDomainService {
         try {
           for (const change of prepared) {
             await this.database.putRecord(change.type, change.id, change.payload);
-            if (change.audit) await this.database.audit({ actorId: change.actorId, eventType: change.eventType, objectType: change.type, objectId: change.id, payload: { state: change.payload?.state || change.payload?.status || null } });
+            if (change.audit) await this.database.audit({ actorId: change.actorId, eventType: change.eventType, objectType: change.type, objectId: change.id, payload: change.auditPayload });
           }
           for (const change of prepared) this.cacheRecord(change.type, change.id, change.payload);
         } catch (error) {
@@ -179,7 +152,7 @@ export class PersistentDomainService {
         await client.query('BEGIN');
         for (const change of prepared) {
           await client.query(`INSERT INTO sra_domain_records (record_type, record_id, payload) VALUES ($1, $2, $3::jsonb) ON CONFLICT (record_type, record_id) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()`, [change.type, change.id, JSON.stringify(change.payload)]);
-          if (change.audit) await client.query('INSERT INTO sra_audit_events (actor_id, event_type, object_type, object_id, payload) VALUES ($1, $2, $3, $4, $5::jsonb)', [change.actorId, change.eventType, change.type, change.id, JSON.stringify({ state: change.payload?.state || change.payload?.status || null })]);
+          if (change.audit) await client.query('INSERT INTO sra_audit_events (actor_id, event_type, object_type, object_id, payload) VALUES ($1, $2, $3, $4, $5::jsonb)', [change.actorId, change.eventType, change.type, change.id, JSON.stringify(change.auditPayload)]);
         }
         await client.query('COMMIT');
         for (const change of prepared) this.cacheRecord(change.type, change.id, change.payload);
@@ -187,9 +160,7 @@ export class PersistentDomainService {
       } catch (error) {
         await client.query('ROLLBACK').catch(() => {});
         throw error;
-      } finally {
-        client.release();
-      }
+      } finally { client.release(); }
     });
   }
 
@@ -202,10 +173,7 @@ export class PersistentDomainService {
     const records = [...this.cache.entries()].filter(([key]) => key.startsWith(prefix)).map(([, value]) => value);
     if (records.length) {
       const rebuilt = new Map();
-      for (const record of records) {
-        const id = recordId(record);
-        if (id) rebuilt.set(id, record);
-      }
+      for (const record of records) { const id = recordId(record); if (id) rebuilt.set(id, record); }
       if (rebuilt.size) this.typeIndex.set(type, rebuilt);
     }
     return records.map((value) => copy(value));
