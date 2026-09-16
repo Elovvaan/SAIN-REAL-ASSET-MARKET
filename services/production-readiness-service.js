@@ -8,10 +8,17 @@ export class ProductionReadinessService {
     this.intelligence = intelligence;
     this.internalLifecycle = new InternalLifecycleService(domain);
     this.productQualification = new ProductQualificationService(domain, this.internalLifecycle);
-    this.initialization = this.productQualification.initialize();
+    this.initialization = null;
   }
 
   async ready() {
+    if (!this.initialization) {
+      this.initialization = Promise.resolve(this.productQualification.initialize())
+        .catch((error) => {
+          this.initialization = null;
+          throw error;
+        });
+    }
     await this.initialization;
     return this;
   }
@@ -36,6 +43,7 @@ export class ProductionReadinessService {
 
   async assess() {
     await this.ready();
+    await this.intelligence?.hydrate?.();
     const database = await this.database.health();
     const intelligence = this.intelligence?.health?.() || null;
     const counts = this.domain.snapshot().counts;
