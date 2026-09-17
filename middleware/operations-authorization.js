@@ -3,7 +3,6 @@ import { AccessService } from '../services/access-service.js';
 
 const STAFF_ROLES = new Set(['PLATFORM_ADMIN','OPERATIONS_ADMIN','FUNDING_OPERATIONS','FUNDING_ANALYST','VERIFICATION_REVIEWER','INSTRUMENT_REVIEWER','ISSUANCE_REVIEWER','MARKETPLACE_OPERATOR','SETTLEMENT_OPERATOR','AUDITOR']);
 let databasePromise = null;
-let accessServicePromise = null;
 
 function readCookie(req,name){const cookie=req.headers.cookie||'';const entry=cookie.split(';').map((part)=>part.trim()).find((part)=>part.startsWith(`${name}=`));return entry?decodeURIComponent(entry.slice(name.length+1)):'';}
 function isConnectorCallback(path){return path==='/api/funding-marketplace-settlement/confirmations/external';}
@@ -14,8 +13,8 @@ function isParticipantFundingSelfService(req){return (req.method==='POST'&&(req.
 function requiredRoles(path){if(path.startsWith('/api/on-chain')||path.startsWith('/api/platform-treasury'))return new Set(['PLATFORM_ADMIN','OPERATIONS_ADMIN']);if(isSettlementOperationsPath(path))return new Set(['PLATFORM_ADMIN','OPERATIONS_ADMIN','SETTLEMENT_OPERATOR']);if(isProductionProtected(path))return new Set(['PLATFORM_ADMIN','OPERATIONS_ADMIN','AUDITOR']);if(path.startsWith('/api/funding-verification'))return new Set(['PLATFORM_ADMIN','OPERATIONS_ADMIN','VERIFICATION_REVIEWER','FUNDING_OPERATIONS']);if(path.startsWith('/api/funding-instrument-review'))return new Set(['PLATFORM_ADMIN','OPERATIONS_ADMIN','INSTRUMENT_REVIEWER','FUNDING_OPERATIONS']);if(path.startsWith('/api/funding-instrument-issuance'))return new Set(['PLATFORM_ADMIN','OPERATIONS_ADMIN','ISSUANCE_REVIEWER','FUNDING_OPERATIONS']);if(path.startsWith('/api/funding-marketplace-settlement'))return new Set(['PLATFORM_ADMIN','OPERATIONS_ADMIN','SETTLEMENT_OPERATOR']);if(path.startsWith('/api/funding-marketplace'))return new Set(['PLATFORM_ADMIN','OPERATIONS_ADMIN','MARKETPLACE_OPERATOR','FUNDING_OPERATIONS']);return STAFF_ROLES;}
 function sessionRoles(session){return [...new Set([session?.activeCapacity,...(session?.capacities||[]).map((capacity)=>capacity.id||capacity),...(session?.roles||[]).map((role)=>role.id||role)].filter(Boolean).map((role)=>String(role).toUpperCase()))];}
 function hasRequiredRole(session,required){return sessionRoles(session).some((role)=>required.has(role));}
-async function productionDatabase(){if(!databasePromise){databasePromise=(async()=>{const database=new DatabaseService();await database.initialize();return database;})().catch((error)=>{databasePromise=null;throw error;});}return databasePromise;}
-async function defaultAccessService(){if(!accessServicePromise){accessServicePromise=(async()=>{const service=new AccessService({database:await productionDatabase()});await service.initialize();return service;})().catch((error)=>{accessServicePromise=null;throw error;});}return accessServicePromise;}
+async function productionDatabase(){if(!databasePromise){databasePromise=(async()=>{const database=new DatabaseService();await database.initialize();return database;})();}return databasePromise;}
+async function defaultAccessService(){const service=new AccessService({database:await productionDatabase()});await service.initialize();return service;}
 
 export function createOperationsAuthorization({accessServiceProvider=defaultAccessService}={}){
   return async function authorizeOperationsRequest(req,res,next){
