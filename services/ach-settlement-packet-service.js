@@ -72,7 +72,9 @@ export class AchSettlementPacketService {
 
   linkedDocumentIds(data) {
     const pkgInstructions = data.pkg?.settlementInstructions || {}; const closingInstructions = data.closing?.settlementInstructions || {};
-    return unique([...(Array.isArray(pkgInstructions.packageDocumentIds) ? pkgInstructions.packageDocumentIds : []), ...(Array.isArray(closingInstructions.packageDocumentIds) ? closingInstructions.packageDocumentIds : []), data.evidence?.documentReference]);
+    const explicitPackageIds = [...(Array.isArray(pkgInstructions.packageDocumentIds) ? pkgInstructions.packageDocumentIds : []), ...(Array.isArray(closingInstructions.packageDocumentIds) ? closingInstructions.packageDocumentIds : [])];
+    const opportunityDocumentIds = data.cashItemCollection && Array.isArray(data.opportunity?.supportingDocumentIds) ? data.opportunity.supportingDocumentIds : [];
+    return unique([...explicitPackageIds, ...opportunityDocumentIds, data.evidence?.documentReference]);
   }
 
   async linkedDocuments(data) { await this.documents.initialize(); const records = []; for (const id of this.linkedDocumentIds(data)) { const record = this.documents.get(id); if (record) records.push(record); } return records.sort((a, b) => documentPriority(a) - documentPriority(b) || String(a.uploadedAt || '').localeCompare(String(b.uploadedAt || ''))); }
