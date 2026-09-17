@@ -36,40 +36,31 @@
     }
   }
 
-  // Financing evidence controls belong to the open opportunity. They must not
-  // bubble into administration-shell handlers, which can treat an ordinary
-  // form interaction as a workspace action and rerender/reposition the panel.
+  // Only the native file input needs capture-phase isolation. Other evidence
+  // controls must reach their own target handlers so each workflow action can
+  // complete and hand off normally.
   document.addEventListener('click', (event) => {
-    const evidence = event.target?.closest?.('[data-admin-financing-evidence]');
-    if (!evidence) return;
+    const input = event.target?.closest?.('[data-admin-financing-evidence] input[name="documents"]');
+    if (!input) return;
 
-    const input = event.target?.closest?.('input[name="documents"]');
-    if (input) {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      sourceInput = input;
-      scrollX = window.scrollX;
-      scrollY = window.scrollY;
-      picker.accept = input.accept || '';
-      picker.multiple = Boolean(input.multiple);
-      picker.value = '';
-      picker.click();
-      restoreScroll();
-      requestAnimationFrame(restoreScroll);
-      return;
-    }
-
-    // Buttons inside the evidence panel still receive their own target-level
-    // handlers after capture completes, but the click cannot reach ancestors.
-    event.stopPropagation();
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    sourceInput = input;
+    scrollX = window.scrollX;
+    scrollY = window.scrollY;
+    picker.accept = input.accept || '';
+    picker.multiple = Boolean(input.multiple);
+    picker.value = '';
+    picker.click();
+    restoreScroll();
+    requestAnimationFrame(restoreScroll);
   }, true);
 
-  // Changing the document classification is local state only. Do not let the
-  // admin shell interpret the select interaction as navigation/refresh work.
+  // Document classification is local state. This handler intentionally does
+  // not stop propagation during capture because doing so prevents target-level
+  // form behavior from running.
   document.addEventListener('change', (event) => {
-    if (event.target?.matches?.('[data-admin-financing-evidence] select[name="documentType"]')) {
-      event.stopPropagation();
-    }
+    if (!event.target?.matches?.('[data-admin-financing-evidence] select[name="documentType"]')) return;
   }, true);
 
   // The programmatic click on the persistent picker must never reach the shell.
