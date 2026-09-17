@@ -36,9 +36,34 @@
     }
   }
 
-  // Only the native file input needs capture-phase isolation. Other evidence
-  // controls must reach their own target handlers so each workflow action can
-  // complete and hand off normally.
+  function containEvidencePanel(panel) {
+    if (!panel || panel.dataset.sraEvidenceBoundary === 'true') return;
+    panel.dataset.sraEvidenceBoundary = 'true';
+
+    // Let the control itself finish first, then stop the event at the financing
+    // panel boundary. Administration/workspace ancestors must never interpret
+    // document selection, classification, attachment, retry, or continuation
+    // as navigation or refresh work.
+    panel.addEventListener('click', (event) => event.stopPropagation());
+    panel.addEventListener('change', (event) => event.stopPropagation());
+  }
+
+  document.querySelectorAll('[data-admin-financing-evidence]').forEach(containEvidencePanel);
+
+  const evidenceObserver = new MutationObserver((records) => {
+    records.forEach((record) => {
+      record.addedNodes.forEach((node) => {
+        if (!(node instanceof Element)) return;
+        if (node.matches('[data-admin-financing-evidence]')) containEvidencePanel(node);
+        node.querySelectorAll?.('[data-admin-financing-evidence]').forEach(containEvidencePanel);
+      });
+    });
+  });
+  evidenceObserver.observe(document.body, { childList: true, subtree: true });
+
+  // The native file input is the one special case: use the persistent picker so
+  // the selected FileList survives without replacing or rerendering the open
+  // financing record.
   document.addEventListener('click', (event) => {
     const input = event.target?.closest?.('[data-admin-financing-evidence] input[name="documents"]');
     if (!input) return;
@@ -54,13 +79,6 @@
     picker.click();
     restoreScroll();
     requestAnimationFrame(restoreScroll);
-  }, true);
-
-  // Document classification is local state. This handler intentionally does
-  // not stop propagation during capture because doing so prevents target-level
-  // form behavior from running.
-  document.addEventListener('change', (event) => {
-    if (!event.target?.matches?.('[data-admin-financing-evidence] select[name="documentType"]')) return;
   }, true);
 
   // The programmatic click on the persistent picker must never reach the shell.
