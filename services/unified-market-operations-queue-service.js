@@ -212,7 +212,6 @@ export class UnifiedMarketOperationsQueueService {
   explain() { return this.explainResult(this.build()); }
 
   async explainPersisted() {
-    await this.ensureIntelligenceHydrated();
     return this.explainResult(this.build());
   }
 }
