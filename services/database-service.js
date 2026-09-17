@@ -69,6 +69,7 @@ CREATE INDEX IF NOT EXISTS sra_sessions_expires_at_idx ON sra_sessions (expires_
 CREATE INDEX IF NOT EXISTS sra_sessions_email_idx ON sra_sessions ((payload->>'email'));
 CREATE INDEX IF NOT EXISTS sra_domain_records_type_idx ON sra_domain_records (record_type);
 CREATE INDEX IF NOT EXISTS sra_domain_records_type_created_idx ON sra_domain_records (record_type, created_at DESC);
+CREATE INDEX IF NOT EXISTS sra_domain_records_type_opportunity_created_idx ON sra_domain_records (record_type, (payload->>'opportunityId'), created_at);
 CREATE INDEX IF NOT EXISTS sra_audit_events_object_idx ON sra_audit_events (object_type, object_id);
 CREATE INDEX IF NOT EXISTS sra_audit_events_occurred_idx ON sra_audit_events (occurred_at DESC);
 CREATE INDEX IF NOT EXISTS sra_audit_events_type_idx ON sra_audit_events (event_type, occurred_at DESC);

@@ -330,6 +330,20 @@ export class FundingOpportunityIntakeService {
     return this.domain.list(EVIDENCE_RECORD_TYPE).filter((record) => record.opportunityId === opportunityId);
   }
 
+  async listEvidenceCurrent(opportunityId, limit = 250) {
+    const database = this.domain.database;
+    if (!database?.pool) return this.listEvidence(opportunityId).slice(0, limit);
+    const result = await database.pool.query(
+      `SELECT payload
+       FROM sra_domain_records
+       WHERE record_type = $1 AND payload->>'opportunityId' = $2
+       ORDER BY created_at
+       LIMIT $3`,
+      [EVIDENCE_RECORD_TYPE, opportunityId, Math.max(1, Math.min(Number(limit) || 250, 500))]
+    );
+    return result.rows.map((row) => row.payload);
+  }
+
   listVerificationRequests(opportunityId) {
     return this.domain.list(VERIFICATION_REQUEST_TYPE).filter((record) => record.opportunityId === opportunityId);
   }

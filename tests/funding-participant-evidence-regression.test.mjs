@@ -142,6 +142,8 @@ test('funding service initialization stays cold and exact records hydrate indivi
 
 test('document upload does not launch extraction inside the web request process', () => {
   const source = fs.readFileSync(new URL('../routes/funding-opportunity-router.js', import.meta.url), 'utf8');
-  assert.match(source, /extractionStatus: queuedDocumentIds\.length \? 'DEFERRED'/);
+  assert.match(source, /extractionStatus\s*:\s*queuedDocumentIds\.length\s*\?\s*'DEFERRED'/);
   assert.doesNotMatch(source, /setImmediate\(\(\) => \{[\s\S]*processExtraction/);
+  assert.doesNotMatch(source, /transition\(opportunity\.opportunityId,'UNDERWRITING',\{source:'EVIDENCE_INGESTION'/);
+  assert.match(source, /intakeContinues\s*:\s*true/);
 });

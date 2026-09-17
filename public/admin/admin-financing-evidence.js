@@ -85,7 +85,8 @@
         <input name="documents" type="file" accept="application/pdf,image/jpeg,image/png,image/webp,.doc,.docx,.txt" multiple required>
         <button class="secondary-button" type="submit">Attach supporting documents</button>
         <div data-admin-financing-evidence-result style="font-size:12px"></div>
-      </form>`;
+      </form>
+      <button class="primary-button" type="button" data-admin-financing-continue style="margin-top:10px">Finish document intake and continue</button>`;
 
     const evidence = [...detail.querySelectorAll('.funding-ops-panel')]
       .find((node) => node.textContent.includes('EVIDENCE & REFERENCES'));
@@ -120,9 +121,31 @@
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(payload.error || `Request failed with ${response.status}.`);
         form.reset();
+        const uploaded = Array.isArray(payload.records) ? payload.records : [];
+        const evidenceList = detail.querySelector('.funding-evidence-list');
+        if (evidenceList && uploaded.length) {
+          if (evidenceList.querySelector('.funding-ops-empty')) evidenceList.innerHTML = '';
+          evidenceList.insertAdjacentHTML('beforeend', uploaded.map((item) => `<div class="funding-evidence-item"><strong>${esc(item.evidence?.title || item.document?.originalName || 'Supporting document')}</strong><span>${esc(item.evidence?.sourceReference || item.document?.id || '')}</span></div>`).join(''));
+        }
+        if (result) result.textContent = `${uploaded.length || files.length} document${(uploaded.length || files.length) === 1 ? '' : 's'} attached. You can add another document or continue when the intake file is complete.`;
+      } catch (error) {
+        if (result) result.textContent = esc(error.message);
+      }
+    });
+
+    panel.querySelector('[data-admin-financing-continue]')?.addEventListener('click', async (event) => {
+      const button = event.currentTarget;
+      const result = panel.querySelector('[data-admin-financing-evidence-result]');
+      button.disabled = true;
+      try {
+        if (result) result.textContent = 'Completing document intake…';
+        await jsonRequest(`/api/funding/opportunities/${encodeURIComponent(currentOpportunityId)}/complete-intake`, { method: 'POST', body: '{}' });
+        if (result) result.textContent = 'Document intake completed. Opening underwriting…';
         reopen(root);
       } catch (error) {
         if (result) result.textContent = esc(error.message);
+      } finally {
+        button.disabled = false;
       }
     });
   }
