@@ -3,6 +3,7 @@
   window.__sraAdminUsersPermissionsWorkstationInstalled = true;
 
   const mounted = new WeakSet();
+  const renderState = new WeakMap();
   const esc = (value) => String(value ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;');
   const list = (value) => Array.isArray(value) ? value : [];
   const when = (value) => value ? new Date(value).toLocaleString() : '—';
@@ -32,9 +33,7 @@
     return capacity?.id || capacity?.capacityId || null;
   }
   function userCapacities(user) { return list(user?.capacities).map(normalizeCapacity).filter(Boolean); }
-  function allUsers(payload) {
-    return list(payload?.users || payload?.records?.users || payload?.administrators || payload?.records?.administrators);
-  }
+  function allUsers(payload) { return list(payload?.users || payload?.records?.users || payload?.administrators || payload?.records?.administrators); }
   function administratorUsers(users) { return users.filter((user) => userCapacities(user).includes('PLATFORM_ADMIN')); }
   function uniqueRoles(users) { return [...new Set(users.flatMap(userCapacities))]; }
   function hideLegacy(workspace) {
@@ -45,15 +44,20 @@
 
   async function load(tab = 'Overview') {
     const [workspacePayload, sessionPayload] = await Promise.all([
-      request(`/api/admin/workspaces?workspace=users&tab=${encodeURIComponent(tab)}&limit=250`),
+      request(`/api/admin/workspaces?workspace=users&tab=${encodeURIComponent(tab)}&limit=1000`),
       request('/api/admin/session'),
     ]);
     const users = allUsers(workspacePayload);
     return { users, administrators:administratorUsers(users), roles:uniqueRoles(users), session:sessionPayload?.session || null, bootstrap:sessionPayload?.bootstrap || {} };
   }
 
+  function userRoster(data) {
+    if (!data.users.length) return '<div class="admin-placeholder">No platform user accounts are currently stored.</div>';
+    return `<div class="admin-record-list" style="margin-top:12px">${data.users.map((user) => `<article class="admin-record-card"><header><strong>${esc(user.displayName || user.email || user.id)}</strong><em>${esc(String(user.state || 'ACTIVE'))}</em></header><div class="admin-record-grid">${field('User ID',user.id || '—')}${field('Email',user.email || '—')}${field('Capacities',userCapacities(user).join(', ') || 'UNIVERSAL')}${field('Joined',when(user.createdAt))}</div></article>`).join('')}</div>`;
+  }
+
   function renderOverview(data) {
-    return card('Access Control Overview','CURRENT',`<div class="admin-record-grid">${field('Administrators',String(data.administrators.length))}${field('Known users',String(data.users.length))}${field('Active capacity',data.session?.activeCapacity || '—')}${field('Defined roles',String(Object.keys(CAPACITIES).length))}${field('Portal','PRIVATE PLATFORM ADMINISTRATION')}${field('Initialized',data.bootstrap?.initialized ? 'YES' : 'NO')}</div><p style="color:#9a9a9a;margin:12px 0 0">Users identify people. Roles/capacities define operating context. Permissions are derived from those capacities. Sessions represent authenticated access. Access History is the audit trail.</p>`);
+    return card('Platform Users & Access','CURRENT',`<div class="admin-record-grid">${field('Registered users',String(data.users.length))}${field('Administrators',String(data.administrators.length))}${field('Current authenticated user',data.session?.displayName || data.session?.email || '—')}${field('Active capacity',data.session?.activeCapacity || '—')}${field('Defined roles',String(Object.keys(CAPACITIES).length))}${field('Initialized',data.bootstrap?.initialized ? 'YES' : 'NO')}</div><p style="color:#9a9a9a;margin:12px 0 0">This is the platform user registry. It shows who has an SRA account and their operating capacities. The Sessions tab remains the authenticated-session view; it does not label other users online unless the backend has verified session activity for them.</p>${userRoster(data)}`);
   }
 
   function renderAdministrators(data) {
@@ -83,7 +87,7 @@
   function renderSessions(data) {
     const session = data.session;
     if (!session) return card('Sessions','NONE','<div class="admin-placeholder">No authenticated administrator session is active.</div>');
-    return card('Sessions','AUTHENTICATED',`<div class="admin-record-grid">${field('User',session.displayName || session.email || session.id || '—')}${field('User ID',session.id || '—')}${field('Active role',session.activeRole || session.activeCapacity || '—')}${field('Active capacity',session.activeCapacity || '—')}${field('Shell',session.shell || '—')}${field('Account tier',session.accountTier || '—')}</div><p style="color:#9a9a9a;margin:12px 0 0">The private session endpoint intentionally exposes the authenticated session without exposing session tokens or token hashes.</p>`);
+    return card('Sessions','AUTHENTICATED',`<div class="admin-record-grid">${field('User',session.displayName || session.email || session.id || '—')}${field('User ID',session.id || '—')}${field('Active role',session.activeRole || session.activeCapacity || '—')}${field('Active capacity',session.activeCapacity || '—')}${field('Shell',session.shell || '—')}${field('Account tier',session.accountTier || '—')}</div><p style="color:#9a9a9a;margin:12px 0 0">This view reports the authenticated administration session without exposing session tokens or token hashes.</p>`);
   }
 
   function renderHistory() {
@@ -93,14 +97,19 @@
   async function render(workspace) {
     hideLegacy(workspace);
     const host = controls(workspace); if (!host) return;
+    const tab = workspace.dataset.activeTab || 'Overview';
+    const state = renderState.get(workspace) || { requestId:0 };
+    const requestId = state.requestId + 1;
+    state.requestId = requestId;
+    renderState.set(workspace,state);
     const placeholder = document.createElement('section');
     placeholder.className = 'admin-record-card';
     placeholder.dataset.usersPermissionsWorkstationCard = 'true';
-    placeholder.innerHTML = '<header><strong>Users & Permissions</strong><em>READING</em></header><p>Reading current access state…</p>';
+    placeholder.innerHTML = '<header><strong>Users & Permissions</strong><em>READING</em></header><p>Reading selected access state…</p>';
     host.prepend(placeholder);
     try {
-      const tab = workspace.dataset.activeTab || 'Overview';
       const data = await load(tab);
+      if (!placeholder.isConnected || workspace.dataset.activeTab !== tab || renderState.get(workspace)?.requestId !== requestId) return;
       let markup = renderOverview(data);
       if (tab === 'Administrators') markup = renderAdministrators(data);
       else if (tab === 'Roles') markup = renderRoles(data);
@@ -109,7 +118,7 @@
       else if (tab === 'Access History') markup = renderHistory(data);
       placeholder.outerHTML = markup;
     } catch (error) {
-      placeholder.innerHTML = `<header><strong>Users & Permissions</strong><em>UNAVAILABLE</em></header><p>${esc(error.message)}</p>`;
+      if (placeholder.isConnected && workspace.dataset.activeTab === tab && renderState.get(workspace)?.requestId === requestId) placeholder.innerHTML = `<header><strong>Users & Permissions</strong><em>UNAVAILABLE</em></header><p>${esc(error.message)}</p>`;
     }
   }
 
@@ -118,9 +127,6 @@
     mounted.add(workspace);
     workspace.addEventListener('click',(event) => {
       if (event.target.closest('[data-admin-tab]')) queueMicrotask(() => void render(workspace));
-    });
-    window.addEventListener('sra:admin-workspace-synchronized',(event) => {
-      if (event.detail?.workspaceId === 'users') void render(workspace);
     });
     void render(workspace);
   }
