@@ -90,7 +90,6 @@ export class PrivateDocumentService {
     if (this.storageReady) return;
     if (!this.storageInitialization) {
       this.storageInitialization = (async () => {
-        await fs.mkdir(this.root, { recursive: true });
         if (this.database?.pool) {
           await this.database.pool.query(`
             CREATE TABLE IF NOT EXISTS sra_private_document_bodies (
@@ -100,6 +99,8 @@ export class PrivateDocumentService {
               updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
           `);
+        } else {
+          await fs.mkdir(this.root, { recursive: true });
         }
         this.storageReady = true;
       })().catch((error) => {
@@ -166,8 +167,10 @@ export class PrivateDocumentService {
     const digest = crypto.createHash('sha256').update(file.buffer).digest('hex');
     const protectedBody = this.protectBody(id, file.buffer);
     const storedName = `${id}${safeExtension(file.originalname)}`;
-    const storagePath = path.join(this.root, storedName);
-    await fs.writeFile(storagePath, protectedBody, { flag: 'wx' });
+    const storagePath = this.database?.pool ? null : path.join(this.root, storedName);
+    // PostgreSQL is the durable production body store. Writing the same encrypted
+    // body to Railway's ephemeral filesystem first only duplicates upload I/O.
+    if (storagePath) await fs.writeFile(storagePath, protectedBody, { flag: 'wx' });
     const uploadedAt = new Date().toISOString();
     let extraction = { status: extractableMimeTypes.has(String(file.mimetype || '').toLowerCase()) ? 'PENDING' : 'NOT_APPLICABLE', documentId: id, sha256: digest, facts: null };
     if (!deferExtraction && extractableMimeTypes.has(String(file.mimetype || '').toLowerCase())) {

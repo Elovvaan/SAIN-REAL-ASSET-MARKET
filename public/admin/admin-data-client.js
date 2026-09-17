@@ -9,7 +9,7 @@
   const ADMIN_OPERATION_PREFIXES = ['/api/admin/','/api/funding','/api/funding-operations','/api/funding-verification','/api/funding-value','/api/funding-model','/api/funding-instrument','/api/funding-marketplace','/api/financing-closing','/api/sane/intelligence'];
   const WORKSPACE_RECORD_LIMIT = 100;
   const ADMIN_SESSION_TIMEOUT_MS = 15_000;
-  const ADMIN_READ_TIMEOUT_MS = 60_000;
+  const ADMIN_READ_TIMEOUT_MS = 15_000;
   const ADMIN_WRITE_TIMEOUT_MS = 180_000;
   const ADMIN_DOCUMENT_UPLOAD_TIMEOUT_MS = 300_000;
   const ADMIN_READ_CACHE_TTL_MS = 30_000;
