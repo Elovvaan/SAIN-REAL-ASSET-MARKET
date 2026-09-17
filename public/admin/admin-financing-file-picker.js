@@ -45,30 +45,36 @@
     event.stopImmediatePropagation();
   }, true);
 
-  function containEvidencePanel(panel) {
-    if (!panel || panel.dataset.sraEvidenceBoundary === 'true') return;
-    panel.dataset.sraEvidenceBoundary = 'true';
+  function containFinancingPanel(panel) {
+    if (!panel || panel.dataset.sraFinancingInteractionBoundary === 'true') return;
+    panel.dataset.sraFinancingInteractionBoundary = 'true';
 
-    // Let the control itself finish first, then stop the event at the financing
-    // panel boundary. Administration/workspace ancestors must never interpret
-    // document selection, classification, attachment, retry, or continuation
-    // as navigation or refresh work.
+    // Target controls run first. The panel then terminates the event so the
+    // surrounding Operations shell cannot reinterpret a stage-local action as
+    // navigation, refresh, or another workflow operation.
     panel.addEventListener('click', (event) => event.stopPropagation());
     panel.addEventListener('change', (event) => event.stopPropagation());
+    panel.addEventListener('input', (event) => event.stopPropagation());
+    panel.addEventListener('submit', (event) => event.stopPropagation());
   }
 
-  document.querySelectorAll('[data-admin-financing-evidence]').forEach(containEvidencePanel);
+  function containKnownFinancingPanels(root = document) {
+    root.querySelectorAll?.('[data-admin-financing-evidence],[data-admin-financing-workflow]')
+      .forEach(containFinancingPanel);
+  }
 
-  const evidenceObserver = new MutationObserver((records) => {
+  containKnownFinancingPanels();
+
+  const financingPanelObserver = new MutationObserver((records) => {
     records.forEach((record) => {
       record.addedNodes.forEach((node) => {
         if (!(node instanceof Element)) return;
-        if (node.matches('[data-admin-financing-evidence]')) containEvidencePanel(node);
-        node.querySelectorAll?.('[data-admin-financing-evidence]').forEach(containEvidencePanel);
+        if (node.matches('[data-admin-financing-evidence],[data-admin-financing-workflow]')) containFinancingPanel(node);
+        containKnownFinancingPanels(node);
       });
     });
   });
-  evidenceObserver.observe(document.body, { childList: true, subtree: true });
+  financingPanelObserver.observe(document.body, { childList: true, subtree: true });
 
   // The native file input is the one special case: use the persistent picker so
   // the selected FileList survives without replacing or rerendering the open
