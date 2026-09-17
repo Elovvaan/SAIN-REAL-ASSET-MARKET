@@ -98,15 +98,18 @@
   async function refresh(workspace) {
     const tab=workspace?.dataset.activeTab||'';
     if(!tab||terminalTabs.has(tab)||!ownedTabs.has(tab)){removePanel(workspace);return;}
-    const state=refreshState.get(workspace)||{inFlight:null,queued:false};
-    if(state.inFlight){state.queued=true;refreshState.set(workspace,state);return state.inFlight;}
+    const state=refreshState.get(workspace)||{requestId:0,inFlight:null};
+    const requestId=state.requestId+1;
+    state.requestId=requestId;
+    refreshState.set(workspace,state);
     const node=panel(workspace); if(!node)return;
-    node.innerHTML='<header><strong>Coin Position Lifecycle</strong><em>LOADING</em></header><p style="color:#9a9a9a">Reconciling the complete persistent Coin Position domain…</p>';
+    node.innerHTML='<header><strong>Coin Position Lifecycle</strong><em>LOADING</em></header><p style="color:#9a9a9a">Reading the selected Coin Position lifecycle stage…</p>';
     const work=(async()=>{try {
       const data=tab==='Instrument Linkage'
         ? await requestJson('/api/admin/instrument-coin-position-linkages')
         : await requestJson('/api/admin/coin-position-lifecycle');
-      if(!node.isConnected||workspace.dataset.activeTab!==tab)return;
+      const current=refreshState.get(workspace);
+      if(!node.isConnected||workspace.dataset.activeTab!==tab||current?.requestId!==requestId)return;
       node.innerHTML=markup(tab,data);
       node.querySelectorAll('[data-open-instrument-stage]').forEach(button=>button.addEventListener('click',()=>openInstrumentStage(button.dataset.openInstrumentStage)));
       node.querySelectorAll('[data-link-instrument]').forEach(button=>button.addEventListener('click',async()=>{
@@ -114,17 +117,23 @@
         if(!coinPositionId){if(result)result.textContent='Select an eligible Coin Position.';return;}
         if(!confirm(`Register ${coinPositionId} as the source position for ${button.dataset.linkInstrument}?`))return;
         button.disabled=true;if(result)result.textContent='Registering instrument linkage…';
-        try{await requestJson(`/api/admin/instruments/${encodeURIComponent(button.dataset.linkInstrument)}/coin-position-linkage`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approval:'LINK',coinPositionId})});if(result)result.textContent='Coin Position linkage verified and lifecycle event recorded.';window.SRAAdminDataClient?.refresh?.('instrument-coin-position-linked');await refresh(workspace);}catch(error){if(result)result.textContent=error.message;button.disabled=false;}
+        try{await requestJson(`/api/admin/instruments/${encodeURIComponent(button.dataset.linkInstrument)}/coin-position-linkage`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approval:'LINK',coinPositionId})});if(result)result.textContent='Coin Position linkage verified and lifecycle event recorded.';await refresh(workspace);}catch(error){if(result)result.textContent=error.message;button.disabled=false;}
       }));
-    } catch(error) { node.innerHTML=`<header><strong>Coin Position Lifecycle</strong><em>UNAVAILABLE</em></header><p style="color:#d6a92f">${esc(error.message)}</p>`; }})();
-    state.inFlight=work;state.queued=false;refreshState.set(workspace,state);
-    try{await work;}finally{state.inFlight=null;if(state.queued){state.queued=false;queueMicrotask(()=>void refresh(workspace));}refreshState.set(workspace,state);}
+    } catch(error) {
+      const current=refreshState.get(workspace);
+      if(node.isConnected&&workspace.dataset.activeTab===tab&&current?.requestId===requestId)node.innerHTML=`<header><strong>Coin Position Lifecycle</strong><em>UNAVAILABLE</em></header><p style="color:#d6a92f">${esc(error.message)}</p>`;
+    }})();
+    state.inFlight=work;
+    refreshState.set(workspace,state);
+    try{await work;}finally{const current=refreshState.get(workspace);if(current?.requestId===requestId){current.inFlight=null;refreshState.set(workspace,current);}}
   }
   function mount(workspace) {
     if(!workspace||mounted.has(workspace))return;
     mounted.add(workspace);
-    window.addEventListener('sra:admin-tab-selected',event=>{if(event.detail?.workspaceId==='coin-positions')void refresh(workspace);});
-    window.addEventListener('sra:admin-workspace-synchronized',event=>{if(event.detail?.workspaceId==='coin-positions')void refresh(workspace);});
+    workspace.addEventListener('click',event=>{
+      if(!event.target.closest('[data-admin-tab]'))return;
+      queueMicrotask(()=>void refresh(workspace));
+    });
     void refresh(workspace);
   }
   window.mountAdminCoinLifecycleWorkstation=mount;
