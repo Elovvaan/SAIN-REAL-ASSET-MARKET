@@ -75,6 +75,37 @@ test('private document filesystem body is ciphertext while service reads origina
   }
 });
 
+test('new uploads do not scan or migrate the historical document collection', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'sra-upload-path-test-'));
+  const queries = [];
+  const client = {
+    async query(sql) { queries.push(String(sql)); return { rows: [], rowCount: 0 }; },
+    release() {},
+  };
+  const database = {
+    pool: {
+      async query(sql) { queries.push(String(sql)); return { rows: [], rowCount: 0 }; },
+      async connect() { return client; },
+    },
+    async audit() {},
+  };
+  try {
+    const service = new PrivateDocumentService({ root, database });
+    const original = Buffer.from('one financing document');
+    const result = await service.store({
+      file: { buffer: original, originalname: 'one.pdf', mimetype: 'application/pdf', size: original.length },
+      documentType: 'FINANCING_SUPPORT',
+      deferExtraction: true,
+    });
+    assert.equal(result.ok, true);
+    assert.equal(queries.some((sql) => sql.includes("SELECT payload - 'contentBase64'")), false);
+    assert.equal(queries.some((sql) => sql.includes('SELECT document_id, content')), false);
+    assert.equal(queries.filter((sql) => sql.includes('CREATE TABLE IF NOT EXISTS sra_private_document_bodies')).length, 1);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test('unconfigured encryption service preserves legacy plaintext compatibility', () => {
   const service = new DataEncryptionService({ env: {} });
   assert.equal(service.configured(), false);

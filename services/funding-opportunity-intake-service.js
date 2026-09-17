@@ -435,7 +435,7 @@ export class FundingOpportunityIntakeService {
   }
 
   async update(opportunityId, input, actorId = null) {
-    const current = this.get(opportunityId);
+    const current = await this.ensureOpportunity(opportunityId);
     if (!current) throw new Error('Funding opportunity was not found.');
     if (current.status === 'WITHDRAWN') throw new Error('A withdrawn opportunity cannot be updated.');
     const opportunityType = String(input.opportunityType ?? current.opportunityType).toUpperCase();
@@ -486,7 +486,7 @@ export class FundingOpportunityIntakeService {
   }
 
   async registerEvidence(opportunityId, input, actorId = null) {
-    const opportunity = this.get(opportunityId);
+    const opportunity = await this.ensureOpportunity(opportunityId);
     if (!opportunity) throw new Error('Funding opportunity was not found.');
     if (opportunity.status === 'WITHDRAWN') throw new Error('Evidence cannot be added to a withdrawn opportunity.');
     requireFields(input, ['evidenceType', 'sourceReference']);
@@ -597,7 +597,7 @@ export class FundingOpportunityIntakeService {
   }
 
   async completeIntake(opportunityId, actorId = null) {
-    const current = this.get(opportunityId);
+    const current = await this.ensureOpportunity(opportunityId);
     if (!current) throw new Error('Funding opportunity was not found.');
     const completeness = this.assessCompleteness(opportunityId);
     if (!completeness.intakeComplete) {
@@ -643,7 +643,7 @@ export class FundingOpportunityIntakeService {
   }
 
   async createVerificationRequest(opportunityId, input = {}, actorId = null) {
-    const opportunity = this.get(opportunityId);
+    const opportunity = await this.ensureOpportunity(opportunityId);
     if (!opportunity) throw new Error('Funding opportunity was not found.');
     if (!['INTAKE_COMPLETE', 'PENDING_VERIFICATION'].includes(opportunity.status)) {
       throw new Error(`Verification cannot begin from ${opportunity.status}.`);
@@ -732,7 +732,7 @@ export class FundingOpportunityIntakeService {
   }
 
   async withdraw(opportunityId, reason, actorId = null) {
-    const current = this.get(opportunityId);
+    const current = await this.ensureOpportunity(opportunityId);
     if (!current) throw new Error('Funding opportunity was not found.');
     const at = now();
     const updated = {

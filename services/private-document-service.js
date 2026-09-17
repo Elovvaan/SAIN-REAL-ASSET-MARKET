@@ -43,7 +43,10 @@ export class PrivateDocumentService {
     this.extractionService = extractionService || new TransactionDocumentExtractionService();
     this.encryption = encryptionService || new DataEncryptionService();
     this.records = new Map();
+    this.storageReady = false;
+    this.storageInitialization = null;
     this.ready = false;
+    this.initialization = null;
   }
 
   bodyContext(documentId) { return `PRIVATE_DOCUMENT_BODY:${documentId}`; }
@@ -83,18 +86,36 @@ export class PrivateDocumentService {
     return { migrated };
   }
 
+  async ensureStorageReady() {
+    if (this.storageReady) return;
+    if (!this.storageInitialization) {
+      this.storageInitialization = (async () => {
+        await fs.mkdir(this.root, { recursive: true });
+        if (this.database?.pool) {
+          await this.database.pool.query(`
+            CREATE TABLE IF NOT EXISTS sra_private_document_bodies (
+              document_id TEXT PRIMARY KEY,
+              content BYTEA NOT NULL,
+              created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+              updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+          `);
+        }
+        this.storageReady = true;
+      })().catch((error) => {
+        this.storageInitialization = null;
+        throw error;
+      });
+    }
+    await this.storageInitialization;
+  }
+
   async initialize() {
     if (this.ready) return;
-    await fs.mkdir(this.root, { recursive: true });
-    if (this.database?.pool) {
-      await this.database.pool.query(`
-        CREATE TABLE IF NOT EXISTS sra_private_document_bodies (
-          document_id TEXT PRIMARY KEY,
-          content BYTEA NOT NULL,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `);
+    if (this.initialization) return this.initialization;
+    this.initialization = (async () => {
+      await this.ensureStorageReady();
+      if (this.database?.pool) {
       await this.database.pool.query(`
         INSERT INTO sra_private_document_bodies (document_id, content)
         SELECT document_id, decode(payload->>'contentBase64', 'base64')
@@ -110,14 +131,19 @@ export class PrivateDocumentService {
       await this.migrateDatabaseBodies();
       const result = await this.database.pool.query("SELECT payload - 'contentBase64' AS payload FROM sra_private_documents ORDER BY created_at");
       result.rows.forEach((row) => this.records.set(row.payload.id, row.payload));
-    } else if (this.database) {
-      const records = await this.database.listDocuments();
-      records.forEach((record) => {
-        const { contentBase64, ...metadata } = record;
-        this.records.set(metadata.id, metadata);
-      });
-    }
-    this.ready = true;
+      } else if (this.database) {
+        const records = await this.database.listDocuments();
+        records.forEach((record) => {
+          const { contentBase64, ...metadata } = record;
+          this.records.set(metadata.id, metadata);
+        });
+      }
+      this.ready = true;
+    })().catch((error) => {
+      this.initialization = null;
+      throw error;
+    });
+    return this.initialization;
   }
 
   validateFile(file) {
@@ -132,7 +158,10 @@ export class PrivateDocumentService {
   async store({ file, documentType = 'OTHER', uploaderId = null, retentionPolicy = 'PRIVATE_EVIDENCE', retentionReferenceId = null, deferExtraction = false }) {
     const validationError = this.validateFile(file);
     if (validationError) return { ok: false, error: validationError };
-    await this.initialize();
+    // A new upload only needs its storage target. Historical metadata loading and
+    // body migration stay outside the request path so large document sets cannot
+    // occupy the database pool before this file is accepted.
+    await this.ensureStorageReady();
     const id = createId();
     const digest = crypto.createHash('sha256').update(file.buffer).digest('hex');
     const protectedBody = this.protectBody(id, file.buffer);
