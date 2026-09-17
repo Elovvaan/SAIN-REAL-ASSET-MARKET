@@ -95,10 +95,12 @@
     else detail.append(panel);
 
     const form = panel.querySelector('form');
+    const fileInput = form?.querySelector('[name="documents"]');
     const result = panel.querySelector('[data-admin-financing-evidence-result]');
     const queueRoot = panel.querySelector('[data-admin-financing-upload-queue]');
     const continueButton = panel.querySelector('[data-admin-financing-continue]');
     let uploadQueue = [];
+    let selectedFiles = [];
     let queueRunning = false;
 
     const renderQueue = () => {
@@ -107,7 +109,8 @@
         const label = entry.state === 'ATTACHED' ? 'Attached'
           : entry.state === 'UPLOADING' ? 'Uploading…'
             : entry.state === 'FAILED' ? `Failed: ${entry.error || 'Upload did not complete.'}`
-              : 'Waiting';
+              : entry.state === 'SELECTED' ? 'Selected — ready to attach'
+                : 'Waiting';
         const retry = entry.state === 'FAILED'
           ? `<button type="button" class="secondary-button" data-admin-financing-retry="${index}" style="padding:5px 9px">Retry</button>`
           : '';
@@ -116,6 +119,25 @@
         </div>`;
       }).join('');
     };
+
+    fileInput?.addEventListener('click', (event) => event.stopPropagation());
+    fileInput?.addEventListener('change', (event) => {
+      event.stopPropagation();
+      selectedFiles = [...(event.currentTarget.files || [])];
+      const documentType = form.querySelector('[name="documentType"]')?.value || 'FINANCING_SUPPORT';
+      uploadQueue = selectedFiles.map((file) => ({
+        file,
+        documentType,
+        idempotencyKey: null,
+        state: 'SELECTED',
+        error: null,
+        rendered: false,
+      }));
+      renderQueue();
+      if (result) result.textContent = selectedFiles.length
+        ? `${selectedFiles.length} document${selectedFiles.length === 1 ? '' : 's'} selected. Click Attach supporting documents to upload.`
+        : 'No documents selected.';
+    });
 
     const appendEvidence = (records, entry) => {
       if (entry.rendered) return;
@@ -129,6 +151,7 @@
     const uploadEntry = async (entry, opportunityId, position, total) => {
       entry.state = 'UPLOADING';
       entry.error = null;
+      if (!entry.idempotencyKey) entry.idempotencyKey = `admin-financing-evidence-${opportunityId}-${crypto.randomUUID()}`;
       renderQueue();
       if (result) result.textContent = `Uploading ${position} of ${total}: ${entry.file.name}`;
 
@@ -177,23 +200,21 @@
 
     form?.addEventListener('submit', async (event) => {
       event.preventDefault();
-      const files = [...(form.querySelector('[name="documents"]')?.files || [])];
-      if (!files.length) return;
+      event.stopPropagation();
+      if (!selectedFiles.length) {
+        if (result) result.textContent = 'Choose one or more supporting documents first.';
+        return;
+      }
 
       const opportunityId = currentOpportunityId;
       if (!opportunityId) return;
 
       const documentType = form.querySelector('[name="documentType"]')?.value || 'FINANCING_SUPPORT';
-      uploadQueue = files.map((file) => ({
-        file,
-        documentType,
-        idempotencyKey: `admin-financing-evidence-${opportunityId}-${crypto.randomUUID()}`,
-        state: 'PENDING',
-        error: null,
-        rendered: false,
-      }));
+      const entries = uploadQueue.filter((entry) => entry.state === 'SELECTED').map((entry) => ({ ...entry, documentType }));
+      uploadQueue = entries;
       renderQueue();
-      form.querySelector('[name="documents"]').value = '';
+      selectedFiles = [];
+      if (fileInput) fileInput.value = '';
       await runQueue(uploadQueue, opportunityId);
     });
 
