@@ -2,7 +2,7 @@
   const esc = (value) => String(value ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;');
   const number = (value, digits = 0) => Number(value || 0).toLocaleString(undefined, { maximumFractionDigits:digits });
   const money = (value) => Number(value || 0).toLocaleString(undefined, { style:'currency', currency:'USD', maximumFractionDigits:2 });
-  const state = { mounted:false, loading:false };
+  const state = { mounted:false, loading:false, userReflectionLoading:false };
 
   function sparkline(series = []) {
     const values = series.map((item) => Number(item.yesPrice)).filter(Number.isFinite);
@@ -55,7 +55,31 @@
       panel.className = 'admin-market-dashboard';
       workspace.querySelector('.admin-status-section')?.insertAdjacentElement('afterend', panel);
     }
-    panel.innerHTML = `${lifecycleMarkup(payload)}<div class="admin-market-heading"><div><p class="admin-section-label">PRODUCTIVE ASSET PERFORMANCE</p><h3>Portfolio operations and surveillance</h3><p>Current pool formation, participation, performance, distributable value, and administrative actions from persistent platform records.</p></div><button type="button" data-admin-market-refresh>Refresh</button></div><div class="admin-market-summary"><div><span>Productive baskets</span><b>${number(payload.market?.productiveBaskets?.total)}</b></div><div><span>Active baskets</span><b>${number(activeBaskets)}</b></div><div><span>Undistributed value</span><b>${money(undistributed)}</b></div><div><span>Actions waiting</span><b>${number(workflow.length)}</b></div></div><section><h4>Productive baskets</h4><div class="admin-market-card-list admin-basket-grid">${baskets.length ? baskets.map(basketCard).join('') : '<div class="admin-placeholder">No productive baskets are stored yet.</div>'}</div></section><section class="admin-market-workflow"><h4>Administrative workflow</h4>${workflow.length ? `<div>${workflow.map((item) => `<article><span>${esc(item.kind)}</span><div><strong>${esc(item.title)}</strong><small>${esc(item.id)} · ${esc(item.state)}</small></div><b>${esc(item.action)}</b></article>`).join('')}</div>` : '<div class="admin-placeholder">No productive-asset or market actions are waiting for administration.</div>'}</section><details class="admin-event-market-secondary"><summary>Event market intelligence <b>${number(payload.market?.eventMarkets?.total)}</b></summary><div class="admin-market-card-list admin-event-grid">${events.length ? events.map(eventCard).join('') : '<div class="admin-placeholder">No governed event markets are stored yet.</div>'}</div></details><footer>Updated ${esc(new Date(payload.generatedAt).toLocaleString())} · Persistent platform records only.</footer>`;
+    panel.innerHTML = `${lifecycleMarkup(payload)}<div class="admin-market-heading"><div><p class="admin-section-label">PRODUCTIVE ASSET PERFORMANCE</p><h3>Portfolio operations and surveillance</h3><p>Current pool formation, participation, performance, distributable value, and administrative actions from persistent platform records.</p></div><button type="button" data-admin-market-refresh>Refresh</button></div><div class="admin-market-summary"><div><span>Productive baskets</span><b>${number(payload.market?.productiveBaskets?.total)}</b></div><div><span>Active baskets</span><b>${number(activeBaskets)}</b></div><div><span>Undistributed value</span><b>${money(undistributed)}</b></div><div><span>Actions waiting</span><b>${number(workflow.length)}</b></div><div><span>Platform users</span><b data-dashboard-platform-users>…</b></div></div><section><h4>Productive baskets</h4><div class="admin-market-card-list admin-basket-grid">${baskets.length ? baskets.map(basketCard).join('') : '<div class="admin-placeholder">No productive baskets are stored yet.</div>'}</div></section><section class="admin-market-workflow"><h4>Administrative workflow</h4>${workflow.length ? `<div>${workflow.map((item) => `<article><span>${esc(item.kind)}</span><div><strong>${esc(item.title)}</strong><small>${esc(item.id)} · ${esc(item.state)}</small></div><b>${esc(item.action)}</b></article>`).join('')}</div>` : '<div class="admin-placeholder">No productive-asset or market actions are waiting for administration.</div>'}</section><details class="admin-event-market-secondary"><summary>Event market intelligence <b>${number(payload.market?.eventMarkets?.total)}</b></summary><div class="admin-market-card-list admin-event-grid">${events.length ? events.map(eventCard).join('') : '<div class="admin-placeholder">No governed event markets are stored yet.</div>'}</div></details><footer>Updated ${esc(new Date(payload.generatedAt).toLocaleString())} · Persistent platform records only.</footer>`;
+  }
+
+  async function loadUserReflection(workspace, force = false) {
+    if (state.userReflectionLoading) return;
+    const target = workspace.querySelector('[data-dashboard-platform-users]');
+    if (!target) return;
+    state.userReflectionLoading = true;
+    try {
+      const client = window.SRAAdminDataClient;
+      const url = '/api/admin/workspaces?workspace=users&tab=Administrators&limit=1000';
+      const payload = client
+        ? await client.json(url, force ? { cache:'reload' } : {})
+        : await (async () => {
+            const response = await fetch(url, { ...(force ? { cache:'reload' } : {}), headers:{ Accept:'application/json' } });
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(body.error || `User reflection request failed with ${response.status}.`);
+            return body;
+          })();
+      const current = workspace.querySelector('[data-dashboard-platform-users]');
+      if (current) current.textContent = number(payload.counts?.users ?? payload.records?.users?.length ?? 0);
+    } catch (_error) {
+      const current = workspace.querySelector('[data-dashboard-platform-users]');
+      if (current) current.textContent = '—';
+    } finally { state.userReflectionLoading = false; }
   }
 
   async function load(workspace, force = false) {
@@ -74,6 +98,7 @@
             return body;
           })();
       render(workspace, payload);
+      void loadUserReflection(workspace, force);
     } catch (error) {
       const target = workspace.querySelector('[data-admin-market-dashboard]') || workspace.querySelector('.admin-workspace-records');
       target?.insertAdjacentHTML('afterbegin', `<div class="admin-placeholder"><strong>Dashboard unavailable.</strong><br>${esc(error.message)}</div>`);
@@ -89,7 +114,6 @@
     const stylesheet = document.createElement('link'); stylesheet.rel='stylesheet'; stylesheet.href='/admin/admin-market-dashboard.css'; stylesheet.dataset.adminMarketDashboardStyle='true'; document.head.append(stylesheet);
     workspace.addEventListener('click', (event) => { if (event.target.closest('[data-admin-market-refresh]')) void load(workspace, true); });
     window.addEventListener('sra:admin-dashboard-refresh', () => void load(workspace, true));
-    window.addEventListener('sra:admin-mutated', () => void load(workspace, true));
     void load(workspace);
   }
   window.mountAdminMarketDashboard = mount;
