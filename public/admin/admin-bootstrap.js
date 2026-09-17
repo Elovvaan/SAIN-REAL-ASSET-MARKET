@@ -300,7 +300,7 @@
     }
   }
 
-  function requestAdministrationRefresh(source = 'mutation') {
+  function requestAdministrationRefresh(source = 'manual') {
     if (refreshInFlight) {
       refreshAgain = true;
       return;
@@ -335,7 +335,6 @@
   }, true);
   window.addEventListener('hashchange', () => void loadWorkspaceFeatures(activeWorkspaceId()));
   window.addEventListener('sra:admin-visible', () => void boot());
-  window.addEventListener('sra:admin-mutated', (event) => requestAdministrationRefresh(event.detail?.path || 'mutation'));
   window.addEventListener('sra:admin-refresh', (event) => requestAdministrationRefresh(event.detail?.source || 'manual'));
   window.sraRefreshAdministration = requestAdministrationRefresh;
   window.sraLoadAdminWorkspaceFeatures = loadWorkspaceFeatures;
