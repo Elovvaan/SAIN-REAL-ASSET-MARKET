@@ -118,13 +118,24 @@
     ensureFinancingTab();
     const tab = activeTab();
     if (controls) controls.style.display = tab === 'Overview' ? '' : 'none';
+
+    // Awaiting Actions is a financing handoff owned by its dedicated staged
+    // loader. Do not replace its DOM and do not invoke the broad SANE operations
+    // queue here. The handoff loader reads only financing opportunities first;
+    // each opportunity's authorization/closing data loads on Open action.
+    if (tab === 'Awaiting Actions') {
+      await window.sraLoadOperationsHandoff?.('awaitingActions');
+      window.mountAdminFinancingAwaitingActions?.(workspace());
+      return;
+    }
+
     root.innerHTML = '<div class="admin-placeholder">Loading current operations…</div>';
     try {
       if (tab === 'Financing') {
         await renderFinancing(root);
         return;
       }
-      if (['Overview', 'Awaiting Actions', 'Exceptions'].includes(tab)) {
+      if (['Overview', 'Exceptions'].includes(tab)) {
         const data = await loadOperationsQueue(force);
         if (tab === 'Overview') {
           root.innerHTML = overviewMarkup(data);
@@ -132,8 +143,8 @@
           root.querySelector('[data-refresh-unified-operations]')?.addEventListener('click', () => void renderTab(true));
           return;
         }
-        const records = tab === 'Exceptions' ? (data.exceptions || []) : (data.queue || []);
-        root.innerHTML = recordCards(records, tab === 'Exceptions' ? 'No operation exceptions are currently recorded.' : 'No governed operation is currently awaiting action.');
+        const records = data.exceptions || [];
+        root.innerHTML = recordCards(records, 'No operation exceptions are currently recorded.');
         return;
       }
 
