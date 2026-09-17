@@ -4,18 +4,15 @@
 
   const PERFORMANCE_RUNTIME = ['/admin/admin-performance-runtime.js', 'data-sra-admin-performance-runtime'];
   const SHELL = ['/admin/admin-suite-shell.js', 'data-sra-admin-suite-shell'];
+
+  // Workspace entry loads only the capability needed to enter that workspace.
+  // Downstream workflow capabilities are loaded by the explicit handoff/click
+  // that owns them; a completed upstream stage is never regenerated here.
   const WORKSPACE_FEATURES = {
-    dashboard: [
-      ['/admin/admin-market-dashboard.js', 'data-sra-admin-market-dashboard'],
-    ],
+    dashboard: [['/admin/admin-market-dashboard.js', 'data-sra-admin-market-dashboard']],
     operations: [
       ['/funding-operations-ui.js', 'data-sra-admin-funding-operations'],
       ['/admin/admin-unified-financing-workstation.js', 'data-sra-admin-unified-financing-workstation'],
-      ['/admin/admin-financing-evidence.js', 'data-sra-admin-financing-evidence'],
-      ['/admin/admin-financing-awaiting-actions.js', 'data-sra-admin-financing-awaiting-actions'],
-      ['/admin/admin-financing-availability-letter.js', 'data-sra-admin-financing-availability-letter'],
-      ['/admin/admin-workstation-controls.js', 'data-sra-admin-workstation-controls'],
-      ['/admin/admin-button-diagnostics-core.js', 'data-sra-admin-diagnostics-core'],
     ],
     settlement: [
       ['/admin/admin-settlement-execution-controls.js', 'data-sra-admin-settlement-execution-controls'],
@@ -28,12 +25,8 @@
       ['/admin/admin-treasury-cash-recording.js', 'data-sra-admin-treasury-cash-recording'],
       ['/admin/admin-treasury-instrument-recording.js', 'data-sra-admin-treasury-instrument-recording'],
     ],
-    'native-asset': [
-      ['/admin/admin-native-platform-asset-workstation.js', 'data-sra-admin-native-platform-asset-workstation'],
-    ],
-    records: [
-      ['/admin/admin-financial-records-workstation.js', 'data-sra-admin-financial-records-workstation'],
-    ],
+    'native-asset': [['/admin/admin-native-platform-asset-workstation.js', 'data-sra-admin-native-platform-asset-workstation']],
+    records: [['/admin/admin-financial-records-workstation.js', 'data-sra-admin-financial-records-workstation']],
     'coin-positions': [
       ['/admin/admin-coin-representation-integrity.js', 'data-sra-admin-coin-representation-integrity'],
       ['/admin/admin-coin-lifecycle-workstation.js', 'data-sra-admin-coin-lifecycle-workstation'],
@@ -47,12 +40,8 @@
       ['/admin/admin-users-permissions-workstation.js', 'data-sra-admin-users-permissions-workstation'],
       ['/admin/capability-review.js', 'data-sra-admin-capability-review'],
     ],
-    agent: [
-      ['/admin/admin-agent-operations-workstation.js', 'data-sra-admin-agent-operations-workstation'],
-    ],
-    connections: [
-      ['/admin/admin-stellar-transfer.js', 'data-sra-admin-stellar-transfer'],
-    ],
+    agent: [['/admin/admin-agent-operations-workstation.js', 'data-sra-admin-agent-operations-workstation']],
+    connections: [['/admin/admin-stellar-transfer.js', 'data-sra-admin-stellar-transfer']],
     instruments: [
       ['/admin/admin-instrument-review-workstation.js', 'data-sra-admin-instrument-review-workstation'],
       ['/admin/admin-on-chain-issuance-controls.js', 'data-sra-admin-on-chain-issuance-controls'],
@@ -63,7 +52,18 @@
     ],
   };
 
+  const OPERATION_HANDOFF_FEATURES = {
+    financingDetail: [
+      ['/admin/admin-financing-evidence.js', 'data-sra-admin-financing-evidence'],
+    ],
+    awaitingActions: [
+      ['/admin/admin-financing-awaiting-actions.js', 'data-sra-admin-financing-awaiting-actions'],
+      ['/admin/admin-financing-availability-letter.js', 'data-sra-admin-financing-availability-letter'],
+    ],
+  };
+
   const workspaceLoads = new Map();
+  const handoffLoads = new Map();
   let performanceLoad = null;
   let shellLoad = null;
   let booted = false;
@@ -76,10 +76,7 @@
       const existing = document.querySelector(`script[${marker}]`);
       if (existing) {
         if (existing.dataset.loaded === 'true' || existing.dataset.preloaded === 'true') resolve();
-        else if (existing.dataset.failed === 'true') {
-          existing.remove();
-          reject(new Error(`Failed to load ${source}`));
-        }
+        else if (existing.dataset.failed === 'true') { existing.remove(); reject(new Error(`Failed to load ${source}`)); }
         else {
           existing.addEventListener('load', resolve, { once: true });
           existing.addEventListener('error', () => reject(new Error(`Failed to load ${source}`)), { once: true });
@@ -90,31 +87,17 @@
       script.src = source;
       script.async = false;
       script.setAttribute(marker, 'true');
-      const timeout = setTimeout(() => {
-        script.dataset.failed = 'true';
-        script.remove();
-        reject(new Error(`Timed out loading ${source}`));
-      }, timeoutMs);
-      script.addEventListener('load', () => {
-        clearTimeout(timeout);
-        script.dataset.loaded = 'true';
-        resolve();
-      }, { once: true });
-      script.addEventListener('error', () => {
-        clearTimeout(timeout);
-        script.dataset.failed = 'true';
-        script.remove();
-        reject(new Error(`Failed to load ${source}`));
-      }, { once: true });
+      const timeout = setTimeout(() => { script.dataset.failed = 'true'; script.remove(); reject(new Error(`Timed out loading ${source}`)); }, timeoutMs);
+      script.addEventListener('load', () => { clearTimeout(timeout); script.dataset.loaded = 'true'; resolve(); }, { once: true });
+      script.addEventListener('error', () => { clearTimeout(timeout); script.dataset.failed = 'true'; script.remove(); reject(new Error(`Failed to load ${source}`)); }, { once: true });
       document.head.append(script);
     });
   }
 
   async function loadScript(source, marker, options = {}) {
     const { retry = true, timeoutMs = 4000 } = options;
-    try {
-      return await loadScriptOnce(source, marker, timeoutMs);
-    } catch (firstError) {
+    try { return await loadScriptOnce(source, marker, timeoutMs); }
+    catch (firstError) {
       if (!retry) throw firstError;
       await new Promise((resolve) => setTimeout(resolve, 350));
       return loadScriptOnce(source, marker, timeoutMs).catch(() => { throw firstError; });
@@ -122,14 +105,10 @@
   }
 
   function activeWorkspaceId() {
-    return document.querySelector('.admin-workspace.active')?.dataset.workspace
-      || location.hash.replace('#admin-', '')
-      || 'dashboard';
+    return document.querySelector('.admin-workspace.active')?.dataset.workspace || location.hash.replace('#admin-', '') || 'dashboard';
   }
 
-  function removeBootPlaceholder(admin) {
-    admin?.querySelector('[data-admin-boot-placeholder]')?.remove();
-  }
+  function removeBootPlaceholder(admin) { admin?.querySelector('[data-admin-boot-placeholder]')?.remove(); }
 
   function reportWorkspaceFeatureFailures(workspaceId, admin, failures = []) {
     const workspace = admin?.querySelector(`[data-workspace="${CSS.escape(workspaceId)}"]`);
@@ -147,73 +126,60 @@
 
   function mountWorkspaceFeatures(workspaceId, admin) {
     if (!admin) return;
-    if (workspaceId === 'dashboard') {
-      window.mountAdminMarketDashboard?.(admin.querySelector('[data-workspace="dashboard"]'));
-      return;
-    }
-    if (workspaceId === 'operations') {
-      const operations = admin.querySelector('[data-workspace="operations"]');
-      window.mountAdminUnifiedFinancingWorkstation?.(operations);
-      window.mountAdminFinancingAwaitingActions?.(operations);
-      window.mountAdminFinancingAvailabilityLetter?.(operations);
-      return;
-    }
+    if (workspaceId === 'dashboard') return window.mountAdminMarketDashboard?.(admin.querySelector('[data-workspace="dashboard"]'));
+    if (workspaceId === 'operations') return window.mountAdminUnifiedFinancingWorkstation?.(admin.querySelector('[data-workspace="operations"]'));
     if (workspaceId === 'settlement') {
-      const settlement = admin.querySelector('[data-workspace="settlement"]');
-      window.mountAdminSettlementExecutionControls?.(settlement);
-      window.mountAdminTreasuryPrimeConnectionTest?.(settlement);
-      window.mountAdminMoneyGramSandboxTest?.(settlement);
-      return;
+      const root = admin.querySelector('[data-workspace="settlement"]');
+      window.mountAdminSettlementExecutionControls?.(root); window.mountAdminTreasuryPrimeConnectionTest?.(root); window.mountAdminMoneyGramSandboxTest?.(root); return;
     }
     if (workspaceId === 'treasury') {
-      const treasury = admin.querySelector('[data-workspace="treasury"]');
-      window.mountAdminTreasuryWorkstation?.(treasury);
-      window.mountAdminTreasuryPresentationOwner?.(treasury);
-      window.mountAdminTreasuryCashRecording?.(treasury);
-      return;
+      const root = admin.querySelector('[data-workspace="treasury"]');
+      window.mountAdminTreasuryWorkstation?.(root); window.mountAdminTreasuryPresentationOwner?.(root); window.mountAdminTreasuryCashRecording?.(root); return;
     }
-    if (workspaceId === 'native-asset') {
-      window.mountAdminNativePlatformAssetWorkstation?.(admin.querySelector('[data-workspace="native-asset"]'));
-      return;
-    }
-    if (workspaceId === 'records') {
-      window.mountAdminFinancialRecordsWorkstation?.(admin.querySelector('[data-workspace="records"]'));
-      return;
-    }
+    if (workspaceId === 'native-asset') return window.mountAdminNativePlatformAssetWorkstation?.(admin.querySelector('[data-workspace="native-asset"]'));
+    if (workspaceId === 'records') return window.mountAdminFinancialRecordsWorkstation?.(admin.querySelector('[data-workspace="records"]'));
     if (workspaceId === 'coin-positions') {
-      const coinWorkspace = admin.querySelector('[data-workspace="coin-positions"]');
-      window.mountAdminCoinRepresentationIntegrityControls?.(coinWorkspace);
-      window.mountAdminCoinLifecycleWorkstation?.(coinWorkspace);
-      window.mountAdminXrplExchangeWorkstation?.(coinWorkspace);
-      return;
+      const root = admin.querySelector('[data-workspace="coin-positions"]');
+      window.mountAdminCoinRepresentationIntegrityControls?.(root); window.mountAdminCoinLifecycleWorkstation?.(root); window.mountAdminXrplExchangeWorkstation?.(root); return;
     }
     if (workspaceId === 'marketplace') {
-      const marketplaceWorkspace = admin.querySelector('[data-workspace="marketplace"]');
-      window.mountAdminMarketplaceLifecycleWorkstation?.(marketplaceWorkspace);
-      window.mountAdminMarketplaceStageActions?.(marketplaceWorkspace);
-      return;
+      const root = admin.querySelector('[data-workspace="marketplace"]');
+      window.mountAdminMarketplaceLifecycleWorkstation?.(root); window.mountAdminMarketplaceStageActions?.(root); return;
     }
-    if (workspaceId === 'users') {
-      window.mountAdminUsersPermissionsWorkstation?.(admin.querySelector('[data-workspace="users"]'));
-      return;
-    }
-    if (workspaceId === 'agent') {
-      window.mountAdminAgentOperationsWorkstation?.(admin);
-      return;
-    }
-    if (workspaceId === 'connections') {
-      window.mountAdminStellarTransfer?.(admin);
-      return;
-    }
+    if (workspaceId === 'users') return window.mountAdminUsersPermissionsWorkstation?.(admin.querySelector('[data-workspace="users"]'));
+    if (workspaceId === 'agent') return window.mountAdminAgentOperationsWorkstation?.(admin);
+    if (workspaceId === 'connections') return window.mountAdminStellarTransfer?.(admin);
     if (workspaceId === 'instruments') {
-      const instruments = admin.querySelector('[data-workspace="instruments"]');
-      window.mountAdminInstrumentReviewWorkstation?.(instruments);
-      window.mountAdminOnChainIssuanceControls?.(instruments);
-      return;
+      const root = admin.querySelector('[data-workspace="instruments"]');
+      window.mountAdminInstrumentReviewWorkstation?.(root); window.mountAdminOnChainIssuanceControls?.(root); return;
     }
-    if (workspaceId === 'system') {
-      window.mountAdminSystemHealthWorkstation?.(admin.querySelector('[data-workspace="system"]'));
-    }
+    if (workspaceId === 'system') return window.mountAdminSystemHealthWorkstation?.(admin.querySelector('[data-workspace="system"]'));
+  }
+
+  async function loadFeatureSet(key, featureList, mount) {
+    if (handoffLoads.has(key)) return handoffLoads.get(key).then(mount);
+    const pending = Promise.allSettled(featureList.map(([source, marker]) => loadScript(source, marker))).then((results) => {
+      const failures = results.filter((result) => result.status === 'rejected');
+      if (failures.length) handoffLoads.delete(key);
+      mount();
+      return { loaded: featureList.length - failures.length, failures };
+    });
+    handoffLoads.set(key, pending);
+    return pending;
+  }
+
+  function loadOperationsHandoff(kind) {
+    const admin = document.querySelector('#admin-view:not(.hidden)');
+    const root = admin?.querySelector('[data-workspace="operations"]');
+    const featureList = OPERATION_HANDOFF_FEATURES[kind];
+    if (!root || !featureList) return Promise.resolve();
+    return loadFeatureSet(`operations:${kind}`, featureList, () => {
+      if (kind === 'financingDetail') window.mountAdminFinancingEvidence?.(root);
+      if (kind === 'awaitingActions') {
+        window.mountAdminFinancingAwaitingActions?.(root);
+        window.mountAdminFinancingAvailabilityLetter?.(root);
+      }
+    });
   }
 
   async function loadWorkspaceFeatures(workspaceId = activeWorkspaceId(), forceRetry = false) {
@@ -221,42 +187,23 @@
     if (!admin) return;
     const featureList = WORKSPACE_FEATURES[workspaceId] || [];
     if (!featureList.length) return;
-    if (workspaceLoads.has(workspaceId) && !forceRetry) {
-      const loaded = workspaceLoads.get(workspaceId);
-      return loaded.then(() => mountWorkspaceFeatures(workspaceId, admin));
-    }
-
+    if (workspaceLoads.has(workspaceId) && !forceRetry) return workspaceLoads.get(workspaceId).then(() => mountWorkspaceFeatures(workspaceId, admin));
     if (forceRetry) workspaceLoads.delete(workspaceId);
-
-    const pending = Promise.allSettled(featureList.map(([source, marker]) => loadScript(source, marker)))
-      .then((results) => {
-        const failures = results
-          .map((result, index) => result.status === 'rejected' ? { source: featureList[index][0], error: result.reason } : null)
-          .filter(Boolean);
-        mountWorkspaceFeatures(workspaceId, admin);
-        reportWorkspaceFeatureFailures(workspaceId, admin, failures);
-        if (failures.length) workspaceLoads.delete(workspaceId);
-        window.dispatchEvent(new CustomEvent('sra:admin-workspace-features-ready', {
-          detail: { workspaceId, featureCount: featureList.length - failures.length, failedFeatureCount: failures.length, loadedAt: new Date().toISOString() },
-        }));
-        return { loaded: featureList.length - failures.length, failures };
-      })
-      .catch((error) => {
-        workspaceLoads.delete(workspaceId);
-        console.error(`SAIN Administration workspace failed to load: ${workspaceId}`, error);
-        throw error;
-      });
-
+    const pending = Promise.allSettled(featureList.map(([source, marker]) => loadScript(source, marker))).then((results) => {
+      const failures = results.map((result, index) => result.status === 'rejected' ? { source: featureList[index][0], error: result.reason } : null).filter(Boolean);
+      mountWorkspaceFeatures(workspaceId, admin);
+      reportWorkspaceFeatureFailures(workspaceId, admin, failures);
+      if (failures.length) workspaceLoads.delete(workspaceId);
+      window.dispatchEvent(new CustomEvent('sra:admin-workspace-features-ready', { detail: { workspaceId, featureCount: featureList.length - failures.length, failedFeatureCount: failures.length, loadedAt: new Date().toISOString() } }));
+      return { loaded: featureList.length - failures.length, failures };
+    }).catch((error) => { workspaceLoads.delete(workspaceId); console.error(`SAIN Administration workspace failed to load: ${workspaceId}`, error); throw error; });
     workspaceLoads.set(workspaceId, pending);
     return pending;
   }
 
   async function ensurePerformanceRuntime() {
     if (performanceLoad) return performanceLoad;
-    performanceLoad = loadScript(...PERFORMANCE_RUNTIME, { retry: false, timeoutMs: 3000 }).catch((error) => {
-      performanceLoad = null;
-      throw error;
-    });
+    performanceLoad = loadScript(...PERFORMANCE_RUNTIME, { retry: false, timeoutMs: 3000 }).catch((error) => { performanceLoad = null; throw error; });
     return performanceLoad;
   }
 
@@ -268,16 +215,10 @@
       const admin = document.querySelector('#admin-view:not(.hidden)');
       if (!admin?.querySelector('.admin-suite')) throw new Error('Administration shell did not mount.');
       admin.querySelector('#admin-suite-account .top')?.style.removeProperty('display');
-      removeBootPlaceholder(admin);
-      admin.dataset.presentationOwner = 'admin-suite';
-      void ensurePerformanceRuntime().catch((error) => {
-        console.warn('SAIN Administration performance enhancement did not load; the shell remains available.', error);
-      });
+      removeBootPlaceholder(admin); admin.dataset.presentationOwner = 'admin-suite';
+      void ensurePerformanceRuntime().catch((error) => console.warn('SAIN Administration performance enhancement did not load; the shell remains available.', error));
       return admin;
-    })().catch((error) => {
-      shellLoad = null;
-      throw error;
-    });
+    })().catch((error) => { shellLoad = null; throw error; });
     return shellLoad;
   }
 
@@ -287,39 +228,26 @@
     if (!admin) return;
     booted = true;
     try {
-      await ensureShell();
-      await loadWorkspaceFeatures(activeWorkspaceId());
-      window.dispatchEvent(new CustomEvent('sra:admin-booted', {
-        detail: { mode: 'single-shell-lazy-workspaces', bootedAt: new Date().toISOString() },
-      }));
+      await ensureShell(); await loadWorkspaceFeatures(activeWorkspaceId());
+      window.dispatchEvent(new CustomEvent('sra:admin-booted', { detail: { mode: 'single-shell-handoff-workflows', bootedAt: new Date().toISOString() } }));
     } catch (error) {
-      booted = false;
-      console.error('SAIN Administration bootstrap failed.', error);
-      const placeholder = admin.querySelector('[data-admin-boot-placeholder]');
-      if (placeholder) placeholder.textContent = 'Administration failed to load. Refresh to retry.';
+      booted = false; console.error('SAIN Administration bootstrap failed.', error);
+      const placeholder = admin.querySelector('[data-admin-boot-placeholder]'); if (placeholder) placeholder.textContent = 'Administration failed to load. Refresh to retry.';
     }
   }
 
   function requestAdministrationRefresh(source = 'manual') {
-    if (refreshInFlight) {
-      refreshAgain = true;
-      return;
-    }
+    if (refreshInFlight) { refreshAgain = true; return; }
     clearTimeout(refreshTimer);
     refreshTimer = setTimeout(async () => {
       refreshInFlight = true;
       try {
         const id = activeWorkspaceId();
         document.querySelector(`[data-refresh-workspace="${CSS.escape(id)}"]`)?.click();
-        window.dispatchEvent(new CustomEvent('sra:admin-workspace-synchronized', {
-          detail: { workspaceId: id, source, synchronizedAt: new Date().toISOString() },
-        }));
+        window.dispatchEvent(new CustomEvent('sra:admin-workspace-synchronized', { detail: { workspaceId: id, source, synchronizedAt: new Date().toISOString() } }));
       } finally {
         refreshInFlight = false;
-        if (refreshAgain) {
-          refreshAgain = false;
-          requestAdministrationRefresh(source);
-        }
+        if (refreshAgain) { refreshAgain = false; requestAdministrationRefresh(source); }
       }
     }, 180);
   }
@@ -332,12 +260,18 @@
   document.addEventListener('click', (event) => {
     const workspaceId = requestedWorkspaceFromEvent(event);
     if (workspaceId) queueMicrotask(() => void loadWorkspaceFeatures(workspaceId));
+
+    // Explicit Operations handoffs. Nothing downstream loads before its click.
+    if (event.target?.closest?.('[data-admin-tab="Awaiting Actions"]')) queueMicrotask(() => void loadOperationsHandoff('awaitingActions'));
+    if (event.target?.closest?.('.funding-ops-row[data-opportunity-id]')) queueMicrotask(() => void loadOperationsHandoff('financingDetail'));
   }, true);
+
   window.addEventListener('hashchange', () => void loadWorkspaceFeatures(activeWorkspaceId()));
   window.addEventListener('sra:admin-visible', () => void boot());
   window.addEventListener('sra:admin-refresh', (event) => requestAdministrationRefresh(event.detail?.source || 'manual'));
   window.sraRefreshAdministration = requestAdministrationRefresh;
   window.sraLoadAdminWorkspaceFeatures = loadWorkspaceFeatures;
+  window.sraLoadOperationsHandoff = loadOperationsHandoff;
 
   if (document.readyState !== 'loading' && document.querySelector('#admin-view:not(.hidden)')) void boot();
 })();
