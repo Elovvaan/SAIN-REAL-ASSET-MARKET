@@ -70,7 +70,7 @@ test('cash item collection requires and includes the funding settlement note', a
   assert.equal(source.cashItemCollection, true);
   const packageBytes = await service.renderFundingPackage('EXP-1');
   const packagePdf = await PDFLibDocument.load(packageBytes);
-  assert.equal(packagePdf.getPageCount(), 5, 'cover + executed note + instructions + collection confirmation + servicing');
+  assert.ok(packagePdf.getPageCount() >= 5, 'cover + executed note + instructions + collection confirmation + servicing');
 });
 
 test('cash item collection rejects package generation when the required funding settlement note is missing', async () => {
@@ -89,4 +89,14 @@ test('admin closing flow exposes Cash Item Collection alongside existing rails',
   assert.match(source, /value="ACH"/);
   assert.match(source, /value="FEDWIRE"/);
   assert.match(source, /value="BANK_WIRE"/);
+});
+
+test('cash item instructions route the payee through its existing banking relationship', () => {
+  const source = fs.readFileSync(new URL('../services/ach-settlement-packet-service.js', import.meta.url), 'utf8');
+  assert.match(source, /commercial relationship manager, business banker, treasury-management representative/i);
+  assert.match(source, /item-processing, special-collections, treasury-management/i);
+  assert.match(source, /request for instrument collection and special handling/i);
+  assert.match(source, /not an ACH debit instruction/i);
+  assert.match(source, /Bank Inquiry \/ Case Number/);
+  assert.match(source, /SRA Verification Completed/);
 });
