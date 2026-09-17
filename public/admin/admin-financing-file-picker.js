@@ -36,6 +36,15 @@
     }
   }
 
+  // Legacy broad mutation broadcasts are not workflow handoffs. They used to
+  // wake unrelated mounted workstations (Native Asset, Financial Records,
+  // Treasury presentation, Operations Queue, and others) after an isolated
+  // action completed. Keep mutations local; explicit tab/click/handoff events
+  // remain available to the workflow that owns them.
+  window.addEventListener('sra:admin-mutated', (event) => {
+    event.stopImmediatePropagation();
+  }, true);
+
   function containEvidencePanel(panel) {
     if (!panel || panel.dataset.sraEvidenceBoundary === 'true') return;
     panel.dataset.sraEvidenceBoundary = 'true';
