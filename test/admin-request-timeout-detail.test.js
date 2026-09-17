@@ -8,6 +8,7 @@ test('admin requests use bounded operation-aware timeouts and bypass stale brows
   assert.match(runtime, /ADMIN_SESSION_TIMEOUT_MS = 15_000/);
   assert.match(runtime, /ADMIN_READ_TIMEOUT_MS = 60_000/);
   assert.match(runtime, /ADMIN_WRITE_TIMEOUT_MS = 180_000/);
+  assert.match(runtime, /ADMIN_DOCUMENT_UPLOAD_TIMEOUT_MS = 300_000/);
   assert.match(runtime, /cache: isAdminRequest \? 'no-store'/);
   assert.match(runtime, /Administration \$\{operation\} timed out after/);
 });

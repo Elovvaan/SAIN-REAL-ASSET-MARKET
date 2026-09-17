@@ -220,7 +220,10 @@ const server = bootstrap.listen(port, '0.0.0.0', () => {
   startupMilestones.serverListeningAt = new Date().toISOString();
   console.log(JSON.stringify({ level: 'info', event: 'SERVER_LISTENING', port, service: 'SAIN_REAL_ASSET_MARKET', deployment }));
 });
-server.requestTimeout = Number(process.env.SRA_REQUEST_TIMEOUT_MS) || 30000;
+// Multipart financing evidence can legitimately take longer to arrive than a
+// JSON action. Keep the transport open through the browser's bounded document
+// upload window; route-level work remains governed independently.
+server.requestTimeout = Number(process.env.SRA_REQUEST_TIMEOUT_MS) || 300000;
 server.headersTimeout = Number(process.env.SRA_HEADERS_TIMEOUT_MS) || 35000;
 server.keepAliveTimeout = Number(process.env.SRA_KEEP_ALIVE_TIMEOUT_MS) || 5000;
 function stopConnectors() { coinbasePublicMarket?.stop?.(); if (marketplaceListingTimer) clearInterval(marketplaceListingTimer); }

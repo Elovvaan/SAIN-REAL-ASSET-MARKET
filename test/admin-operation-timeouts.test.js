@@ -8,6 +8,8 @@ test('Administration requests use operation-aware timeout boundaries', () => {
   assert.match(source, /ADMIN_SESSION_TIMEOUT_MS = 15_000/);
   assert.match(source, /ADMIN_READ_TIMEOUT_MS = 60_000/);
   assert.match(source, /ADMIN_WRITE_TIMEOUT_MS = 180_000/);
+  assert.match(source, /ADMIN_DOCUMENT_UPLOAD_TIMEOUT_MS = 300_000/);
+  assert.match(source, /\/documents\$\/\.test\(pathname\).*ADMIN_DOCUMENT_UPLOAD_TIMEOUT_MS/);
   assert.match(source, /SAFE_METHODS = new Set\(\['GET', 'HEAD', 'OPTIONS'\]\)/);
   assert.match(source, /return SAFE_METHODS\.has\(method\) \? ADMIN_READ_TIMEOUT_MS : ADMIN_WRITE_TIMEOUT_MS/);
 });
