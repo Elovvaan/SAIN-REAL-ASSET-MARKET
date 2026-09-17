@@ -85,6 +85,7 @@
         <input name="documents" type="file" accept="application/pdf,image/jpeg,image/png,image/webp,.doc,.docx,.txt" multiple required>
         <button class="secondary-button" type="submit">Attach supporting documents</button>
         <div data-admin-financing-evidence-result style="font-size:12px"></div>
+        <div data-admin-financing-upload-queue style="display:grid;gap:6px" aria-live="polite"></div>
       </form>
       <button class="primary-button" type="button" data-admin-financing-continue style="margin-top:10px">Finish document intake and continue</button>`;
 
@@ -93,47 +94,118 @@
     if (evidence) evidence.insertAdjacentElement('beforebegin', panel);
     else detail.append(panel);
 
-    panel.querySelector('form')?.addEventListener('submit', async (event) => {
+    const form = panel.querySelector('form');
+    const result = panel.querySelector('[data-admin-financing-evidence-result]');
+    const queueRoot = panel.querySelector('[data-admin-financing-upload-queue]');
+    const continueButton = panel.querySelector('[data-admin-financing-continue]');
+    let uploadQueue = [];
+    let queueRunning = false;
+
+    const renderQueue = () => {
+      if (!queueRoot) return;
+      queueRoot.innerHTML = uploadQueue.map((entry, index) => {
+        const label = entry.state === 'ATTACHED' ? 'Attached'
+          : entry.state === 'UPLOADING' ? 'Uploading…'
+            : entry.state === 'FAILED' ? `Failed: ${entry.error || 'Upload did not complete.'}`
+              : 'Waiting';
+        const retry = entry.state === 'FAILED'
+          ? `<button type="button" class="secondary-button" data-admin-financing-retry="${index}" style="padding:5px 9px">Retry</button>`
+          : '';
+        return `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;border:1px solid rgba(255,255,255,.1);border-radius:8px">
+          <span style="min-width:0;overflow-wrap:anywhere"><strong>${esc(entry.file.name)}</strong><br><small>${esc(label)}</small></span>${retry}
+        </div>`;
+      }).join('');
+    };
+
+    const appendEvidence = (records, entry) => {
+      if (entry.rendered) return;
+      const evidenceList = detail.querySelector('.funding-evidence-list');
+      if (!evidenceList || !records.length) return;
+      if (evidenceList.querySelector('.funding-ops-empty')) evidenceList.innerHTML = '';
+      evidenceList.insertAdjacentHTML('beforeend', records.map((item) => `<div class="funding-evidence-item"><strong>${esc(item.evidence?.title || item.document?.originalName || 'Supporting document')}</strong><span>${esc(item.evidence?.sourceReference || item.document?.id || '')}</span></div>`).join(''));
+      entry.rendered = true;
+    };
+
+    const uploadEntry = async (entry, opportunityId, position, total) => {
+      entry.state = 'UPLOADING';
+      entry.error = null;
+      renderQueue();
+      if (result) result.textContent = `Uploading ${position} of ${total}: ${entry.file.name}`;
+
+      const body = new FormData();
+      body.append('documents', entry.file);
+      body.append('documentTypes', entry.documentType);
+      try {
+        const response = await fetch(`/api/funding/opportunities/${encodeURIComponent(opportunityId)}/documents`, {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'x-sra-idempotency-key': entry.idempotencyKey },
+          body,
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.error || `Request failed with ${response.status}.`);
+        entry.state = 'ATTACHED';
+        appendEvidence(Array.isArray(payload.records) ? payload.records : [], entry);
+      } catch (error) {
+        entry.state = 'FAILED';
+        entry.error = error.message;
+      }
+      renderQueue();
+    };
+
+    const runQueue = async (entries, opportunityId) => {
+      if (queueRunning || !entries.length) return;
+      queueRunning = true;
+      const submitButton = form?.querySelector('[type="submit"]');
+      if (submitButton) submitButton.disabled = true;
+      if (continueButton) continueButton.disabled = true;
+      try {
+        for (let index = 0; index < entries.length; index += 1) {
+          await uploadEntry(entries[index], opportunityId, index + 1, entries.length);
+        }
+        const attached = uploadQueue.filter((entry) => entry.state === 'ATTACHED').length;
+        const failed = uploadQueue.filter((entry) => entry.state === 'FAILED').length;
+        if (result) result.textContent = failed
+          ? `${attached} of ${uploadQueue.length} documents attached. ${failed} failed; retry only the failed document${failed === 1 ? '' : 's'}.`
+          : `${attached} document${attached === 1 ? '' : 's'} attached. You can add more documents or continue when the intake file is complete.`;
+      } finally {
+        queueRunning = false;
+        if (submitButton) submitButton.disabled = false;
+        if (continueButton) continueButton.disabled = false;
+      }
+    };
+
+    form?.addEventListener('submit', async (event) => {
       event.preventDefault();
-      const form = event.currentTarget;
-      const result = panel.querySelector('[data-admin-financing-evidence-result]');
       const files = [...(form.querySelector('[name="documents"]')?.files || [])];
       if (!files.length) return;
 
       const opportunityId = currentOpportunityId;
       if (!opportunityId) return;
 
-      const body = new FormData();
       const documentType = form.querySelector('[name="documentType"]')?.value || 'FINANCING_SUPPORT';
-      files.forEach((file) => {
-        body.append('documents', file);
-        body.append('documentTypes', documentType);
-      });
-
-      if (result) result.textContent = 'Attaching supporting documents…';
-      try {
-        const response = await fetch(`/api/funding/opportunities/${encodeURIComponent(opportunityId)}/documents`, {
-          method: 'POST',
-          credentials: 'same-origin',
-          headers: { 'x-sra-idempotency-key': `admin-financing-evidence-${opportunityId}-${crypto.randomUUID()}` },
-          body,
-        });
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(payload.error || `Request failed with ${response.status}.`);
-        form.reset();
-        const uploaded = Array.isArray(payload.records) ? payload.records : [];
-        const evidenceList = detail.querySelector('.funding-evidence-list');
-        if (evidenceList && uploaded.length) {
-          if (evidenceList.querySelector('.funding-ops-empty')) evidenceList.innerHTML = '';
-          evidenceList.insertAdjacentHTML('beforeend', uploaded.map((item) => `<div class="funding-evidence-item"><strong>${esc(item.evidence?.title || item.document?.originalName || 'Supporting document')}</strong><span>${esc(item.evidence?.sourceReference || item.document?.id || '')}</span></div>`).join(''));
-        }
-        if (result) result.textContent = `${uploaded.length || files.length} document${(uploaded.length || files.length) === 1 ? '' : 's'} attached. You can add another document or continue when the intake file is complete.`;
-      } catch (error) {
-        if (result) result.textContent = esc(error.message);
-      }
+      uploadQueue = files.map((file) => ({
+        file,
+        documentType,
+        idempotencyKey: `admin-financing-evidence-${opportunityId}-${crypto.randomUUID()}`,
+        state: 'PENDING',
+        error: null,
+        rendered: false,
+      }));
+      renderQueue();
+      form.querySelector('[name="documents"]').value = '';
+      await runQueue(uploadQueue, opportunityId);
     });
 
-    panel.querySelector('[data-admin-financing-continue]')?.addEventListener('click', async (event) => {
+    queueRoot?.addEventListener('click', async (event) => {
+      const button = event.target.closest('[data-admin-financing-retry]');
+      if (!button || queueRunning) return;
+      const entry = uploadQueue[Number(button.dataset.adminFinancingRetry)];
+      if (!entry || entry.state !== 'FAILED' || !currentOpportunityId) return;
+      await runQueue([entry], currentOpportunityId);
+    });
+
+    continueButton?.addEventListener('click', async (event) => {
       const button = event.currentTarget;
       const result = panel.querySelector('[data-admin-financing-evidence-result]');
       button.disabled = true;
