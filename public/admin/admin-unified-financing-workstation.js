@@ -1,9 +1,9 @@
 (() => {
   let mounted = false;
-  let workspaceCache = null;
-  let workspaceCacheAt = 0;
+  const workspaceCache = new Map();
   let operationsQueueCache = null;
   let operationsQueueCacheAt = 0;
+  let renderGeneration = 0;
 
   const esc = (value) => String(value ?? '')
     .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
@@ -59,11 +59,11 @@
   }
 
   async function loadWorkspaceRecords(tab, force = false) {
-    if (!force && workspaceCache?.tab === tab && Date.now() - workspaceCacheAt < 15000) return workspaceCache.payload;
+    const cached = workspaceCache.get(tab);
+    if (!force && cached && Date.now() - cached.at < 15000) return cached.payload;
     const suffix = force ? `&_=${Date.now()}` : '';
     const payload = await request(`/api/admin/workspaces?workspace=operations&tab=${encodeURIComponent(tab)}&limit=100${suffix}`);
-    workspaceCache = { tab, payload };
-    workspaceCacheAt = Date.now();
+    workspaceCache.set(tab, { payload, at: Date.now() });
     return payload;
   }
 
@@ -111,54 +111,63 @@
     window.dispatchEvent(new CustomEvent('sra:admin-financing-rendered', { detail: { workspaceId: 'operations', renderedAt: new Date().toISOString() } }));
   }
 
+  function recordsForTab(tab, records = {}) {
+    if (tab === 'Exceptions') return records.exceptions || records.operationExceptions || [];
+    if (tab === 'Settlement Queue') return [...(records.settlementInstructions || []), ...(records.marketplaceSettlementPreparations || []), ...(records.marketplaceSettlementReviews || []), ...(records.marketplaceSettlementAuthorizations || [])];
+    if (tab === 'Exports') return [...(records.exportPackages || []), ...(records.transactions || []).filter((item) => /EXPORT/i.test(JSON.stringify(item)))];
+    if (tab === 'Imports') return (records.transactions || []).filter((item) => /IMPORT/i.test(JSON.stringify(item)));
+    if (tab === 'Transaction Router') return [...(records.transactions || []), ...(records.fundingInstructions || []), ...(records.treasuryPaymentOrders || [])];
+    if (tab === 'Audit Trail' || tab === 'Operation History') return records.lifecycleEvents || [];
+    return [];
+  }
+
   async function renderTab(force = false) {
     const root = recordsRoot();
     const controls = controlsRoot();
     if (!root) return;
     ensureFinancingTab();
     const tab = activeTab();
+    const generation = ++renderGeneration;
+    const ownsRender = () => generation === renderGeneration && activeTab() === tab && root.isConnected;
     if (controls) controls.style.display = tab === 'Overview' ? '' : 'none';
 
-    // Awaiting Actions is a financing handoff owned by its dedicated staged
-    // loader. Do not replace its DOM and do not invoke the broad SANE operations
-    // queue here. The handoff loader reads only financing opportunities first;
-    // each opportunity's authorization/closing data loads on Open action.
     if (tab === 'Awaiting Actions') {
       await window.sraLoadOperationsHandoff?.('awaitingActions');
+      if (!ownsRender()) return;
       window.mountAdminFinancingAwaitingActions?.(workspace());
       return;
     }
 
-    root.innerHTML = '<div class="admin-placeholder">Loading current operations…</div>';
-    try {
-      if (tab === 'Financing') {
+    if (tab === 'Financing') {
+      try {
+        if (!ownsRender()) return;
         await renderFinancing(root);
-        return;
+      } catch (error) {
+        if (ownsRender()) root.innerHTML = `<div class="admin-placeholder"><strong>Unable to load Financing.</strong><br>${esc(error.message)}</div>`;
       }
-      if (['Overview', 'Exceptions'].includes(tab)) {
+      return;
+    }
+
+    root.innerHTML = `<div class="admin-placeholder">Loading ${esc(tab)}…</div>`;
+    try {
+      // The broad governed operations queue belongs to Overview only. Every
+      // other tab reads its own tab-scoped workspace projection and cannot wake
+      // Overview, Financing, Awaiting Actions, or a sibling operation.
+      if (tab === 'Overview') {
         const data = await loadOperationsQueue(force);
-        if (tab === 'Overview') {
-          root.innerHTML = overviewMarkup(data);
-          root.querySelector('[data-open-financing]')?.addEventListener('click', () => workspace()?.querySelector('[data-admin-tab="Financing"]')?.click());
-          root.querySelector('[data-refresh-unified-operations]')?.addEventListener('click', () => void renderTab(true));
-          return;
-        }
-        const records = data.exceptions || [];
-        root.innerHTML = recordCards(records, 'No operation exceptions are currently recorded.');
+        if (!ownsRender()) return;
+        root.innerHTML = overviewMarkup(data);
+        root.querySelector('[data-open-financing]')?.addEventListener('click', () => workspace()?.querySelector('[data-admin-tab="Financing"]')?.click());
+        root.querySelector('[data-refresh-unified-operations]')?.addEventListener('click', () => void renderTab(true));
         return;
       }
 
       const data = await loadWorkspaceRecords(tab, force);
-      const r = data.records || {};
-      let records = [];
-      if (tab === 'Settlement Queue') records = [...(r.settlementInstructions || []), ...(r.marketplaceSettlementPreparations || []), ...(r.marketplaceSettlementReviews || []), ...(r.marketplaceSettlementAuthorizations || [])];
-      else if (tab === 'Exports') records = [...(r.exportPackages || []), ...(r.transactions || []).filter((item) => /EXPORT/i.test(JSON.stringify(item)))];
-      else if (tab === 'Imports') records = (r.transactions || []).filter((item) => /IMPORT/i.test(JSON.stringify(item)));
-      else if (tab === 'Transaction Router') records = [...(r.transactions || []), ...(r.fundingInstructions || []), ...(r.treasuryPaymentOrders || [])];
-      else if (tab === 'Audit Trail' || tab === 'Operation History') records = r.lifecycleEvents || [];
+      if (!ownsRender()) return;
+      const records = recordsForTab(tab, data.records || {});
       root.innerHTML = recordCards(records, `No ${friendly(tab).toLowerCase()} records are currently stored.`);
     } catch (error) {
-      root.innerHTML = `<div class="admin-placeholder"><strong>Unable to load ${esc(tab)}.</strong><br>${esc(error.message)}</div>`;
+      if (ownsRender()) root.innerHTML = `<div class="admin-placeholder"><strong>Unable to load ${esc(tab)}.</strong><br>${esc(error.message)}</div>`;
     }
   }
 
