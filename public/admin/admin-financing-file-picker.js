@@ -36,32 +36,44 @@
     }
   }
 
-  // The programmatic click on the persistent picker must never reach the
-  // administration shell. Shell-level click handlers can otherwise rerender
-  // the active workspace while the operating-system file dialog is opening.
-  picker.addEventListener('click', (event) => {
-    event.stopImmediatePropagation();
-  });
-
+  // Financing evidence controls belong to the open opportunity. They must not
+  // bubble into administration-shell handlers, which can treat an ordinary
+  // form interaction as a workspace action and rerender/reposition the panel.
   document.addEventListener('click', (event) => {
-    const input = event.target?.closest?.('[data-admin-financing-evidence] input[name="documents"]');
-    if (!input) return;
+    const evidence = event.target?.closest?.('[data-admin-financing-evidence]');
+    if (!evidence) return;
 
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    sourceInput = input;
-    scrollX = window.scrollX;
-    scrollY = window.scrollY;
-    picker.accept = input.accept || '';
-    picker.multiple = Boolean(input.multiple);
-    picker.value = '';
-    picker.click();
+    const input = event.target?.closest?.('input[name="documents"]');
+    if (input) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      sourceInput = input;
+      scrollX = window.scrollX;
+      scrollY = window.scrollY;
+      picker.accept = input.accept || '';
+      picker.multiple = Boolean(input.multiple);
+      picker.value = '';
+      picker.click();
+      restoreScroll();
+      requestAnimationFrame(restoreScroll);
+      return;
+    }
 
-    // Opening the OS picker is not a navigation or workspace action. Keep the
-    // financing record at the exact scroll position from which it was opened.
-    restoreScroll();
-    requestAnimationFrame(restoreScroll);
+    // Buttons inside the evidence panel still receive their own target-level
+    // handlers after capture completes, but the click cannot reach ancestors.
+    event.stopPropagation();
   }, true);
+
+  // Changing the document classification is local state only. Do not let the
+  // admin shell interpret the select interaction as navigation/refresh work.
+  document.addEventListener('change', (event) => {
+    if (event.target?.matches?.('[data-admin-financing-evidence] select[name="documentType"]')) {
+      event.stopPropagation();
+    }
+  }, true);
+
+  // The programmatic click on the persistent picker must never reach the shell.
+  picker.addEventListener('click', (event) => event.stopImmediatePropagation());
 
   picker.addEventListener('change', () => {
     const files = picker.files;
