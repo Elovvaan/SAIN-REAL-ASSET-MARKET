@@ -76,6 +76,35 @@ test('funding package encloses operative closing documents without reproducing u
   assert.ok(assembled.getPageCount() >= 5, 'cover + operative agreement + recipient instructions + settlement + servicing');
 });
 
+test('cash-item funding package resolves an executed settlement note handed off from financing documents', async () => {
+  const domain = new Domain();
+  domain.put('PARTICIPANT', 'P-HANDOFF', { participantId: 'P-HANDOFF', displayName: 'Purchasing Party' });
+  domain.put('FUNDING_OPPORTUNITY', 'FOR-HANDOFF', {
+    opportunityId: 'FOR-HANDOFF', applicantParticipantId: 'P-HANDOFF', title: 'Business Acquisition', purpose: 'Purchase', supportingDocumentIds: ['DOC-PNL', 'DOC-NOTE'],
+  });
+  domain.put('FINANCING_CLOSING', 'FCL-HANDOFF', {
+    closingId: 'FCL-HANDOFF', opportunityId: 'FOR-HANDOFF', beneficiaryName: 'Selling Party', settlementMethod: 'CASH_ITEM_COLLECTION', settlementInstructions: {},
+  });
+  domain.put('EXPORT_PACKAGE', 'EXP-HANDOFF', {
+    exportPackageId: 'EXP-HANDOFF', exportKind: 'FINANCING_DISBURSEMENT', financingTransactionId: 'LFA-HANDOFF', closingId: 'FCL-HANDOFF', opportunityId: 'FOR-HANDOFF', borrowerParticipantId: 'P-HANDOFF', beneficiaryName: 'Selling Party', preferredRail: 'CASH_ITEM_COLLECTION', amount: 3900000, currency: 'USD', settlementInstructions: {},
+  });
+  const records = new Map([
+    ['DOC-PNL', { id: 'DOC-PNL', originalName: 'Historical P&L.pdf', mimeType: 'application/pdf', documentType: 'FINANCIAL_STATEMENTS', sha256: 'p'.repeat(64), uploadedAt: '2026-09-16T12:00:00.000Z' }],
+    ['DOC-NOTE', { id: 'DOC-NOTE', originalName: 'SRA Funding Settlement Note.pdf', mimeType: 'application/pdf', documentType: 'FUNDING_SETTLEMENT_NOTE', sha256: 'n'.repeat(64), uploadedAt: '2026-09-17T12:00:00.000Z' }],
+  ]);
+  const bytes = new Map([
+    ['DOC-PNL', await sourcePdf('Historical Profit and Loss Statements')],
+    ['DOC-NOTE', await sourcePdf('Executed SRA Funding Settlement Note')],
+  ]);
+  const service = new AchSettlementPacketService(domain, documentService(records, bytes));
+  const data = service.source('EXP-HANDOFF');
+  const linkedDocuments = await service.linkedDocuments(data);
+  assert.deepEqual(linkedDocuments.map((record) => record.id), ['DOC-NOTE', 'DOC-PNL']);
+  const pdf = await service.renderFundingPackage('EXP-HANDOFF');
+  const assembled = await PDFLibDocument.load(pdf);
+  assert.ok(assembled.getPageCount() >= 5);
+});
+
 test('cash-item funding package preserves the note boundary and includes processing, confirmation, and servicing pages', async () => {
   const domain = new Domain();
   domain.put('PARTICIPANT', 'P-2', { participantId: 'P-2', displayName: 'Purchasing Party' });
