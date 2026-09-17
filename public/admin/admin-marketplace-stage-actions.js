@@ -31,21 +31,51 @@
     return node;
   }
 
-  async function data() {
-    const [listingPage, readiness, publication, windows, commitments, allocationReviews, positions, preparations, settlementReviews, authorizations, confirmations] = await Promise.all([
-      request('/api/marketplace-listings?page=1&limit=100'),
-      request('/api/admin/listing-readiness-batch?unitPrice=1&minimumOrder=1&askingPriceMethod=VERIFIED_RECORDED_USD_VALUE_AT_SRA_PAR&eligibilityRule=SRA_REGISTERED_PARTICIPANTS&transactionRouteId=SRA_INTERNAL_MARKETPLACE&settlementRouteId=SRA_INTERNAL_SETTLEMENT'),
-      request('/api/admin/listing-publication-batch'),
-      request('/api/funding-marketplace-commitment/windows'),
-      request('/api/funding-marketplace-commitment/commitments'),
-      request('/api/funding-marketplace-allocation/reviews'),
-      request('/api/funding-marketplace-allocation/positions'),
-      request('/api/funding-marketplace-allocation/settlement-preparations'),
-      request('/api/funding-marketplace-settlement/reviews'),
-      request('/api/funding-marketplace-settlement/authorizations'),
-      request('/api/funding-marketplace-settlement/confirmations'),
-    ]);
-    return { listings:listingPage.listings||[], readiness, publication, windows:list(windows), commitments:list(commitments), allocationReviews:list(allocationReviews), positions:list(positions), preparations:list(preparations), settlementReviews:list(settlementReviews), authorizations:list(authorizations), confirmations:list(confirmations) };
+  async function listings() {
+    const page = await request('/api/marketplace-listings?page=1&limit=100');
+    return page.listings || [];
+  }
+
+  async function dataForTab(tab) {
+    const base = { listings:[], readiness:{}, publication:{}, windows:[], commitments:[], allocationReviews:[], positions:[], preparations:[], settlementReviews:[], authorizations:[], confirmations:[] };
+    if (tab === 'Investor Funding Flow') return base;
+    if (tab === 'Prepared') {
+      const [items, readiness] = await Promise.all([
+        listings(),
+        request('/api/admin/listing-readiness-batch?unitPrice=1&minimumOrder=1&askingPriceMethod=VERIFIED_RECORDED_USD_VALUE_AT_SRA_PAR&eligibilityRule=SRA_REGISTERED_PARTICIPANTS&transactionRouteId=SRA_INTERNAL_MARKETPLACE&settlementRouteId=SRA_INTERNAL_SETTLEMENT'),
+      ]);
+      return { ...base, listings:items, readiness };
+    }
+    if (tab === 'Ready') {
+      const [items, publication] = await Promise.all([listings(), request('/api/admin/listing-publication-batch')]);
+      return { ...base, listings:items, publication };
+    }
+    if (tab === 'Published') {
+      const [items, windows] = await Promise.all([listings(), request('/api/funding-marketplace-commitment/windows')]);
+      return { ...base, listings:items, windows:list(windows) };
+    }
+    if (tab === 'Orders') {
+      const [windows, commitments] = await Promise.all([request('/api/funding-marketplace-commitment/windows'), request('/api/funding-marketplace-commitment/commitments')]);
+      return { ...base, windows:list(windows), commitments:list(commitments) };
+    }
+    if (tab === 'Reservations') {
+      const commitments = await request('/api/funding-marketplace-commitment/commitments');
+      return { ...base, commitments:list(commitments) };
+    }
+    if (tab === 'Allocations') {
+      const [windows, commitments, reviews, positions] = await Promise.all([
+        request('/api/funding-marketplace-commitment/windows'), request('/api/funding-marketplace-commitment/commitments'), request('/api/funding-marketplace-allocation/reviews'), request('/api/funding-marketplace-allocation/positions'),
+      ]);
+      return { ...base, windows:list(windows), commitments:list(commitments), allocationReviews:list(reviews), positions:list(positions) };
+    }
+    if (tab === 'Settlement') {
+      const [positions, preparations, reviews, authorizations, confirmations] = await Promise.all([
+        request('/api/funding-marketplace-allocation/positions'), request('/api/funding-marketplace-allocation/settlement-preparations'), request('/api/funding-marketplace-settlement/reviews'), request('/api/funding-marketplace-settlement/authorizations'), request('/api/funding-marketplace-settlement/confirmations'),
+      ]);
+      return { ...base, positions:list(positions), preparations:list(preparations), settlementReviews:list(reviews), authorizations:list(authorizations), confirmations:list(confirmations) };
+    }
+    if (tab === 'Historical Listings') return { ...base, listings:await listings() };
+    return base;
   }
 
   function button(label, action, id, disabled = false) { return `<button type="button" data-stage-action="${esc(action)}" data-stage-id="${esc(id||'')}" ${disabled?'disabled':''}>${esc(label)}</button>`; }
@@ -91,22 +121,24 @@
 
   async function render(workspace) {
     const root=host(workspace); if(!root)return;
-    root.innerHTML='<header><strong>Marketplace Stage Actions</strong><em>READING</em></header><p>Reading the current lifecycle stage…</p>';
+    const tab=workspace.dataset.activeTab||'Investor Funding Flow';
+    if(tab==='Investor Funding Flow') {
+      root.innerHTML='<header><strong>Investor Funding Controls</strong><em>GOVERNED</em></header><p>The flow view reconciles existing records. State-changing controls remain in Prepared, Published, Orders, Reservations, Allocations, and Settlement.</p>';
+      return;
+    }
+    root.innerHTML=`<header><strong>${esc(tab)} Actions</strong><em>READING</em></header><p>Reading only the selected marketplace stage…</p>`;
     try {
-      const d=await data();
-      const tab=workspace.dataset.activeTab||'Prepared';
-      if(tab==='Investor Funding Flow') {
-        root.innerHTML='<header><strong>Investor Funding Controls</strong><em>GOVERNED</em></header><p>The flow view reconciles existing records. State-changing controls remain in Prepared, Published, Orders, Reservations, Allocations, and Settlement.</p>';
-      } else if(tab==='Prepared')renderPrepared(root,d);else if(tab==='Ready')renderReady(root,d);else if(tab==='Published')renderPublished(root,d);else if(tab==='Orders')renderOrders(root,d);else if(tab==='Reservations')renderReservations(root,d);else if(tab==='Allocations')renderAllocations(root,d);else if(tab==='Settlement')renderSettlement(root,d);else renderHistorical(root,d);
+      const d=await dataForTab(tab);
+      if(tab==='Prepared')renderPrepared(root,d);else if(tab==='Ready')renderReady(root,d);else if(tab==='Published')renderPublished(root,d);else if(tab==='Orders')renderOrders(root,d);else if(tab==='Reservations')renderReservations(root,d);else if(tab==='Allocations')renderAllocations(root,d);else if(tab==='Settlement')renderSettlement(root,d);else renderHistorical(root,d);
       bind(workspace,root,d);
-    } catch(error) { root.innerHTML=`<header><strong>Marketplace Stage Actions</strong><em>UNAVAILABLE</em></header><p>${esc(error.message)}</p>`; }
+    } catch(error) { root.innerHTML=`<header><strong>${esc(tab)} Actions</strong><em>UNAVAILABLE</em></header><p>${esc(error.message)}</p>`; }
   }
 
   async function mutate(workspace,root,fn) {
     const result=root.querySelector('[data-stage-result]')||document.createElement('span');
     if(!result.isConnected){result.dataset.stageResult='true';result.style.cssText='color:#d6a92f;font-size:12px;margin-left:8px';root.append(result);}
     result.textContent='Working…';
-    try { await fn(); result.textContent='Recorded.'; client()?.refresh?.('marketplace-stage-action'); window.dispatchEvent(new CustomEvent('sra:admin-workspace-synchronized',{detail:{workspaceId:'marketplace',source:'marketplace-stage-action'}})); await render(workspace); }
+    try { await fn(); result.textContent='Recorded.'; await render(workspace); }
     catch(error){result.textContent=error.message;}
   }
 
@@ -142,8 +174,6 @@
     if(!workspace||mounted.has(workspace))return;
     mounted.add(workspace);
     workspace.addEventListener('click',(event)=>{if(event.target.closest('[data-admin-tab]'))queueMicrotask(()=>void render(workspace));});
-    window.addEventListener('sra:admin-workspace-synchronized',(event)=>{if(event.detail?.workspaceId==='marketplace')void render(workspace);});
-    void render(workspace);
   }
 
   window.mountAdminMarketplaceStageActions=mount;
