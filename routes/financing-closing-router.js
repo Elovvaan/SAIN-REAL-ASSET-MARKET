@@ -60,7 +60,7 @@ export function createFinancingClosingRouter(service) {
       const opportunity = financing.opportunityId ? service.domain.get('FUNDING_OPPORTUNITY', financing.opportunityId) : null;
       const stage = opportunity ? normalizeFinancingStage(opportunity) : null;
       const participant = participantId ? service.domain.get('PARTICIPANT', participantId) : null;
-      const customerName = participant?.displayName || participant?.metadata?.legalName || opportunity?.applicantDisplayName || participantId || 'Financing applicant';
+      const customerName = participant?.displayName || participant?.metadata?.legalName || opportunity?.applicantDisplayName || financing.applicantDisplayName || participantId || 'Financing applicant';
       const closing = financing.opportunityId ? service.list({ opportunityId: financing.opportunityId }).find((record) => record.status !== 'CANCELLED') || null : null;
       const status = stage === 'FUNDED' || stage === 'SERVICING' ? 'FUNDED' : stage === 'READY_TO_FUND' ? 'READY_TO_FUND' : 'FINANCING_AVAILABLE';
       res.setHeader('Cache-Control', 'no-store');
