@@ -1,3 +1,5 @@
+import multer from 'multer';
+import { PrivateDocumentService } from '../services/private-document-service.js';
 import { InstrumentApprovalService } from '../services/instrument-approval-service.js';
 import { InstrumentRepresentationApprovalService, INSTRUMENT_REPRESENTATION_APPROVAL_TYPE } from '../services/instrument-representation-approval-service.js';
 import { InstrumentCoinPositionLinkageService } from '../services/instrument-coin-position-linkage-service.js';
@@ -5,6 +7,7 @@ import { CoinMarketPropagationService } from '../services/coin-market-propagatio
 
 const PENDING_STATES = new Set(['DRAFT', 'PENDING', 'PENDING_REVIEW', 'IN_REVIEW', 'REVIEW_REQUIRED', 'AWAITING_APPROVAL', 'RECORDED']);
 const REPRESENTATION_STATES = new Set(['APPROVED', 'ISSUED', 'ACTIVE']);
+const recoveryUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024, files: 10 } });
 
 function stateOf(record) { return String(record?.state || record?.status || '').toUpperCase(); }
 function idOf(record) { return record?.instrumentId || record?.id || null; }
@@ -33,6 +36,27 @@ export async function installInstrumentAdminRoutes({ router, domain, requireAdmi
   const representations = new InstrumentRepresentationApprovalService(domain);
   const linkages = new InstrumentCoinPositionLinkageService(domain);
   const marketPropagation = new CoinMarketPropagationService(domain);
+
+  router.post('/api/admin/records/recovery-documents', recoveryUpload.array('documents', 10), async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    try {
+      const files = Array.isArray(req.files) ? req.files : [];
+      if (!files.length) return res.status(400).json({ error:'Select at least one existing SRA package or transaction document.' });
+      const documents = new PrivateDocumentService({ database: database || domain?.database || null });
+      const invalid = files.map((file,index)=>({ index, error:documents.validateFile(file) })).filter((item)=>item.error);
+      if (invalid.length) return res.status(400).json({ error:'The recovery package contains an unsupported file.', invalidFiles:invalid.map(({index,error})=>({ name:files[index]?.originalname || null, error })) });
+      const extracted = [];
+      for (const file of files) {
+        const stored = await documents.store({ file, documentType:'HISTORICAL_RECORD_RECOVERY', uploaderId:session.id, retentionPolicy:'ADMIN_RECORD_RECOVERY', deferExtraction:false });
+        if (!stored.ok) throw new Error(stored.error);
+        extracted.push({ document:stored.document, facts:stored.document?.extraction?.facts || null, extractionStatus:stored.document?.extraction?.status || null });
+      }
+      if (database?.audit) await database.audit({ actorId:session.id, eventType:'ADMIN_RECOVERY_PACKAGE_INGESTED', objectType:'HISTORICAL_RECORD_RECOVERY', objectId:extracted[0]?.document?.id || 'RECOVERY_PACKAGE', payload:{ documentIds:extracted.map((item)=>item.document?.id).filter(Boolean), count:extracted.length } });
+      return res.status(201).json({ records:extracted, extractedFacts:extracted.map((item)=>item.facts).filter(Boolean) });
+    } catch (error) {
+      return res.status(422).json({ error:error.message, code:error.code || 'RECOVERY_PACKAGE_INGESTION_FAILED' });
+    }
+  });
 
   router.post('/api/admin/records/recover', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
