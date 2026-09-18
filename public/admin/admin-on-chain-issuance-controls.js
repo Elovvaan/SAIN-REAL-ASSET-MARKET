@@ -397,7 +397,7 @@
 
   async function renderApproval(workspace, card) {
     card.innerHTML = '<header><strong>Representation Approval</strong><em>CHECKING</em></header><p>Loading instruments…</p>';
-    const approvalStatus = await request('/api/admin/instruments/approval-status');
+    const approvalStatus = await request('/api/admin/instruments/approval-status?stage=representation-approval');
     if (!active(workspace) || activeTab(workspace) !== 'Approval') return;
     const eligible = approvalStatus.representationReady || [];
     card.innerHTML = `<header><strong>Representation Approval</strong><em>INSTRUMENT LIFECYCLE</em></header><p style="color:#9a9a9a;line-height:1.5">Instrument approval comes first. Representation approval is the explicit handoff that authorizes an approved instrument to enter on-chain preparation.</p><div style="display:grid;gap:10px">${eligible.length ? eligible.map(approvalCard).join('') : '<p>No approved instruments are currently available for representation review.</p>'}</div>`;
@@ -407,7 +407,7 @@
   async function renderOnChain(workspace, card) {
     card.innerHTML = '<header><strong>On-Chain</strong><em>CHECKING</em></header><p>Loading instrument lifecycle and network state…</p>';
     const [approvalStatus, status, assetsResult, sourcesResult, offersResult, swapsResult, marketsResult, nativeMarketsResult] = await Promise.all([
-      request('/api/admin/instruments/approval-status'),
+      request('/api/admin/instruments/approval-status?stage=on-chain'),
       request('/api/on-chain/status?networks=STELLAR,XRPL'),
       request('/api/on-chain/assets'),
       request('/api/on-chain/source-positions'),
@@ -505,14 +505,10 @@
     workspace.addEventListener('click', (event) => {
       if (event.target.closest('[data-admin-tab]')) setTimeout(schedule, 0);
     });
-    window.addEventListener('sra:admin-workspace-synchronized', (event) => {
-      if (event.detail?.workspaceId === 'instruments') schedule();
-    });
-    window.addEventListener('sra:admin-refresh', () => { if (SPECIAL_TABS.has(activeTab(workspace))) schedule(); });
-    window.addEventListener('sra:admin-mutated', () => { if (SPECIAL_TABS.has(activeTab(workspace))) schedule(); });
-    const observer = new MutationObserver(() => { if (active(workspace)) schedule(); });
-    observer.observe(workspace, { attributes:true, attributeFilter:['class'] });
-    if (active(workspace)) schedule();
+    // Stage reads are click-scoped. Global workspace/mutation events must not wake
+    // Approval or On-Chain after their durable result has handed off.
+    window.addEventListener('sra:admin-refresh', () => { if (active(workspace) && SPECIAL_TABS.has(activeTab(workspace))) schedule(); });
+    if (active(workspace) && SPECIAL_TABS.has(activeTab(workspace))) schedule();
   }
 
   window.mountAdminOnChainIssuanceControls = mount;
