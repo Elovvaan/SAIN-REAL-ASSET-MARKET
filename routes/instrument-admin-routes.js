@@ -34,6 +34,34 @@ export async function installInstrumentAdminRoutes({ router, domain, requireAdmi
   const linkages = new InstrumentCoinPositionLinkageService(domain);
   const marketPropagation = new CoinMarketPropagationService(domain);
 
+  router.post('/api/admin/records/recover', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    try {
+      const recoveryType = String(req.body?.recoveryType || '').trim().toUpperCase();
+      const mode = String(req.body?.mode || 'PREVIEW').trim().toUpperCase();
+      if (!['SRA_RECORD','ON_CHAIN_ASSET'].includes(recoveryType)) return res.status(400).json({ error:'Recovery type must be SRA_RECORD or ON_CHAIN_ASSET.' });
+      if (!['PREVIEW','RESTORE'].includes(mode)) return res.status(400).json({ error:'Recovery mode must be PREVIEW or RESTORE.' });
+      const source = req.body?.record && typeof req.body.record === 'object' ? req.body.record : {};
+      const network = String(req.body?.network || source.network || source.blockchain || '').trim().toUpperCase();
+      const originalId = String(req.body?.originalId || source.transactionId || source.instrumentId || source.coinPositionId || source.id || '').trim();
+      if (!originalId) return res.status(400).json({ error:'Original record identifier is required. Recovery never generates a replacement identifier.' });
+      const recordType = String(req.body?.recordType || '').trim().toUpperCase();
+      const allowedRecordTypes = new Set(['SRA_TRANSACTION','SRA_INSTRUMENT','COIN_POSITION','ASSET_RAIL_REPRESENTATION','CANONICAL_ASSET']);
+      if (!allowedRecordTypes.has(recordType)) return res.status(400).json({ error:'Select a supported durable record type for recovery.' });
+      if (recoveryType === 'ON_CHAIN_ASSET' && !network) return res.status(400).json({ error:'Network is required for on-chain asset recovery.' });
+      const existing = await domain.hydrateRecord(recordType, originalId);
+      const recovered = { ...source, ...(recordType === 'SRA_TRANSACTION' ? { transactionId: originalId } : {}), ...(recordType === 'SRA_INSTRUMENT' ? { instrumentId: originalId } : {}), ...(recordType === 'COIN_POSITION' ? { coinPositionId: originalId } : {}), id: source.id || originalId, recovery: { recoveryType, network: network || null, restoredFromExistingEvidence: true, recoveredAt: new Date().toISOString(), recoveredBy: session.id } };
+      const preview = { recoveryType, recordType, originalId, network: network || null, existingRecordFound: Boolean(existing), action: existing ? 'NO_CHANGE_EXISTING_RECORD' : 'RESTORE_ORIGINAL_RECORD', record: recovered };
+      if (mode === 'PREVIEW' || existing) return res.json({ preview, restored:false, existing: existing || null });
+      if (String(req.body?.approval || '').toUpperCase() !== 'RESTORE') return res.status(409).json({ error:'Explicit RESTORE approval is required after preview.', requiredApproval:'RESTORE', preview });
+      await domain.put(recordType, originalId, recovered, { actorId:session.id, eventType:'HISTORICAL_RECORD_RESTORED', auditPayload:{ recoveryType, network:network || null, originalId, restoredFromExistingEvidence:true } });
+      if (database?.audit) await database.audit({ actorId:session.id, eventType:'ADMIN_HISTORICAL_RECORD_RECOVERY', objectType:recordType, objectId:originalId, payload:{ recoveryType, network:network || null } });
+      return res.status(201).json({ restored:true, recordType, originalId, record:recovered });
+    } catch (error) {
+      return res.status(422).json({ error:error.message, code:error.code || 'HISTORICAL_RECORD_RECOVERY_FAILED' });
+    }
+  });
+
   router.get('/api/admin/instrument-coin-position-linkages', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
     return res.json(linkages.read());
