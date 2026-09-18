@@ -45,6 +45,7 @@
     instruments: [
       ['/admin/admin-instrument-review-workstation.js', 'data-sra-admin-instrument-review-workstation'],
       ['/admin/admin-on-chain-issuance-controls.js', 'data-sra-admin-on-chain-issuance-controls'],
+      ['/admin/admin-record-recovery-workstation.js', 'data-sra-admin-record-recovery-workstation'],
     ],
     system: [
       ['/admin/admin-button-diagnostics-core.js', 'data-sra-admin-diagnostics-core'],
