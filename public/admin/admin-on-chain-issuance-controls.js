@@ -405,48 +405,68 @@
   }
 
   async function renderOnChain(workspace, card) {
-    card.innerHTML = '<header><strong>On-Chain</strong><em>CHECKING</em></header><p>Loading instrument lifecycle and network state…</p>';
-    const [approvalStatus, status, assetsResult, sourcesResult, offersResult, swapsResult, marketsResult, nativeMarketsResult] = await Promise.all([
-      request('/api/admin/instruments/approval-status?stage=on-chain'),
-      request('/api/on-chain/status?networks=STELLAR,XRPL'),
-      request('/api/on-chain/assets'),
-      request('/api/on-chain/source-positions'),
-      request('/api/on-chain/market-offers'),
-      request('/api/on-chain/market-swaps'),
-      request('/api/on-chain/usdc-markets'),
-      request('/api/on-chain/native-markets'),
-    ]);
+    card.innerHTML = '<header><strong>On-Chain</strong><em>CHECKING</em></header><p>Loading the current instrument handoff…</p>';
+    // Read only the durable instrument handoff first. Downstream network/market
+    // stages are not allowed to boot until this stage proves they are needed.
+    const approvalStatus = await request('/api/admin/instruments/approval-status?stage=on-chain');
     if (!active(workspace) || activeTab(workspace) !== 'On-Chain') return;
     const eligible = approvalStatus.representationReady || [];
+    const handedOff = eligible.filter((item) => item.representationApproved);
+    if (!handedOff.length) {
+      card.innerHTML = '<header><strong>On-Chain</strong><em>WAITING FOR HANDOFF</em></header><p style="color:#9a9a9a;line-height:1.5">No instrument has completed Representation Approval. Complete that durable handoff before network preparation starts.</p>';
+      return;
+    }
+
+    // Network readiness is the first owned operation after representation approval.
+    const status = await request('/api/on-chain/status?networks=STELLAR,XRPL');
+    if (!active(workspace) || activeTab(workspace) !== 'On-Chain') return;
+    const assetsResult = await request('/api/on-chain/assets');
+    if (!active(workspace) || activeTab(workspace) !== 'On-Chain') return;
     const assets = assetsResult.records || [];
+
+    // Source positions are needed only once a durable asset identity exists.
+    const sourcesResult = assets.length ? await request('/api/on-chain/source-positions') : { records:[] };
+    if (!active(workspace) || activeTab(workspace) !== 'On-Chain') return;
     const sources = sourcesResult.records || [];
+
+    // Market, conversion, and offer history belong to the final market stage.
+    // Do not hydrate any of them while instruments are still waiting for asset
+    // identity or issuance.
+    const issuedAssets = assets.filter((asset) => Number(asset?.issuedSupply || 0) > 0);
+    let offersResult={records:[]}, swapsResult={records:[]}, marketsResult={records:[],readiness:[]}, nativeMarketsResult={records:[]};
+    if (issuedAssets.length) {
+      [offersResult, swapsResult, marketsResult, nativeMarketsResult] = await Promise.all([
+        request('/api/on-chain/market-offers'),
+        request('/api/on-chain/market-swaps'),
+        request('/api/on-chain/usdc-markets'),
+        request('/api/on-chain/native-markets'),
+      ]);
+    }
+    if (!active(workspace) || activeTab(workspace) !== 'On-Chain') return;
+
     const offersByAsset = new Map();
     for (const offer of offersResult.records || []) {
       const records = offersByAsset.get(offer.assetId) || [];
-      records.push(offer);
-      offersByAsset.set(offer.assetId, records);
+      records.push(offer); offersByAsset.set(offer.assetId, records);
     }
     const swapsByAsset = new Map();
     for (const swap of swapsResult.records || []) {
       const records = swapsByAsset.get(swap.assetId) || [];
-      records.push(swap);
-      swapsByAsset.set(swap.assetId, records);
+      records.push(swap); swapsByAsset.set(swap.assetId, records);
     }
     const marketsByAsset = new Map();
     for (const market of marketsResult.records || []) {
       const records = marketsByAsset.get(market.assetId) || [];
-      records.push(market);
-      marketsByAsset.set(market.assetId, records);
+      records.push(market); marketsByAsset.set(market.assetId, records);
     }
     const readinessByAsset = new Map((marketsResult.readiness || []).map((record)=>[record.assetId,record]));
     const nativeMarketsByAsset = new Map();
     for (const market of nativeMarketsResult.records || []) {
       const records = nativeMarketsByAsset.get(market.assetId) || [];
-      records.push(market);
-      nativeMarketsByAsset.set(market.assetId, records);
+      records.push(market); nativeMarketsByAsset.set(market.assetId, records);
     }
     const ready = (status.networks || []).some((item) => item.ready && (item.capabilities || []).includes('CREATE_ASSET'));
-    card.innerHTML = `<header><strong>On-Chain</strong><em>${ready ? 'NETWORK READY' : 'NETWORK NOT READY'}</em></header><p style="color:#9a9a9a;line-height:1.5">Instrument approval → representation approval → Coin Position linkage → network readiness → asset identity → issue supply → market activation → conversion or transfer. Each stage must complete before the next stage becomes actionable.</p><div style="display:grid;gap:10px">${eligible.length ? eligible.map((item) => onChainCard(item, assets, status, sources, offersByAsset, swapsByAsset, marketsByAsset, readinessByAsset, nativeMarketsByAsset)).join('') : '<p>No approved instruments are currently available.</p>'}</div>`;
+    card.innerHTML = `<header><strong>On-Chain</strong><em>${ready ? 'NETWORK READY' : 'NETWORK NOT READY'}</em></header><p style="color:#9a9a9a;line-height:1.5">Instrument approval → representation approval → Coin Position linkage → network readiness → asset identity → issue supply → market activation → conversion or transfer. Each completed stage hands off its durable result; downstream stages remain idle until needed.</p><div style="display:grid;gap:10px">${eligible.length ? eligible.map((item) => onChainCard(item, assets, status, sources, offersByAsset, swapsByAsset, marketsByAsset, readinessByAsset, nativeMarketsByAsset)).join('') : '<p>No approved instruments are currently available.</p>'}</div>`;
     bindOnChain(workspace, card);
   }
 
