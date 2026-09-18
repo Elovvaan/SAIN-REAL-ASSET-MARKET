@@ -42,7 +42,7 @@
           '<div><span>Opportunity</span><strong>'+esc(data.opportunityReference||'—')+'</strong></div>'+
           '<div><span>Closing</span><strong>'+esc(data.closingReference||'Not yet opened')+'</strong></div></div>'+
           '<div class="notice">'+esc(data.notice)+'</div>'+
-          '<div class="contact"><strong>'+esc(data.verificationContact?.organization||'SAIN Platform')+' · '+esc(data.verificationContact?.department||'Financing Operations')+'</strong><br>'+esc(data.verificationContact?.phone||'')+'<br>'+esc(data.verificationContact?.address||'')+'</div>';
+          '<div class="contact"><strong>'+esc(data.verificationContact?.organization||'SAIN Platform')+' · '+esc(data.verificationContact?.department||'Financing Operations')+'</strong><br>'+esc(data.verificationContact?.phone||'')+'<br>'+esc(data.verificationContact?.email||'')+'<br>'+esc(data.verificationContact?.address||'')+'</div>';
       }catch(error){showError('Verification service could not be reached. Please try again.');}
       finally{button.disabled=false;button.textContent='Verify';}
     }
