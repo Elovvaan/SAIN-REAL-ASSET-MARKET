@@ -149,16 +149,30 @@ async function initializeAccess(){
   if(accessInitialization)return accessInitialization;
   accessInitialization=(async()=>{
     ensureAccessModal();ensureAccessControls();
+    // First paint is public and must never wait on database/session hydration.
+    // Access/session and public market data are enhancements applied after the
+    // shell is already interactive.
+    accessState.session=null;
+    accessState.publicData={opportunities:[]};
+    applyAccessShell();
+    document.body.classList.remove('sra-access-resolving');
     try{
       const sessionResponse=await fetch('/api/access/session');
       const sessionPayload=await sessionResponse.json();
       accessState.session=sessionPayload.session;
-      if(accessState.session)accessState.publicData={opportunities:[]};
-      else{const publicResponse=await fetch('/api/access/public');accessState.publicData=await publicResponse.json()}
-    }catch{accessState.session=null;accessState.publicData={opportunities:[]}}
-    applyAccessShell();
+      if(accessState.session){
+        accessState.publicData={opportunities:[]};
+        applyAccessShell();
+      }else{
+        const publicResponse=await fetch('/api/access/public');
+        accessState.publicData=await publicResponse.json();
+        applyAccessShell();
+      }
+    }catch{
+      accessState.session=null;
+      accessState.publicData=accessState.publicData||{opportunities:[]};
+    }
     window.SRAPublicHome?.refreshNow?.();
-    document.body.classList.remove('sra-access-resolving');
     window.dispatchEvent(new CustomEvent('sra:public-access-ready',{detail:{signedIn:Boolean(accessState.session)}}));
     return accessState;
   })();
