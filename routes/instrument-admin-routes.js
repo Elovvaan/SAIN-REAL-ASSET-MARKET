@@ -159,8 +159,10 @@ export async function installInstrumentAdminRoutes({ router, domain, requireAdmi
     const instruments = domain.list('SRA_INSTRUMENT');
 
     if (stage === 'instrument-approval') {
-      const pending = instruments.filter((instrument) => PENDING_STATES.has(stateOf(instrument)));
-      return res.json({ stage, pending, pendingCount: pending.length });
+      const pendingAll = instruments.filter((instrument) => PENDING_STATES.has(stateOf(instrument)));
+      const limit = Math.max(1, Math.min(Number(req.query?.limit) || 50, 100));
+      const pending = pendingAll.slice(0, limit);
+      return res.json({ stage, pending, pendingCount: pendingAll.length, returnedCount: pending.length, hasMore: pendingAll.length > pending.length });
     }
 
     if (!['representation-approval','on-chain'].includes(stage)) {
