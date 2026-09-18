@@ -20,7 +20,7 @@
     treasury:['Overview','Commercial Instruments','Cash Position','Available Financing','Funding Capacity','Journal Entries','Treasury Wallets','Ledger','Treasury Reports'],
     'native-asset':['Current Asset','Approval Status','Listing','Marketplace Status','Export Status','Ownership','Recognitions','Asset History','Publishing','Governance'],
     marketplace:['Investor Funding Flow','Prepared','Ready','Published','Orders','Reservations','Allocations','Settlement','Historical Listings'],
-    instruments:['Overview','Pending Review','Approved','Published','History','Approval','On-Chain'],
+    instruments:['Overview','Pending Review','Approved','Published','History','Approval','On-Chain','Restore Record'],
     records:['Recognitions','Observations','Financial Records','Evidence','Origin Records','Trace','Audit'],
     'coin-positions':['Current Supply','Represented Value','Legacy Corrections','Coin Intelligence','Instrument Linkage','Mint History','XRPL Exchange','Retirements','Adjustments'],
     transactions:['All','Pending','Completed','Failed','Exported','Imported','Settlement','Search'],
@@ -30,7 +30,7 @@
     users:['Overview','Administrators','Roles','Permissions','Sessions','Access History'],
     system:['Overview','Core Services','Diagnostics','Protected Actions','Alerts','Audit State']
   };
-  const FEATURE_ONLY_TABS = new Set(['operations::Financing','treasury::Overview','instruments::Approval','instruments::On-Chain']);
+  const FEATURE_ONLY_TABS = new Set(['operations::Financing','treasury::Overview','instruments::Approval','instruments::On-Chain','instruments::Restore Record']);
   const state = { mounted:false, workspaceData:null, loading:null, loadingScope:null, loadedScopes:new Set(), loadedViews:new Set(), loadingViews:new Map(), viewErrors:new Map() };
   const esc = value => String(value ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;');
   const recordsBody = id => document.querySelector(`[data-workspace="${id}"] .admin-workspace-records`);
