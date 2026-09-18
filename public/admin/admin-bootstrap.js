@@ -152,7 +152,7 @@
     if (workspaceId === 'connections') return window.mountAdminStellarTransfer?.(admin);
     if (workspaceId === 'instruments') {
       const root = admin.querySelector('[data-workspace="instruments"]');
-      window.mountAdminInstrumentReviewWorkstation?.(root); window.mountAdminOnChainIssuanceControls?.(root); return;
+      window.mountAdminInstrumentReviewWorkstation?.(root); window.mountAdminOnChainIssuanceControls?.(root); window.mountAdminRecordRecoveryWorkstation?.(root); return;
     }
     if (workspaceId === 'system') return window.mountAdminSystemHealthWorkstation?.(admin.querySelector('[data-workspace="system"]'));
   }
