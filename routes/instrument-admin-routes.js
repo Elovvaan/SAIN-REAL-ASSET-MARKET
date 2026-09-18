@@ -77,21 +77,33 @@ export async function installInstrumentAdminRoutes({ router, domain, requireAdmi
       const extractedFacts = Array.isArray(source.extractedFacts) ? source.extractedFacts : [];
       const evidenceOther = extractedFacts.flatMap((facts) => Array.isArray(facts?.identifiers?.other) ? facts.identifiers.other : []);
       const evidenceValue = (label) => evidenceOther.find((item) => String(item?.label || '').trim().toUpperCase() === label)?.value || null;
-      const principalAmount = extractedFacts.map((facts) => facts?.economicTerms?.principalAmount ?? facts?.economicTerms?.financedAmount).find((value) => value !== null && value !== undefined) ?? null;
+      const evidenceEntries = extractedFacts.flatMap((facts) => Array.isArray(facts?.sourceEvidence) ? facts.sourceEvidence : []);
+      const parseMoney = (value) => {
+        if (typeof value === 'number' && Number.isFinite(value)) return value;
+        const normalized = String(value ?? '').replace(/[$,\s]/g, '');
+        const parsed = Number(normalized);
+        return Number.isFinite(parsed) ? parsed : null;
+      };
+      const directAmount = extractedFacts.map((facts) => facts?.economicTerms?.principalAmount ?? facts?.economicTerms?.financedAmount ?? facts?.settlement?.amount ?? facts?.economicTerms?.purchasePrice).map(parseMoney).find((value) => value !== null) ?? null;
+      const evidenceAmount = evidenceEntries.filter((item) => /authorized amount|financing availability|financing amount|principal amount|amount/i.test(String(item?.sourceLabel || item?.field || ''))).map((item) => parseMoney(item?.value)).find((value) => value !== null) ?? null;
+      const principalAmount = directAmount ?? evidenceAmount;
+      const applicantName = source.applicantDisplayName || extractedFacts.flatMap((facts) => Array.isArray(facts?.parties) ? facts.parties : []).find((party) => /applicant|borrower|buyer/i.test(String(party?.role || '')))?.legalName || evidenceEntries.find((item) => /applicant/i.test(String(item?.sourceLabel || item?.field || '')))?.value || null;
       const recoveredTransaction = recordType === 'SRA_TRANSACTION' ? {
         transactionId: originalId,
         transactionType: String(source.transactionType || '').trim() || (originalId.toUpperCase().startsWith('LFA-') ? 'LOAN_FINANCING_AUTHORIZATION' : 'RECOVERED_SRA_TRANSACTION'),
         state: String(source.state || '').trim() || (originalId.toUpperCase().startsWith('LFA-') ? 'POSTED' : 'RECOVERED'),
         amount: source.amount ?? principalAmount,
         currency: source.currency || extractedFacts.map((facts) => facts?.economicTerms?.currency).find(Boolean) || 'USD',
-        opportunityId: source.opportunityId || evidenceValue('FUNDING OPPORTUNITY REFERENCE') || evidenceValue('OPPORTUNITY REFERENCE') || null,
+        opportunityId: source.opportunityId || evidenceValue('FUNDING OPPORTUNITY REFERENCE') || evidenceValue('OPPORTUNITY REFERENCE') || evidenceEntries.find((item) => /opportunity reference/i.test(String(item?.sourceLabel || item?.field || '')))?.value || null,
+        applicantDisplayName: applicantName,
         closingId: source.closingId || evidenceValue('FINANCING CLOSING REFERENCE') || null,
         fundingPackageReference: source.fundingPackageReference || evidenceValue('SRA FUNDING PACKAGE REFERENCE') || null,
         settlementReference: source.settlementReference || extractedFacts.map((facts) => facts?.identifiers?.settlementReference).find(Boolean) || null,
       } : {};
       const recovered = { ...source, ...recoveredTransaction, ...(recordType === 'SRA_INSTRUMENT' ? { instrumentId: originalId } : {}), ...(recordType === 'COIN_POSITION' ? { coinPositionId: originalId } : {}), id: source.id || originalId, recovery: { recoveryType, network: network || null, restoredFromExistingEvidence: true, recoveredAt: new Date().toISOString(), recoveredBy: session.id } };
       const existingRecovery = existing?.recovery && existing.recovery.restoredFromExistingEvidence === true;
-      const repairableRecovery = Boolean(existing && existingRecovery && recordType === 'SRA_TRANSACTION' && originalId.toUpperCase().startsWith('LFA-') && (existing.transactionType !== 'LOAN_FINANCING_AUTHORIZATION' || existing.state !== 'POSTED'));
+      const incompleteLfa = recordType === 'SRA_TRANSACTION' && originalId.toUpperCase().startsWith('LFA-') && (existing?.transactionType !== 'LOAN_FINANCING_AUTHORIZATION' || existing?.state !== 'POSTED' || Number(existing?.amount || 0) <= 0 || !existing?.opportunityId || !existing?.applicantDisplayName);
+      const repairableRecovery = Boolean(existing && existingRecovery && incompleteLfa);
       const action = existing ? (repairableRecovery ? 'REPAIR_INCOMPLETE_RECOVERY' : 'NO_CHANGE_EXISTING_RECORD') : 'RESTORE_ORIGINAL_RECORD';
       const preview = { recoveryType, recordType, originalId, network: network || null, existingRecordFound: Boolean(existing), repairableRecovery, action, record: recovered };
       if (mode === 'PREVIEW') return res.json({ preview, restored:false, existing: existing || null });
