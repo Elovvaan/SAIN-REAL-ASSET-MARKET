@@ -1,4 +1,5 @@
 import express from 'express';
+import { fileURLToPath } from 'node:url';
 import { createApp } from './app.js';
 import { createUniversalAccountBlockchainRouter } from './routes/universal-account-blockchain-router.js';
 import { createCoinbasePublicMarketRouter } from './routes/coinbase-public-market-router.js';
@@ -50,7 +51,8 @@ const port = Number(process.env.PORT) || 3000;
 const bootstrap = express();
 bootstrap.set('trust proxy', 1);
 // Serve the canonical repository logo without duplicating the asset into /public.
-bootstrap.get('/brand-logo', (_req, res) => res.sendFile(new URL('./SRA LOGO.png', import.meta.url).pathname));
+// URL.pathname keeps percent-encoding for spaces; fileURLToPath resolves the real filesystem path.
+bootstrap.get('/brand-logo', (_req, res) => res.sendFile(fileURLToPath(new URL('./SRA LOGO.png', import.meta.url))));
 // Static delivery must not wait behind API authorization, idempotency, metrics,
 // or application initialization. API paths fall through to the runtime stack.
 bootstrap.use(express.static(new URL('./public', import.meta.url).pathname, {
