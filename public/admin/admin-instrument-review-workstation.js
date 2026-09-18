@@ -60,7 +60,7 @@
     const panel = host(workspace); if (!panel) return;
     panel.innerHTML = '<header><strong>Instrument Approval Queue</strong><em>LOADING</em></header><p style="color:#9a9a9a">Reading instruments that completed Coin Position propagation and require Platform Administration approval…</p>';
     try {
-      const status = await request('/api/admin/instruments/approval-status');
+      const status = await request('/api/admin/instruments/approval-status?stage=instrument-approval');
       if (!ownsRender(workspace, version) || !panel.isConnected) return;
       const pending = Array.isArray(status.pending) ? status.pending : [];
       panel.innerHTML = `<header><strong>Instrument Approval Queue</strong><em>${pending.length} PENDING</em></header><p style="color:#9a9a9a;line-height:1.5">Coin Position → SRA instrument → administrative review → approved instrument → representation / marketplace lifecycle.</p><div style="display:grid;gap:10px">${pending.length ? pending.map(card).join('') : '<p>No instruments currently require approval.</p>'}</div>`;
