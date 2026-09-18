@@ -74,7 +74,22 @@ export async function installInstrumentAdminRoutes({ router, domain, requireAdmi
       if (!allowedRecordTypes.has(recordType)) return res.status(400).json({ error:'Select a supported durable record type for recovery.' });
       if (recoveryType === 'ON_CHAIN_ASSET' && !network) return res.status(400).json({ error:'Network is required for on-chain asset recovery.' });
       const existing = await domain.hydrateRecord(recordType, originalId);
-      const recovered = { ...source, ...(recordType === 'SRA_TRANSACTION' ? { transactionId: originalId } : {}), ...(recordType === 'SRA_INSTRUMENT' ? { instrumentId: originalId } : {}), ...(recordType === 'COIN_POSITION' ? { coinPositionId: originalId } : {}), id: source.id || originalId, recovery: { recoveryType, network: network || null, restoredFromExistingEvidence: true, recoveredAt: new Date().toISOString(), recoveredBy: session.id } };
+      const extractedFacts = Array.isArray(source.extractedFacts) ? source.extractedFacts : [];
+      const evidenceOther = extractedFacts.flatMap((facts) => Array.isArray(facts?.identifiers?.other) ? facts.identifiers.other : []);
+      const evidenceValue = (label) => evidenceOther.find((item) => String(item?.label || '').trim().toUpperCase() === label)?.value || null;
+      const principalAmount = extractedFacts.map((facts) => facts?.economicTerms?.principalAmount ?? facts?.economicTerms?.financedAmount).find((value) => value !== null && value !== undefined) ?? null;
+      const recoveredTransaction = recordType === 'SRA_TRANSACTION' ? {
+        transactionId: originalId,
+        transactionType: String(source.transactionType || '').trim() || (originalId.toUpperCase().startsWith('LFA-') ? 'LOAN_FINANCING_AUTHORIZATION' : 'RECOVERED_SRA_TRANSACTION'),
+        state: String(source.state || '').trim() || (originalId.toUpperCase().startsWith('LFA-') ? 'POSTED' : 'RECOVERED'),
+        amount: source.amount ?? principalAmount,
+        currency: source.currency || extractedFacts.map((facts) => facts?.economicTerms?.currency).find(Boolean) || 'USD',
+        opportunityId: source.opportunityId || evidenceValue('FUNDING OPPORTUNITY REFERENCE') || evidenceValue('OPPORTUNITY REFERENCE') || null,
+        closingId: source.closingId || evidenceValue('FINANCING CLOSING REFERENCE') || null,
+        fundingPackageReference: source.fundingPackageReference || evidenceValue('SRA FUNDING PACKAGE REFERENCE') || null,
+        settlementReference: source.settlementReference || extractedFacts.map((facts) => facts?.identifiers?.settlementReference).find(Boolean) || null,
+      } : {};
+      const recovered = { ...source, ...recoveredTransaction, ...(recordType === 'SRA_INSTRUMENT' ? { instrumentId: originalId } : {}), ...(recordType === 'COIN_POSITION' ? { coinPositionId: originalId } : {}), id: source.id || originalId, recovery: { recoveryType, network: network || null, restoredFromExistingEvidence: true, recoveredAt: new Date().toISOString(), recoveredBy: session.id } };
       const preview = { recoveryType, recordType, originalId, network: network || null, existingRecordFound: Boolean(existing), action: existing ? 'NO_CHANGE_EXISTING_RECORD' : 'RESTORE_ORIGINAL_RECORD', record: recovered };
       if (mode === 'PREVIEW' || existing) return res.json({ preview, restored:false, existing: existing || null });
       if (String(req.body?.approval || '').toUpperCase() !== 'RESTORE') return res.status(409).json({ error:'Explicit RESTORE approval is required after preview.', requiredApproval:'RESTORE', preview });
