@@ -49,6 +49,8 @@ import { NativePlatformAssetService } from './services/native-platform-asset-ser
 const port = Number(process.env.PORT) || 3000;
 const bootstrap = express();
 bootstrap.set('trust proxy', 1);
+// Serve the canonical repository logo without duplicating the asset into /public.
+bootstrap.get('/brand-logo', (_req, res) => res.sendFile(new URL('./SRA LOGO.png', import.meta.url).pathname));
 // Static delivery must not wait behind API authorization, idempotency, metrics,
 // or application initialization. API paths fall through to the runtime stack.
 bootstrap.use(express.static(new URL('./public', import.meta.url).pathname, {
