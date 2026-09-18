@@ -5,6 +5,7 @@ import { AchSettlementPacketService } from '../services/ach-settlement-packet-se
 import { SettlementRouteSelectionService } from '../services/settlement-route-selection-service.js';
 import { normalizeFinancingStage } from '../services/financing-lifecycle-service.js';
 import { financingLetterClosingRequirements } from '../services/financing-letter-closing-requirements.js';
+import { RECORD_TYPES } from '../services/persistent-domain-service.js';
 
 function actorId(req) { return req.sraOperationsAuth?.actorId || req.sraIdentity?.actorId || null; }
 function fail(res, error) { const message = error?.message || 'Unexpected financing closing error.'; return res.status(/not found/i.test(message) ? 404 : 422).json({ error: message, code: error?.code || 'FINANCING_CLOSING_ERROR', assessment: error?.assessment || null }); }
@@ -47,6 +48,40 @@ export function createFinancingClosingRouter(service) {
     if (!opportunityId) return res.status(400).json({ error: 'opportunityId is required.' });
     return res.json({ record: service.financingAuthorizationForOpportunity(opportunityId) });
   });
+  router.get('/verification/:authorizationId', (req, res) => {
+    try {
+      const authorizationId = String(req.params.authorizationId || '').trim();
+      if (!authorizationId) return res.status(400).json({ error: 'Financing authorization reference is required.' });
+      const financing = service.domain.get(RECORD_TYPES.SRA_TRANSACTION, authorizationId);
+      if (!financing || financing.transactionType !== 'LOAN_FINANCING_AUTHORIZATION' || financing.state !== 'POSTED') return res.status(404).json({ verified: false, authorizationReference: authorizationId, status: 'NOT_FOUND' });
+      const opportunity = financing.opportunityId ? service.domain.get('FUNDING_OPPORTUNITY', financing.opportunityId) : null;
+      const stage = opportunity ? normalizeFinancingStage(opportunity) : null;
+      const participantId = opportunity?.applicantParticipantId || financing.borrowerParticipantId || null;
+      const participant = participantId ? service.domain.get('PARTICIPANT', participantId) : null;
+      const customerName = participant?.displayName || participant?.metadata?.legalName || opportunity?.applicantDisplayName || participantId || 'Financing applicant';
+      const closing = financing.opportunityId ? service.list({ opportunityId: financing.opportunityId }).find((record) => record.status !== 'CANCELLED') || null : null;
+      const status = stage === 'FUNDED' || stage === 'SERVICING' ? 'FUNDED' : stage === 'READY_TO_FUND' ? 'READY_TO_FUND' : 'FINANCING_AVAILABLE';
+      res.setHeader('Cache-Control', 'no-store');
+      return res.json({
+        verified: true,
+        verificationType: 'SAIN_FINANCING_AUTHORIZATION',
+        authorizationReference: financing.transactionId,
+        opportunityReference: financing.opportunityId || null,
+        applicant: customerName,
+        amount: Number(financing.amount || 0),
+        currency: financing.currency || 'USD',
+        authorizationState: financing.state,
+        financingStatus: status,
+        closingReference: closing?.closingId || null,
+        generatedAt: new Date().toISOString(),
+        verificationContact: { organization: 'SAIN Platform', department: 'Financing Operations', phone: '(801) 923-3680', address: '2522 Orchard Ave, Ogden, UT 84401' },
+        notice: status === 'FUNDED'
+          ? 'This response verifies the financing authorization and current funded status recorded by SAIN Platform.'
+          : 'This response verifies a posted financing authorization recorded by SAIN Platform. It is not a depository account balance verification and does not represent that external settlement has occurred.',
+      });
+    } catch (error) { return fail(res, error); }
+  });
+
   router.get('/letters/opportunities/:opportunityId', (req, res) => {
     try {
       if (!req.sraOperationsAuth?.actorId) return res.status(401).send('An authenticated financing-operations staff session is required.');
