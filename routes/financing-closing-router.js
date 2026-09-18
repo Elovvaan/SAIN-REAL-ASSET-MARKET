@@ -48,15 +48,17 @@ export function createFinancingClosingRouter(service) {
     if (!opportunityId) return res.status(400).json({ error: 'opportunityId is required.' });
     return res.json({ record: service.financingAuthorizationForOpportunity(opportunityId) });
   });
-  router.get('/verification/:authorizationId', (req, res) => {
+  router.get('/verification/:authorizationId', async (req, res) => {
     try {
-      const authorizationId = String(req.params.authorizationId || '').trim();
+      const authorizationId = String(req.params.authorizationId || '').trim().toUpperCase();
       if (!authorizationId) return res.status(400).json({ error: 'Financing authorization reference is required.' });
-      const financing = service.domain.get(RECORD_TYPES.SRA_TRANSACTION, authorizationId);
+      const financing = await service.domain.hydrateRecord(RECORD_TYPES.SRA_TRANSACTION, authorizationId);
       if (!financing || financing.transactionType !== 'LOAN_FINANCING_AUTHORIZATION' || financing.state !== 'POSTED') return res.status(404).json({ verified: false, authorizationReference: authorizationId, status: 'NOT_FOUND' });
+      if (financing.opportunityId) await service.domain.hydrateRecord('FUNDING_OPPORTUNITY', financing.opportunityId);
+      const participantId = financing.borrowerParticipantId || service.domain.get('FUNDING_OPPORTUNITY', financing.opportunityId)?.applicantParticipantId || null;
+      if (participantId) await service.domain.hydrateRecord('PARTICIPANT', participantId);
       const opportunity = financing.opportunityId ? service.domain.get('FUNDING_OPPORTUNITY', financing.opportunityId) : null;
       const stage = opportunity ? normalizeFinancingStage(opportunity) : null;
-      const participantId = opportunity?.applicantParticipantId || financing.borrowerParticipantId || null;
       const participant = participantId ? service.domain.get('PARTICIPANT', participantId) : null;
       const customerName = participant?.displayName || participant?.metadata?.legalName || opportunity?.applicantDisplayName || participantId || 'Financing applicant';
       const closing = financing.opportunityId ? service.list({ opportunityId: financing.opportunityId }).find((record) => record.status !== 'CANCELLED') || null : null;
