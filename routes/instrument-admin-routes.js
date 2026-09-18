@@ -31,7 +31,7 @@ function workflowFor(instrument, representationApproved, marketplaceState = 'NOT
 }
 
 export async function installInstrumentAdminRoutes({ router, domain, requireAdmin, database = null }) {
-  await domain.hydrate?.([INSTRUMENT_REPRESENTATION_APPROVAL_TYPE]);
+  // Instrument lifecycle data is hydrated only by the stage that owns it.
   const approvals = new InstrumentApprovalService(domain);
   const representations = new InstrumentRepresentationApprovalService(domain);
   const linkages = new InstrumentCoinPositionLinkageService(domain);
@@ -154,29 +154,34 @@ export async function installInstrumentAdminRoutes({ router, domain, requireAdmi
 
   router.get('/api/admin/instruments/approval-status', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
+    const stage = String(req.query?.stage || 'instrument-approval').trim().toLowerCase();
+    await domain.hydrate?.(['SRA_INSTRUMENT']);
     const instruments = domain.list('SRA_INSTRUMENT');
-    const pending = instruments.filter((instrument) => PENDING_STATES.has(stateOf(instrument)));
+
+    if (stage === 'instrument-approval') {
+      const pending = instruments.filter((instrument) => PENDING_STATES.has(stateOf(instrument)));
+      return res.json({ stage, pending, pendingCount: pending.length });
+    }
+
+    if (!['representation-approval','on-chain'].includes(stage)) {
+      return res.status(400).json({ error:'Unsupported instrument lifecycle stage.' });
+    }
+
+    await domain.hydrate?.([INSTRUMENT_REPRESENTATION_APPROVAL_TYPE]);
     const representationReady = instruments.filter((instrument) => REPRESENTATION_STATES.has(stateOf(instrument)));
     const representationApprovals = representations.list();
     const approvedIds = new Set(representationApprovals.filter((item) => item.state === 'APPROVED').map((item) => item.instrumentId));
     const assessments = new Map(representations.evaluateMany(representationReady).map((assessment) => [assessment.instrumentId, assessment]));
     return res.json({
-      pending,
-      pendingCount: pending.length,
+      stage,
       representationReady: representationReady.map((instrument) => {
         const instrumentId = idOf(instrument);
         const representationApproved = approvedIds.has(instrumentId);
-        const marketplace = marketPropagation.statusFor(instrumentId);
         return {
           instrument,
           assessment: assessments.get(instrumentId),
           representationApproved,
-          marketplace: {
-            listingId: marketplace.listingId || null,
-            state: marketplace.marketplaceState || 'NOT_PREPARED',
-            blockers: marketplace.blockers || [],
-          },
-          workflow: workflowFor(instrument, representationApproved, marketplace.marketplaceState || 'NOT_PREPARED'),
+          workflow: workflowFor(instrument, representationApproved),
         };
       }),
       representationApprovalCount: approvedIds.size,
