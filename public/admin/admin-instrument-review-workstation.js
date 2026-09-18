@@ -60,10 +60,10 @@
     const panel = host(workspace); if (!panel) return;
     panel.innerHTML = '<header><strong>Instrument Approval Queue</strong><em>LOADING</em></header><p style="color:#9a9a9a">Reading instruments that completed Coin Position propagation and require Platform Administration approval…</p>';
     try {
-      const status = await request('/api/admin/instruments/approval-status?stage=instrument-approval');
+      const status = await request('/api/admin/instruments/approval-status?stage=instrument-approval&limit=50');
       if (!ownsRender(workspace, version) || !panel.isConnected) return;
       const pending = Array.isArray(status.pending) ? status.pending : [];
-      panel.innerHTML = `<header><strong>Instrument Approval Queue</strong><em>${pending.length} PENDING</em></header><p style="color:#9a9a9a;line-height:1.5">Coin Position → SRA instrument → administrative review → approved instrument → representation / marketplace lifecycle.</p><div style="display:grid;gap:10px">${pending.length ? pending.map(card).join('') : '<p>No instruments currently require approval.</p>'}</div>`;
+      panel.innerHTML = `<header><strong>Instrument Approval Queue</strong><em>${Number(status.pendingCount ?? pending.length).toLocaleString()} PENDING</em></header><p style="color:#9a9a9a;line-height:1.5">Coin Position → SRA instrument → administrative review → approved instrument → representation / marketplace lifecycle.</p><div style="display:grid;gap:10px">${pending.length ? pending.map(card).join('') : '<p>No instruments currently require approval.</p>'}</div>`;
       bind(workspace, panel);
     } catch (error) {
       if (!ownsRender(workspace, version) || !panel.isConnected) return;
@@ -80,8 +80,12 @@
       button.disabled = true; if (result) result.textContent = 'Recording approval…';
       try {
         const response = await request(`/api/admin/instruments/${encodeURIComponent(instrumentId)}/approve`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ approval:'APPROVE' }) });
-        if (result) result.textContent = response.changed === false ? 'Already approved.' : 'APPROVED';
-        await render(workspace);
+        if (result) result.textContent = response.changed === false ? 'Already approved.' : 'APPROVED · HANDED OFF';
+        if (response.changed !== false) {
+          row?.remove();
+          const remaining = panel.querySelectorAll('[data-review-instrument]').length;
+          if (!remaining) panel.querySelector('div[style*="display:grid"]')?.insertAdjacentHTML('beforeend','<p>No more instruments are loaded in this review batch. Use Refresh to load the next batch.</p>');
+        }
       } catch (error) { if (result) result.textContent = error.message; button.disabled = false; }
     }));
   }
