@@ -1,0 +1,37 @@
+(() => {
+  if (window.__sraAdminRecordRecoveryWorkstationInstalled) return;
+  window.__sraAdminRecordRecoveryWorkstationInstalled = true;
+  const mounted = new WeakSet();
+  const esc = (v) => String(v ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;');
+  const active = (w) => w?.classList.contains('active') && String(w?.dataset?.activeTab || '') === 'Restore Record';
+  async function request(body) {
+    const options={method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)};
+    if(window.SRAAdminDataClient) return window.SRAAdminDataClient.json('/api/admin/records/recover',options);
+    const r=await fetch('/api/admin/records/recover',{credentials:'same-origin',cache:'no-store',...options}); const p=await r.json().catch(()=>({})); if(!r.ok){const e=new Error(p.error||'Recovery request failed.');e.payload=p;throw e;} return p;
+  }
+  function panel(workspace) {
+    const root=workspace?.querySelector('.admin-workspace-controls'); if(!root) return null;
+    let p=root.querySelector('[data-record-recovery]'); if(!p){p=document.createElement('section');p.className='admin-record-card';p.dataset.recordRecovery='true';root.append(p);} return p;
+  }
+  function render(workspace) {
+    if(!active(workspace)){workspace?.querySelector('[data-record-recovery]')?.remove();return;}
+    const p=panel(workspace); if(!p)return;
+    p.innerHTML=`<header><strong>Restore Historical Record</strong><em>CONTROLLED RECOVERY</em></header>
+      <p style="color:#9a9a9a;line-height:1.5">Restore an original SRA record or reconnect an asset that already exists on-chain. Recovery preserves the original identifier and does not mint, issue, transfer, underwrite, settle, or advance a workflow.</p>
+      <div class="admin-record-grid">
+        <label><span>Recovery Type</span><select data-recovery-type><option value="SRA_RECORD">Existing SRA Record</option><option value="ON_CHAIN_ASSET">Existing On-Chain Asset</option></select></label>
+        <label><span>Record Type</span><select data-record-type><option value="SRA_TRANSACTION">SRA Transaction / LFA</option><option value="SRA_INSTRUMENT">SRA Instrument</option><option value="COIN_POSITION">Coin Position</option><option value="ASSET_RAIL_REPRESENTATION">Asset Rail Representation</option><option value="CANONICAL_ASSET">Canonical Asset</option></select></label>
+        <label><span>Original Record ID</span><input data-original-id placeholder="LFA-... / SRI-... / existing ID"></label>
+        <label><span>Network (on-chain recovery)</span><select data-network><option value="">Not applicable</option><option>STELLAR</option><option>XRPL</option><option>SOLANA</option><option>ETHEREUM</option><option>BITCOIN</option></select></label>
+      </div>
+      <label style="display:block;margin-top:14px"><span style="display:block;color:#9a9a9a;font-size:11px;margin-bottom:6px">Existing record / package facts (JSON)</span><textarea data-record-json rows="10" style="width:100%;background:#090909;color:#eee;border:1px solid #333;border-radius:8px;padding:12px" placeholder='Paste the recovered record facts here. Original identifiers are preserved.'></textarea></label>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px"><button type="button" data-preview-recovery>Preview Recovery</button><button type="button" data-restore-recovery disabled>Restore Original Record</button><span data-recovery-status style="color:#d6a92f;font-size:12px;align-self:center"></span></div>
+      <pre data-recovery-preview style="white-space:pre-wrap;overflow:auto;color:#bbb;background:#090909;border:1px solid #222;border-radius:8px;padding:12px;margin-top:12px;display:none"></pre>`;
+    const status=p.querySelector('[data-recovery-status]'), preview=p.querySelector('[data-recovery-preview]'), restore=p.querySelector('[data-restore-recovery]');
+    const values=()=>{let record={};const raw=p.querySelector('[data-record-json]').value.trim();if(raw)record=JSON.parse(raw);return{recoveryType:p.querySelector('[data-recovery-type]').value,recordType:p.querySelector('[data-record-type]').value,originalId:p.querySelector('[data-original-id]').value.trim(),network:p.querySelector('[data-network]').value,record};};
+    p.querySelector('[data-preview-recovery]').addEventListener('click',async()=>{restore.disabled=true;status.textContent='Checking durable records…';try{const body=values();const r=await request({...body,mode:'PREVIEW'});preview.style.display='block';preview.textContent=JSON.stringify(r.preview,null,2);status.textContent=r.preview.existingRecordFound?'Original record already exists. No restore needed.':'Preview ready. Review before restoring.';restore.disabled=r.preview.existingRecordFound;}catch(e){status.textContent=e.message;}});
+    restore.addEventListener('click',async()=>{if(!confirm('Restore this original durable record exactly under the supplied identifier?'))return;restore.disabled=true;status.textContent='Restoring durable record…';try{const r=await request({...values(),mode:'RESTORE',approval:'RESTORE'});status.textContent=r.restored?'RESTORED — durable record written.':'No change.';preview.textContent=JSON.stringify(r.record||r,null,2);}catch(e){status.textContent=e.message;restore.disabled=false;}});
+  }
+  function mount(workspace){if(!workspace||mounted.has(workspace))return;mounted.add(workspace);workspace.addEventListener('click',(e)=>{if(!e.target.closest('[data-admin-tab]'))return;queueMicrotask(()=>render(workspace));});render(workspace);}
+  window.mountAdminRecordRecoveryWorkstation=mount;
+})();
