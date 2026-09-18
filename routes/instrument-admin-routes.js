@@ -87,14 +87,28 @@ export async function installInstrumentAdminRoutes({ router, domain, requireAdmi
       const directAmount = extractedFacts.map((facts) => facts?.economicTerms?.principalAmount ?? facts?.economicTerms?.financedAmount ?? facts?.settlement?.amount ?? facts?.economicTerms?.purchasePrice).map(parseMoney).find((value) => value !== null) ?? null;
       const evidenceAmount = evidenceEntries.filter((item) => /authorized amount|financing availability|financing amount|principal amount|amount/i.test(String(item?.sourceLabel || item?.field || ''))).map((item) => parseMoney(item?.value)).find((value) => value !== null) ?? null;
       const principalAmount = directAmount ?? evidenceAmount;
-      const applicantName = source.applicantDisplayName || extractedFacts.flatMap((facts) => Array.isArray(facts?.parties) ? facts.parties : []).find((party) => /applicant|borrower|buyer/i.test(String(party?.role || '')))?.legalName || evidenceEntries.find((item) => /applicant/i.test(String(item?.sourceLabel || item?.field || '')))?.value || null;
+      const allParties = extractedFacts.flatMap((facts) => Array.isArray(facts?.parties) ? facts.parties : []);
+      const applicantName = source.applicantDisplayName
+        || allParties.find((party) => /applicant|borrower|buyer|recipient/i.test(String(party?.role || '')))?.legalName
+        || evidenceEntries.find((item) => /applicant|borrower|buyer|recipient/i.test(String(item?.sourceLabel || item?.field || '')))?.value
+        || null;
+      const identifierCandidates = [
+        ...extractedFacts.flatMap((facts) => Array.isArray(facts?.identifiers?.other) ? facts.identifiers.other.map((item) => ({ label:item?.label || '', value:item?.value })) : []),
+        ...evidenceEntries.map((item) => ({ label:item?.sourceLabel || item?.field || '', value:item?.value })),
+      ];
+      const findIdentifier = (patterns) => identifierCandidates.find((item) => patterns.some((pattern) => pattern.test(String(item?.label || ''))))?.value || null;
+      const opportunityReference = source.opportunityId
+        || evidenceValue('FUNDING OPPORTUNITY REFERENCE')
+        || evidenceValue('OPPORTUNITY REFERENCE')
+        || findIdentifier([/funding opportunity/i, /opportunity reference/i, /opportunity id/i])
+        || null;
       const recoveredTransaction = recordType === 'SRA_TRANSACTION' ? {
         transactionId: originalId,
         transactionType: String(source.transactionType || '').trim() || (originalId.toUpperCase().startsWith('LFA-') ? 'LOAN_FINANCING_AUTHORIZATION' : 'RECOVERED_SRA_TRANSACTION'),
         state: String(source.state || '').trim() || (originalId.toUpperCase().startsWith('LFA-') ? 'POSTED' : 'RECOVERED'),
         amount: source.amount ?? principalAmount,
         currency: source.currency || extractedFacts.map((facts) => facts?.economicTerms?.currency).find(Boolean) || 'USD',
-        opportunityId: source.opportunityId || evidenceValue('FUNDING OPPORTUNITY REFERENCE') || evidenceValue('OPPORTUNITY REFERENCE') || evidenceEntries.find((item) => /opportunity reference/i.test(String(item?.sourceLabel || item?.field || '')))?.value || null,
+        opportunityId: opportunityReference,
         applicantDisplayName: applicantName,
         closingId: source.closingId || evidenceValue('FINANCING CLOSING REFERENCE') || null,
         fundingPackageReference: source.fundingPackageReference || evidenceValue('SRA FUNDING PACKAGE REFERENCE') || null,
