@@ -90,12 +90,17 @@ export async function installInstrumentAdminRoutes({ router, domain, requireAdmi
         settlementReference: source.settlementReference || extractedFacts.map((facts) => facts?.identifiers?.settlementReference).find(Boolean) || null,
       } : {};
       const recovered = { ...source, ...recoveredTransaction, ...(recordType === 'SRA_INSTRUMENT' ? { instrumentId: originalId } : {}), ...(recordType === 'COIN_POSITION' ? { coinPositionId: originalId } : {}), id: source.id || originalId, recovery: { recoveryType, network: network || null, restoredFromExistingEvidence: true, recoveredAt: new Date().toISOString(), recoveredBy: session.id } };
-      const preview = { recoveryType, recordType, originalId, network: network || null, existingRecordFound: Boolean(existing), action: existing ? 'NO_CHANGE_EXISTING_RECORD' : 'RESTORE_ORIGINAL_RECORD', record: recovered };
-      if (mode === 'PREVIEW' || existing) return res.json({ preview, restored:false, existing: existing || null });
+      const existingRecovery = existing?.recovery && existing.recovery.restoredFromExistingEvidence === true;
+      const repairableRecovery = Boolean(existing && existingRecovery && recordType === 'SRA_TRANSACTION' && originalId.toUpperCase().startsWith('LFA-') && (existing.transactionType !== 'LOAN_FINANCING_AUTHORIZATION' || existing.state !== 'POSTED'));
+      const action = existing ? (repairableRecovery ? 'REPAIR_INCOMPLETE_RECOVERY' : 'NO_CHANGE_EXISTING_RECORD') : 'RESTORE_ORIGINAL_RECORD';
+      const preview = { recoveryType, recordType, originalId, network: network || null, existingRecordFound: Boolean(existing), repairableRecovery, action, record: recovered };
+      if (mode === 'PREVIEW') return res.json({ preview, restored:false, existing: existing || null });
+      if (existing && !repairableRecovery) return res.json({ preview, restored:false, existing });
       if (String(req.body?.approval || '').toUpperCase() !== 'RESTORE') return res.status(409).json({ error:'Explicit RESTORE approval is required after preview.', requiredApproval:'RESTORE', preview });
-      await domain.put(recordType, originalId, recovered, { actorId:session.id, eventType:'HISTORICAL_RECORD_RESTORED', auditPayload:{ recoveryType, network:network || null, originalId, restoredFromExistingEvidence:true } });
+      const durableRecord = repairableRecovery ? { ...existing, ...recovered, recovery:{ ...existing.recovery, ...recovered.recovery, repairedAt:new Date().toISOString(), repairedBy:session.id } } : recovered;
+      await domain.put(recordType, originalId, durableRecord, { actorId:session.id, eventType:repairableRecovery ? 'HISTORICAL_RECORD_RECOVERY_REPAIRED' : 'HISTORICAL_RECORD_RESTORED', auditPayload:{ recoveryType, network:network || null, originalId, restoredFromExistingEvidence:true, repairableRecovery } });
       if (database?.audit) await database.audit({ actorId:session.id, eventType:'ADMIN_HISTORICAL_RECORD_RECOVERY', objectType:recordType, objectId:originalId, payload:{ recoveryType, network:network || null } });
-      return res.status(201).json({ restored:true, recordType, originalId, record:recovered });
+      return res.status(repairableRecovery ? 200 : 201).json({ restored:true, repaired:repairableRecovery, recordType, originalId, record:durableRecord });
     } catch (error) {
       return res.status(422).json({ error:error.message, code:error.code || 'HISTORICAL_RECORD_RECOVERY_FAILED' });
     }
