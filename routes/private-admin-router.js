@@ -425,7 +425,20 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
         records.users = (await persistedUsers()).map((user) => ({ id:user.id, displayName:user.displayName, email:user.email, capacities:user.capacities || [], state:user.state || 'ACTIVE', createdAt:user.createdAt || null }));
       } else if (key === 'networkAccounts') {
         records.networkAccounts = configuredNetworkAccounts();
-      } else if (ADMIN_RECORD_TYPES[key]) records[key] = list(domain, ADMIN_RECORD_TYPES[key], limit);
+      } else if (ADMIN_RECORD_TYPES[key]) {
+        let source = domain.list(ADMIN_RECORD_TYPES[key]);
+        // Instruments tabs own distinct lifecycle views. Filter before exposing
+        // the bounded page so one tab never scans/renders another stage's batch.
+        if (requestedWorkspace === 'instruments' && key === 'instruments') {
+          const states = {
+            'Pending Review': new Set(['DRAFT','PENDING','PENDING_REVIEW','IN_REVIEW','REVIEW_REQUIRED','AWAITING_APPROVAL']),
+            Approved: new Set(['APPROVED','AUTHORIZED','ISSUED','DEPOSITED_RECOGNIZED_USD']),
+            Published: new Set(['PUBLISHED','ACTIVE','LISTED']),
+          }[requestedTab];
+          if (states) source = source.filter((record) => states.has(stateOf(record)));
+        }
+        records[key] = expose(source, limit);
+      }
     }
     const counts = Object.fromEntries(Object.entries(records).map(([key, value]) => [key, value.length]));
     const states = Object.fromEntries(Object.entries(records).filter(([, value]) => Array.isArray(value)).map(([key, value]) => {
