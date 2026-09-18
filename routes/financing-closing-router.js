@@ -76,7 +76,7 @@ export function createFinancingClosingRouter(service) {
         financingStatus: status,
         closingReference: closing?.closingId || null,
         generatedAt: new Date().toISOString(),
-        verificationContact: { organization: 'SAIN Platform', department: 'Financing Operations', phone: '(801) 923-3680', email: 'lolajuwaan@gmail.com', address: '2522 Orchard Ave, Ogden, UT 84401' },
+        verificationContact: { organization: 'SAIN Platform', department: 'Financing Operations', phone: '(801) 923-3680', email: 'olajuwaan.lewis@sainrealasset.com', address: '2522 Orchard Ave, Ogden, UT 84401' },
         notice: status === 'FUNDED'
           ? 'This response verifies the financing authorization and current funded status recorded by SAIN Platform.'
           : 'This response verifies a posted financing authorization recorded by SAIN Platform. It is not a depository account balance verification and does not represent that external settlement has occurred.',
