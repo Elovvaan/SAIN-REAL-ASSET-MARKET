@@ -1,6 +1,6 @@
 const capacityCopy={
-  UNIVERSAL:{label:'Universal Account',description:'Browse the marketplace, fund eligible positions, track activity, and use Sane.',actions:[['Marketplace','Browse compact productive opportunities.','marketplace'],['My Positions','Track active and settled participation positions.','positions'],['Account Capacities','Add asset-provider or professional capabilities.','account-capacities']]},
-  ASSET_PROVIDER:{label:'Asset Provider',description:'Bring productive assets through V4V, manage Asset Accounts, and create projects.',actions:[['Start V4V','Present a productive asset and private evidence.','onboarding'],['My Asset Accounts','Open assets controlled by this identity.','assets'],['My Projects','Track projects, Verified Value, and completion.','projects']]},
+  UNIVERSAL:{label:'Universal Account',description:'Browse the marketplace, begin asset onboarding, fund eligible positions, track activity, and use Sane.',actions:[['Marketplace','Browse compact productive opportunities.','marketplace'],['Onboard an Asset','Start a separate asset verification application.','onboarding'],['My Positions','Track active and settled participation positions.','positions'],['Account Capacities','Add asset-provider or professional capabilities.','account-capacities']]},
+  ASSET_PROVIDER:{label:'Asset Provider',description:'Onboard productive assets, manage permanent Asset Accounts, and create projects.',actions:[['Onboard an Asset','Present an asset and private evidence.','onboarding'],['My Asset Accounts','Open assets controlled by this identity.','assets'],['My Projects','Track projects, Verified Value, and completion.','projects']]},
   MARKET_PROFESSIONAL:{label:'Market Professional',description:'Offer capital, services, materials, equipment, or contract capacity.',actions:[['Marketplace','Find opportunities requiring your capacity.','marketplace'],['My Positions','Track commitments, deployment, and settlement.','positions'],['Projects','Review active work and milestones.','projects']]},
   INSTITUTIONAL_OPERATOR:{label:'Institutional Operator',description:'Operate V4V review, custody, Verified Value, settlement, setoff, and discharge.',actions:[]},
   PLATFORM_ADMIN:{label:'Platform Administration',description:'Operate SRA through SAIN, inspect live platform records, prepare changes, and approve state-changing actions.',actions:[]}
@@ -52,7 +52,7 @@ function configureNavigation(){
   document.querySelectorAll('.nav-item').forEach(item=>{
     const view=item.dataset.view;
     let visible=true;
-    if(universal) visible=['marketplace','positions'].includes(view);
+    if(universal) visible=['marketplace','onboarding','positions'].includes(view);
     if(assetProvider) visible=['marketplace','onboarding','assets','verified','projects','instruments','completion','positions'].includes(view);
     if(professional) visible=['marketplace','projects','verified','positions'].includes(view);
     if(institutional) visible=true;

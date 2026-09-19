@@ -82,6 +82,7 @@
   function intakeForm() {
     return `<section class="funding-intake-modal" id="funding-intake-modal"><div class="funding-panel-head"><div><p class="eyebrow">FINANCING</p><h3>Start a funding opportunity</h3><p>Capture the financing request.</p></div><button class="secondary-button" type="button" id="funding-intake-close">Close</button></div><form id="funding-opportunity-form" class="funding-intake-grid">
       <div class="applicant-mode"><select name="applicantSource" id="funding-applicant-source"><option value="EXISTING">Existing participant / account</option><option value="MANUAL">Manual applicant entry</option></select><input name="applicantParticipantId" id="funding-applicant-reference" placeholder="Participant ID, account ID, email, or exact participant name"></div>
+      <div class="applicant-mode"><select name="relatedAssetId" id="funding-existing-asset"><option value="">No registered asset selected</option></select><span class="projection-note">Permanent SRA Asset IDs from completed onboarding appear here.</span></div>
       <div class="applicant-manual" id="funding-manual-applicant"><input name="applicantDisplayName" placeholder="Applicant / entity name"><select name="applicantType"><option value="ORGANIZATION">Organization</option><option value="PERSON">Person</option><option value="TRUST">Trust</option><option value="SPV">SPV / acquisition entity</option></select><input name="applicantEmail" type="email" placeholder="Applicant email (optional)"><input name="applicantPhone" placeholder="Applicant phone (optional)"></div>
       <input name="title" placeholder="Opportunity title" required><select name="opportunityType" id="funding-opportunity-type" required><option value="">Opportunity type</option><option value="STARTUP_BUSINESS">Startup business</option><option value="BUSINESS_ACQUISITION">Business acquisition</option><option value="HOME_EQUITY">Home equity funding</option><option value="LINE_OF_CREDIT">Line of credit</option><option value="PLATFORM">Platform</option><option value="PROJECT">Project</option><option value="CONSTRUCTION">Construction</option><option value="EQUIPMENT">Equipment</option><option value="WORKING_CAPITAL">Working capital</option><option value="INVOICE">Invoice</option><option value="DIGITAL_ASSET">Token, coin, or on-chain asset</option></select><select name="purpose" required><option value="">Purpose</option><option value="HOME_EQUITY_ACCESS">Home equity access</option><option value="STARTUP_LAUNCH">Startup / launch</option><option value="BUILD">Build</option><option value="DEVELOP">Develop</option><option value="EXPAND">Expand</option><option value="PURCHASE">Purchase</option><option value="WORKING_CAPITAL">Working capital</option><option value="REFINANCE">Refinance</option></select><select name="proposedTransactionStructure" id="funding-transaction-structure" required disabled><option value="">Select opportunity type first</option></select><input name="requestedAmount" type="number" min="0.01" step="0.01" placeholder="Principal advance requested" required><select name="currency"><option value="USD">USD reference value</option></select><textarea class="wide" name="description" placeholder="Describe what is being funded and the expected result."></textarea>${startupFields()}${homeEquityFields()}<button class="primary-button" type="submit">Create opportunity record</button><div class="funding-intake-result" id="funding-intake-result"></div></form></section>`;
   }
@@ -288,7 +289,18 @@
         : '<option value="">Select opportunity type first</option>';
       structureSelect.disabled = structures.length === 0;
     };
-    root.querySelector('#funding-ops-new')?.addEventListener('click', () => modal?.classList.add('open'));
+    async function loadRegisteredAssets(){
+      const select=root.querySelector('#funding-existing-asset');
+      if(!select || select.dataset.loaded==='true') return;
+      try{
+        const response=await fetch('/api/onboarding/registered-assets');
+        const payload=await response.json();
+        const assets=Array.isArray(payload.assets)?payload.assets:[];
+        select.innerHTML='<option value="">No registered asset selected</option>'+assets.map(asset=>`<option value="${esc(asset.assetId)}">${esc(asset.assetId)} · ${esc(asset.name)}</option>`).join('');
+        select.dataset.loaded='true';
+      }catch{}
+    }
+    root.querySelector('#funding-ops-new')?.addEventListener('click', () => { modal?.classList.add('open'); void loadRegisteredAssets(); });
     root.querySelector('#funding-intake-close')?.addEventListener('click', () => modal?.classList.remove('open'));
     root.querySelector('#funding-ops-records')?.addEventListener('click', () => void loadFinancingRecords(root));
     applicantSource?.addEventListener('change', syncApplicantMode);
@@ -315,6 +327,8 @@
       const formData = new FormData(form);
       const values = Object.fromEntries(formData.entries());
       const payload = { ...values, requestedAmount: Number(values.requestedAmount) };
+      payload.relatedAssetIds = values.relatedAssetId ? [values.relatedAssetId] : [];
+      delete payload.relatedAssetId;
       if (values.applicantSource === 'MANUAL') {
         delete payload.applicantParticipantId;
         payload.manualApplicant = {

@@ -208,7 +208,7 @@ export async function createApp(options = {}) {
     homeFinancingService,
     settlementService: sraSettlementService
   });
-  const onboardingRouter = await createOnboardingRouter(domainStore, database, persistentDomain);
+  const onboardingRouter = await createOnboardingRouter(domainStore, database, persistentDomain, accessService);
   const authoritativeAssetRegistryService = installAuthoritativeAssetRegistry(app, { persistentDomain, accessService });
 
   app.get('/.well-known/stellar.toml', (_req, res) => {

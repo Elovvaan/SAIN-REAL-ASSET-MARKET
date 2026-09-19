@@ -2,6 +2,7 @@
   const LABELS = new Map([
     ['home-projects', ['⌂', 'Home']],
     ['marketplace', ['◫', 'Marketplace']],
+    ['onboarding', ['＋', 'Asset Onboarding']],
     ['instruments', ['▱', 'Create Instrument']],
     ['funding-operations', ['↳', 'Financing']],
     ['positions', ['▤', 'My Positions']],
@@ -28,6 +29,7 @@
   const VIEW_COPY = {
     'home-projects': ['Home', 'ACTIVE'],
     marketplace: ['Marketplace', 'LIVE'],
+    onboarding: ['Asset Onboarding', 'APPLICATION'],
     instruments: ['Create Instrument', 'AVAILABLE'],
     'funding-operations': ['Financing', 'AVAILABLE'],
     positions: ['My Positions', 'ACTIVE'],
@@ -382,6 +384,7 @@
 
   function actionMarkup(view) {
     if (view === 'marketplace') return ['Marketplace', `<div class="participant-action-ticket participant-market-board" data-participant-market-board><div class="participant-market-loading"><span></span><strong>Loading published market opportunities…</strong></div></div>`];
+    if (view === 'onboarding') return ['Onboard an Asset', `<div class="participant-action-ticket"><div class="ticket-stat"><span>Workflow</span><strong>Application → Verification → Permanent SRA Asset ID</strong></div><div class="ticket-stat"><span>Financing</span><strong>SEPARATE WORKFLOW</strong></div></div>`];
     if (view === 'instruments') return ['Create Instrument', `<div class="participant-action-ticket"><div class="ticket-stat"><span>Current operating tier</span><strong>${esc(String(window.accessState?.session?.activeCapacity || 'UNIVERSAL').replaceAll('_',' '))}</strong></div><div class="ticket-stat"><span>Representation rule</span><strong>1 SRA = 1 USD recognized value</strong></div><button type="button" data-participant-prompt="Review what instrument formation paths are currently available to my account.">Review formation paths</button><button type="button" data-participant-prompt="What recognized value and authority records do I need before creating an instrument?">Explain prerequisites</button></div>`];
     if (view === 'funding-operations') return ['Request Financing', `<div class="participant-action-ticket"><div class="ticket-stat"><span>Workflow</span><strong>Verified Value → Model → Instrument → Market → Settlement</strong></div><button type="button" data-participant-prompt="Explain my current financing state and the next available action.">Explain financing state</button></div>`];
     if (view === 'pools') return ['Market Pools', `<div class="participant-action-ticket"><div class="ticket-stat"><span>Market</span><strong>PRODUCTIVE BASKETS</strong></div><button type="button" data-participant-prompt="Explain how productive asset baskets form, close, perform, and distribute value.">Explain market pools</button></div>`];
@@ -446,6 +449,10 @@
     else if (view === 'activity') void renderTransactions(root);
     else if (view === 'assets') void renderSraCoin(root);
     else if (view === 'instruments') root.innerHTML = instrumentMarkup();
+    else if (view === 'onboarding') {
+      if (typeof window.renderOnboarding === 'function') window.renderOnboarding();
+      else root.innerHTML = staticMarkup(view);
+    }
     else if (view === 'funding-operations') {
       if (typeof window.renderParticipantFundingOperations === 'function') void window.renderParticipantFundingOperations(root);
       else root.innerHTML = financingMarkup();

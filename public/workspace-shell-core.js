@@ -16,7 +16,7 @@
       label: 'Asset Provider Workspace',
       intro: 'Your workspace for bringing productive assets into SRA and moving them through evidence, verification, recognition, and marketplace preparation.',
       features: [
-        ['Start V4V', 'Begin the evidence and verification workflow for a productive asset.', 'onboarding'],
+        ['Onboard an Asset', 'Begin the separate evidence and verification workflow for an asset.', 'onboarding'],
         ['Asset Accounts', 'Open permanent asset records and review their lifecycle history.', 'assets'],
         ['Verified Value', 'Review supported value, evidence dimensions, and recognition state.', 'verified'],
         ['Projects', 'Create and monitor projects connected to your assets.', 'projects'],

@@ -5,11 +5,18 @@ const classifications = [
   'OPERATING_BUSINESS',
   'REAL_ESTATE',
   'MIXED_USE_REAL_ESTATE',
+  'AI_COMPUTE_INFRASTRUCTURE',
+  'POWER_ENERGY_INFRASTRUCTURE',
+  'FIBER_COMMUNICATIONS_INFRASTRUCTURE',
   'EQUIPMENT',
+  'VEHICLE',
   'AGRICULTURE',
   'RENEWABLE_ENERGY',
   'INFRASTRUCTURE',
+  'CONTRACT_RECEIVABLE',
+  'DIGITAL_ASSET',
   'INTELLECTUAL_PROPERTY',
+  'MINERALS_NATURAL_RESOURCES',
   'OTHER'
 ];
 
@@ -47,7 +54,7 @@ export class AssetOnboardingService {
       documentTypes: ['TITLE_OR_DEED', 'OWNERSHIP_AGREEMENT', 'REGISTRATION', 'OPERATING_RECORD', 'INSPECTION', 'VALUATION', 'TAX_RECORD', 'CONTRACT', 'OTHER'],
       acceptedMimeTypes: ['application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/msword', 'text/plain'],
       maximumFileSizeMb: 15,
-      steps: ['REGISTER', 'IDENTITY', 'DOCUMENTS', 'OWNERSHIP', 'CLASSIFICATION', 'SUBMITTER_ATTESTATION', 'CREATED'],
+      steps: ['ONBOARDING', 'IDENTITY', 'DOCUMENTS', 'OWNERSHIP', 'CLASSIFICATION', 'SUBMITTER_ATTESTATION', 'SUBMITTED'],
       verificationFlow: ['SUBMITTER_ATTESTED', 'INSTITUTIONAL_REVIEW_PENDING', 'INSTITUTIONALLY_VERIFIED', 'VERIFIED_VALUE_BASELINE'],
       privacy: {
         sourceDocuments: 'PRIVATE',
@@ -99,7 +106,9 @@ export class AssetOnboardingService {
     if (errors.length) return { ok: false, errors };
 
     const participantId = createId('P');
-    const assetId = createId('A');
+    // This internal candidate identifier is not the permanent SRA Asset ID.
+    // The permanent identity is issued only after an authorized admin review.
+    const assetId = createId('CANDIDATE');
     const lifecycleRecordId = `LR-${assetId}`;
     const applicationId = createId('AO');
     const evidencePackageId = createId('EP');
@@ -171,6 +180,7 @@ export class AssetOnboardingService {
       classification,
       evidencePackageId,
       institutionalReviewId,
+      submittedByUserId: clean(actor.userId, 120) || null,
       status: 'INSTITUTIONAL_REVIEW_PENDING',
       createdAt: now
     };
@@ -182,7 +192,7 @@ export class AssetOnboardingService {
       region,
       ownerId: participantId,
       lifecycleRecordId,
-      status: 'PENDING_INSTITUTIONAL_VERIFICATION',
+      status: 'ONBOARDING_REVIEW_PENDING',
       metadata: {
         onboardingApplicationId: applicationId,
         description,
@@ -209,7 +219,7 @@ export class AssetOnboardingService {
         this.persistentDomain.put(RECORD_TYPES.EVIDENCE_PACKAGE, evidencePackageId, evidencePackage, { actorId, eventType: 'PRIVATE_EVIDENCE_PACKAGE_CREATED' }),
         this.persistentDomain.put(RECORD_TYPES.V4V_PACKAGE, evidencePackageId, { ...evidencePackage, packageId: evidencePackageId, stage: 'EVIDENCE_SUBMITTED' }, { actorId, eventType: 'V4V_PACKAGE_OPENED' }),
         this.persistentDomain.put(RECORD_TYPES.INSTITUTIONAL_REVIEW, institutionalReviewId, institutionalReview, { actorId, eventType: 'INSTITUTIONAL_REVIEW_OPENED' }),
-        this.persistentDomain.put(RECORD_TYPES.ASSET_ACCOUNT, assetId, { ...asset, assetId }, { actorId, eventType: 'ASSET_ACCOUNT_CREATED' })
+        this.persistentDomain.put(RECORD_TYPES.ASSET_ACCOUNT, assetId, { ...asset, assetId, permanentAssetId: null, registrationState: 'PROVISIONAL' }, { actorId, eventType: 'ASSET_CANDIDATE_CREATED' })
       ]);
       for (const event of lifecycle.events) {
         await this.persistentDomain.lifecycle({
@@ -227,12 +237,15 @@ export class AssetOnboardingService {
       applicationId,
       evidencePackage,
       institutionalReview,
-      assetAccount: asset,
+      assetCandidate: { ...asset, permanentAssetId: null, registrationState: 'PROVISIONAL' },
+      // Compatibility alias for earlier clients. This remains provisional and
+      // is not the permanent SRA Asset Account issued by admin verification.
+      assetAccount: { ...asset, permanentAssetId: null, registrationState: 'PROVISIONAL' },
       ownerParticipant: participant,
       lifecycleRecord: lifecycle,
       recordHash,
       nextAction: 'INSTITUTIONAL_EVIDENCE_REVIEW',
-      futureFlow: ['INSTITUTIONALLY_VERIFIED', 'BEGIN_VERIFIED_VALUE_BASELINE', 'CREATE_DIGITAL_REPRESENTATION_IF_AUTHORIZED']
+      futureFlow: ['INSTITUTIONALLY_VERIFIED', 'ISSUE_PERMANENT_SRA_ASSET_ID', 'REGISTER_IN_INSTRUMENTS', 'BEGIN_VERIFIED_VALUE_BASELINE', 'CREATE_DIGITAL_REPRESENTATION_IF_AUTHORIZED']
     };
   }
 

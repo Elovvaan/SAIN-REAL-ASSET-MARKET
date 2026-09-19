@@ -13,9 +13,9 @@ const accessRouter = read('../routes/access-router.js');
 const server = read('../server.js');
 
 test('public shell resolves access once with a bounded visible fallback', () => {
-  assert.match(index, /<body class="sra-access-resolving">/);
-  assert.match(index, /setTimeout\(\(\) => document\.body\.classList\.remove\('sra-access-resolving'\), 8000\)/);
-  assert.match(css, /body\.sra-access-resolving \.app-shell\{visibility:hidden\}/);
+  assert.match(index, /<body>/);
+  assert.doesNotMatch(index, /<body class="sra-access-resolving">/);
+  assert.match(css, /body\.sra-access-resolving \.app-shell\{visibility:visible\}/);
   assert.match(bootstrap, /'\/public-home\.js'/);
   assert.match(access, /let accessInitialization=null/);
   assert.match(access, /window\.SRAPublicHome\?\.refreshNow\?\.\(\)/);

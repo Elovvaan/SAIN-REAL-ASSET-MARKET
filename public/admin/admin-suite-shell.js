@@ -1,6 +1,7 @@
 (() => {
   const WORKSPACES = [
     ['dashboard','Dashboard','Executive platform status'],
+    ['onboarding','Asset Onboarding','Universal asset verification and registration'],
     ['operations','Unified Market Operations','Governed lifecycle and exceptions'],
     ['treasury','Treasury','Commercial instruments, cash, financing, and ledger'],
     ['native-asset','Native Platform Asset','Native instrument and export lifecycle'],
@@ -16,6 +17,7 @@
     ['system','System Health','Core services and diagnostics']
   ];
   const TABS = {
+    onboarding:['Overview','Pending Review','Information Required','Verified','Rejected','History'],
     operations:['Overview','Awaiting Actions','Exceptions','Settlement Queue','Exports','Imports','Transaction Router','Audit Trail','Operation History'],
     treasury:['Overview','Commercial Instruments','Cash Position','Available Financing','Funding Capacity','Journal Entries','Treasury Wallets','Ledger','Treasury Reports'],
     'native-asset':['Current Asset','Approval Status','Listing','Marketplace Status','Export Status','Ownership','Recognitions','Asset History','Publishing','Governance'],
@@ -34,7 +36,7 @@
   const state = { mounted:false, workspaceData:null, loading:null, loadingScope:null, loadedScopes:new Set(), loadedViews:new Set(), loadingViews:new Map(), viewErrors:new Map() };
   const esc = value => String(value ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;');
   const recordsBody = id => document.querySelector(`[data-workspace="${id}"] .admin-workspace-records`);
-  const firstId = record => record?.instrumentId || record?.listingId || record?.financialRecordId || record?.recognitionId || record?.observationId || record?.coinPositionId || record?.transactionId || record?.exportPackageId || record?.instructionId || record?.settlementId || record?.adapterId || record?.entryId || record?.accountId || record?.paymentOrderId || record?.statementId || record?.walletId || record?.connectionId || record?.eventId || record?.id || record?.userId || record?.email || 'Unidentified record';
+  const firstId = record => record?.permanentAssetId || record?.applicationId || record?.assetId || record?.instrumentId || record?.listingId || record?.financialRecordId || record?.recognitionId || record?.observationId || record?.coinPositionId || record?.transactionId || record?.exportPackageId || record?.instructionId || record?.settlementId || record?.adapterId || record?.entryId || record?.accountId || record?.paymentOrderId || record?.statementId || record?.walletId || record?.connectionId || record?.eventId || record?.id || record?.userId || record?.email || 'Unidentified record';
   const recordState = record => String(record?.state || record?.status || record?.lifecycleState || record?.financingState || record?.treasuryState || 'UNKNOWN').toUpperCase();
   const dateValue = record => record?.updatedAt || record?.createdAt || record?.occurredAt || record?.recordedAt || record?.issuedAt || record?.publishedAt || record?.confirmedAt || record?.settledAt || record?.postedAt || null;
   const money = value => Number.isFinite(Number(value)) ? Number(value).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}) : null;
@@ -80,7 +82,7 @@
     return section;
   }
   function dashboardMarkup(){
-    return `<section class="admin-status-section"><div class="admin-section-label">PLATFORM STATUS</div><div class="admin-dashboard-grid">${[['Treasury','treasury'],['Marketplace','marketplace'],['Native Asset','nativeAsset'],['Coin Engine','coinPositions'],['Settlement','settlement'],['System','system'],['Operations','operations']].map(([label,key])=>`<button type="button" class="admin-dashboard-card" data-open-workspace="${key==='nativeAsset'?'native-asset':key==='coinPositions'?'coin-positions':key}"><div class="admin-card-top"><span>${esc(label)}</span><b>→</b></div><strong data-workspace-status="${key}">Checking</strong><small>Current persistent-domain records</small><em>STATUS</em></button>`).join('')}</div></section><section class="admin-command-map"><div class="admin-section-label">PLATFORM COMMAND MAP</div><div class="admin-command-grid">${WORKSPACES.filter(([id])=>id!=='dashboard').map(([id,label,description])=>`<button type="button" data-open-workspace="${id}"><strong>${esc(label)}</strong><span>${esc(description)}</span><b>→</b></button>`).join('')}</div></section>`;
+    return `<section class="admin-status-section"><div class="admin-section-label">PLATFORM STATUS</div><div class="admin-dashboard-grid">${[['Onboarding','onboarding'],['Treasury','treasury'],['Marketplace','marketplace'],['Native Asset','nativeAsset'],['Coin Engine','coinPositions'],['Settlement','settlement'],['System','system'],['Operations','operations']].map(([label,key])=>`<button type="button" class="admin-dashboard-card" data-open-workspace="${key==='nativeAsset'?'native-asset':key==='coinPositions'?'coin-positions':key}"><div class="admin-card-top"><span>${esc(label)}</span><b>→</b></div><strong data-workspace-status="${key}">Checking</strong><small>Current persistent-domain records</small><em>STATUS</em></button>`).join('')}</div></section><section class="admin-command-map"><div class="admin-section-label">PLATFORM COMMAND MAP</div><div class="admin-command-grid">${WORKSPACES.filter(([id])=>id!=='dashboard').map(([id,label,description])=>`<button type="button" data-open-workspace="${id}"><strong>${esc(label)}</strong><span>${esc(description)}</span><b>→</b></button>`).join('')}</div></section>`;
   }
   function emptyState(label){ return `<div class="admin-placeholder">No ${esc(label)} records are currently stored.</div>`; }
   function errorState(message){ return `<div class="admin-placeholder"><strong>Unable to load this workspace.</strong><br>${esc(message)}</div>`; }
@@ -115,6 +117,15 @@
 
   function workspaceRecords(id,tab){
     const r = state.workspaceData?.records || {};
+    if(id==='onboarding'){
+      const applications=list(r.onboardingApplications);
+      if(tab==='Pending Review') return applications.filter(item=>['INSTITUTIONAL_REVIEW_PENDING','UNDER_REVIEW','SUBMITTED'].includes(recordState(item)));
+      if(tab==='Information Required') return applications.filter(item=>recordState(item)==='INFORMATION_REQUIRED');
+      if(tab==='Verified') return combined(applications.filter(item=>recordState(item)==='ONBOARDED'),list(r.assetAccounts).filter(item=>item.registrationState==='REGISTERED'),list(r.instruments).filter(item=>item.instrumentType==='REGISTERED_ASSET'));
+      if(tab==='Rejected') return applications.filter(item=>recordState(item)==='REJECTED');
+      if(tab==='History') return combined(applications,r.institutionalReviews,r.assetAccounts,list(r.lifecycleEvents).filter(item=>/ONBOARD|PERMANENT_SRA_ASSET/i.test(JSON.stringify(item))));
+      return combined(applications,r.institutionalReviews,r.assetAccounts);
+    }
     if(id==='operations'){
       if(tab==='Awaiting Actions') return combined(byState(r.transactions,['PENDING','READY','AUTHORIZED','PROCESSING']),byState(r.settlementInstructions,['DRAFT','READY','EXCEPTION']),byState(r.treasuryPaymentOrders,['PENDING','READY','AUTHORIZED']));
       if(tab==='Exceptions') return combined(r.treasuryExceptions,byState(r.transactions,['FAILED','REJECTED','RETURNED','EXCEPTION','REVERSED']),byState(r.settlementInstructions,['REJECTED','RETURNED','EXCEPTION']));
@@ -252,7 +263,27 @@
     const error = state.viewErrors.get(viewKey(id,tab));
     if(error){ node.innerHTML = errorState(error); return; }
     if(id==='settlement' && tab==='Workflow'){ node.innerHTML = settlementWorkflowMarkup(); return; }
+    if(id==='onboarding' && tab==='Pending Review'){
+      const applications=workspaceRecords(id,tab);
+      node.innerHTML = applications.length ? `<div class="admin-record-list">${applications.map(record=>`${recordCard(record)}<div style="display:flex;gap:8px;flex-wrap:wrap;margin:-8px 0 18px 14px"><button type="button" data-onboarding-decision="VERIFY" data-application-id="${esc(record.applicationId)}">Verify and issue SRA Asset ID</button><button type="button" data-onboarding-decision="INFORMATION_REQUIRED" data-application-id="${esc(record.applicationId)}">Request information</button><button type="button" data-onboarding-decision="REJECT" data-application-id="${esc(record.applicationId)}">Reject</button><span data-onboarding-result="${esc(record.applicationId)}" style="color:#d6a92f"></span></div>`).join('')}</div>` : emptyState(labelFor(id,tab));
+      bindOnboardingDecisions(node);
+      return;
+    }
     node.innerHTML = recordsMarkup(workspaceRecords(id,tab),labelFor(id,tab));
+  }
+  function bindOnboardingDecisions(root){
+    root.querySelectorAll('[data-onboarding-decision]').forEach(button=>button.addEventListener('click',async()=>{
+      const applicationId=button.dataset.applicationId;
+      const decision=button.dataset.onboardingDecision;
+      const result=root.querySelector(`[data-onboarding-result="${CSS.escape(applicationId)}"]`);
+      if(result) result.textContent='Recording decision…';
+      try{
+        const payload=await requestJson(`/api/admin/onboarding/${encodeURIComponent(applicationId)}/decision`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({decision})});
+        if(result) result.textContent=payload.permanentAssetId?`${payload.permanentAssetId} registered in Instruments.`:`${payload.status.replaceAll('_',' ')}.`;
+        state.loadedViews.delete(viewKey('onboarding','Pending Review'));
+        setTimeout(()=>void refreshWorkspace('onboarding'),500);
+      }catch(error){if(result) result.textContent=error.message;}
+    }));
   }
   const workspaceApiKey = (id) => id === 'native-asset' ? 'nativeAsset' : id === 'coin-positions' ? 'coinPositions' : id;
   const viewKey = (id,tab) => `${workspaceApiKey(id)}::${tab||''}`;

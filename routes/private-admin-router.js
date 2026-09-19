@@ -60,6 +60,7 @@ function stateCounts(records = []) {
 
 const ADMIN_WORKSPACE_SOURCES = Object.freeze({
   dashboard: ['instruments','marketplaceListings','transactions','exportPackages','settlementInstructions','treasuryExceptions','lifecycleEvents'],
+  onboarding: ['onboardingApplications','institutionalReviews','evidencePackages','assetAccounts','instruments','lifecycleEvents'],
   operations: ['transactions','fundingInstructions','exportPackages','settlementInstructions','treasuryPaymentOrders','treasuryExceptions','marketplaceSettlementPreparations','marketplaceSettlementReviews','marketplaceSettlementAuthorizations','lifecycleEvents'],
   treasury: ['instruments','transactions','treasuryProfiles','ledgerAccounts','ledgerEntries','accountingPeriods','treasuryBankConnections','treasuryPaymentOrders','treasuryStatements','treasuryWallets','treasuryCryptoActivity','treasuryForecasts','treasuryExceptions','financialStatementSnapshots'],
   nativeAsset: ['instruments','marketplaceListings','recognitions','ownershipRecognitions','exportPackages','lifecycleEvents'],
@@ -76,6 +77,14 @@ const ADMIN_WORKSPACE_SOURCES = Object.freeze({
 });
 
 const ADMIN_TAB_SOURCES = Object.freeze({
+  onboarding: {
+    Overview:['onboardingApplications','institutionalReviews','assetAccounts'],
+    'Pending Review':['onboardingApplications','institutionalReviews','evidencePackages','assetAccounts'],
+    'Information Required':['onboardingApplications','institutionalReviews'],
+    Verified:['onboardingApplications','institutionalReviews','assetAccounts','instruments'],
+    Rejected:['onboardingApplications','institutionalReviews'],
+    History:['onboardingApplications','institutionalReviews','assetAccounts','instruments','lifecycleEvents'],
+  },
   operations: {
     Overview:['transactions','fundingInstructions','exportPackages','settlementInstructions','treasuryPaymentOrders','treasuryExceptions'],
     'Awaiting Actions':['transactions','settlementInstructions','treasuryPaymentOrders'], Exceptions:['transactions','settlementInstructions','treasuryExceptions'],
@@ -153,7 +162,7 @@ function configuredNetworkAccounts(environment = process.env) {
 }
 
 const ADMIN_RECORD_TYPES = Object.freeze({
-  participants:RECORD_TYPES.PARTICIPANT, assetAccounts:RECORD_TYPES.ASSET_ACCOUNT, projectAccounts:RECORD_TYPES.PROJECT_ACCOUNT,
+  participants:RECORD_TYPES.PARTICIPANT, onboardingApplications:RECORD_TYPES.ONBOARDING_APPLICATION, institutionalReviews:RECORD_TYPES.INSTITUTIONAL_REVIEW, assetAccounts:RECORD_TYPES.ASSET_ACCOUNT, projectAccounts:RECORD_TYPES.PROJECT_ACCOUNT,
   instruments:RECORD_TYPES.SRA_INSTRUMENT, protectionInstruments:RECORD_TYPES.PROTECTION_INSTRUMENT, marketplaceListings:RECORD_TYPES.MARKETPLACE_LISTING,
   marketplaceCommitmentWindows:RECORD_TYPES.FUNDING_MARKETPLACE_COMMITMENT_WINDOW, marketplaceCommitments:RECORD_TYPES.FUNDING_MARKETPLACE_COMMITMENT,
   marketplacePositions:RECORD_TYPES.FUNDING_MARKETPLACE_POSITION, marketplaceAllocations:RECORD_TYPES.FUNDING_MARKETPLACE_ALLOCATION_REVIEW,
@@ -367,6 +376,7 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
       generatedAt: new Date().toISOString(),
       administrator: { id: session.id, displayName: session.displayName },
       statuses: {
+        onboarding: { state:'AVAILABLE', recordCount:count(domain, RECORD_TYPES.ONBOARDING_APPLICATION) },
         treasury: { state:'AVAILABLE', recordCount:count(domain, RECORD_TYPES.LEDGER_ENTRY) + count(domain, RECORD_TYPES.TREASURY_PAYMENT_ORDER) },
         marketplace: { state:'AVAILABLE', recordCount:count(domain, RECORD_TYPES.MARKETPLACE_LISTING) },
         nativeAsset: { state:nativePlatformAsset ? 'AVAILABLE' : 'UNAVAILABLE', recordCount:count(domain, RECORD_TYPES.SRA_INSTRUMENT) },
@@ -405,6 +415,56 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
       servicingObligations: domain.list(RECORD_TYPES.ASSET_SERVICING_OBLIGATION).filter((record) => servicingIds.has(record.servicingAccountId)),
       servicingEvents: domain.list(RECORD_TYPES.ASSET_SERVICING_EVENT).filter((record) => servicingIds.has(record.servicingAccountId)),
     });
+  });
+
+  router.post('/api/admin/onboarding/:applicationId/decision', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    const applicationId = String(req.params.applicationId || '').trim();
+    const decision = String(req.body?.decision || '').trim().toUpperCase();
+    if (!['VERIFY','INFORMATION_REQUIRED','REJECT'].includes(decision)) return res.status(400).json({ error:'Decision must be VERIFY, INFORMATION_REQUIRED, or REJECT.' });
+    await domain.hydrate([RECORD_TYPES.ONBOARDING_APPLICATION, RECORD_TYPES.INSTITUTIONAL_REVIEW, RECORD_TYPES.ASSET_ACCOUNT, RECORD_TYPES.SRA_INSTRUMENT]);
+    const application = domain.get(RECORD_TYPES.ONBOARDING_APPLICATION, applicationId);
+    if (!application) return res.status(404).json({ error:'Onboarding application not found.' });
+    const review = domain.get(RECORD_TYPES.INSTITUTIONAL_REVIEW, application.institutionalReviewId);
+    const candidate = domain.get(RECORD_TYPES.ASSET_ACCOUNT, application.assetId);
+    const now = new Date().toISOString();
+    const actorId = session.id;
+    if (decision !== 'VERIFY') {
+      const status = decision === 'REJECT' ? 'REJECTED' : 'INFORMATION_REQUIRED';
+      await domain.atomicPut([
+        { type:RECORD_TYPES.ONBOARDING_APPLICATION, id:applicationId, payload:{ ...application, status, updatedAt:now }, actorId, eventType:`ASSET_ONBOARDING_${status}` },
+        { type:RECORD_TYPES.INSTITUTIONAL_REVIEW, id:application.institutionalReviewId, payload:{ ...review, status, reviewerId:actorId, requestedEvidence:req.body?.requestedEvidence || [], findings:req.body?.findings || [], decisionAt:now }, actorId, eventType:`ASSET_ONBOARDING_${status}` },
+        ...(candidate ? [{ type:RECORD_TYPES.ASSET_ACCOUNT, id:application.assetId, payload:{ ...candidate, status, updatedAt:now }, actorId, eventType:`ASSET_CANDIDATE_${status}` }] : []),
+      ]);
+      await domain.lifecycle({ objectType:RECORD_TYPES.ONBOARDING_APPLICATION, objectId:applicationId, eventType:`ASSET_ONBOARDING_${status}`, actorId, payload:{ requestedEvidence:req.body?.requestedEvidence || [] } });
+      return res.json({ ok:true, applicationId, status });
+    }
+    if (application.submittedByUserId) {
+      const submittingUser = (await persistedUsers()).find((user) => user.id === application.submittedByUserId);
+      const assetProvider = submittingUser?.capacities?.find((capacity) => (typeof capacity === 'string' ? capacity : capacity.id) === 'ASSET_PROVIDER');
+      const assetProviderActive = typeof assetProvider === 'string' || assetProvider?.state === 'ACTIVE';
+      if (!assetProviderActive) return res.status(409).json({ error:'Asset Provider capability must be active before a permanent SRA Asset ID can be issued.' });
+    }
+    if (application.permanentAssetId) return res.json({ ok:true, applicationId, permanentAssetId:application.permanentAssetId, instrumentId:application.instrumentId, reused:true });
+    const permanentAssetId = `SRA-AST-${new Date().getUTCFullYear()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+    const instrumentId = `SRA-INST-${permanentAssetId.slice(-8)}`;
+    const registeredAsset = { ...candidate, id:permanentAssetId, assetId:permanentAssetId, candidateAssetId:application.assetId, permanentAssetId, registrationState:'REGISTERED', status:'ONBOARDED', onboardedAt:now, updatedAt:now };
+    const instrument = {
+      id:instrumentId, instrumentId, instrumentType:'REGISTERED_ASSET', assetId:permanentAssetId,
+      name:application.identity?.name || candidate?.name || permanentAssetId,
+      classification:application.classification, ownerId:application.participantId,
+      state:'REGISTERED', financingState:'AVAILABLE_FOR_OPPORTUNITY_INTAKE', onChainState:'NOT_EVALUATED',
+      sourceApplicationId:applicationId, createdAt:now, updatedAt:now,
+    };
+    await domain.atomicPut([
+      { type:RECORD_TYPES.ONBOARDING_APPLICATION, id:applicationId, payload:{ ...application, status:'ONBOARDED', permanentAssetId, instrumentId, verifiedAt:now, updatedAt:now }, actorId, eventType:'PERMANENT_SRA_ASSET_ID_ISSUED' },
+      { type:RECORD_TYPES.INSTITUTIONAL_REVIEW, id:application.institutionalReviewId, payload:{ ...review, status:'INSTITUTIONALLY_VERIFIED', reviewerId:actorId, findings:req.body?.findings || [], decisionAt:now }, actorId, eventType:'ASSET_ONBOARDING_VERIFIED' },
+      ...(candidate ? [{ type:RECORD_TYPES.ASSET_ACCOUNT, id:application.assetId, payload:{ ...candidate, status:'SUPERSEDED_BY_PERMANENT_ASSET', permanentAssetId, registrationState:'SUPERSEDED', updatedAt:now }, actorId, eventType:'ASSET_CANDIDATE_SUPERSEDED' }] : []),
+      { type:RECORD_TYPES.ASSET_ACCOUNT, id:permanentAssetId, payload:registeredAsset, actorId, eventType:'PERMANENT_SRA_ASSET_REGISTERED' },
+      { type:RECORD_TYPES.SRA_INSTRUMENT, id:instrumentId, payload:instrument, actorId, eventType:'REGISTERED_ASSET_ADDED_TO_INSTRUMENTS' },
+    ]);
+    await domain.lifecycle({ objectType:RECORD_TYPES.ASSET_ACCOUNT, objectId:permanentAssetId, eventType:'PERMANENT_SRA_ASSET_ID_ISSUED', actorId, payload:{ applicationId, instrumentId } });
+    return res.json({ ok:true, applicationId, permanentAssetId, instrumentId, status:'ONBOARDED' });
   });
 
   router.get('/api/admin/workspaces', async (req, res) => {
