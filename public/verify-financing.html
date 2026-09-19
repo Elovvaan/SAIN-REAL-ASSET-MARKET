@@ -27,13 +27,16 @@
     const esc=(v)=>String(v??'').replace(/[&<>"']/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
     const money=(amount,currency)=>new Intl.NumberFormat('en-US',{style:'currency',currency:currency||'USD'}).format(Number(amount||0));
     const label=(v)=>String(v||'').replaceAll('_',' ');
-    function showError(message){result.className='result visible';result.innerHTML='<div class="status bad">Authorization not verified</div><p>'+esc(message)+'</p>';}
+    function showError(title,message){result.className='result visible';result.innerHTML='<div class="status bad">'+esc(title)+'</div><p>'+esc(message)+'</p>';}
     async function verify(reference){
       button.disabled=true;button.textContent='Verifying…';result.className='result visible';result.innerHTML='<p>Checking current SAIN financing records…</p>';
+      const controller=new AbortController(), timeout=setTimeout(()=>controller.abort(),20000);
       try{
-        const response=await fetch('/api/financing-closing/verification/'+encodeURIComponent(reference),{headers:{Accept:'application/json'},cache:'no-store'});
+        const response=await fetch('/api/financing-closing/verification/'+encodeURIComponent(reference),{headers:{Accept:'application/json'},cache:'no-store',signal:controller.signal});
         const data=await response.json().catch(()=>({}));
-        if(!response.ok||!data.verified){showError('No current posted financing authorization was found for that reference. Check the reference and try again.');return;}
+        if(response.status===404){showError('Authorization not found','No current posted financing authorization was found for that reference. Check the reference and try again.');return;}
+        if(!response.ok){showError('Verification temporarily unavailable','The financing record service returned a temporary response. Please try the verification again.');return;}
+        if(!data.verified){showError('Authorization not verified','The current response did not include a verified financing authorization record.');return;}
         result.innerHTML='<div class="status ok">✓ Financing authorization verified</div><div class="grid">'+
           '<div><span>Authorization</span><strong>'+esc(data.authorizationReference)+'</strong></div>'+
           '<div><span>Current status</span><strong>'+esc(label(data.financingStatus))+'</strong></div>'+
@@ -52,8 +55,8 @@
           '<p>Following processing, the resulting <strong>bank confirmation, collection reference, settlement reference, trace/reference number, execution date, settled amount, return, or exception information</strong>, as applicable, is recorded with the SAIN transaction to complete reconciliation and maintain the transaction record.</p>'+
           '</div></details>'+
           '<div class="contact"><strong>'+esc(data.verificationContact?.organization||'SAIN Platform')+' · '+esc(data.verificationContact?.department||'Financing Operations')+'</strong><br>'+esc(data.verificationContact?.phone||'')+'<br>'+esc(data.verificationContact?.email||'')+'<br>'+esc(data.verificationContact?.address||'')+'</div>';
-      }catch(error){showError('Verification service could not be reached. Please try again.');}
-      finally{button.disabled=false;button.textContent='Verify';}
+      }catch(error){showError(error?.name==='AbortError'?'Verification timed out':'Verification temporarily unavailable',error?.name==='AbortError'?'The request took longer than expected. Please try the verification again.':'The financing record service was not reached. Please try the verification again.');}
+      finally{clearTimeout(timeout);button.disabled=false;button.textContent='Verify';}
     }
     form.addEventListener('submit',(event)=>{event.preventDefault();const reference=input.value.trim().toUpperCase();if(reference)void verify(reference);});
     const supplied=new URLSearchParams(location.search).get('authorization');if(supplied){input.value=supplied.toUpperCase();void verify(input.value);}

@@ -97,6 +97,20 @@ test('external settlement confirmation callback remains outside session authenti
   assert.equal(result.nextCalled, true);
 });
 
+test('public financing verification read bypasses staff session authentication only for the exact lookup route', async () => {
+  const middleware = createOperationsAuthorization({ accessServiceProvider: async () => { throw new Error('should not be called'); } });
+  const lookup = await run(middleware, request({ path: '/api/financing-closing/verification/LFA-F7DA0CA9' }));
+  assert.equal(lookup.nextCalled, true);
+
+  const collection = await run(createOperationsAuthorization({ accessServiceProvider: async () => accessServiceFor() }), request({ path: '/api/financing-closing/verification' }));
+  assert.equal(collection.nextCalled, false);
+  assert.equal(collection.res.statusCode, 401);
+
+  const mutation = await run(createOperationsAuthorization({ accessServiceProvider: async () => accessServiceFor() }), request({ method: 'POST', path: '/api/financing-closing/verification/LFA-F7DA0CA9' }));
+  assert.equal(mutation.nextCalled, false);
+  assert.equal(mutation.res.statusCode, 401);
+});
+
 test('unrelated public paths are unaffected', async () => {
   const middleware = createOperationsAuthorization({ accessServiceProvider: async () => { throw new Error('should not be called'); } });
   const result = await run(middleware, request({ path: '/api/health' }));

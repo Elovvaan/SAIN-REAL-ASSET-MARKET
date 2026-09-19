@@ -6,6 +6,7 @@ let databasePromise = null;
 
 function readCookie(req,name){const cookie=req.headers.cookie||'';const entry=cookie.split(';').map((part)=>part.trim()).find((part)=>part.startsWith(`${name}=`));return entry?decodeURIComponent(entry.slice(name.length+1)):'';}
 function isConnectorCallback(path){return path==='/api/funding-marketplace-settlement/confirmations/external';}
+function isPublicFinancingVerification(req){return req.method==='GET'&&/^\/api\/financing-closing\/verification\/[^/]+$/.test(req.path);}
 function isProductionProtected(path){return path.startsWith('/api/production/metrics')||path.startsWith('/api/production/audit')||path.startsWith('/api/production/alerts');}
 function isSettlementOperationsPath(path){return path.startsWith('/api/settlement-rails/stellar-usdc/sep24')||/^\/api\/settlement-rails\/instructions\/[^/]+\/execute-stellar-usdc$/.test(path);}
 function isProtectedOperationsPath(path){return isProductionProtected(path)||isSettlementOperationsPath(path)||['/api/on-chain','/api/platform-treasury','/api/funding','/api/funding-verification','/api/funding-value','/api/funding-model','/api/funding-instrument','/api/funding-instrument-review','/api/funding-instrument-issuance','/api/funding-marketplace','/api/funding-marketplace-publication','/api/funding-marketplace-commitment','/api/funding-marketplace-allocation','/api/funding-marketplace-settlement','/api/funding-operations','/api/financing-closing','/api/sain/intelligence'].some((prefix)=>path===prefix||path.startsWith(`${prefix}/`));}
@@ -18,7 +19,7 @@ async function defaultAccessService(){const service=new AccessService({database:
 
 export function createOperationsAuthorization({accessServiceProvider=defaultAccessService}={}){
   return async function authorizeOperationsRequest(req,res,next){
-    if(!isProtectedOperationsPath(req.path)||isConnectorCallback(req.path))return next();
+    if(!isProtectedOperationsPath(req.path)||isConnectorCallback(req.path)||isPublicFinancingVerification(req))return next();
     const startedAt=Date.now();
     try{
       const standardToken=readCookie(req,'sra_session');
