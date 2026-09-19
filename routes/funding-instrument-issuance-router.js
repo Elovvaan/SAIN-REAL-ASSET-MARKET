@@ -1,5 +1,6 @@
 import express from 'express';
 import { GovernedLoanFinancingService } from '../services/governed-loan-financing-service.js';
+import { CheckStockInstrumentDocumentService } from '../services/check-stock-instrument-document-service.js';
 
 function actorId(req) {
   return req.sraIdentity?.actorId || req.get('x-sra-actor-id') || req.body?.actorId || null;
@@ -17,6 +18,7 @@ function handle(res, error) {
 export function createFundingInstrumentIssuanceRouter(service) {
   const router = express.Router();
   const loanFinancing = new GovernedLoanFinancingService(service.domain);
+  const instrumentDocuments = new CheckStockInstrumentDocumentService(service.domain);
   void loanFinancing.initialize().catch((error) => console.error(JSON.stringify({ level: 'error', event: 'LOAN_FINANCING_INITIALIZATION_FAILED', error: error?.message || String(error) })));
 
   router.get('/status', (_req, res) => res.json({ issuance: service.status(), loanFinancing: loanFinancing.status() }));
@@ -53,6 +55,16 @@ export function createFundingInstrumentIssuanceRouter(service) {
   router.post('/authorizations/:authorizationId/issue', async (req, res) => {
     try { return res.status(201).json(await service.issue(req.params.authorizationId, req.body, actorId(req))); }
     catch (error) { return handle(res, error); }
+  });
+
+  router.get('/instruments/:instrumentId/document', async (req, res) => {
+    try {
+      const printReady = String(req.query.version || '').toLowerCase() === 'print';
+      const pdf = await instrumentDocuments.render(req.params.instrumentId, { printReady });
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${req.params.instrumentId}-${printReady ? 'check-stock-print' : 'issued-instrument'}.pdf"`);
+      return res.send(pdf);
+    } catch (error) { return handle(res, error); }
   });
 
   router.get('/financing/status', (_req, res) => res.json(loanFinancing.status()));
