@@ -73,6 +73,27 @@ test('cash item collection requires and includes the funding settlement note', a
   assert.ok(packagePdf.getPageCount() >= 5, 'cover + executed note + instructions + collection confirmation + servicing');
 });
 
+test('system generates matching digital and check-stock funding settlement notes', async () => {
+  const { domain, documents } = await fixture();
+  const opportunity = domain.get('FUNDING_OPPORTUNITY', 'FOR-1');
+  opportunity.transactionProfile = {
+    ...opportunity.transactionProfile,
+    draftNumber:'2026-001', drawerName:'House Morris Trust', authorizedSigner:'Olajuwaan Lewis',
+    draweeName:'SRA Treasury Office', draweeAddress:'2522 Orchard Ave, Ogden, UT 84401',
+    draweePhone:'(801) 923-3680', draweeSecureDelivery:'treasury@sainrealasset.com', fundingReference:'FP-98765',
+  };
+  const service = new AchSettlementPacketService(domain, documents);
+  const digital = await service.renderFundingSettlementNote('EXP-1');
+  const print = await service.renderFundingSettlementNote('EXP-1', { printReady:true });
+  for (const bytes of [digital, print]) {
+    assert.equal(bytes.subarray(0,4).toString(),'%PDF');
+    const pdf = await PDFLibDocument.load(bytes);
+    assert.equal(pdf.getPageCount(),2,'front and reverse sides should remain on one check-stock sheet');
+    assert.deepEqual(pdf.getPages()[0].getSize(),{ width:612, height:792 });
+  }
+  assert.notDeepEqual(digital,print,'print output includes stock alignment and perforation marks');
+});
+
 test('cash item collection rejects package generation when the required funding settlement note is missing', async () => {
   const { domain, documents } = await fixture({ includeNote: false });
   const service = new AchSettlementPacketService(domain, documents);
@@ -89,6 +110,15 @@ test('admin closing flow exposes Cash Item Collection alongside existing rails',
   assert.match(source, /value="ACH"/);
   assert.match(source, /value="FEDWIRE"/);
   assert.match(source, /value="BANK_WIRE"/);
+});
+
+test('admin financing records expose digital and check-stock note downloads', () => {
+  const ui = fs.readFileSync(new URL('../public/admin/admin-unified-financing-workstation.js', import.meta.url), 'utf8');
+  const router = fs.readFileSync(new URL('../routes/financing-closing-router.js', import.meta.url), 'utf8');
+  assert.match(ui,/Digital Note PDF/);
+  assert.match(ui,/Check-Stock Print PDF/);
+  assert.match(router,/funding-settlement-note/);
+  assert.match(router,/version.*print/);
 });
 
 test('cash item instructions route the payee through its existing banking relationship', () => {

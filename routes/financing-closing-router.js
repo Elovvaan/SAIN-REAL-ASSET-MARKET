@@ -133,6 +133,18 @@ export function createFinancingClosingRouter(service) {
       return res.send(pdf);
     } catch (error) { return fail(res, error); }
   });
+  router.get('/exports/:exportPackageId/funding-settlement-note', async (req, res) => {
+    try {
+      if (!actorId(req)) return res.status(401).json({ error: 'An authenticated financing-operations identity is required.' });
+      const exportPackageId = String(req.params.exportPackageId || '').trim();
+      const printReady = String(req.query.version || '').toLowerCase() === 'print';
+      const pdf = await achSettlementPacket.renderFundingSettlementNote(exportPackageId, { printReady });
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('Content-Disposition', `attachment; filename="SRA-Funding-Settlement-Note-${exportPackageId}-${printReady ? 'Check-Stock-Print' : 'Digital'}.pdf"`);
+      return res.send(pdf);
+    } catch (error) { return fail(res, error); }
+  });
   router.get('/exports/:exportPackageId/funding-package', async (req, res) => {
     try {
       if (!actorId(req)) return res.status(401).json({ error: 'An authenticated financing-operations identity is required.' });

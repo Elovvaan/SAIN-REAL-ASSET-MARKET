@@ -49,8 +49,10 @@
     const encoded = encodeURIComponent(record.exportPackageId);
     const achHref = `/api/financing-closing/exports/${encoded}/ach-settlement-packet`;
     const fundingHref = `/api/financing-closing/exports/${encoded}/funding-package`;
+    const digitalNoteHref = `/api/financing-closing/exports/${encoded}/funding-settlement-note`;
+    const printNoteHref = `/api/financing-closing/exports/${encoded}/funding-settlement-note?version=print`;
     const buttonStyle = 'display:inline-block;padding:9px 12px;border:1px solid #4a4a4a;border-radius:8px;color:#f5f5f5;text-decoration:none';
-    return `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"><a href="${esc(achHref)}" style="${buttonStyle}" target="_blank" rel="noopener">Download Settlement Packet</a><a href="${esc(fundingHref)}" style="${buttonStyle}" target="_blank" rel="noopener">Download Funding Package</a></div>`;
+    return `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"><a href="${esc(digitalNoteHref)}" style="${buttonStyle}" target="_blank" rel="noopener">Digital Note PDF</a><a href="${esc(printNoteHref)}" style="${buttonStyle}" target="_blank" rel="noopener">Check-Stock Print PDF</a><a href="${esc(achHref)}" style="${buttonStyle}" target="_blank" rel="noopener">Download Settlement Packet</a><a href="${esc(fundingHref)}" style="${buttonStyle}" target="_blank" rel="noopener">Download Funding Package</a></div>`;
   }
 
   function recordCards(records, emptyText) {
