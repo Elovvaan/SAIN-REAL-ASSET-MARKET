@@ -278,7 +278,13 @@
       const result=root.querySelector(`[data-onboarding-result="${CSS.escape(applicationId)}"]`);
       if(result) result.textContent='Recording decision…';
       try{
-        const payload=await requestJson(`/api/admin/onboarding/${encodeURIComponent(applicationId)}/decision`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({decision})});
+        const application=list(state.workspaceData?.records?.onboardingApplications).find(item=>item.applicationId===applicationId);
+        let rightsClearanceConfirmed=false;
+        if(decision==='VERIFY'&&application?.classification==='CREATIVE_RIGHTS'){
+          rightsClearanceConfirmed=window.confirm('Confirm institutional review of chain of title, registrations, revenue records, counterparties, licenses, liens, and participation claims. This confirmation is required before issuing the permanent SRA Asset ID.');
+          if(!rightsClearanceConfirmed){if(result)result.textContent='Rights clearance confirmation was not completed.';return;}
+        }
+        const payload=await requestJson(`/api/admin/onboarding/${encodeURIComponent(applicationId)}/decision`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({decision,rightsClearanceConfirmed})});
         if(result) result.textContent=payload.permanentAssetId?`${payload.permanentAssetId} registered in Instruments.`:`${payload.status.replaceAll('_',' ')}.`;
         state.loadedViews.delete(viewKey('onboarding','Pending Review'));
         setTimeout(()=>void refreshWorkspace('onboarding'),500);

@@ -445,20 +445,25 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
       const assetProviderActive = typeof assetProvider === 'string' || assetProvider?.state === 'ACTIVE';
       if (!assetProviderActive) return res.status(409).json({ error:'Asset Provider capability must be active before a permanent SRA Asset ID can be issued.' });
     }
+    if (application.classification === 'CREATIVE_RIGHTS' && req.body?.rightsClearanceConfirmed !== true) {
+      return res.status(409).json({ error:'Creative-rights verification requires explicit confirmation of chain of title, registrations, revenue records, counterparties, licenses, liens, and participation claims.' });
+    }
     if (application.permanentAssetId) return res.json({ ok:true, applicationId, permanentAssetId:application.permanentAssetId, instrumentId:application.instrumentId, reused:true });
     const permanentAssetId = `SRA-AST-${new Date().getUTCFullYear()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
     const instrumentId = `SRA-INST-${permanentAssetId.slice(-8)}`;
-    const registeredAsset = { ...candidate, id:permanentAssetId, assetId:permanentAssetId, candidateAssetId:application.assetId, permanentAssetId, registrationState:'REGISTERED', status:'ONBOARDED', onboardedAt:now, updatedAt:now };
+    const verifiedSpecializedAssetData = application.specializedAssetData?.creativeRights ? { creativeRights:{ ...application.specializedAssetData.creativeRights, clearanceState:'INSTITUTIONALLY_VERIFIED', clearedAt:now, clearedBy:actorId } } : application.specializedAssetData;
+    const registeredAsset = { ...candidate, id:permanentAssetId, assetId:permanentAssetId, candidateAssetId:application.assetId, permanentAssetId, specializedAssetData:verifiedSpecializedAssetData, registrationState:'REGISTERED', status:'ONBOARDED', onboardedAt:now, updatedAt:now };
     const instrument = {
       id:instrumentId, instrumentId, instrumentType:'REGISTERED_ASSET', assetId:permanentAssetId,
       name:application.identity?.name || candidate?.name || permanentAssetId,
       classification:application.classification, ownerId:application.participantId,
+      specializedAssetData:verifiedSpecializedAssetData,
       state:'REGISTERED', financingState:'AVAILABLE_FOR_OPPORTUNITY_INTAKE', onChainState:'NOT_EVALUATED',
       sourceApplicationId:applicationId, createdAt:now, updatedAt:now,
     };
     await domain.atomicPut([
       { type:RECORD_TYPES.ONBOARDING_APPLICATION, id:applicationId, payload:{ ...application, status:'ONBOARDED', permanentAssetId, instrumentId, verifiedAt:now, updatedAt:now }, actorId, eventType:'PERMANENT_SRA_ASSET_ID_ISSUED' },
-      { type:RECORD_TYPES.INSTITUTIONAL_REVIEW, id:application.institutionalReviewId, payload:{ ...review, status:'INSTITUTIONALLY_VERIFIED', reviewerId:actorId, findings:req.body?.findings || [], decisionAt:now }, actorId, eventType:'ASSET_ONBOARDING_VERIFIED' },
+      { type:RECORD_TYPES.INSTITUTIONAL_REVIEW, id:application.institutionalReviewId, payload:{ ...review, status:'INSTITUTIONALLY_VERIFIED', reviewerId:actorId, findings:req.body?.findings || [], verificationChecklist:(review?.verificationChecklist || []).map(item=>({ ...item, status:'VERIFIED', verifiedAt:now, verifiedBy:actorId })), rightsClearanceConfirmed:application.classification === 'CREATIVE_RIGHTS', decisionAt:now }, actorId, eventType:'ASSET_ONBOARDING_VERIFIED' },
       ...(candidate ? [{ type:RECORD_TYPES.ASSET_ACCOUNT, id:application.assetId, payload:{ ...candidate, status:'SUPERSEDED_BY_PERMANENT_ASSET', permanentAssetId, registrationState:'SUPERSEDED', updatedAt:now }, actorId, eventType:'ASSET_CANDIDATE_SUPERSEDED' }] : []),
       { type:RECORD_TYPES.ASSET_ACCOUNT, id:permanentAssetId, payload:registeredAsset, actorId, eventType:'PERMANENT_SRA_ASSET_REGISTERED' },
       { type:RECORD_TYPES.SRA_INSTRUMENT, id:instrumentId, payload:instrument, actorId, eventType:'REGISTERED_ASSET_ADDED_TO_INSTRUMENTS' },

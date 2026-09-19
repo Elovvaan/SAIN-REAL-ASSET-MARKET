@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { AssetOnboardingService } from '../services/asset-onboarding-service.js';
+import { DomainStore } from '../services/domain-store.js';
 
 const read = (path) => fs.readFileSync(new URL(path, import.meta.url), 'utf8');
 const service = read('../services/asset-onboarding-service.js');
@@ -42,4 +44,46 @@ test('opportunity intake can select a registered permanent asset', () => {
   assert.match(funding, /funding-existing-asset/);
   assert.match(funding, /\/api\/onboarding\/registered-assets/);
   assert.match(funding, /payload\.relatedAssetIds/);
+});
+
+test('creative rights use a specialized rights-bundle schema without changing universal onboarding', () => {
+  assert.match(service, /'CREATIVE_RIGHTS'/);
+  assert.match(service, /MASTER_RECORDING/);
+  assert.match(service, /COMPOSITION_PUBLISHING/);
+  assert.match(service, /rightsBundleDescription/);
+  assert.match(service, /ownershipPercentage/);
+  assert.match(service, /CHAIN_OF_TITLE/);
+  assert.match(service, /ROYALTY_STATEMENT/);
+  assert.match(publicUi, /Creative-rights bundle/);
+  assert.match(publicUi, /it does not treat the entire song, production, or catalog as one undivided asset/);
+});
+
+test('creative rights require institutional clearance before registration', () => {
+  assert.match(adminRouter, /rightsClearanceConfirmed/);
+  assert.match(adminRouter, /chain of title, registrations, revenue records, counterparties, licenses, liens, and participation claims/);
+  assert.match(adminUi, /Confirm institutional review of chain of title/);
+  assert.match(adminRouter, /clearanceState:'INSTITUTIONALLY_VERIFIED'/);
+});
+
+test('creative-rights submissions persist the exact verified-review candidate bundle', async () => {
+  const documentService = { get: (id) => ({ id, documentType:'CHAIN_OF_TITLE', originalName:'chain.pdf', sha256:'a'.repeat(64), mimeType:'application/pdf', size:1024 }) };
+  const onboarding = new AssetOnboardingService(new DomainStore(), documentService);
+  const result = await onboarding.onboard({
+    identity:{ name:'Independent Music Catalog', region:'United States' },
+    ownership:{ ownerName:'Independent Artist', ownershipType:'INDIVIDUAL' },
+    classification:'CREATIVE_RIGHTS',
+    creativeRights:{
+      workType:'MUSIC', rightTypes:['MASTER_RECORDING','SYNC'], revenueSources:['STREAMING','SYNC_LICENSES'],
+      rightsBundleDescription:'Five percent of defined master and sync receipts.', ownershipPercentage:5,
+      territory:'Worldwide', identifiers:{ catalogReference:'CAT-001' }, collectionSources:'Distributor statements',
+      existingLicenses:'None disclosed', encumbrances:'None disclosed'
+    },
+    documents:[{ uploadId:'DOC-1', type:'CHAIN_OF_TITLE' }],
+    attestation:{ attested:true }
+  }, { userId:'USER-1' });
+  assert.equal(result.ok,true);
+  assert.equal(result.assetCandidate.registrationState,'PROVISIONAL');
+  assert.equal(result.assetCandidate.metadata.specializedAssetData.creativeRights.ownershipPercentage,5);
+  assert.deepEqual(result.assetCandidate.metadata.specializedAssetData.creativeRights.rightTypes,['MASTER_RECORDING','SYNC']);
+  assert.equal(result.institutionalReview.verificationChecklist.length,5);
 });
