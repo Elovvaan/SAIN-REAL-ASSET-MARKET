@@ -21,7 +21,8 @@ test('keeps optional exchange readiness separate from direct settlement readines
   const snapshot = new CapitalActivationAgentService(new Domain(records)).snapshot();
   const issued = snapshot.queue.find((item)=>item.assetId === 'A-1');
   assert.equal(issued.classification, 'SETTLEMENT_READY');
-  assert.equal(issued.recommendedAction, 'TRANSFER_SRA_OR_USE_OPTIONAL_EXCHANGE');
+  assert.equal(issued.recommendedAction, 'TRANSFER_SRA_ON_CHAIN');
+  assert.match(issued.reason, /later exchange is initiated by the holder/);
   assert.equal(snapshot.summary.settlementReady, 1);
   assert.equal(snapshot.queue.find((item)=>item.assetId === 'A-2').classification, 'DEPLOYABLE');
 });

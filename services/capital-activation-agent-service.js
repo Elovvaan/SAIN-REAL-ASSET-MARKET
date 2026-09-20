@@ -44,8 +44,8 @@ export class CapitalActivationAgentService {
       const marketLive = ACTIVE_MARKET_STATES.has(upper(market?.state || market?.confirmation?.state || offer?.state));
       let classification = 'DORMANT'; let action = 'ISSUE_APPROVED_SUPPLY'; let reason = 'The representation exists, but no issued units are available to activate.';
       if (reserved) { classification = 'RESERVED'; action = 'MONITOR_SETTLEMENT'; reason = 'Units are committed to an open reservation or settlement workflow.'; }
-      else if (marketLive) { classification = 'DEPLOYABLE'; action = 'SETTLE_OR_MONITOR_OPTIONAL_MARKET'; reason = 'Issued SRA is ready for direct settlement and also has an active optional exchange route.'; }
-      else if (issued > 0 && ready) { classification = 'SETTLEMENT_READY'; action = 'TRANSFER_SRA_OR_USE_OPTIONAL_EXCHANGE'; reason = 'Issued SRA is ready for direct wallet settlement; the prepared USDC route remains an optional holder exchange.'; }
+      else if (marketLive) { classification = 'DEPLOYABLE'; action = 'SETTLE_OR_MONITOR_HOLDER_MARKET'; reason = 'Issued SRA is ready for direct settlement. A separately active market records holder-directed trading after settlement.'; }
+      else if (issued > 0 && ready) { classification = 'SETTLEMENT_READY'; action = 'TRANSFER_SRA_ON_CHAIN'; reason = 'Issued SRA is ready for direct wallet settlement. Any later exchange is initiated by the holder through an available market.'; }
       else if (issued > 0) { classification = 'SETTLEMENT_READY'; action = 'TRANSFER_SRA_ON_CHAIN'; reason = 'Issued SRA is online and ready for direct wallet settlement.'; }
       queue.push({ assetId, instrumentId, coinPositionId:idOf(position) || null, network:upper(asset.network) || 'UNKNOWN', symbol:asset.asset || asset.assetCode || asset.symbol || 'SRA', availableAmount:available, issuedAmount:issued, classification, recommendedAction:action, reason, executionAuthorized:false });
     }

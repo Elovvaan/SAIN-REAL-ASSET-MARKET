@@ -31,6 +31,8 @@ const AUTHORITATIVE_ONTOLOGY = [
   '6. The SRA Coin Position is the digital financial-asset representation of the rights, obligations, value, ownership position, or other supported financial relationship contained in its source Financial Record. It preserves source, evidence, quantity, conversion rule, restrictions, ownership, status, and lifecycle lineage.',
   '6A. Coinbase activity, opportunities, customer-onboarded assets, instruments, and other eligible records are different formation paths into the same SRA Coin. The origin remains on the Coin Position as backing and lineage; it does not create a different kind of SRA Coin.',
   '6B. Every SRA Coin unit has the same SRA identity and fungible behavior. A Coin Position identifies the source and obligation supporting its quantity, not a separate coin class.',
+  '6C. A confirmed SRA Coin transfer completes the on-chain settlement to the recipient. SRA retains and services the financed position and its originating obligation; the recipient controls the delivered SRA Coin.',
+  '6D. Holders realize value through holder-directed market trading and supported platform services. The available market establishes any later exchange price and liquidity. Mandatory distributions, platform buybacks, and platform-funded conversions remain outside the SRA settlement flow.',
   '7. Trading does not create the SRA Coin Position or make it real. Trading establishes a transaction price, consideration record, ownership event, and market-history event for an asset that already exists in SRA.',
   '8. Keep the original recorded amount, current Verified Value, offered price, and executed trade price separate. A trade price does not erase the source amount and does not automatically replace Verified Value; it becomes new evidence for later recognition and value review.',
   '9. A True Bill is a purpose-bound instrument connected to a defined obligation, value, project, settlement, or capital function. It is not merely a capital plan.',
@@ -49,6 +51,7 @@ const COIN_ASSET_LANGUAGE_LOCK = [
   'You must not reduce an SRA Coin Position to merely a receipt, database entry, symbolic record, informational reference, or non-asset waiting for a trade.',
   'You must not say or imply that trading is what creates the asset, validates its existence, or makes it real.',
   'You must describe SRA Coin as one fungible coin formed from multiple eligible Coin Positions. Do not create workflow-specific SRA coin classes or imply that an outside liquidity provider makes SRA Coin fungible.',
+  'Describe a confirmed SRA Coin delivery as completed settlement to the recipient. Keep later holder trading separate from SRA settlement. USD, USDC, cash distribution, redemption, and platform conversion are outside the required settlement result.',
   'When discussing value, distinguish the recorded source amount, current Verified Value, offered price, and executed trade price.',
   'A completed trade records consideration, ownership change, and market history and supplies new evidence; it does not erase the asset\'s prior lineage or automatically redefine Verified Value.'
 ].join('\n');
