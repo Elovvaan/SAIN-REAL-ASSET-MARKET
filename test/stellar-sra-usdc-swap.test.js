@@ -23,7 +23,6 @@ test('SRAUSD/USDC workflow persists quote, confirmed swap, and reconciliation re
   assert.match(router, /ON_CHAIN_SWAP_QUOTE/);
   assert.match(router, /ON_CHAIN_ASSET_SWAP/);
   assert.match(router, /confirmSwap !== true/);
-  assert.match(ui, /Quote Optional SRA\/USDC Exchange/);
-  assert.match(ui, /Execute Optional Exchange/);
   assert.match(ui, /Reconcile Conversion/);
+  assert.doesNotMatch(ui, /\$\{nativeMarket\}\$\{usdcPreparation\}\$\{usdcConversion\}/);
 });

@@ -8,11 +8,11 @@ const router = fs.readFileSync(new URL('../routes/settlement-rail-gateway-router
 const bootstrap = fs.readFileSync(new URL('../public/admin/admin-bootstrap.js', import.meta.url), 'utf8');
 const moneyGram = fs.readFileSync(new URL('../public/admin/admin-moneygram-sandbox-test.js', import.meta.url), 'utf8');
 
-test('admin settlement flow offers governed Circle USDC without replacing dealer package or bank rails', () => {
-  assert.match(ui, /Stellar USDC · Circle-issued/);
-  assert.match(ui, /Dealer elected Circle-issued USDC on Stellar/);
-  assert.match(ui, /confirmMainnetSettlement/);
-  assert.match(ui, /execute-stellar-usdc/);
+test('admin settlement flow offers the instrument path and SRA Coin while preserving the inactive USDC integration', () => {
+  assert.match(ui, /const bankRails = new Set\(\['ACH','FEDWIRE','WIRE'\]\)/);
+  assert.match(ui, /SRA Coin on-chain/);
+  assert.match(ui, /Settle with SRA Coin/);
+  assert.match(ui, /A confirmed SRA transfer pays the recipient/);
   assert.match(ui, /DEAL_PACKAGE/);
   assert.match(gateway, /STELLAR_PAYMENT/);
   assert.match(gateway, /Cancel it before selecting another settlement rail/);
@@ -22,7 +22,7 @@ test('admin settlement flow offers governed Circle USDC without replacing dealer
 
 test('MoneyGram certification tests live in Export and Settlement as sandbox evidence', () => {
   assert.match(bootstrap, /settlement:[\s\S]*admin-moneygram-sandbox-test/);
-  assert.match(bootstrap, /mountAdminMoneyGramSandboxTest\?\.\(settlement\)/);
+  assert.match(bootstrap, /mountAdminMoneyGramSandboxTest\?\.\(root\)/);
   assert.doesNotMatch(bootstrap, /instruments:[\s\S]{0,300}admin-moneygram-sandbox-test/);
   assert.match(moneyGram, /MoneyGram Ramps Sandbox Certification/);
   assert.match(moneyGram, /CASH_OUT_REFUND/);

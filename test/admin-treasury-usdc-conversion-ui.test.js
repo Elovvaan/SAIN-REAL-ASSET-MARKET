@@ -8,11 +8,11 @@ import { createPlatformTreasuryRouter } from '../routes/platform-treasury-router
 const ui=fs.readFileSync(new URL('../public/admin/admin-treasury-workstation.js',import.meta.url),'utf8');
 const router=fs.readFileSync(new URL('../routes/platform-treasury-router.js',import.meta.url),'utf8');
 
-test('Treasury Wallets exposes the governed USD to Stellar USDC lifecycle',()=>{
-  assert.match(ui,/Treasury Wallets & Stellar USDC/);
-  assert.match(ui,/SEPARATE TREASURY OPERATION/);
-  assert.match(ui,/separate from direct SRA Coin issuance and on-chain settlement/);
-  assert.match(ui,/sep24\.ready/);
+test('Treasury Wallets shows retained SRA holdings and keeps conversion APIs outside the settlement UI',()=>{
+  assert.match(ui,/SRA HOLDINGS & SERVICING/);
+  assert.match(ui,/retains the resulting financed position/);
+  assert.match(ui,/conversion takes place outside the SRA settlement workflow/);
+  assert.doesNotMatch(ui,/<form data-usdc-conversion-form/);
   for(const action of ['initiate','confirm-usd-funding','confirm-usdc-receipt','reconcile','reclassify'])assert.match(router,new RegExp(action));
   assert.match(router,/Authenticated SRA treasury identity is required/);
 });

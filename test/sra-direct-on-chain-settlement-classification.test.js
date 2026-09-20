@@ -16,12 +16,14 @@ test('admin keeps exchange controls separate from direct SRA settlement', () => 
   const controls = read('public/admin/admin-on-chain-issuance-controls.js');
   assert.match(controls, /Step 7 · Settle SRA On Chain/);
   assert.match(controls, /Network confirmation completes the direct on-chain SRA settlement/);
-  assert.match(controls, /Optional Post-Settlement Exchange · SRA \/ USDC Market/);
-  assert.match(controls, /Direct SRA issuance and wallet settlement do not use this step/);
+  assert.match(controls, /External Holder Activity/);
+  assert.match(controls, /recipient controls any later wallet transfer, chain movement, exchange, or liquidation outside the SRA settlement workflow/);
+  assert.doesNotMatch(controls, /\$\{nativeMarket\}\$\{usdcPreparation\}\$\{usdcConversion\}/);
 });
 
-test('treasury USDC acquisition is identified as a separate operation', () => {
+test('treasury view retains the financed position instead of offering holder conversion', () => {
   const treasury = read('public/admin/admin-treasury-workstation.js');
-  assert.match(treasury, /SEPARATE TREASURY OPERATION/);
-  assert.match(treasury, /separate from direct SRA Coin issuance and on-chain settlement/);
+  assert.match(treasury, /SRA HOLDINGS & SERVICING/);
+  assert.match(treasury, /retains the resulting financed position/);
+  assert.doesNotMatch(treasury, /<form data-usdc-conversion-form/);
 });

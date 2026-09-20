@@ -333,7 +333,9 @@ try {
   ensureOnChainProjection = createSingleFlightInitializer('On-Chain Projection', async () => {
     onChainProjectionService = new OnChainProjectionService(domain);
     await onChainProjectionService.initialize();
-    return createOnChainProjectionRouter(onChainProjectionService);
+    const financingClosingService = new FinancingClosingService(domain, new AssetServicingService(domain));
+    await financingClosingService.initialize();
+    return createOnChainProjectionRouter(onChainProjectionService, { financingClosingService });
   });
 
   startupState = 'READY';

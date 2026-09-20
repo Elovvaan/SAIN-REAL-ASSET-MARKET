@@ -49,6 +49,12 @@ export class OnChainTransferService {
       asset: normalizeAsset(input.asset),
       amount: text(input.amount),
       destinationAddress: text(input.destinationAddress),
+      sourceType: text(input.sourceType) || null,
+      exportPackageId: text(input.exportPackageId) || null,
+      financingTransactionId: text(input.financingTransactionId) || null,
+      closingId: text(input.closingId) || null,
+      disbursementId: text(input.disbursementId) || null,
+      instrumentId: text(input.instrumentId) || null,
     };
     if (!request.network) throw new Error('network is required.');
     if (!request.asset) throw new Error('asset is required.');

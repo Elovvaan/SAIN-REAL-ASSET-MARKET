@@ -117,7 +117,7 @@ async function adapterHealth(network, adapter) {
   return { network, ...health };
 }
 
-export function createOnChainProjectionRouter(service) {
+export function createOnChainProjectionRouter(service, { financingClosingService = null } = {}) {
   const router = express.Router();
   router.use(normalizeDirectMount);
   const issuanceSourcesInFlight = new Set();
@@ -736,6 +736,23 @@ export function createOnChainProjectionRouter(service) {
         if (existing) return res.status(200).json(existing);
       }
       const network = upper(req.body?.network);
+      const exportPackageId = text(req.body?.exportPackageId);
+      let settlementPackage = null;
+      let settlementAsset = null;
+      if (exportPackageId) {
+        settlementPackage = service.domain.get('EXPORT_PACKAGE', exportPackageId);
+        if (!settlementPackage || upper(settlementPackage.exportKind) !== 'FINANCING_DISBURSEMENT') throw new Error('Financing export package was not found.');
+        if (!['READY_FOR_SETTLEMENT_INSTRUCTION','SETTLEMENT_INSTRUCTION_READY'].includes(upper(settlementPackage.state))) throw new Error(`Financing export package is not ready for on-chain settlement from ${settlementPackage.state}.`);
+        const closing = service.domain.get('FINANCING_CLOSING', settlementPackage.closingId);
+        const disbursement = service.domain.get('FINANCING_DISBURSEMENT', settlementPackage.disbursementId);
+        const financing = service.domain.get('SRA_TRANSACTION', settlementPackage.financingTransactionId);
+        const opportunity = service.domain.get('FUNDING_OPPORTUNITY', settlementPackage.opportunityId);
+        if (!closing || !disbursement || !financing || !opportunity) throw new Error('Financing settlement records are incomplete for retained-position creation.');
+        if (!['AUTHORIZED','SUBMITTED'].includes(upper(disbursement.status))) throw new Error(`Financing disbursement is not awaiting settlement from ${disbursement.status}.`);
+        settlementAsset = service.listAssets({ network }).find((item) => item.instrumentId === settlementPackage.instrumentId && Number(item.issuedSupply || 0) > 0) || null;
+        if (!settlementAsset) throw new Error('Issued SRA Coin representation was not found for this financing instrument and network.');
+        if (Number(req.body?.amount) !== Number(settlementPackage.amount)) throw new Error('On-chain SRA settlement amount must match the authorized export package amount.');
+      }
       const adapter = adapters.get(network);
       if (adapter) {
         const health = await adapterHealth(network, adapter);
@@ -745,7 +762,27 @@ export function createOnChainProjectionRouter(service) {
           throw error;
         }
       }
-      return res.status(201).json(await transfers.send(req.body || {}, actor));
+      const transfer = await transfers.send({
+        ...(req.body || {}),
+        asset:settlementAsset?.asset || req.body?.asset,
+        sourceType:settlementPackage ? 'FINANCING_DISBURSEMENT' : null,
+        financingTransactionId:settlementPackage?.financingTransactionId || null,
+        closingId:settlementPackage?.closingId || null,
+        disbursementId:settlementPackage?.disbursementId || null,
+        instrumentId:settlementPackage?.instrumentId || null,
+      }, actor);
+      let retainedPosition = null;
+      if (settlementPackage && transfer.state === 'CONFIRMED') {
+        if (!financingClosingService) throw new Error('Financing closing service is unavailable for retained-position creation.');
+        const settled = await financingClosingService.recordSettlement(
+          settlementPackage.closingId,
+          settlementPackage.disbursementId,
+          { externalReference:transfer.transactionId },
+          actor,
+        );
+        retainedPosition = settled.financedPosition;
+      }
+      return res.status(201).json({ ...transfer, settlementComplete:transfer.state === 'CONFIRMED', recipientPaid:transfer.state === 'CONFIRMED', retainedPosition });
     } catch (error) { return handle(res, error); }
   });
 
