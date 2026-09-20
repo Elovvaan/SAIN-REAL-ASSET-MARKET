@@ -27,7 +27,7 @@ test('market activation is governed, persisted, monitored, and exposed in Instru
   assert.match(router,/markets\/usdc\/prepare/);
   assert.match(router,/ON_CHAIN_USDC_MARKET_READINESS/);
   assert.match(router,/markets\/usdc\/:marketId\/reconcile/);
-  assert.match(ui,/Activate Two-Sided Market/);
+  assert.match(ui,/Activate Optional SRA\/USDC Market/);
   assert.match(ui,/data-reconcile-usdc-market/);
   assert.match(ui,/\/api\/on-chain\/usdc-markets/);
 });

@@ -179,17 +179,17 @@ export function createAccessRouter(marketplace, service = new AccessService()) {
     const coinPositions = records(RECORD_TYPES.COIN_POSITION);
     const onChainAssets = records('ON_CHAIN_ASSET');
     const issuedAssets = onChainAssets.filter((record) => Number(record.issuedSupply || 0) > 0 || String(record.state || '').toUpperCase().includes('ISSUED'));
-    const marketReadiness = records('ON_CHAIN_USDC_MARKET_READINESS');
-    const activeMarkets = records('ON_CHAIN_USDC_MARKET').filter((record) => ['ACTIVE','CONFIRMED','READY','TWO_SIDED'].includes(String(record.state || record.confirmation?.state || '').toUpperCase()) || String(record.confirmation?.state || '').toUpperCase() === 'CONFIRMED');
+    const onChainTransfers = records('ON_CHAIN_TRANSFER');
+    const confirmedTransfers = onChainTransfers.filter((record) => String(record.state || record.confirmation?.state || '').toUpperCase() === 'CONFIRMED');
     const moneyGramTests = records('MONEYGRAM_SANDBOX_CERTIFICATION_TEST');
     const completedMoneyGramTests = moneyGramTests.filter((record) => ['COMPLETED','CONFIRMED','CERTIFIED'].some((state) => String(record.anchorStatus || record.status || record.state || '').toUpperCase().includes(state)));
     return {
-      phase: 'INFRASTRUCTURE_LIQUIDITY_BUILDOUT',
+      phase: 'VERIFIED_ASSET_SETTLEMENT',
       updatedAt: new Date().toISOString(),
       stages: [
         { id:'VERIFIED_POSITIONS', label:'Verified positions', state:financialRecords.length || coinPositions.length || instruments.length ? 'ACTIVE' : 'AVAILABLE', detail:`${financialRecords.length} financial records · ${coinPositions.length} coin positions · ${instruments.length} instruments` },
         { id:'ON_CHAIN_REPRESENTATION', label:'On-chain representation', state:issuedAssets.length ? 'ACTIVE' : onChainAssets.length ? 'PREPARED' : 'AVAILABLE', detail:issuedAssets.length ? `${issuedAssets.length} issued on-chain asset${issuedAssets.length === 1 ? '' : 's'}` : onChainAssets.length ? `${onChainAssets.length} on-chain asset record${onChainAssets.length === 1 ? '' : 's'} awaiting issuance` : 'Authorized workflow available' },
-        { id:'SRAUSD_USDC_LIQUIDITY', label:'SRAUSD / USDC liquidity', state:activeMarkets.length ? 'ACTIVE' : marketReadiness.length ? 'PREPARED' : 'AWAITING_LIQUIDITY', detail:activeMarkets.length ? `${activeMarkets.length} confirmed Stellar market${activeMarkets.length === 1 ? '' : 's'}` : marketReadiness.length ? 'Trustline prepared; USDC inventory and activation required' : 'USDC inventory and two-sided market activation required' },
+        { id:'ON_CHAIN_SETTLEMENT', label:'SRA on-chain settlement', state:confirmedTransfers.length ? 'ACTIVE' : issuedAssets.length ? 'READY' : onChainAssets.length ? 'PREPARED' : 'AVAILABLE', detail:confirmedTransfers.length ? `${confirmedTransfers.length} confirmed SRA on-chain transfer${confirmedTransfers.length === 1 ? '' : 's'}` : issuedAssets.length ? 'Issued SRA is ready for direct wallet settlement' : onChainAssets.length ? 'On-chain representation is prepared for SRA issuance' : 'Authorized issuance and direct transfer workflow available' },
         { id:'FIAT_RAMP', label:'Fiat entry and exit', state:completedMoneyGramTests.length >= 3 ? 'CERTIFIED' : moneyGramTests.length ? 'SANDBOX_TESTING' : 'PENDING_PROVIDER', detail:completedMoneyGramTests.length >= 3 ? 'MoneyGram sandbox scenarios completed' : `${completedMoneyGramTests.length} of 3 MoneyGram sandbox scenarios completed` }
       ]
     };

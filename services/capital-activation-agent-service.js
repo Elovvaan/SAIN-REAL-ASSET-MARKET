@@ -44,9 +44,9 @@ export class CapitalActivationAgentService {
       const marketLive = ACTIVE_MARKET_STATES.has(upper(market?.state || market?.confirmation?.state || offer?.state));
       let classification = 'DORMANT'; let action = 'ISSUE_APPROVED_SUPPLY'; let reason = 'The representation exists, but no issued units are available to activate.';
       if (reserved) { classification = 'RESERVED'; action = 'MONITOR_SETTLEMENT'; reason = 'Units are committed to an open reservation or settlement workflow.'; }
-      else if (marketLive) { classification = 'DEPLOYABLE'; action = 'MONITOR_AND_REBALANCE'; reason = 'Issued inventory has an active market route.'; }
-      else if (issued > 0 && ready) { classification = 'LIQUIDITY_BLOCKED'; action = 'FUND_COUNTER_ASSET_AND_ACTIVATE_MARKET'; reason = 'Issued inventory is present, but the SRAUSD/USDC market still needs counter-asset liquidity or confirmation.'; }
-      else if (issued > 0) { classification = 'MARKET_READY'; action = 'PREPARE_SRAUSD_USDC_MARKET'; reason = 'Issued inventory is online and can be prepared for a governed market activation.'; }
+      else if (marketLive) { classification = 'DEPLOYABLE'; action = 'SETTLE_OR_MONITOR_OPTIONAL_MARKET'; reason = 'Issued SRA is ready for direct settlement and also has an active optional exchange route.'; }
+      else if (issued > 0 && ready) { classification = 'SETTLEMENT_READY'; action = 'TRANSFER_SRA_OR_USE_OPTIONAL_EXCHANGE'; reason = 'Issued SRA is ready for direct wallet settlement; the prepared USDC route remains an optional holder exchange.'; }
+      else if (issued > 0) { classification = 'SETTLEMENT_READY'; action = 'TRANSFER_SRA_ON_CHAIN'; reason = 'Issued SRA is online and ready for direct wallet settlement.'; }
       queue.push({ assetId, instrumentId, coinPositionId:idOf(position) || null, network:upper(asset.network) || 'UNKNOWN', symbol:asset.asset || asset.assetCode || asset.symbol || 'SRA', availableAmount:available, issuedAmount:issued, classification, recommendedAction:action, reason, executionAuthorized:false });
     }
 
@@ -59,8 +59,8 @@ export class CapitalActivationAgentService {
 
     const counts = queue.reduce((result, item) => ({ ...result, [item.classification]:(result[item.classification] || 0) + 1 }), {});
     return {
-      agentId:'SRA-CAPITAL-ACTIVATION-AGENT', state:queue.some((item) => item.classification === 'LIQUIDITY_BLOCKED') ? 'ACTION_REQUIRED' : 'CURRENT', generatedAt:new Date().toISOString(), policy:CAPITAL_ACTIVATION_POLICY,
-      summary:{ totalAssets:queue.length, deployable:counts.DEPLOYABLE || 0, marketReady:counts.MARKET_READY || 0, liquidityBlocked:counts.LIQUIDITY_BLOCKED || 0, dormant:counts.DORMANT || 0, reserved:counts.RESERVED || 0, availableUnits:queue.reduce((sum,item)=>sum+item.availableAmount,0) },
+      agentId:'SRA-CAPITAL-ACTIVATION-AGENT', state:'CURRENT', generatedAt:new Date().toISOString(), policy:CAPITAL_ACTIVATION_POLICY,
+      summary:{ totalAssets:queue.length, deployable:counts.DEPLOYABLE || 0, settlementReady:counts.SETTLEMENT_READY || 0, dormant:counts.DORMANT || 0, reserved:counts.RESERVED || 0, availableUnits:queue.reduce((sum,item)=>sum+item.availableAmount,0) },
       queue,
       externalMarketBoundary:{ state:'OBSERVATION_ONLY', supportedUniverse:['PUBLIC_EQUITIES','DIGITAL_ASSETS','VERIFIED_DEFI'], executionRequirements:['AUTHORIZED_VENUE_CONNECTION','APPROVED_CAPITAL_MANDATE','INSTRUMENT_VERIFICATION','ADMINISTRATOR_APPROVAL'] },
     };

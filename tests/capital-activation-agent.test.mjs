@@ -8,17 +8,21 @@ class Domain {
   async put(type, id, payload) { this.records[type] ||= []; this.records[type].push(payload); return payload; }
 }
 
-test('classifies issued inventory without a market as market ready', () => {
+test('classifies issued inventory without a market as settlement ready', () => {
   const service = new CapitalActivationAgentService(new Domain({ ON_CHAIN_ASSET:[{assetId:'A-1',instrumentId:'INS-1',network:'STELLAR',asset:'SRAUSD',issuedSupply:100000}], COIN_POSITION:[], SRA_COIN_POSITION:[], ON_CHAIN_USDC_MARKET:[], ON_CHAIN_USDC_MARKET_READINESS:[], ON_CHAIN_MARKET_OFFER:[], POSITION_RESERVATION:[] }));
   const snapshot = service.snapshot();
-  assert.equal(snapshot.queue[0].classification, 'MARKET_READY');
+  assert.equal(snapshot.queue[0].classification, 'SETTLEMENT_READY');
+  assert.equal(snapshot.queue[0].recommendedAction, 'TRANSFER_SRA_ON_CHAIN');
   assert.equal(snapshot.queue[0].executionAuthorized, false);
 });
 
-test('distinguishes liquidity-blocked and active market inventory', () => {
+test('keeps optional exchange readiness separate from direct settlement readiness', () => {
   const records = { ON_CHAIN_ASSET:[{assetId:'A-1',instrumentId:'INS-1',issuedSupply:25},{assetId:'A-2',instrumentId:'INS-2',issuedSupply:50}], COIN_POSITION:[], SRA_COIN_POSITION:[], ON_CHAIN_USDC_MARKET_READINESS:[{assetId:'A-1'}], ON_CHAIN_USDC_MARKET:[{assetId:'A-2',state:'ACTIVE'}], ON_CHAIN_MARKET_OFFER:[], POSITION_RESERVATION:[] };
   const snapshot = new CapitalActivationAgentService(new Domain(records)).snapshot();
-  assert.equal(snapshot.queue.find((item)=>item.assetId === 'A-1').classification, 'LIQUIDITY_BLOCKED');
+  const issued = snapshot.queue.find((item)=>item.assetId === 'A-1');
+  assert.equal(issued.classification, 'SETTLEMENT_READY');
+  assert.equal(issued.recommendedAction, 'TRANSFER_SRA_OR_USE_OPTIONAL_EXCHANGE');
+  assert.equal(snapshot.summary.settlementReady, 1);
   assert.equal(snapshot.queue.find((item)=>item.assetId === 'A-2').classification, 'DEPLOYABLE');
 });
 
