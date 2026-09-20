@@ -43,6 +43,13 @@ test('requires recorded Coin Position authority',()=>{
   assert.ok(service.evaluate('INS-1','CP-1').blockers.includes('COIN_POSITION_AUTHORITY_REQUIRED'));
 });
 
+test('preserves documentary source restrictions without changing SRA Coin fungibility',()=>{
+  const {service}=fixture({position:{restrictions:[{type:'NO_UNDERLYING_ACCOUNT_OWNERSHIP_INFERRED'}],assetIdentity:'SRA_COIN',fungibility:'FUNGIBLE'}});
+  const assessment=service.evaluate('INS-1','CP-1');
+  assert.equal(assessment.eligible,true);
+  assert.equal(assessment.blockers.includes('COIN_POSITION_RESTRICTED'),false);
+});
+
 test('blocks conflicting prior linkage',()=>{
   const {service}=fixture({position:{instrumentId:'INS-OTHER'}});
   assert.ok(service.evaluate('INS-1','CP-1').blockers.includes('COIN_POSITION_ALREADY_LINKED'));

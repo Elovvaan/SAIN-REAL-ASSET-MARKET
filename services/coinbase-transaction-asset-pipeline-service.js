@@ -32,7 +32,7 @@ export class CoinbaseTransactionAssetPipelineService {
     this.environment = environment;
     this.logger = logger;
     this.enabled = String(environment.COINBASE_TRANSACTION_ASSET_PIPELINE_ENABLED ?? 'true').toLowerCase() !== 'false';
-    this.instrumentFormationEnabled = String(environment.COINBASE_TRANSACTION_INSTRUMENT_FORMATION_ENABLED ?? 'true').toLowerCase() !== 'false';
+    this.instrumentFormationEnabled = String(environment.COINBASE_TRANSACTION_INSTRUMENT_FORMATION_ENABLED ?? 'false').toLowerCase() === 'true';
     this.instrumentEngine = instrumentEngineService || new InstrumentEngineService(this.domain);
     this.backfillLimit = Number(environment.COINBASE_TRANSACTION_ASSET_BACKFILL_LIMIT || 5000);
     this.processed = 0;
@@ -139,6 +139,11 @@ export class CoinbaseTransactionAssetPipelineService {
     const updatedAt = new Date().toISOString();
     const updated = {
       ...coinPosition,
+      symbol: 'SRA',
+      assetIdentity: 'SRA_COIN',
+      assetName: 'SRA Coin',
+      fungibility: 'FUNGIBLE',
+      restrictions: (coinPosition.restrictions || []).filter((restriction) => restriction?.type !== 'MARKET_ACCESS_SUBJECT_TO_PLATFORM_WORKFLOW'),
       sourcePosition: expectedSourcePosition,
       nativeQuantity: size,
       nativeUnit,
@@ -322,7 +327,6 @@ export class CoinbaseTransactionAssetPipelineService {
           conversionRate: 1,
           representationType: 'TRANSACTION_FINANCIAL_ASSET_POSITION',
           methodologyReference: 'ONE_SRA_UNIT_PER_RECORDED_USD_OF_SOURCE_TRANSACTION_NOTIONAL',
-          restrictions: [{ type: 'MARKET_ACCESS_SUBJECT_TO_PLATFORM_WORKFLOW' }],
           reason: 'Coinbase transaction financial asset represented as an SRA Coin Position.'
         }, ACTOR_ID);
         coinPosition = result.coinPosition;

@@ -143,7 +143,14 @@ export class FinancialRecordService {
     if (!['RECORDED', 'ACTIVE', 'RESTRICTED'].includes(record.state)) throw new Error('Only an open financial record can receive coin representation.');
 
     const existing = this.listCoinPositions({ financialRecordId }).find((position) => position.state !== 'RETIRED');
-    if (existing) return { coinPosition: existing, coinAccount: this.getCoinAccount(existing.coinAccountId), created: false };
+    if (existing) {
+      const symbol = normalizedUnit(existing.symbol || 'SRA');
+      const normalized = symbol === 'SRA' && (existing.assetIdentity !== 'SRA_COIN' || existing.fungibility !== 'FUNGIBLE')
+        ? { ...existing, symbol: 'SRA', assetIdentity: 'SRA_COIN', assetName: 'SRA Coin', fungibility: 'FUNGIBLE', updatedAt: new Date().toISOString() }
+        : existing;
+      if (normalized !== existing) await this.persistentDomain.put(RECORD_TYPES.COIN_POSITION, existing.coinPositionId, normalized, { actorId, eventType: 'SRA_COIN_IDENTITY_RECOGNIZED' });
+      return { coinPosition: normalized, coinAccount: this.getCoinAccount(existing.coinAccountId), created: false };
+    }
 
     const sourceAmount = finitePositive(record.recognizedPosition?.amount, 'recognizedPosition.amount');
     const sourceUnit = normalizedUnit(record.recognizedPosition?.unit);
@@ -197,6 +204,9 @@ export class FinancialRecordService {
       recognitionId: record.recognitionId,
       observationId: record.observationId,
       symbol,
+      assetIdentity: symbol === 'SRA' ? 'SRA_COIN' : symbol,
+      assetName: symbol === 'SRA' ? 'SRA Coin' : symbol,
+      fungibility: symbol === 'SRA' ? 'FUNGIBLE' : null,
       representationType: requireText(input.representationType || 'FINANCIAL_RECORD_POSITION', 'representationType').toUpperCase(),
       sourcePosition: {
         amount: sourceAmount,

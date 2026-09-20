@@ -63,7 +63,14 @@ export class PlatformFundingInstrumentDepositService {
       createdAt: timestamp,
       updatedAt: timestamp,
     };
-    const coinPosition = existingPosition || {
+    const coinPosition = existingPosition ? {
+      ...existingPosition,
+      symbol: 'SRA',
+      assetIdentity: 'SRA_COIN',
+      assetName: 'SRA Coin',
+      fungibility: 'FUNGIBLE',
+      updatedAt: timestamp,
+    } : {
       coinPositionId: PLATFORM_COIN_POSITION_ID,
       coinAccountId: PLATFORM_COIN_ACCOUNT_ID,
       sourceInstrumentId: instrument.instrumentId,
@@ -72,6 +79,9 @@ export class PlatformFundingInstrumentDepositService {
       ownerId: 'SRA_PLATFORM',
       ownerType: 'PLATFORM',
       symbol: 'SRA',
+      assetIdentity: 'SRA_COIN',
+      assetName: 'SRA Coin',
+      fungibility: 'FUNGIBLE',
       representationType: 'PLATFORM_FUNDING_INSTRUMENT_POSITION',
       sourcePosition: { amount: quantity, unit: 'USD', asOf: deposit.depositedAt || timestamp, basis: 'PLATFORM_FUNDING_INSTRUMENT_TREASURY_DEPOSIT' },
       recordedValue: { amount: quantity, currency: 'USD' },
@@ -109,7 +119,12 @@ export class PlatformFundingInstrumentDepositService {
     const instrument = this.domain.get(RECORD_TYPES.SRA_INSTRUMENT, CANONICAL_PLATFORM_FUNDING_INSTRUMENT_ID);
     if (!deposit || !instrument) return { created: false, reason: 'CANONICAL_DEPOSIT_NOT_AVAILABLE' };
     const records = this.representationRecords(deposit, instrument, actorId);
-    if (records.existingPosition) return { created: false, coinAccount: records.coinAccount, coinPosition: records.coinPosition };
+    if (records.existingPosition) {
+      if (records.existingPosition.assetIdentity !== 'SRA_COIN' || records.existingPosition.fungibility !== 'FUNGIBLE') {
+        await this.domain.put(RECORD_TYPES.COIN_POSITION, PLATFORM_COIN_POSITION_ID, records.coinPosition, { actorId, eventType: 'SRA_COIN_IDENTITY_RECOGNIZED' });
+      }
+      return { created: false, coinAccount: records.coinAccount, coinPosition: records.coinPosition };
+    }
     const timestamp = records.coinPosition.createdAt;
     await this.domain.atomicPut([
       { type: RECORD_TYPES.COIN_ACCOUNT, id: PLATFORM_COIN_ACCOUNT_ID, payload: records.coinAccount, actorId, eventType: 'PLATFORM_TREASURY_COIN_ACCOUNT_OPENED' },

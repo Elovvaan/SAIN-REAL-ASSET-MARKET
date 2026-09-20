@@ -70,7 +70,7 @@
         ${metric('Coinbase connector', sourceState(snapshot.coinbase), `${number(coinbase.recordedTrades)} trades recorded`)}
         ${metric('Market observations', observations.total ?? observations.count ?? 0, 'Observation Layer records')}
         ${metric('Financial Records', records.total ?? records.count ?? 0, 'Recognized financial positions')}
-        ${metric('SRA Coin Positions', coinPositions.length, 'Digital financial assets')}
+        ${metric('SRA Coin Positions', coinPositions.length, 'Positions in the same fungible SRA Coin')}
         ${metric('Instruments', instruments.length, 'Recorded SRA instruments')}
         ${metric('Transactions', transactions.total ?? transactions.count ?? 0, 'Transaction Engine records')}
         ${metric('Hardware wallets', treasury.activeWalletCount ?? 0, `${number(treasury.wallets?.length || 0)} treasury records`)}

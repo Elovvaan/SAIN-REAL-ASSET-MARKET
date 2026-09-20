@@ -59,6 +59,8 @@ test('issued opportunities across asset classes create distinct selectable Coin 
   for(const item of cases){
     const ids=opportunityInstrumentRepresentationIds(item.instrumentId);
     const position=domain.get('COIN_POSITION',ids.coinPositionId);
+    assert.equal(position.assetIdentity,'SRA_COIN');
+    assert.equal(position.fungibility,'FUNGIBLE');
     assert.equal(position.quantity,item.amount);
     assert.equal(position.availableQuantity,item.amount);
     assert.equal(position.externalizedQuantity,0);
@@ -110,4 +112,6 @@ test('reconciliation reuses an existing direct instrument position instead of du
   assert.equal(result.created,0);
   assert.equal(domain.list('COIN_POSITION').length,1);
   assert.equal(domain.get('COIN_POSITION','CP-LEGACY').externalizedQuantity,100_000);
+  assert.equal(domain.get('COIN_POSITION','CP-LEGACY').assetIdentity,'SRA_COIN');
+  assert.equal(domain.get('COIN_POSITION','CP-LEGACY').fungibility,'FUNGIBLE');
 });

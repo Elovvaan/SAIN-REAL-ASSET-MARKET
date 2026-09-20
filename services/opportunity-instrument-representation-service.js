@@ -112,6 +112,9 @@ export class OpportunityInstrumentRepresentationService {
       ownerId,
       ownerType: ownerId === 'SRA_PLATFORM' ? 'PLATFORM' : 'PARTICIPANT',
       symbol: 'SRA',
+      assetIdentity: 'SRA_COIN',
+      assetName: 'SRA Coin',
+      fungibility: 'FUNGIBLE',
       representationType: 'FUNDING_OPPORTUNITY_OBLIGATION_POSITION',
       sourcePosition: { amount, unit: currency, asOf: instrument.issuedAt || timestamp, basis: 'ISSUED_INSTRUMENT_FACE_VALUE' },
       recordedValue: { amount, currency: currency === 'USD' ? 'USD' : currency },
@@ -148,7 +151,14 @@ export class OpportunityInstrumentRepresentationService {
   async ensureForInstrument(instrumentId, actorId = 'SRA_OPPORTUNITY_REPRESENTATION_SYSTEM') {
     const assessment = this.inspect(instrumentId);
     if (!assessment.eligible) return { created: false, assessment };
-    if (assessment.coinPosition) return { created: false, assessment, coinPosition: assessment.coinPosition };
+    if (assessment.coinPosition) {
+      const current = assessment.coinPosition;
+      const coinPosition = current.assetIdentity === 'SRA_COIN' && current.fungibility === 'FUNGIBLE'
+        ? current
+        : { ...current, symbol: 'SRA', assetIdentity: 'SRA_COIN', assetName: 'SRA Coin', fungibility: 'FUNGIBLE', updatedAt: new Date().toISOString() };
+      if (coinPosition !== current) await this.domain.put(RECORD_TYPES.COIN_POSITION, coinPosition.coinPositionId, coinPosition, { actorId, eventType: 'SRA_COIN_IDENTITY_RECOGNIZED' });
+      return { created: false, assessment, coinPosition };
+    }
     const timestamp = new Date().toISOString();
     const records = this.records(assessment, actorId, timestamp);
     const instrument = { ...assessment.instrument, preparedFinancialRecordId: assessment.ids.financialRecordId, preparedCoinPositionId: assessment.ids.coinPositionId, updatedAt: timestamp };

@@ -82,10 +82,13 @@ test('Coinbase trade becomes a Recognition, Financial Record, and SRA Coin Posit
   assert.equal(result.financialRecord.observationId, observation.observationId);
 
   assert.equal(result.coinPosition.symbol, 'SRA');
+  assert.equal(result.coinPosition.assetIdentity, 'SRA_COIN');
+  assert.equal(result.coinPosition.fungibility, 'FUNGIBLE');
   assert.equal(result.coinPosition.quantity, 600);
   assert.equal(result.coinPosition.representationType, 'TRANSACTION_FINANCIAL_ASSET_POSITION');
   assert.equal(result.coinPosition.sourceLineage.observationId, observation.observationId);
   assert.equal(result.coinPosition.state, 'REPRESENTED');
+  assert.equal(result.coinPosition.restrictions.some((item) => item.type === 'MARKET_ACCESS_SUBJECT_TO_PLATFORM_WORKFLOW'), false);
   assert.equal(result.instrument, null);
 
   assert.equal(domain.list(RECORD_TYPES.RECOGNITION_ASSESSMENT).length, 1);

@@ -24,4 +24,6 @@ test('pipeline preserves transaction asset language and creates an SRA Coin Posi
   assert.match(pipeline, /TRANSACTION_FINANCIAL_ASSET_POSITION/);
   assert.match(pipeline, /representAsCoin/);
   assert.match(pipeline, /SOURCE_TRANSACTION_NOTIONAL/);
+  assert.match(pipeline, /assetIdentity: 'SRA_COIN'/);
+  assert.match(pipeline, /fungibility: 'FUNGIBLE'/);
 });

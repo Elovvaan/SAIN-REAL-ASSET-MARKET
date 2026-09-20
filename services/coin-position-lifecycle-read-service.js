@@ -88,6 +88,9 @@ export class CoinPositionLifecycleReadService {
       const currentOwnerId = ownershipOwner(latestOwnership) || position.ownerId || position.participantId || initialOwnerId;
       return {
         coinPositionId: idOf(position),
+        assetIdentity: position.assetIdentity || 'SRA_COIN',
+        assetName: position.assetName || 'SRA Coin',
+        fungibility: position.fungibility || 'FUNGIBLE',
         financialRecordId: position.financialRecordId || null,
         instrumentId: position.instrumentId || instrument?.instrumentId || null,
         state: stateOf(position),

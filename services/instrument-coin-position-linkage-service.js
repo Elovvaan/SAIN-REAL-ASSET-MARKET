@@ -107,7 +107,6 @@ export class InstrumentCoinPositionLinkageService {
     if (isDerivative(position)) blockers.push('ROOT_COIN_POSITION_REQUIRED');
     if (upper(position.symbol || position.assetCode || 'SRA') !== 'SRA') blockers.push('SRA_DENOMINATION_REQUIRED');
     if (!text(position.ownerId || position.participantId || position.coinAccountId)) blockers.push('COIN_POSITION_AUTHORITY_REQUIRED');
-    if (Array.isArray(position.restrictions) && position.restrictions.length) blockers.push('COIN_POSITION_RESTRICTED');
     if (position.frozen || position.complianceHold || position.transferRestricted || position.externalTransferRestricted || position.disputeState === 'OPEN') blockers.push('COIN_POSITION_RESTRICTED');
     const existingPositionId = instrumentPositionId(instrument);
     const existingInstrumentId = positionInstrumentId(position);
@@ -183,7 +182,7 @@ export class InstrumentCoinPositionLinkageService {
       ownerId: position.ownerId || position.participantId || position.coinAccountId || null,
       instrumentId: positionInstrumentId(position),
       rootPosition: !isDerivative(position),
-      restricted: Array.isArray(position.restrictions) && position.restrictions.length > 0,
+      restricted: Boolean(position.frozen || position.complianceHold || position.transferRestricted || position.externalTransferRestricted || position.disputeState === 'OPEN'),
     }));
     return { model: 'INSTRUMENT_COIN_POSITION_LINKAGE', instruments, positions };
   }
