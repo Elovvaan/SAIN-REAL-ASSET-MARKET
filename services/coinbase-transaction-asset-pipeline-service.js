@@ -239,6 +239,53 @@ export class CoinbaseTransactionAssetPipelineService {
     return instrument;
   }
 
+  async processConsolidatedMarketFlow(observation) {
+    const raw = observation.rawValues || {};
+    const productId = String(raw.productId || '').toUpperCase();
+    const { baseAsset: nativeUnit, quoteAsset: quoteCurrency } = productAssets(productId);
+    if (quoteCurrency !== 'USD') {
+      const error = new Error(`Coinbase product ${productId} is quoted in ${quoteCurrency}. SRA par representation requires an explicit USD valuation and does not infer FX conversion.`);
+      error.code = 'COINBASE_NON_USD_QUOTE_REQUIRES_FX_CONVERSION';
+      throw error;
+    }
+    const price = finitePositive(raw.price, 'flow price');
+    const size = finitePositive(raw.size, 'flow size');
+    const notional = finitePositive(raw.notional, 'flow notional');
+    const tradeCount = Math.max(1, Number(raw.tradeCount || 1));
+    const key = shortHash(`COINBASE:${productId}`);
+    const ids = { recognition: `REC-CB-FLOW-${key}`, account: `FRA-CB-${key}`, financialRecord: `FR-CB-FLOW-${key}`, coinAccount: `CA-CB-${key}`, coinPosition: `CP-CB-FLOW-${key}` };
+    const load = async (type, id) => this.domain.hydrateRecord ? this.domain.hydrateRecord(type, id) : this.domain.get(type, id);
+    const [priorRecognition, priorAccount, priorRecord, priorCoinAccount, priorPosition] = await Promise.all([
+      load(RECORD_TYPES.RECOGNITION_ASSESSMENT, ids.recognition), load(RECORD_TYPES.FINANCIAL_RECORD_ACCOUNT, ids.account),
+      load(RECORD_TYPES.FINANCIAL_RECORD, ids.financialRecord), load(RECORD_TYPES.COIN_ACCOUNT, ids.coinAccount), load(RECORD_TYPES.COIN_POSITION, ids.coinPosition)
+    ]);
+    if (priorPosition?.lastFlowObservationId === observation.observationId) return { processed: true, observation, recognition: priorRecognition, financialRecord: priorRecord, coinPosition: priorPosition, instrument: null, pipelineBoundary: 'COIN_POSITION' };
+    const timestamp = observation.sourceTimestamp || observation.observedAt || new Date().toISOString();
+    const cumulative = {
+      tradeCount: Number(priorPosition?.sourceTradeCount || 0) + tradeCount,
+      batchCount: Number(priorPosition?.sourceBatchCount || 0) + 1,
+      nativeQuantity: Number((Number(priorPosition?.sourcePosition?.amount || 0) + size).toFixed(8)),
+      representedSra: Number((Number(priorPosition?.quantity || 0) + notional).toFixed(8))
+    };
+    const subject = { subjectType: 'MARKET_PRODUCT', subjectId: `COINBASE:${productId}`, displayName: `${productId} Coinbase market flow` };
+    const recognition = { ...(priorRecognition || {}), recognitionId: ids.recognition, observationId: observation.observationId, engine: 'SAIN_RECOGNITION_ENGINE', version: 3, phase: 2, identity: subject, source: { market: 'COINBASE', sourceRecordId: observation.sourceRecordId, sourceRecordType: 'MARKET_FLOW', payloadDigest: observation.payloadDigest, sourceReference: observation.sourceReference, sourceTimestamp: timestamp, observedAt: observation.observedAt }, authority: { basis: 'AUTHORIZED_PUBLIC_MARKET_DATA', scope: 'Record and recognize summarized Coinbase public market activity inside SRA.', reference: observation.sourceReference }, evidence: { items: [{ type: 'COINBASE_PUBLIC_MARKET_FLOW', reference: observation.sourceReference }], sourcePayloadIncluded: true }, classification: { type: 'VERIFIED_MARKET_TRANSACTION', category: observation.category, description: 'Summarized Coinbase market activity recognized as one SRA market flow.' }, relationships: [{ type: 'MARKET_PRODUCT', id: productId }, { type: 'SOURCE_CONNECTOR', id: observation.connectorId }], measurement: { method: 'SOURCE_TRANSACTION_NOTIONAL', unit: 'USD', value: cumulative.representedSra, asOf: timestamp, inputs: raw, methodologyReference: 'COINBASE_FLOW_NOTIONAL' }, decision: 'RECOGNIZED', state: 'RECOGNIZED', assessedBy: ACTOR_ID, assessedAt: timestamp };
+    const account = { ...(priorAccount || {}), financialAccountId: ids.account, name: `${productId} Coinbase Market Flow Account`, subjectType: subject.subjectType, subjectId: subject.subjectId, currencyOrUnit: 'USD', state: 'ACTIVE', recordCount: 1, latestFinancialRecordId: ids.financialRecord, createdBy: priorAccount?.createdBy || ACTOR_ID, createdAt: priorAccount?.createdAt || timestamp, updatedAt: timestamp };
+    const financialRecord = { ...(priorRecord || {}), financialRecordId: ids.financialRecord, financialAccountId: ids.account, recognitionId: ids.recognition, observationId: observation.observationId, recordType: 'MARKET_FLOW_FINANCIAL_ASSET', identity: subject, source: recognition.source, authority: recognition.authority, evidence: recognition.evidence, classification: recognition.classification, relationships: recognition.relationships, measurement: recognition.measurement, recognizedPosition: { amount: cumulative.representedSra, unit: 'USD', asOf: timestamp, basis: 'CUMULATIVE_SOURCE_TRANSACTION_NOTIONAL' }, rights: [{ type: 'SRA_RECORDED_TRANSACTION_ASSET_RIGHT', scope: 'Recorded digital financial-asset representation inside SRA.' }], obligations: [{ type: 'SOURCE_TRACEABILITY_OBLIGATION' }], restrictions: [{ type: 'NO_UNDERLYING_ACCOUNT_OWNERSHIP_INFERRED' }], state: 'RECORDED', phase: 3, version: 3, recordedBy: priorRecord?.recordedBy || ACTOR_ID, recordedAt: priorRecord?.recordedAt || timestamp, updatedAt: timestamp };
+    const coinAccount = { ...(priorCoinAccount || {}), coinAccountId: ids.coinAccount, financialAccountId: ids.account, subjectType: subject.subjectType, subjectId: subject.subjectId, symbol: 'SRA', state: 'ACTIVE', positionCount: 1, representedQuantity: cumulative.representedSra, createdBy: priorCoinAccount?.createdBy || ACTOR_ID, createdAt: priorCoinAccount?.createdAt || timestamp, updatedAt: timestamp };
+    const coinPosition = { ...(priorPosition || {}), coinPositionId: ids.coinPosition, coinAccountId: ids.coinAccount, financialRecordId: ids.financialRecord, financialAccountId: ids.account, recognitionId: ids.recognition, observationId: observation.observationId, symbol: 'SRA', assetIdentity: 'SRA_COIN', assetName: 'SRA Coin', fungibility: 'FUNGIBLE', representationType: 'CONSOLIDATED_MARKET_FLOW_POSITION', sourcePosition: { amount: cumulative.nativeQuantity, unit: nativeUnit, asOf: timestamp, basis: 'COINBASE_MARKET_FLOW' }, nativeQuantity: cumulative.nativeQuantity, nativeUnit, recordedValue: { amount: cumulative.representedSra, currency: 'USD' }, representedValueUsd: cumulative.representedSra, conversionRule: { method: 'RECORDED_USD_VALUE_AT_PAR', rate: 1, sourceUnit: 'USD', originalSourceUnit: nativeUnit, coinUnit: 'SRA', methodologyReference: 'ONE_SRA_UNIT_PER_RECORDED_USD_OF_SOURCE_TRANSACTION_NOTIONAL' }, quantity: cumulative.representedSra, availableQuantity: cumulative.representedSra, ownerId: PLATFORM_OWNER_ID, ownerType: 'PLATFORM', initialOwnerId: PLATFORM_OWNER_ID, ownershipState: 'PLATFORM_OWNED', ownershipBasis: 'VERIFIED_COINBASE_MARKET_FLOW', rights: financialRecord.rights, obligations: financialRecord.obligations, restrictions: financialRecord.restrictions, marketDestination: 'SRA_LIVING_MARKET', marketState: 'LIVE', sourceFlow: 'COINBASE_PUBLIC_MARKET', sourceTradeCount: cumulative.tradeCount, sourceBatchCount: cumulative.batchCount, lastFlowObservationId: observation.observationId, valuation: { method: 'COINBASE_FLOW_VWAP_TIMES_QUANTITY', source: 'COINBASE', productId, nativeQuantity: size, nativeUnit, price, lastPrice: Number(raw.lastPrice || price), priceCurrency: 'USD', recognizedValueUsd: notional, asOf: timestamp }, sourceLineage: { latestObservationId: observation.observationId, source: recognition.source, evidence: recognition.evidence }, state: 'REPRESENTED', phase: 4, version: 4, representedBy: priorPosition?.representedBy || ACTOR_ID, representedAt: priorPosition?.representedAt || timestamp, updatedAt: timestamp };
+    const updatedObservation = { ...observation, recognitionState: 'RECOGNIZED', currentRecognitionId: ids.recognition, lastRecognizedAt: timestamp, lastRecognizedBy: ACTOR_ID };
+    const changes = [[RECORD_TYPES.MARKET_OBSERVATION, observation.observationId, updatedObservation], [RECORD_TYPES.RECOGNITION_ASSESSMENT, ids.recognition, recognition], [RECORD_TYPES.FINANCIAL_RECORD_ACCOUNT, ids.account, account], [RECORD_TYPES.FINANCIAL_RECORD, ids.financialRecord, financialRecord], [RECORD_TYPES.COIN_ACCOUNT, ids.coinAccount, coinAccount], [RECORD_TYPES.COIN_POSITION, ids.coinPosition, coinPosition]];
+    if (this.domain.atomicPut) await this.domain.atomicPut(changes.map(([type, id, payload]) => ({ type, id, payload, actorId: ACTOR_ID, eventType: 'COINBASE_MARKET_FLOW_UPDATED', audit: false })));
+    else for (const [type, id, payload] of changes) await this.domain.put(type, id, payload);
+    if (!priorRecognition) this.recognized += 1;
+    if (!priorRecord) this.financialRecordsCreated += 1;
+    if (!priorPosition) this.coinPositionsCreated += 1;
+    this.processed += 1;
+    this.lastProcessedAt = timestamp;
+    this.flowPositions.set(productId, { productId, nativeUnit, tradeCount: cumulative.tradeCount, batchCount: cumulative.batchCount, nativeQuantity: cumulative.nativeQuantity, representedSra: cumulative.representedSra, lastPrice: Number(raw.lastPrice || price), marketDestination: 'SRA_LIVING_MARKET', marketState: 'LIVE', latestCoinPositionId: ids.coinPosition, updatedAt: timestamp });
+    return { processed: true, observation: updatedObservation, recognition, financialRecord, coinPosition, instrument: null, pipelineBoundary: 'COIN_POSITION' };
+  }
+
   async processObservation(observationOrId) {
     if (!this.enabled) return { processed: false, reason: 'PIPELINE_DISABLED' };
     const observation = typeof observationOrId === 'string' ? this.observations.get(observationOrId) : observationOrId;
@@ -246,6 +293,11 @@ export class CoinbaseTransactionAssetPipelineService {
     if (!this.eligible(observation)) {
       this.skipped += 1;
       return { processed: false, reason: 'NOT_COINBASE_MARKET_TRADE' };
+    }
+
+    if (observation.sourceRecordType === 'MARKET_FLOW') {
+      try { return await this.processConsolidatedMarketFlow(observation); }
+      catch (error) { this.failed += 1; this.lastError = { message: error?.message || String(error), observationId: observation.observationId, at: new Date().toISOString() }; throw error; }
     }
 
     try {

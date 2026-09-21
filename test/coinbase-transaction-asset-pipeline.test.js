@@ -110,7 +110,18 @@ test('a summarized Coinbase flow reaches the SRA market as one Coin Position', a
   const result = await pipeline.processObservation(observation);
   assert.equal(result.coinPosition.sourceTradeCount, 1000);
   assert.equal(domain.list(RECORD_TYPES.COIN_POSITION).length, 1);
-  assert.equal(pipeline.status().flowPositions[0].tradeCount, 1000);
+  const { observation: next } = await observations.observe({
+    sourceMarket: 'COINBASE', sourceRecordId: 'BTC-USD:1001:1500', sourceRecordType: 'MARKET_FLOW',
+    sourceTimestamp: '2026-08-04T22:02:00.000Z', connectorId: 'COINBASE_PUBLIC_MARKET_TRADES', category: 'CRYPTO_MARKET_TRANSACTION',
+    rawValues: { tradeId: '1500', tradeCount: 500, productId: 'BTC-USD', price: 51000, lastPrice: 51010, size: 0.5, notional: 25500 },
+    rawPayload: { productId: 'BTC-USD', tradeCount: 500 }, sourceReference: 'coinbase:advanced-trade:market_flow:BTC-USD:1001:1500'
+  }, 'COINBASE_PUBLIC_MARKET_TRADES');
+  const updated = await pipeline.processObservation(next);
+  assert.equal(updated.coinPosition.coinPositionId, result.coinPosition.coinPositionId);
+  assert.equal(updated.coinPosition.sourceTradeCount, 1500);
+  assert.equal(updated.coinPosition.quantity, 75500);
+  assert.equal(domain.list(RECORD_TYPES.COIN_POSITION).length, 1);
+  assert.equal(pipeline.status().flowPositions[0].tradeCount, 1500);
   assert.equal(pipeline.status().flowPositions[0].marketDestination, 'SRA_LIVING_MARKET');
 });
 
