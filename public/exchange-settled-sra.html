@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Exchange settled SRA for USDC from the wallet that received it.">
+  <meta name="description" content="Choose an available network and asset route for settled SRA held in your wallet.">
   <title>Exchange Settled SRA | SAIN Real Assets</title>
   <link rel="stylesheet" href="/public-exchange.css">
 </head>
@@ -13,20 +13,24 @@
     <section class="exchange-hero">
       <p class="eyebrow">AFTER DIGITAL SETTLEMENT</p>
       <h1>Exchange settled SRA</h1>
-      <p>Use the Stellar wallet that received your SRA to request a live SRA/USDC quote. Your wallet reviews and signs the exchange. No SRA account is required.</p>
+      <p>Choose where your settled SRA is held and which available asset you want to receive. Your wallet reviews and signs the exchange. No SRA account is required.</p>
     </section>
 
     <section class="exchange-grid">
       <form id="exchange-form" class="exchange-card">
-        <div class="step"><span>01</span><div><strong>Select the SRA asset</strong><small>Only issued SRA assets with an active USDC market appear here.</small></div></div>
+        <div class="step"><span>01</span><div><strong>Select the receiving route</strong><small>The platform displays the networks and asset pairs currently available for exchange.</small></div></div>
+        <label for="network">Receiving network</label>
+        <select id="network" name="network" required><option value="">Loading available networks…</option></select>
+        <label for="receive-asset">Asset to receive</label>
+        <select id="receive-asset" name="receiveAsset" required><option value="">Select a network first</option></select>
         <label for="asset-id">SRA asset</label>
         <select id="asset-id" name="assetId" required><option value="">Loading available markets…</option></select>
 
         <div class="step"><span>02</span><div><strong>Connect the receiving wallet</strong><small>This is the wallet currently holding the settled SRA.</small></div></div>
-        <label for="source-address">Stellar wallet address</label>
+        <label for="source-address"><span id="wallet-network-label">Receiving</span> wallet address</label>
         <div class="wallet-row"><input id="source-address" name="sourceAddress" autocomplete="off" placeholder="G…" required><button type="button" id="connect-wallet" class="secondary">Connect wallet</button></div>
 
-        <div class="step"><span>03</span><div><strong>Enter the amount</strong><small>The live market determines the USDC quote.</small></div></div>
+        <div class="step"><span>03</span><div><strong>Enter the amount</strong><small>The selected live market determines the receiving-asset quote.</small></div></div>
         <label for="sell-amount">SRA amount</label>
         <input id="sell-amount" name="sellAmount" inputmode="decimal" placeholder="0.0000000" required>
         <button type="submit" id="quote-button" class="primary">Get live quote</button>
@@ -35,9 +39,9 @@
 
       <aside class="exchange-card result-card" aria-live="polite">
         <p class="eyebrow">LIVE EXCHANGE</p>
-        <div id="market-state" class="market-state">Reading the SRA/USDC market…</div>
+        <div id="market-state" class="market-state">Reading available SRA exchange routes…</div>
         <div id="quote-result" hidden>
-          <dl><div><dt>SRA sent</dt><dd id="quote-sra">—</dd></div><div><dt>Expected USDC</dt><dd id="quote-usdc">—</dd></div><div><dt>Minimum USDC</dt><dd id="quote-minimum">—</dd></div><div><dt>Quote expires</dt><dd id="quote-expires">—</dd></div></dl>
+          <dl><div><dt>SRA sent</dt><dd id="quote-sra">—</dd></div><div><dt id="quote-expected-label">Expected receipt</dt><dd id="quote-receive">—</dd></div><div><dt id="quote-minimum-label">Minimum receipt</dt><dd id="quote-minimum">—</dd></div><div><dt>Quote expires</dt><dd id="quote-expires">—</dd></div></dl>
           <button id="sign-submit" class="primary" type="button">Sign and exchange in wallet</button>
           <details><summary>Use another Stellar wallet</summary><p>Copy the unsigned transaction into a compatible Stellar wallet, sign it, then paste the signed transaction below.</p><label for="unsigned-xdr">Unsigned transaction XDR</label><textarea id="unsigned-xdr" readonly></textarea><button id="copy-xdr" class="secondary" type="button">Copy unsigned XDR</button><label for="signed-xdr">Signed transaction XDR</label><textarea id="signed-xdr" placeholder="Paste wallet-signed XDR"></textarea><button id="submit-signed" class="secondary" type="button">Submit signed exchange</button></details>
         </div>
@@ -45,7 +49,7 @@
       </aside>
     </section>
 
-    <section class="separate-path"><strong>Using a note or documentary settlement package?</strong><p>That process continues through institutional presentment. This page is for SRA already delivered to a Stellar wallet.</p><a href="/verify-financing.html">Verify financing authorization</a></section>
+    <section class="separate-path"><strong>Using a note or documentary settlement package?</strong><p>That process continues through institutional presentment. This page is for SRA already delivered to a supported on-chain wallet.</p><a href="/verify-financing.html">Verify financing authorization</a></section>
   </main>
   <script src="/public-exchange.js" defer></script>
 </body>

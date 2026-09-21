@@ -27,13 +27,16 @@ function horizonUrl(environment) {
   return text(environment.STELLAR_HORIZON_URL) || (networkPassphrase(environment) === StellarSdk.Networks.TESTNET ? 'https://horizon-testnet.stellar.org' : 'https://horizon.stellar.org');
 }
 function assetFromAddress(address) {
+  if (text(address).toLowerCase() === 'native:xlm') return StellarSdk.Asset.native();
   const [code, issuer] = text(address).split(':');
   if (!code || !StellarSdk.StrKey.isValidEd25519PublicKey(issuer)) throw new Error('The on-chain asset address is not available for exchange.');
   return new StellarSdk.Asset(code, issuer);
 }
 function sameAsset(left, right) {
+  if (left?.isNative?.() || right?.isNative?.()) return Boolean(left?.isNative?.() && right?.isNative?.());
   return left?.code === right?.code && left?.issuer === right?.issuer;
 }
+function assetAddress(asset) { return asset.isNative() ? 'native:XLM' : `${asset.code}:${asset.issuer}`; }
 function publicError(message, code) {
   return Object.assign(new Error(message), { code });
 }
@@ -51,30 +54,38 @@ export class PublicSraExchangeService {
     return new StellarSdk.Asset('USDC', stellarUsdcIssuer(this.environment, this.passphrase));
   }
 
-  marketRecords() {
-    const markets = this.domain.list('ON_CHAIN_USDC_MARKET');
-    return this.domain.list('ON_CHAIN_ASSET')
+  routeRecords() {
+    const marketTypes = [
+      { recordType:'ON_CHAIN_USDC_MARKET', receiveAsset:'USDC' },
+      { recordType:'ON_CHAIN_NATIVE_MARKET', receiveAsset:'XLM' },
+    ];
+    const assets = this.domain.list('ON_CHAIN_ASSET')
       .filter((asset) => upper(asset.network) === 'STELLAR' && Number(asset.issuedSupply || 0) > 0)
-      .map((asset) => {
-        const market = markets.filter((item) => item.assetId === asset.assetId)
-          .sort((a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')))[0] || null;
-        const state = upper(market?.state);
-        return {
+    return assets.flatMap((asset) => marketTypes.map(({ recordType, receiveAsset }) => {
+      const market = this.domain.list(recordType).filter((item) => item.assetId === asset.assetId)
+        .sort((a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')))[0] || null;
+      const state = upper(market?.state);
+      return {
+          routeId: `STELLAR:${receiveAsset}:${asset.assetId}`,
           assetId: asset.assetId,
           instrumentId: asset.instrumentId || null,
           asset: asset.asset || asset.symbol,
           assetAddress: asset.assetAddress,
           network: 'STELLAR',
+          receiveAsset,
+          pair: `SRA/${receiveAsset}`,
           issuedSupply: String(asset.issuedSupply),
           marketId: market?.marketId || null,
           marketState: state || 'NOT_ACTIVE',
           available: Boolean(market && ['ACTIVE', 'TWO_SIDED'].includes(state)),
-        };
-      });
+      };
+    }));
   }
 
+  marketRecords() { return this.routeRecords().filter((route) => route.receiveAsset === 'USDC'); }
+
   status() {
-    const markets = this.marketRecords();
+    const routes = this.routeRecords();
     const usdc = this.usdc();
     return {
       network: 'STELLAR',
@@ -83,27 +94,30 @@ export class PublicSraExchangeService {
       usdcAssetAddress: `${usdc.code}:${usdc.issuer}`,
       accountRequired: false,
       walletControlsExchange: true,
-      markets,
-      availableMarkets: markets.filter((item) => item.available),
+      networks: [{ network:'STELLAR', label:'Stellar', addressPrefix:'G', walletConnector:'FREIGHTER_OR_SIGNED_XDR', available:routes.some((item)=>item.available) }],
+      routes,
+      availableRoutes: routes.filter((item) => item.available),
+      markets: routes.filter((item) => item.receiveAsset === 'USDC'),
+      availableMarkets: routes.filter((item) => item.receiveAsset === 'USDC' && item.available),
     };
   }
 
-  resolveMarket(assetId) {
-    const market = this.marketRecords().find((item) => item.assetId === text(assetId));
-    if (!market) throw publicError('The selected on-chain SRA asset was not found.', 'PUBLIC_EXCHANGE_ASSET_NOT_FOUND');
-    if (!market.available) throw publicError('The SRA/USDC market for this asset is not active yet.', 'PUBLIC_EXCHANGE_MARKET_NOT_ACTIVE');
-    return market;
+  resolveRoute({ assetId, network = 'STELLAR', receiveAsset = 'USDC' } = {}) {
+    const route = this.routeRecords().find((item) => item.assetId === text(assetId) && item.network === upper(network) && item.receiveAsset === upper(receiveAsset));
+    if (!route) throw publicError('The selected SRA exchange route was not found.', 'PUBLIC_EXCHANGE_ROUTE_NOT_FOUND');
+    if (!route.available) throw publicError(`The ${route.pair} market for this asset is not active yet.`, 'PUBLIC_EXCHANGE_MARKET_NOT_ACTIVE');
+    return route;
   }
 
-  async quote({ quoteId, assetId, sourceAddress, sellAmount, slippageBps = 100 } = {}) {
+  async quote({ quoteId, assetId, network = 'STELLAR', receiveAsset = 'USDC', sourceAddress, sellAmount, slippageBps = 100 } = {}) {
     const holder = text(sourceAddress);
     if (!StellarSdk.StrKey.isValidEd25519PublicKey(holder)) throw publicError('Enter or connect the Stellar wallet holding the settled SRA.', 'PUBLIC_EXCHANGE_WALLET_INVALID');
     const sendAmount = stellarAmount(sellAmount, 'sellAmount');
     const slippage = Number(slippageBps);
     if (!Number.isInteger(slippage) || slippage < 0 || slippage > 5000) throw new Error('slippageBps must be an integer from 0 to 5000.');
-    const market = this.resolveMarket(assetId);
+    const market = this.resolveRoute({ assetId, network, receiveAsset });
     const selling = assetFromAddress(market.assetAddress);
-    const buying = this.usdc();
+    const buying = market.receiveAsset === 'XLM' ? StellarSdk.Asset.native() : this.usdc();
     let account;
     try { account = await this.server.loadAccount(holder); }
     catch (error) {
@@ -112,13 +126,13 @@ export class PublicSraExchangeService {
     }
     const balance = account.balances.find((item) => item.asset_type !== 'native' && item.asset_code === selling.code && item.asset_issuer === selling.issuer);
     if (!balance || Number(balance.balance || 0) < Number(sendAmount)) throw publicError(`The connected wallet does not hold ${sendAmount} ${selling.code} available for this exchange.`, 'PUBLIC_EXCHANGE_SRA_BALANCE_LOW');
-    const usdcTrustline = account.balances.some((item) => item.asset_type !== 'native' && item.asset_code === buying.code && item.asset_issuer === buying.issuer);
-    if (!usdcTrustline) throw publicError('The connected wallet needs its USDC trustline before receiving USDC.', 'PUBLIC_EXCHANGE_USDC_TRUSTLINE_REQUIRED');
+    const receiveTrustline = buying.isNative() || account.balances.some((item) => item.asset_type !== 'native' && item.asset_code === buying.code && item.asset_issuer === buying.issuer);
+    if (!receiveTrustline) throw publicError(`The connected wallet needs its ${market.receiveAsset} trustline before receiving ${market.receiveAsset}.`, 'PUBLIC_EXCHANGE_RECEIVE_TRUSTLINE_REQUIRED');
     const paths = (await this.server.strictSendPaths(selling, sendAmount, [buying]).call())?.records || [];
-    if (!paths.length) throw publicError('No live SRA/USDC exchange path is available for this amount right now.', 'PUBLIC_EXCHANGE_PATH_UNAVAILABLE');
+    if (!paths.length) throw publicError(`No live ${market.pair} exchange path is available for this amount right now.`, 'PUBLIC_EXCHANGE_PATH_UNAVAILABLE');
     const best = [...paths].sort((a, b) => units(a.destination_amount) > units(b.destination_amount) ? -1 : 1)[0];
-    const expectedUsdc = stellarAmount(best.destination_amount);
-    const minimumUnits = units(expectedUsdc) * BigInt(10000 - slippage) / 10000n;
+    const expectedReceiveAmount = stellarAmount(best.destination_amount);
+    const minimumUnits = units(expectedReceiveAmount) * BigInt(10000 - slippage) / 10000n;
     if (minimumUnits <= 0n) throw new Error('The quoted amount is below Stellar precision.');
     const minimumUsdc = amountFromUnits(minimumUnits);
     const path = (best.path || []).map((item) => item.asset_type === 'native' ? StellarSdk.Asset.native() : new StellarSdk.Asset(item.asset_code, item.asset_issuer));
@@ -131,15 +145,20 @@ export class PublicSraExchangeService {
       quoteId,
       assetId: market.assetId,
       marketId: market.marketId,
+      routeId: market.routeId,
+      pair: market.pair,
       network: 'STELLAR',
+      receiveAsset: market.receiveAsset,
       networkPassphrase: this.passphrase,
       sourceAddress: holder,
       destinationAddress: holder,
       sellAssetAddress: market.assetAddress,
-      receiveAssetAddress: `${buying.code}:${buying.issuer}`,
+      receiveAssetAddress: assetAddress(buying),
       sellAmount: sendAmount,
-      expectedUsdc,
-      minimumUsdc,
+      expectedReceiveAmount,
+      minimumReceiveAmount: minimumUsdc,
+      expectedUsdc: market.receiveAsset === 'USDC' ? expectedReceiveAmount : null,
+      minimumUsdc: market.receiveAsset === 'USDC' ? minimumUsdc : null,
       slippageBps: slippage,
       unsignedXdr: transaction.toXDR(),
       transactionHash: transaction.hash().toString('hex'),
@@ -159,7 +178,7 @@ export class PublicSraExchangeService {
     const operation = transaction.operations[0];
     const selling = assetFromAddress(quote.sellAssetAddress);
     const buying = assetFromAddress(quote.receiveAssetAddress);
-    if (!sameAsset(operation.sendAsset, selling) || !sameAsset(operation.destAsset, buying) || units(operation.sendAmount) !== units(quote.sellAmount) || units(operation.destMin) !== units(quote.minimumUsdc) || operation.destination !== quote.destinationAddress) throw publicError('The signed transaction terms do not match the quoted SRA/USDC exchange.', 'PUBLIC_EXCHANGE_TERMS_MISMATCH');
+    if (!sameAsset(operation.sendAsset, selling) || !sameAsset(operation.destAsset, buying) || units(operation.sendAmount) !== units(quote.sellAmount) || units(operation.destMin) !== units(quote.minimumReceiveAmount || quote.minimumUsdc) || operation.destination !== quote.destinationAddress) throw publicError(`The signed transaction terms do not match the quoted ${quote.pair || 'SRA exchange'}.`, 'PUBLIC_EXCHANGE_TERMS_MISMATCH');
     const hash = transaction.hash();
     const publicKey = StellarSdk.Keypair.fromPublicKey(quote.sourceAddress);
     const signedByHolder = transaction.signatures.some((signature) => publicKey.verify(hash, signature.signature()));
@@ -180,7 +199,11 @@ export class PublicSraExchangeService {
       destinationAddress: quote.destinationAddress,
       sellAssetAddress: quote.sellAssetAddress,
       receiveAssetAddress: quote.receiveAssetAddress,
+      receiveAsset: quote.receiveAsset,
+      pair: quote.pair,
       sellAmount: quote.sellAmount,
+      quotedReceiveAmount: quote.expectedReceiveAmount,
+      minimumReceiveAmount: quote.minimumReceiveAmount,
       quotedUsdc: quote.expectedUsdc,
       minimumUsdc: quote.minimumUsdc,
       transactionId: result.hash,

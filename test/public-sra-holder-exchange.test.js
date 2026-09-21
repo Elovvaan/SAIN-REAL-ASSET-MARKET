@@ -32,6 +32,7 @@ function fixture() {
   const domain = new Domain({
     ON_CHAIN_ASSET: [{ assetId: 'OCA-1', network: 'STELLAR', asset: 'SRAUSD', assetAddress: `SRAUSD:${issuer.publicKey()}`, issuedSupply: '1000', state: 'ISSUED' }],
     ON_CHAIN_USDC_MARKET: [{ marketId: 'OCUSM-1', assetId: 'OCA-1', state: 'ACTIVE', updatedAt: '2026-09-21T00:00:00.000Z' }],
+    ON_CHAIN_NATIVE_MARKET: [{ marketId: 'OCNM-1', assetId: 'OCA-1', state: 'TWO_SIDED', updatedAt: '2026-09-21T00:00:00.000Z' }],
   });
   const environment = { STELLAR_NETWORK: 'TESTNET', STELLAR_USDC_ISSUER: usdcIssuer.publicKey() };
   return { holder, issuer, usdcIssuer, account, server, submitted, domain, environment };
@@ -44,6 +45,8 @@ test('public holder exchange requires no SRA account and uses the holder signatu
   assert.equal(status.accountRequired, false);
   assert.equal(status.walletControlsExchange, true);
   assert.equal(status.availableMarkets.length, 1);
+  assert.equal(status.availableRoutes.length, 2);
+  assert.deepEqual(status.availableRoutes.map((route) => route.receiveAsset).sort(), ['USDC','XLM']);
 
   const quote = await service.quote({ quoteId: 'PHQ-1', assetId: 'OCA-1', sourceAddress: data.holder.publicKey(), sellAmount: '20' });
   const transaction = StellarSdk.TransactionBuilder.fromXDR(quote.unsignedXdr, quote.networkPassphrase);
@@ -53,6 +56,22 @@ test('public holder exchange requires no SRA account and uses the holder signatu
   assert.equal(result.sourceAddress, data.holder.publicKey());
   assert.equal(result.destinationAddress, data.holder.publicKey());
   assert.equal(data.submitted.length, 1);
+});
+
+test('public holder can select the active Stellar SRA/XLM route', async () => {
+  const data = fixture();
+  const service = new PublicSraExchangeService(data);
+  const quote = await service.quote({ quoteId:'PHQ-XLM', assetId:'OCA-1', network:'STELLAR', receiveAsset:'XLM', sourceAddress:data.holder.publicKey(), sellAmount:'20' });
+  assert.equal(quote.pair, 'SRA/XLM');
+  assert.equal(quote.receiveAsset, 'XLM');
+  assert.equal(quote.receiveAssetAddress, 'native:XLM');
+  assert.equal(quote.expectedReceiveAmount, '19.7500000');
+  const transaction = StellarSdk.TransactionBuilder.fromXDR(quote.unsignedXdr, quote.networkPassphrase);
+  transaction.sign(data.holder);
+  const result = await service.submit(quote, transaction.toXDR());
+  assert.equal(result.state, 'CONFIRMED');
+  assert.equal(result.receiveAsset, 'XLM');
+  assert.equal(result.minimumReceiveAmount, quote.minimumReceiveAmount);
 });
 
 test('public holder exchange rejects a transaction signed by another wallet', async () => {
@@ -80,6 +99,8 @@ test('public exchange routes work without an authenticated SRA session', async (
 test('public exchange page keeps documentary settlement separate', async () => {
   const page = await import('node:fs/promises').then((fs) => fs.readFile(new URL('../public/exchange-settled-sra.html', import.meta.url), 'utf8'));
   assert.match(page, /No SRA account is required/);
+  assert.match(page, /Receiving network/);
+  assert.match(page, /Asset to receive/);
   assert.match(page, /note or documentary settlement package/i);
   assert.match(page, /institutional presentment/i);
 });

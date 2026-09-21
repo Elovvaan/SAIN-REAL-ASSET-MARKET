@@ -18,8 +18,8 @@ export function createPublicSraExchangeRouter(service) {
   router.post('/quotes', async (req, res) => {
     try {
       const quoteId = `PHQ-${crypto.randomUUID().split('-')[0].toUpperCase()}`;
-      const quote = await service.quote({ quoteId, assetId: req.body?.assetId, sourceAddress: req.body?.sourceAddress, sellAmount: req.body?.sellAmount, slippageBps: req.body?.slippageBps });
-      await service.domain.put('PUBLIC_HOLDER_EXCHANGE_QUOTE', quoteId, quote, { actorId: quote.sourceAddress, eventType: 'PUBLIC_HOLDER_SRA_USDC_QUOTED' });
+      const quote = await service.quote({ quoteId, assetId: req.body?.assetId, network: req.body?.network, receiveAsset: req.body?.receiveAsset, sourceAddress: req.body?.sourceAddress, sellAmount: req.body?.sellAmount, slippageBps: req.body?.slippageBps });
+      await service.domain.put('PUBLIC_HOLDER_EXCHANGE_QUOTE', quoteId, quote, { actorId: quote.sourceAddress, eventType: 'PUBLIC_HOLDER_SRA_EXCHANGE_QUOTED' });
       return res.status(201).json(quote);
     } catch (error) { return handle(res, error); }
   });
@@ -35,8 +35,8 @@ export function createPublicSraExchangeRouter(service) {
       const exchange = await service.submit(quote, req.body.signedXdr);
       const completedQuote = { ...quote, state: 'CONFIRMED', exchangeId: exchange.exchangeId, transactionId: exchange.transactionId, confirmedAt: exchange.confirmedAt };
       await service.domain.atomicPut([
-        { type: 'PUBLIC_HOLDER_EXCHANGE_QUOTE', id: quoteId, payload: completedQuote, actorId: quote.sourceAddress, eventType: 'PUBLIC_HOLDER_SRA_USDC_QUOTE_COMPLETED' },
-        { type: 'PUBLIC_HOLDER_EXCHANGE', id: exchange.exchangeId, payload: exchange, actorId: quote.sourceAddress, eventType: 'PUBLIC_HOLDER_SRA_USDC_CONFIRMED' },
+        { type: 'PUBLIC_HOLDER_EXCHANGE_QUOTE', id: quoteId, payload: completedQuote, actorId: quote.sourceAddress, eventType: 'PUBLIC_HOLDER_SRA_EXCHANGE_QUOTE_COMPLETED' },
+        { type: 'PUBLIC_HOLDER_EXCHANGE', id: exchange.exchangeId, payload: exchange, actorId: quote.sourceAddress, eventType: 'PUBLIC_HOLDER_SRA_EXCHANGE_CONFIRMED' },
       ]);
       return res.status(201).json(exchange);
     } catch (error) { return handle(res, error); }
