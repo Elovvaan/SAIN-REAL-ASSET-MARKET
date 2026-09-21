@@ -17,6 +17,7 @@ test('public shell resolves access once with a bounded visible fallback', () => 
   assert.doesNotMatch(index, /<body class="sra-access-resolving">/);
   assert.match(css, /body\.sra-access-resolving \.app-shell\{visibility:visible\}/);
   assert.match(bootstrap, /'\/public-home\.js'/);
+  assert.ok(bootstrap.indexOf('loadScript(PUBLIC_HOME_FEATURE)') < bootstrap.indexOf('loadScript(ACCESS_FEATURE)'));
   assert.match(access, /let accessInitialization=null/);
   assert.match(access, /window\.SRAPublicHome\?\.refreshNow\?\.\(\)/);
   assert.match(access, /classList\.remove\('sra-access-resolving'\)/);
@@ -48,21 +49,24 @@ test('homepage carries filed SRA business identity and a contact route', () => {
 });
 
 test('homepage positions SRA as infrastructure and reports persisted operational stages', () => {
-  assert.match(home, /Make productive assets liquid/);
-  assert.match(home, /tokenized financial positions/);
-  assert.match(home, /The moat is not lending/);
-  assert.match(home, /Verify the value/);
-  assert.match(home, /Form the position/);
-  assert.match(home, /Open market access/);
+  assert.match(home, /Make productive assets transferable/);
+  assert.match(home, /One fungible SRA Coin/);
+  assert.match(home, /Verify the position/);
+  assert.match(home, /Create SRA Coin/);
+  assert.match(home, /Transfer and settle/);
+  assert.match(home, /exchange it into another asset through an available market/);
   assert.match(home, /Businesses and asset providers/);
-  assert.match(home, /Market participants/);
-  assert.match(home, /Institutions and settlement partners/);
+  assert.match(home, /SRA Coin holders/);
+  assert.match(home, /Markets and institutions/);
   assert.match(accessRouter, /function publicInfrastructureStatus\(\)/);
-  assert.match(accessRouter, /ON_CHAIN_USDC_MARKET_READINESS/);
-  assert.match(accessRouter, /MONEYGRAM_SANDBOX_CERTIFICATION_TEST/);
-  assert.match(accessRouter, /record\.anchorStatus/);
-  assert.match(accessRouter, /TWO_SIDED/);
+  assert.match(accessRouter, /Verified Coin Positions/);
+  assert.match(accessRouter, /On-chain SRA assets/);
+  assert.match(accessRouter, /Transfer and settlement/);
+  assert.match(accessRouter, /hydrate\(\['ON_CHAIN_ASSET','ON_CHAIN_TRANSFER'\]\)/);
   assert.match(accessRouter, /infrastructureStatus: publicInfrastructureStatus\(\)/);
+  assert.doesNotMatch(accessRouter, /MONEYGRAM_SANDBOX_CERTIFICATION_TEST/);
+  assert.doesNotMatch(accessRouter, /FIAT_RAMP/);
+  assert.doesNotMatch(home, /MoneyGram|Fiat entry and exit/i);
   assert.doesNotMatch(home, /licensed bank/i);
   assert.doesNotMatch(home, /freely tradeable from day one/i);
 });

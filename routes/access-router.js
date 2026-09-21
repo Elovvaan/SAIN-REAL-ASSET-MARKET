@@ -175,27 +175,34 @@ export function createAccessRouter(marketplace, service = new AccessService()) {
   function publicInfrastructureStatus() {
     const records = (type) => domain?.list(type) || [];
     const financialRecords = records(RECORD_TYPES.FINANCIAL_RECORD);
-    const instruments = records(RECORD_TYPES.SRA_INSTRUMENT);
     const coinPositions = records(RECORD_TYPES.COIN_POSITION);
     const onChainAssets = records('ON_CHAIN_ASSET');
     const issuedAssets = onChainAssets.filter((record) => Number(record.issuedSupply || 0) > 0 || String(record.state || '').toUpperCase().includes('ISSUED'));
     const onChainTransfers = records('ON_CHAIN_TRANSFER');
     const confirmedTransfers = onChainTransfers.filter((record) => String(record.state || record.confirmation?.state || '').toUpperCase() === 'CONFIRMED');
-    const moneyGramTests = records('MONEYGRAM_SANDBOX_CERTIFICATION_TEST');
-    const completedMoneyGramTests = moneyGramTests.filter((record) => ['COMPLETED','CONFIRMED','CERTIFIED'].some((state) => String(record.anchorStatus || record.status || record.state || '').toUpperCase().includes(state)));
+    const onChainNetworks = [...new Set(onChainAssets.map((record) => String(record.network || '').toUpperCase()).filter(Boolean))];
+    const positionWord = coinPositions.length === 1 ? 'position' : 'positions';
+    const recordWord = financialRecords.length === 1 ? 'record' : 'records';
+    const assetWord = issuedAssets.length === 1 ? 'asset' : 'assets';
+    const networkWord = onChainNetworks.length === 1 ? 'network' : 'networks';
     return {
       phase: 'VERIFIED_ASSET_SETTLEMENT',
       updatedAt: new Date().toISOString(),
       stages: [
-        { id:'VERIFIED_POSITIONS', label:'Verified positions', state:financialRecords.length || coinPositions.length || instruments.length ? 'ACTIVE' : 'AVAILABLE', detail:`${financialRecords.length} financial records · ${coinPositions.length} coin positions · ${instruments.length} instruments` },
-        { id:'ON_CHAIN_REPRESENTATION', label:'On-chain representation', state:issuedAssets.length ? 'ACTIVE' : onChainAssets.length ? 'PREPARED' : 'AVAILABLE', detail:issuedAssets.length ? `${issuedAssets.length} issued on-chain asset${issuedAssets.length === 1 ? '' : 's'}` : onChainAssets.length ? `${onChainAssets.length} on-chain asset record${onChainAssets.length === 1 ? '' : 's'} awaiting issuance` : 'Authorized workflow available' },
-        { id:'ON_CHAIN_SETTLEMENT', label:'SRA on-chain settlement', state:confirmedTransfers.length ? 'ACTIVE' : issuedAssets.length ? 'READY' : onChainAssets.length ? 'PREPARED' : 'AVAILABLE', detail:confirmedTransfers.length ? `${confirmedTransfers.length} confirmed SRA on-chain transfer${confirmedTransfers.length === 1 ? '' : 's'}` : issuedAssets.length ? 'Issued SRA is ready for direct wallet settlement' : onChainAssets.length ? 'On-chain representation is prepared for SRA issuance' : 'Authorized issuance and direct transfer workflow available' },
-        { id:'FIAT_RAMP', label:'Fiat entry and exit', state:completedMoneyGramTests.length >= 3 ? 'CERTIFIED' : moneyGramTests.length ? 'SANDBOX_TESTING' : 'PENDING_PROVIDER', detail:completedMoneyGramTests.length >= 3 ? 'MoneyGram sandbox scenarios completed' : `${completedMoneyGramTests.length} of 3 MoneyGram sandbox scenarios completed` }
+        { id:'VERIFIED_POSITIONS', label:'Verified Coin Positions', state:financialRecords.length || coinPositions.length ? 'ACTIVE' : 'AVAILABLE', detail:coinPositions.length ? `${coinPositions.length} fungible SRA Coin ${positionWord} supported by ${financialRecords.length} recognized financial ${recordWord}` : 'Verified financial records can form source-backed SRA Coin Positions' },
+        { id:'ON_CHAIN_REPRESENTATION', label:'On-chain SRA assets', state:issuedAssets.length ? 'ACTIVE' : onChainAssets.length ? 'PREPARED' : 'AVAILABLE', detail:issuedAssets.length ? `${issuedAssets.length} issued SRA ${assetWord}${onChainNetworks.length ? ` across ${onChainNetworks.length} supported ${networkWord}` : ''}` : onChainAssets.length ? `${onChainAssets.length} SRA asset representation${onChainAssets.length === 1 ? '' : 's'} prepared for issuance` : 'Authorized SRA representation and issuance workflow available' },
+        { id:'ON_CHAIN_SETTLEMENT', label:'Transfer and settlement', state:confirmedTransfers.length ? 'ACTIVE' : issuedAssets.length ? 'READY' : onChainAssets.length ? 'PREPARED' : 'AVAILABLE', detail:confirmedTransfers.length ? `${confirmedTransfers.length} confirmed SRA transfer${confirmedTransfers.length === 1 ? '' : 's'} recorded; delivered SRA remains transferable by its holder` : issuedAssets.length ? 'Issued SRA is available for direct wallet settlement, later transfer, and holder-directed exchange through available markets' : onChainAssets.length ? 'SRA assets are prepared for issuance, direct transfer, and settlement' : 'Authorized issuance, direct transfer, and settlement workflow available' }
       ]
     };
   }
 
-  router.get('/public', (_req, res) => res.json({
+  router.get('/public', async (_req, res) => {
+    try {
+      if (domain?.hydrate) await domain.hydrate(['ON_CHAIN_ASSET','ON_CHAIN_TRANSFER']);
+    } catch {
+      // Serve the latest in-memory status if persistent hydration is unavailable.
+    }
+    return res.json({
     marketStatus: marketplace.marketStatus,
     verifiedValue: marketplace.verifiedValue,
     activeProjects: marketplace.activeProjects,
@@ -207,7 +214,8 @@ export function createAccessRouter(marketplace, service = new AccessService()) {
       projectedGainRate: project.projectedGainRate, participationWindow: project.participationWindow,
       completionState: project.completionState
     }))
-  }));
+    });
+  });
   router.get('/session', async (req, res) => {
     try { const session = await sessionFor(req); res.json({ authenticated: Boolean(session), session }); }
     catch { res.status(500).json({ error: 'Session lookup failed.' }); }

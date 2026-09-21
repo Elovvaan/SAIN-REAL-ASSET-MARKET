@@ -8,7 +8,7 @@ test('public status recognizes direct SRA transfer as on-chain settlement', () =
   const router = read('routes/access-router.js');
   assert.match(router, /phase: 'VERIFIED_ASSET_SETTLEMENT'/);
   assert.match(router, /id:'ON_CHAIN_SETTLEMENT'/);
-  assert.match(router, /Issued SRA is ready for direct wallet settlement/);
+  assert.match(router, /Issued SRA is available for direct wallet settlement, later transfer, and holder-directed exchange through available markets/);
   assert.doesNotMatch(router, /id:'SRAUSD_USDC_LIQUIDITY'/);
 });
 
@@ -26,8 +26,9 @@ test('public and agent language separate settlement from holder-directed value r
   const home = read('public/public-home.js');
   const agent = read('services/sra-agent-service.js');
   const capital = read('services/capital-activation-agent-service.js');
-  assert.match(home, /Receive SRA Coin through confirmed settlement, use supported platform services, or enter an available holder-directed market/);
-  assert.match(home, /Control settled SRA Coin/);
+  assert.match(home, /Deliver SRA directly to the recipient/);
+  assert.match(home, /Receive settled SRA Coin, control the delivered asset/);
+  assert.match(home, /exchange it into another asset through an available market/);
   assert.match(agent, /Holders realize value through holder-directed market trading and supported platform services/);
   assert.match(agent, /Mandatory distributions, platform buybacks, and platform-funded conversions remain outside the SRA settlement flow/);
   assert.match(capital, /Any later exchange is initiated by the holder through an available market/);

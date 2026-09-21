@@ -143,7 +143,7 @@ function renderTierHome(){
 function activateParticipantView(view){const button=document.querySelector(`.nav-item[data-view="${view}"]`);if(button){document.querySelectorAll('.nav-item').forEach(item=>item.classList.remove('active'));button.classList.add('active');button.click()}}
 function configureNavigation(){const workspace=accessState.session?currentWorkspace():null;document.querySelectorAll('.nav-item').forEach(item=>{const visible=!workspace||workspace.nav.includes(item.dataset.view);item.classList.toggle('role-hidden',!visible)});document.querySelector('.system-card')?.classList.toggle('role-hidden',Boolean(accessState.session)&&!['INSTITUTIONAL_OPERATOR','PLATFORM_ADMIN'].includes(accessState.session.activeCapacity))}
 function updateSaneContext(){const workspace=currentWorkspace();const context=document.querySelector('.chat-context');if(context)context.textContent=`Sane is operating in the ${workspace.label} tier and will interpret requests through this workspace.`}
-function applyAccessShell(){renderAccessControls();configureNavigation();if(!accessState.session){renderPublicShell();return}document.body.classList.remove('access-public');updateSaneContext();renderTierHome()}
+function applyAccessShell(){renderAccessControls();configureNavigation();if(!accessState.session){document.body.classList.add('access-public');if(window.SRAPublicHome?.refreshNow){window.SRAPublicHome.refreshNow();return}renderPublicShell();return}document.body.classList.remove('access-public');updateSaneContext();renderTierHome()}
 let accessInitialization=null;
 async function initializeAccess(){
   if(accessInitialization)return accessInitialization;

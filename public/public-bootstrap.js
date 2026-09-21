@@ -3,10 +3,10 @@
   window.__sraPublicBootstrapInstalled = true;
 
   const ACCESS_FEATURE = '/access.js';
+  const PUBLIC_HOME_FEATURE = '/public-home.js';
   const CORE_PARALLEL_FEATURES = [
     '/sane-skills.js',
     '/public-chat-runtime.js',
-    '/public-home.js',
     '/sane-chat-format.js',
     '/sra-authenticated-fetch.js',
   ];
@@ -77,8 +77,9 @@
   }
 
   async function loadCore() {
-    // Access controls first paint. Do not make it wait for chat and workspace
-    // enhancements, which may be slow on a cold production instance.
+    // Public Home owns the signed-out canvas before Access resolves. Loading it
+    // first prevents the legacy public shell from flashing over the homepage.
+    await loadScript(PUBLIC_HOME_FEATURE);
     await loadScript(ACCESS_FEATURE);
 
     if (document.readyState !== 'loading' && typeof window.initializeAccess === 'function') {
@@ -90,7 +91,7 @@
 
     window.dispatchEvent(new CustomEvent('sra:public-booted', {
       detail: {
-        featureCount: 1 + CORE_PARALLEL_FEATURES.length + CORE_FINAL_FEATURES.length,
+        featureCount: 2 + CORE_PARALLEL_FEATURES.length + CORE_FINAL_FEATURES.length,
         lazyWorkspaceCount: Object.keys(VIEW_FEATURES).length,
         bootedAt: new Date().toISOString(),
       },
