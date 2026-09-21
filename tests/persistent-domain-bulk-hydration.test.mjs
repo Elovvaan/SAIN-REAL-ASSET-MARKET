@@ -13,6 +13,20 @@ test('memory database returns requested record types through the bulk-read contr
   assert.deepEqual(records, [{ recordType: 'ASSET_ACCOUNT', payload: { assetId: 'A-0' } }]);
 });
 
+test('memory database summarizes record counts, states, and recent samples', async () => {
+  const database = new DatabaseService();
+  await database.putRecord('SRA_INSTRUMENT', 'I-1', { instrumentId:'I-1', state:'ISSUED' });
+  await database.putRecord('SRA_INSTRUMENT', 'I-2', { instrumentId:'I-2', state:'REVIEW_REQUIRED' });
+  await database.putRecord('COIN_POSITION', 'C-1', { coinPositionId:'C-1', state:'ACTIVE' });
+
+  const summary = await database.summarizeRecords(['SRA_INSTRUMENT','COIN_POSITION'], { sampleLimit:1 });
+
+  assert.equal(summary.counts.SRA_INSTRUMENT, 2);
+  assert.deepEqual(summary.states.SRA_INSTRUMENT, { ISSUED:1, REVIEW_REQUIRED:1 });
+  assert.equal(summary.samples.SRA_INSTRUMENT[0].instrumentId, 'I-2');
+  assert.equal(summary.counts.COIN_POSITION, 1);
+});
+
 test('persistent domain hydrates requested record types with one database read', async () => {
   const calls = [];
   const database = {

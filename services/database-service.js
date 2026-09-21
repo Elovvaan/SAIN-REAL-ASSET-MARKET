@@ -282,6 +282,64 @@ export class DatabaseService {
     return Number(result.rows[0]?.count || 0);
   }
 
+  async summarizeRecords(recordTypes = [], { sampleLimit = 3 } = {}) {
+    const requestedTypes = [...new Set(recordTypes.map((value) => String(value || '').trim()).filter(Boolean))];
+    const boundedSampleLimit = Math.max(0, Math.min(Number(sampleLimit) || 0, 10));
+    const summary = {
+      generatedAt: new Date().toISOString(),
+      counts: Object.fromEntries(requestedTypes.map((type) => [type, 0])),
+      states: Object.fromEntries(requestedTypes.map((type) => [type, {}])),
+      samples: Object.fromEntries(requestedTypes.map((type) => [type, []])),
+    };
+    if (!requestedTypes.length) return summary;
+    if (!this.pool) {
+      const grouped = Object.fromEntries(requestedTypes.map((type) => [type, []]));
+      for (const [key, payload] of this.memory.records.entries()) {
+        const recordType = key.slice(0, key.indexOf(':'));
+        if (grouped[recordType]) grouped[recordType].push(clone(payload));
+      }
+      for (const recordType of requestedTypes) {
+        const records = grouped[recordType];
+        summary.counts[recordType] = records.length;
+        for (const record of records) {
+          const state = String(record?.state || record?.status || 'UNSPECIFIED').toUpperCase();
+          summary.states[recordType][state] = (summary.states[recordType][state] || 0) + 1;
+        }
+        summary.samples[recordType] = boundedSampleLimit ? records.slice(-boundedSampleLimit).reverse() : [];
+      }
+      return summary;
+    }
+    const stateResult = await this.pool.query(
+      `SELECT record_type,
+              UPPER(COALESCE(NULLIF(payload->>'state', ''), NULLIF(payload->>'status', ''), 'UNSPECIFIED')) AS record_state,
+              COUNT(*)::int AS count
+       FROM sra_domain_records
+       WHERE record_type = ANY($1::text[])
+       GROUP BY record_type, record_state`,
+      [requestedTypes]
+    );
+    for (const row of stateResult.rows) {
+      const count = Number(row.count || 0);
+      summary.counts[row.record_type] = (summary.counts[row.record_type] || 0) + count;
+      summary.states[row.record_type][row.record_state] = count;
+    }
+    if (boundedSampleLimit) {
+      const sampleResult = await this.pool.query(
+        `SELECT record_type, payload FROM (
+           SELECT record_type, payload,
+                  ROW_NUMBER() OVER (PARTITION BY record_type ORDER BY updated_at DESC) AS row_number
+           FROM sra_domain_records
+           WHERE record_type = ANY($1::text[])
+         ) recent
+         WHERE row_number <= $2
+         ORDER BY record_type, row_number`,
+        [requestedTypes, boundedSampleLimit]
+      );
+      for (const row of sampleResult.rows) summary.samples[row.record_type].push(row.payload);
+    }
+    return summary;
+  }
+
   async claimIdempotency({ key, fingerprint, actorId = null, resourceKey, ttlMs }) {
     const expiresAt = new Date(Date.now() + ttlMs);
     if (!this.pool) {

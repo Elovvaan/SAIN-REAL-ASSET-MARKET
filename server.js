@@ -256,7 +256,7 @@ try {
   marketplaceListingService = new MarketplaceListingService(createdApp.persistentDomain);
   coinbasePublicMarket = new CoinbasePublicMarketService({ observationLayerService: createdApp.observationLayerService, transactionAssetPipeline: coinbaseTransactionAssetPipeline });
   coinbaseExtension = createCoinbasePublicMarketRouter(coinbasePublicMarket);
-  privateAdminExtension = await createPrivateAdminRouter({ database: createdApp.database, domain: createdApp.persistentDomain, coinbasePublicMarket, nativePlatformAsset: nativePlatformAssetService });
+  privateAdminExtension = await createPrivateAdminRouter({ database: createdApp.database, domain: createdApp.persistentDomain, coinbasePublicMarket, nativePlatformAsset: nativePlatformAssetService, sraAgentService: createdApp.sraAgentService, runtimeMetricsProvider: runtimeMetrics });
   coinbasePublicMarket.start();
   startupMilestones.adminReadyAt = new Date().toISOString();
 

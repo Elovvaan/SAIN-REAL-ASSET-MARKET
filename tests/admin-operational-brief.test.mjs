@@ -34,3 +34,34 @@ test('preserves the human approval boundary', () => {
   assert.equal(capabilities.writeAuthority, 'HUMAN_IN_THE_LOOP');
   assert.ok(capabilities.cannotWithoutApproval.includes('PUBLISH_LISTING'));
 });
+
+test('diagnoses persistent record state, server errors, and slow routes', async () => {
+  const database = {
+    summarizeRecords: async (types) => ({
+      generatedAt: '2026-09-21T12:00:00.000Z',
+      counts: Object.fromEntries(types.map((type) => [type, type === 'SRA_INSTRUMENT' ? 5848 : type === 'COIN_POSITION' ? 473 : 0])),
+      states: Object.fromEntries(types.map((type) => [type, type === 'SRA_INSTRUMENT' ? { ISSUED:5847, REVIEW_REQUIRED:1 } : {}])),
+      samples: Object.fromEntries(types.map((type) => [type, []])),
+    }),
+    audit: async () => {},
+  };
+  const runtimeMetricsProvider = () => ({ byRoute:{ '/api/admin/instruments':{ requests:4, errors:1, averageDurationMs:2200, maxDurationMs:6100 } }, recentErrors:[{ path:'/api/admin/instruments', status:502 }] });
+  const result = await new AdminIntelligenceAgentService({ domain:new MemoryDomain(), database, runtimeMetricsProvider }).ask({ question:'Diagnose the platform and tell me what is sticking.' });
+  assert.equal(result.intent, 'DIAGNOSTICS');
+  assert.equal(result.status, 'DEGRADED');
+  assert.equal(result.diagnostics.counts.SRA_INSTRUMENT, 5848);
+  assert.equal(result.diagnostics.findings.some((item) => item.state === 'REVIEW_REQUIRED'), true);
+  assert.equal(result.diagnostics.findings.some((item) => item.route === '/api/admin/instruments' && item.state === 'HTTP_ERRORS'), true);
+  assert.equal(result.diagnostics.slowRoutes[0].maxDurationMs, 6100);
+});
+
+test('uses live platform context for open administrative conversation', async () => {
+  let suppliedContext = null;
+  const database = { summarizeRecords: async (types) => ({ generatedAt:new Date().toISOString(), counts:Object.fromEntries(types.map((type)=>[type,type === 'COIN_POSITION'?12:0])), states:Object.fromEntries(types.map((type)=>[type,{}])), samples:Object.fromEntries(types.map((type)=>[type,[]])) }), audit:async()=>{} };
+  const conversationalAgent = { available:()=>true, chat:async(input)=>{ suppliedContext=input.context; return{ message:'The Coin Positions are present, and I am checking their next lifecycle stage.' }; } };
+  const result = await new AdminIntelligenceAgentService({ domain:new MemoryDomain(), database, conversationalAgent }).ask({ question:'Talk me through what you see happening right now.' });
+  assert.equal(result.intent, 'OPEN_CONVERSATION');
+  assert.equal(result.status, 'AVAILABLE');
+  assert.match(result.answer, /Coin Positions are present/);
+  assert.equal(suppliedContext.liveRecords.counts.COIN_POSITION, 12);
+});

@@ -248,12 +248,12 @@ function compactMarketDashboard(domain) {
   };
 }
 
-export async function createPrivateAdminRouter({ database, domain, coinbasePublicMarket = null, nativePlatformAsset = null }) {
+export async function createPrivateAdminRouter({ database, domain, coinbasePublicMarket = null, nativePlatformAsset = null, sraAgentService = null, runtimeMetricsProvider = null }) {
   const access = new AccessService({ database });
   const marketplaceListings = new MarketplaceListingService(domain);
   const listingReadinessBatch = new ListingReadinessBatchService(domain);
   const listingPublicationBatch = new ListingPublicationBatchService(domain);
-  const intelligenceAgent = new AdminIntelligenceAgentService({ domain, database });
+  const intelligenceAgent = new AdminIntelligenceAgentService({ domain, database, conversationalAgent: sraAgentService, runtimeMetricsProvider });
   const determinationEngine = new DeterminationEngineService(domain);
   await access.initialize();
   await determinationEngine.initialize();
