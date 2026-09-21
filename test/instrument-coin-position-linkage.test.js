@@ -75,3 +75,20 @@ test('discovers and links positions stored in the SRA_COIN_POSITION record class
   await service.link('INS-1','CP-1','ADMIN-1');
   assert.equal(domain.get('SRA_COIN_POSITION','CP-1').instrumentId,'INS-1');
 });
+
+test('keeps direct living-market positions out of instrument linkage inventory',()=>{
+  const {service}=fixture({position:{marketDestination:'SRA_LIVING_MARKET',marketState:'LIVE',availableQuantity:473000000}});
+  const read=service.read();
+  assert.equal(read.positions.length,0);
+  assert.equal(read.directMarket.positionCount,1);
+  assert.equal(read.directMarket.liveSra,473000000);
+  assert.ok(service.evaluate('INS-1','CP-1').blockers.includes('DIRECT_MARKET_POSITION'));
+});
+
+test('automatically registers an existing eligible source relationship',async()=>{
+  const {domain,service}=fixture({instrument:{coinPositionId:'CP-1'},position:{instrumentId:'INS-1'}});
+  const results=await service.reconcileKnownSources();
+  assert.equal(results.length,1);
+  assert.deepEqual(domain.get('INSTRUMENT_REPRESENTATION_APPROVAL','IRA-INS-1').linkedCoinPositionIds,['CP-1']);
+  assert.equal((await service.reconcileKnownSources()).length,0);
+});

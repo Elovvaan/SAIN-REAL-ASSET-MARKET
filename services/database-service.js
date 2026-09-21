@@ -231,6 +231,57 @@ export class DatabaseService {
     return result.rows.map((row) => ({ recordType: row.record_type, payload: row.payload }));
   }
 
+  async listRecordsWindow(recordType, { states = [], limit = 100 } = {}) {
+    const boundedLimit = Math.max(1, Math.min(Number(limit) || 100, 500));
+    const normalizedStates = [...new Set(states.map((value) => String(value || '').trim().toUpperCase()).filter(Boolean))];
+    if (!this.pool) {
+      return [...this.memory.records.entries()]
+        .filter(([key]) => key.startsWith(`${recordType}:`))
+        .map(([, value]) => clone(value))
+        .filter((record) => !normalizedStates.length || normalizedStates.includes(String(record?.state || record?.status || '').toUpperCase()))
+        .slice(-boundedLimit)
+        .reverse();
+    }
+    const values = [recordType];
+    const stateClause = normalizedStates.length ? `AND UPPER(COALESCE(payload->>'state', payload->>'status', '')) = ANY($2::text[])` : '';
+    if (normalizedStates.length) values.push(normalizedStates);
+    values.push(boundedLimit);
+    const result = await this.pool.query(
+      `SELECT payload FROM sra_domain_records
+       WHERE record_type = $1 ${stateClause}
+       ORDER BY updated_at DESC
+       LIMIT $${values.length}`,
+      values
+    );
+    return result.rows.map((row) => row.payload);
+  }
+
+  async listRecordsByIds(recordType, recordIds = []) {
+    const ids = [...new Set(recordIds.map((value) => String(value || '').trim()).filter(Boolean))].slice(0, 500);
+    if (!ids.length) return [];
+    if (!this.pool) return ids.map((id) => clone(this.memory.records.get(`${recordType}:${id}`) || null)).filter(Boolean);
+    const result = await this.pool.query(
+      'SELECT payload FROM sra_domain_records WHERE record_type = $1 AND record_id = ANY($2::text[])',
+      [recordType, ids]
+    );
+    return result.rows.map((row) => row.payload);
+  }
+
+  async countRecords(recordType, { states = [] } = {}) {
+    const normalizedStates = [...new Set(states.map((value) => String(value || '').trim().toUpperCase()).filter(Boolean))];
+    if (!this.pool) {
+      return [...this.memory.records.entries()]
+        .filter(([key]) => key.startsWith(`${recordType}:`))
+        .map(([, value]) => value)
+        .filter((record) => !normalizedStates.length || normalizedStates.includes(String(record?.state || record?.status || '').toUpperCase())).length;
+    }
+    const values = [recordType];
+    const stateClause = normalizedStates.length ? `AND UPPER(COALESCE(payload->>'state', payload->>'status', '')) = ANY($2::text[])` : '';
+    if (normalizedStates.length) values.push(normalizedStates);
+    const result = await this.pool.query(`SELECT COUNT(*)::int AS count FROM sra_domain_records WHERE record_type = $1 ${stateClause}`, values);
+    return Number(result.rows[0]?.count || 0);
+  }
+
   async claimIdempotency({ key, fingerprint, actorId = null, resourceKey, ttlMs }) {
     const expiresAt = new Date(Date.now() + ttlMs);
     if (!this.pool) {

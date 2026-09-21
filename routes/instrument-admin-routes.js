@@ -134,7 +134,12 @@ export async function installInstrumentAdminRoutes({ router, domain, requireAdmi
 
   router.get('/api/admin/instrument-coin-position-linkages', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
-    return res.json(linkages.read());
+    try {
+      await linkages.reconcileKnownSources('SRA-COIN-AGENT');
+      return res.json(linkages.read());
+    } catch (error) {
+      return res.status(503).json({ error:'Instrument linkage is still loading. Refresh this stage in a moment.', code:error.code || 'INSTRUMENT_LINKAGE_READ_FAILED' });
+    }
   });
 
   router.post('/api/admin/instruments/:instrumentId/coin-position-linkage', async (req, res) => {
@@ -154,26 +159,43 @@ export async function installInstrumentAdminRoutes({ router, domain, requireAdmi
 
   router.get('/api/admin/instruments/approval-status', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
-    const stage = String(req.query?.stage || 'instrument-approval').trim().toLowerCase();
-    await domain.hydrate?.(['SRA_INSTRUMENT']);
-    const instruments = domain.list('SRA_INSTRUMENT');
-
-    if (stage === 'instrument-approval') {
-      const pendingAll = instruments.filter((instrument) => PENDING_STATES.has(stateOf(instrument)));
+    try {
+      const stage = String(req.query?.stage || 'instrument-approval').trim().toLowerCase();
       const limit = Math.max(1, Math.min(Number(req.query?.limit) || 50, 100));
-      const pending = pendingAll.slice(0, limit);
-      return res.json({ stage, pending, pendingCount: pendingAll.length, returnedCount: pending.length, hasMore: pendingAll.length > pending.length });
-    }
 
-    if (!['representation-approval','on-chain'].includes(stage)) {
-      return res.status(400).json({ error:'Unsupported instrument lifecycle stage.' });
-    }
+      if (stage === 'instrument-approval') {
+        if (database?.listRecordsWindow) {
+          const states = [...PENDING_STATES];
+          const [pending, pendingCount] = await Promise.all([
+            database.listRecordsWindow('SRA_INSTRUMENT', { states, limit }),
+            database.countRecords('SRA_INSTRUMENT', { states }),
+          ]);
+          return res.json({ stage, pending, pendingCount, returnedCount:pending.length, hasMore:pendingCount > pending.length });
+        }
+        await domain.hydrate?.(['SRA_INSTRUMENT']);
+        const pendingAll = domain.list('SRA_INSTRUMENT').filter((instrument) => PENDING_STATES.has(stateOf(instrument)));
+        const pending = pendingAll.slice(0, limit);
+        return res.json({ stage, pending, pendingCount: pendingAll.length, returnedCount: pending.length, hasMore: pendingAll.length > pending.length });
+      }
 
-    await domain.hydrate?.([INSTRUMENT_REPRESENTATION_APPROVAL_TYPE]);
-    const representationReady = instruments.filter((instrument) => REPRESENTATION_STATES.has(stateOf(instrument)));
-    const representationApprovals = representations.list();
-    const approvedIds = new Set(representationApprovals.filter((item) => item.state === 'APPROVED').map((item) => item.instrumentId));
-    const assessments = new Map(representations.evaluateMany(representationReady).map((assessment) => [assessment.instrumentId, assessment]));
+      if (!['representation-approval','on-chain'].includes(stage)) {
+        return res.status(400).json({ error:'Unsupported instrument lifecycle stage.' });
+      }
+
+      let representationReady;
+      let representationApprovals;
+      if (database?.listRecordsWindow) {
+        representationReady = await database.listRecordsWindow('SRA_INSTRUMENT', { states:[...REPRESENTATION_STATES], limit });
+        representationApprovals = await database.listRecordsByIds(
+          INSTRUMENT_REPRESENTATION_APPROVAL_TYPE,
+          representationReady.map((instrument) => `IRA-${idOf(instrument)}`)
+        );
+      } else {
+        await domain.hydrate?.(['SRA_INSTRUMENT', INSTRUMENT_REPRESENTATION_APPROVAL_TYPE]);
+        representationReady = domain.list('SRA_INSTRUMENT').filter((instrument) => REPRESENTATION_STATES.has(stateOf(instrument))).slice(0, limit);
+        representationApprovals = representations.list();
+      }
+      const approvedIds = new Set(representationApprovals.filter((item) => item.state === 'APPROVED').map((item) => item.instrumentId));
     return res.json({
       stage,
       representationReady: representationReady.map((instrument) => {
@@ -181,14 +203,17 @@ export async function installInstrumentAdminRoutes({ router, domain, requireAdmi
         const representationApproved = approvedIds.has(instrumentId);
         return {
           instrument,
-          assessment: assessments.get(instrumentId),
+          assessment: { eligible:true, instrumentId, state:stateOf(instrument), blockers:[], linkedCoinPositionIds:instrument.coinPositionId ? [instrument.coinPositionId] : [] },
           representationApproved,
           workflow: workflowFor(instrument, representationApproved),
         };
       }),
       representationApprovalCount: approvedIds.size,
       representationApprovals,
-    });
+      });
+    } catch (error) {
+      return res.status(503).json({ error:'Instrument approval data is still loading. Refresh this stage in a moment.', code:error.code || 'INSTRUMENT_APPROVAL_READ_FAILED' });
+    }
   });
 
   router.get('/api/admin/instruments/:instrumentId/internal-market', async (req, res) => {
@@ -223,9 +248,15 @@ export async function installInstrumentAdminRoutes({ router, domain, requireAdmi
     }
     try {
       const result = await representations.approve(req.params.instrumentId, session.id);
+      const instrument = domain.get('SRA_INSTRUMENT', req.params.instrumentId);
+      const knownCoinPositionId = instrument?.coinPositionId || instrument?.sourcePositionId || null;
+      const linkageAssessment = knownCoinPositionId ? linkages.evaluate(req.params.instrumentId, knownCoinPositionId) : null;
+      const linkage = linkageAssessment?.eligible
+        ? await linkages.link(req.params.instrumentId, knownCoinPositionId, 'SRA-COIN-AGENT')
+        : null;
       const marketplace = await marketPropagation.propagate(req.params.instrumentId, 'SRA-COIN-AGENT');
       if (database?.audit) await database.audit({ actorId: session.id, eventType: 'INSTRUMENT_REPRESENTATION_APPROVED', objectType: 'SRA_INSTRUMENT', objectId: req.params.instrumentId, payload: { changed: result.changed, approvalId: result.approval.approvalId, marketplaceState: marketplace.marketplaceState } });
-      return res.status(result.changed ? 201 : 200).json({ ...result, marketplace });
+      return res.status(result.changed ? 201 : 200).json({ ...result, linkage, marketplace });
     } catch (error) {
       return res.status(422).json({ error: error.message, code: error.code || 'INSTRUMENT_REPRESENTATION_APPROVAL_FAILED', assessment: error.assessment || null });
     }

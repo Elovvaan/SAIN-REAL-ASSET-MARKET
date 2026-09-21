@@ -38,7 +38,8 @@ export function createSaneRouter(service = new SaneSkillService(), edxOperations
   const unifiedOperationsQueue = domain ? new UnifiedMarketOperationsQueueService(domain, orderReviewMatching, coreHeartbeat) : null;
   const agentOperatingSystem = domain ? new SraAgentOperatingSystemService(domain, { operationsQueue: unifiedOperationsQueue, coreHeartbeat }) : null;
 
-  if (coreHeartbeat) void coreHeartbeat.start().catch((error) => console.error(JSON.stringify({ level: 'error', event: 'SRA_CORE_START_FAILED', error: error?.message || String(error) })));
+  // Core cycles are operator-directed. Keeping the recurring writer off the public
+  // boot path prevents it from competing with sign-in and stage-specific reads.
 
   router.get('/skills', (req, res) => res.json({ architectureVersion: 'V14', operatingTier: typeof req.query?.operatingTier === 'string' ? req.query.operatingTier : 'UNIVERSAL', skills: service.listSkills(typeof req.query?.operatingTier === 'string' ? req.query.operatingTier : 'UNIVERSAL') }));
   router.post('/message', (req, res) => { try { res.json(service.dispatch(req.body)); } catch (error) { res.status(400).json({ error: error.message }); } });

@@ -32,7 +32,21 @@
     users:['Overview','Administrators','Roles','Permissions','Sessions','Access History'],
     system:['Overview','Core Services','Diagnostics','Protected Actions','Alerts','Audit State']
   };
-  const FEATURE_ONLY_TABS = new Set(['operations::Financing','treasury::Overview','instruments::Approval','instruments::On-Chain','instruments::Restore Record']);
+  const FEATURE_ONLY_TABS = new Set([
+    'operations::Financing',
+    'treasury::Overview',
+    'instruments::Pending Review',
+    'instruments::Approval',
+    'instruments::On-Chain',
+    'instruments::Restore Record',
+    'coin-positions::Current Supply',
+    'coin-positions::Represented Value',
+    'coin-positions::Coin Intelligence',
+    'coin-positions::Instrument Linkage',
+    'coin-positions::Mint History',
+    'coin-positions::Retirements',
+    'coin-positions::Adjustments'
+  ]);
   const state = { mounted:false, workspaceData:null, loading:null, loadingScope:null, loadedScopes:new Set(), loadedViews:new Set(), loadingViews:new Map(), viewErrors:new Map() };
   const esc = value => String(value ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;');
   const recordsBody = id => document.querySelector(`[data-workspace="${id}"] .admin-workspace-records`);

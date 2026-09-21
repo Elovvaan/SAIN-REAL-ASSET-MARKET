@@ -43,6 +43,11 @@ function positionInstrumentId(position) {
   return position?.instrumentId || position?.sraInstrumentId || position?.linkedInstrumentId || null;
 }
 
+function isDirectMarketPosition(position) {
+  return upper(position?.marketDestination) === 'SRA_LIVING_MARKET'
+    && upper(position?.marketState) === 'LIVE';
+}
+
 function instrumentPositionId(instrument) {
   return instrument?.coinPositionId || instrument?.sourcePositionId || null;
 }
@@ -104,6 +109,7 @@ export class InstrumentCoinPositionLinkageService {
     if (!INSTRUMENT_STATES.has(upper(instrument.state || instrument.status))) blockers.push('INSTRUMENT_NOT_APPROVED');
     if (approval?.state !== 'APPROVED') blockers.push('REPRESENTATION_APPROVAL_REQUIRED');
     if (!POSITION_STATES.has(upper(position.state || position.status))) blockers.push('COIN_POSITION_NOT_ACTIVE');
+    if (isDirectMarketPosition(position)) blockers.push('DIRECT_MARKET_POSITION');
     if (isDerivative(position)) blockers.push('ROOT_COIN_POSITION_REQUIRED');
     if (upper(position.symbol || position.assetCode || 'SRA') !== 'SRA') blockers.push('SRA_DENOMINATION_REQUIRED');
     if (!text(position.ownerId || position.participantId || position.coinAccountId)) blockers.push('COIN_POSITION_AUTHORITY_REQUIRED');
@@ -171,7 +177,9 @@ export class InstrumentCoinPositionLinkageService {
           nextStage,
         };
       });
-    const positions = uniquePositions(this.domain).map(({ position, recordType }) => ({
+    const allPositions = uniquePositions(this.domain);
+    const directMarketPositions = allPositions.filter(({ position }) => isDirectMarketPosition(position));
+    const positions = allPositions.filter(({ position }) => !isDirectMarketPosition(position)).map(({ position, recordType }) => ({
       coinPositionId: positionIdOf(position),
       recordType,
       state: upper(position.state || position.status),
@@ -184,7 +192,29 @@ export class InstrumentCoinPositionLinkageService {
       rootPosition: !isDerivative(position),
       restricted: Boolean(position.frozen || position.complianceHold || position.transferRestricted || position.externalTransferRestricted || position.disputeState === 'OPEN'),
     }));
-    return { model: 'INSTRUMENT_COIN_POSITION_LINKAGE', instruments, positions };
+    return {
+      model: 'INSTRUMENT_COIN_POSITION_LINKAGE',
+      instruments,
+      positions,
+      directMarket: {
+        positionCount: directMarketPositions.length,
+        liveSra: directMarketPositions.reduce((sum, { position }) => sum + availableQuantity(position), 0),
+        destination: 'SRA_LIVING_MARKET',
+        state: directMarketPositions.length ? 'LIVE' : 'EMPTY',
+      },
+    };
+  }
+
+  async reconcileKnownSources(actorId = 'SRA-COIN-AGENT') {
+    const results = [];
+    for (const instrument of this.domain.list(INSTRUMENT_TYPE)) {
+      const instrumentId = instrumentIdOf(instrument);
+      const coinPositionId = instrumentPositionId(instrument);
+      if (!instrumentId || !coinPositionId) continue;
+      const assessment = this.evaluate(instrumentId, coinPositionId);
+      if (assessment.eligible && !assessment.alreadyLinked) results.push(await this.link(instrumentId, coinPositionId, actorId));
+    }
+    return results;
   }
 
   async link(instrumentId, coinPositionId, actorId = 'SRA_PLATFORM_ADMIN') {

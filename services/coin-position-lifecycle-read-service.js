@@ -114,6 +114,8 @@ export class CoinPositionLifecycleReadService {
           state: entry.state || null,
           recognizedAt: entry.recognizedAt || entry.settledAt || entry.completedAt || entry.createdAt || null,
         })),
+        marketDestination: position.marketDestination || null,
+        marketState: position.marketState || null,
       };
     });
 
@@ -131,6 +133,8 @@ export class CoinPositionLifecycleReadService {
     const available = Math.max(0, representedSra - reserved - externalized);
     const retired = retiredRoots.reduce((sum, position) => sum + n(position.quantity), 0);
     const accountIssuance = coinAccounts.filter((account) => String(account.symbol || '').toUpperCase() === 'SRA').reduce((sum, account) => sum + n(account.representedQuantity), 0);
+    const liveMarketRows = rows.filter((row) => row.marketDestination === 'SRA_LIVING_MARKET' && row.marketState === 'LIVE');
+    const liveMarketSra = liveMarketRows.reduce((sum, row) => sum + row.availableSra, 0);
 
     const sourceMix = {};
     for (const row of rows) sourceMix[row.sourceUnit] = (sourceMix[row.sourceUnit] || 0) + 1;
@@ -148,7 +152,9 @@ export class CoinPositionLifecycleReadService {
         retiredSra: retired,
         accountIssuedSra: accountIssuance,
         recognizedUsd,
+        liveMarketSra,
       },
+      market: { destination:'SRA_LIVING_MARKET', state:liveMarketRows.length ? 'LIVE' : 'EMPTY', positionCount:liveMarketRows.length, liveSra:liveMarketSra },
       ownership: {
         platformOwnerId: PLATFORM_OWNER_ID,
         positionCountWithInitialOwner: rows.length - missingInitialOwner,
