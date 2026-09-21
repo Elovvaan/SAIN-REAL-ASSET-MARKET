@@ -16,8 +16,9 @@ test('Platform Administration renders a live SAIN operating workspace', () => {
 test('administrative workspace reads core platform systems', () => {
   assert.match(workspace, /coinbase-public\/status/);
   assert.match(workspace, /observations\/summary/);
-  assert.match(workspace, /financial-records\/coin-positions/);
-  assert.match(workspace, /financial-records\/instruments/);
+  assert.match(workspace, /financial-records\/summary/);
+  assert.match(workspace, /financial-records\/instruments\/summary/);
+  assert.doesNotMatch(workspace, /json\('\/api\/financial-records\/coin-positions'\)/);
   assert.match(workspace, /platform-treasury\/crypto-wallets\/dashboard/);
 });
 

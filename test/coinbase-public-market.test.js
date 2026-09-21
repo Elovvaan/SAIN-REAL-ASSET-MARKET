@@ -69,15 +69,34 @@ test('records Coinbase trades as SRA market observations with source lineage', a
     }]
   });
   await waitForAsyncWork();
+  await service.flushMarketFlows();
   assert.equal(calls.length, 1);
   assert.equal(calls[0].actor, 'COINBASE_PUBLIC_MARKET_TRADES');
   assert.equal(calls[0].input.sourceMarket, 'COINBASE');
-  assert.equal(calls[0].input.sourceRecordId, 'BTC-USD:9001');
-  assert.equal(calls[0].input.sourceRecordType, 'MARKET_TRADE');
+  assert.equal(calls[0].input.sourceRecordId, 'BTC-USD:9001:9001');
+  assert.equal(calls[0].input.sourceRecordType, 'MARKET_FLOW');
+  assert.equal(calls[0].input.rawValues.tradeCount, 1);
   assert.equal(calls[0].input.rawValues.notional, 600);
-  assert.equal(calls[0].input.rawPayload.trade_id, '9001');
+  assert.equal(calls[0].input.rawPayload.lastTradeId, '9001');
   assert.equal(service.status().recordedTrades, 1);
   service.stop();
+});
+
+test('summarizes a high-volume tick stream into one bounded market-flow record', async () => {
+  const calls = [];
+  const service = new CoinbasePublicMarketService({
+    observationLayerService: { observe: async (input) => { calls.push(input); return { created: true, observation: { observationId: 'OBS-FLOW' } }; } },
+    WebSocketImpl: FakeWebSocket,
+    environment: { COINBASE_PUBLIC_MARKET_ENABLED: 'true', COINBASE_PUBLIC_MARKET_PRODUCTS: 'BTC-USD', COINBASE_PUBLIC_MARKET_MAX_TRADES_PER_MINUTE: '2000' },
+    logger: quietLogger()
+  });
+  for (let index = 1; index <= 1000; index += 1) service.collectTrade({ trade_id: String(index), product_id: 'BTC-USD', price: '50000', size: '0.001', side: 'BUY', time: '2026-08-04T20:00:00Z' }, { sequence_num: index }, 'update');
+  await service.flushMarketFlows();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].rawValues.tradeCount, 1000);
+  assert.equal(calls[0].rawValues.size, 1);
+  assert.equal(calls[0].rawValues.notional, 50000);
+  assert.equal(service.status().pendingMarketFlows, 0);
 });
 
 test('remains disabled until the Railway connector flag is explicitly enabled', () => {

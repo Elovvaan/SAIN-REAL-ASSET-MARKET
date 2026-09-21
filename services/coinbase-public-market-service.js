@@ -30,6 +30,7 @@ export class CoinbasePublicMarketService {
     this.endpoint = environment.COINBASE_PUBLIC_MARKET_WS_URL || DEFAULT_ENDPOINT;
     this.products = productList(environment.COINBASE_PUBLIC_MARKET_PRODUCTS);
     this.maxTradesPerMinute = positiveInteger(environment.COINBASE_PUBLIC_MARKET_MAX_TRADES_PER_MINUTE, 60);
+    this.flushIntervalMs = positiveInteger(environment.COINBASE_PUBLIC_MARKET_FLUSH_INTERVAL_MS, 60000);
     this.reconnectBaseMs = positiveInteger(environment.COINBASE_PUBLIC_MARKET_RECONNECT_MS, 1000);
     this.socket = null;
     this.reconnectTimer = null;
@@ -37,7 +38,9 @@ export class CoinbasePublicMarketService {
     this.closedByService = false;
     this.minuteStartedAt = Date.now();
     this.tradesThisMinute = 0;
-    this.messageQueue = Promise.resolve();
+    this.flowBuckets = new Map();
+    this.flushTimer = null;
+    this.flushQueue = Promise.resolve();
     this.state = this.enabled ? 'IDLE' : 'DISABLED';
     this.connectedAt = null;
     this.lastMessageAt = null;
@@ -65,6 +68,8 @@ export class CoinbasePublicMarketService {
       endpoint: this.endpoint,
       products: this.products,
       maxTradesPerMinute: this.maxTradesPerMinute,
+      flushIntervalMs: this.flushIntervalMs,
+      pendingMarketFlows: this.flowBuckets.size,
       connectedAt: this.connectedAt,
       lastMessageAt: this.lastMessageAt,
       lastTradeAt: this.lastTradeAt,
@@ -87,6 +92,10 @@ export class CoinbasePublicMarketService {
     if (!this.enabled) return this.status();
     if (this.socket && [this.WebSocketImpl.OPEN, this.WebSocketImpl.CONNECTING].includes(this.socket.readyState)) return this.status();
     this.closedByService = false;
+    if (!this.flushTimer) {
+      this.flushTimer = setInterval(() => this.flushMarketFlows(), this.flushIntervalMs);
+      this.flushTimer.unref?.();
+    }
     this.connect();
     return this.status();
   }
@@ -95,6 +104,8 @@ export class CoinbasePublicMarketService {
     this.closedByService = true;
     clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
+    clearInterval(this.flushTimer);
+    this.flushTimer = null;
     if (this.socket) {
       try { this.socket.close(1000, 'SRA connector stopped'); } catch {}
     }
@@ -119,9 +130,7 @@ export class CoinbasePublicMarketService {
     });
 
     socket.on('message', (payload) => {
-      this.messageQueue = this.messageQueue
-        .then(() => this.handleMessage(payload))
-        .catch((error) => this.captureError(error));
+      try { this.handleMessage(payload); } catch (error) { this.captureError(error); }
     });
 
     socket.on('error', (error) => this.captureError(error));
@@ -163,7 +172,7 @@ export class CoinbasePublicMarketService {
     return true;
   }
 
-  async handleMessage(payload) {
+  handleMessage(payload) {
     this.lastMessageAt = now();
     let message;
     try { message = JSON.parse(payload.toString()); } catch { return; }
@@ -177,9 +186,45 @@ export class CoinbasePublicMarketService {
       for (const trade of event.trades || []) {
         this.receivedTrades += 1;
         if (!this.allowTrade()) continue;
-        await this.recordTrade(trade, message, event.type || null);
+        this.collectTrade(trade, message, event.type || null);
       }
     }
+  }
+
+  collectTrade(trade, envelope, eventType) {
+    const tradeId = String(trade.trade_id || '').trim();
+    const productId = String(trade.product_id || '').trim().toUpperCase();
+    const price = finiteNumber(trade.price);
+    const size = finiteNumber(trade.size);
+    if (!tradeId || !productId || price == null || size == null || price <= 0 || size <= 0) return;
+    const at = trade.time || envelope.timestamp || now();
+    const bucket = this.flowBuckets.get(productId) || {
+      productId, tradeCount: 0, nativeQuantity: 0, notional: 0, lowPrice: price, highPrice: price,
+      firstTradeId: tradeId, lastTradeId: tradeId, firstTradeAt: at, lastTradeAt: at,
+      buyCount: 0, sellCount: 0, eventType, lastSequenceNumber: null
+    };
+    bucket.tradeCount += 1;
+    bucket.nativeQuantity += size;
+    bucket.notional += price * size;
+    bucket.lowPrice = Math.min(bucket.lowPrice, price);
+    bucket.highPrice = Math.max(bucket.highPrice, price);
+    bucket.lastPrice = price;
+    bucket.lastTradeId = tradeId;
+    bucket.lastTradeAt = at;
+    bucket.lastSequenceNumber = envelope.sequence_num ?? bucket.lastSequenceNumber;
+    if (String(trade.side || '').toUpperCase() === 'BUY') bucket.buyCount += 1;
+    if (String(trade.side || '').toUpperCase() === 'SELL') bucket.sellCount += 1;
+    this.flowBuckets.set(productId, bucket);
+    this.lastTradeAt = at;
+  }
+
+  async flushMarketFlows() {
+    this.flushQueue = this.flushQueue.then(async () => {
+      const buckets = [...this.flowBuckets.values()];
+      this.flowBuckets.clear();
+      for (const bucket of buckets) await this.recordMarketFlow(bucket);
+    }).catch((error) => this.captureError(error));
+    return this.flushQueue;
   }
 
   async processAssetPipeline(observation) {
@@ -195,36 +240,42 @@ export class CoinbasePublicMarketService {
     }
   }
 
-  async recordTrade(trade, envelope, eventType) {
-    const tradeId = String(trade.trade_id || '').trim();
-    const productId = String(trade.product_id || '').trim().toUpperCase();
-    if (!tradeId || !productId) return;
-    const price = finiteNumber(trade.price);
-    const size = finiteNumber(trade.size);
-    const notional = price != null && size != null ? Number((price * size).toFixed(8)) : null;
+  async recordMarketFlow(bucket) {
+    const { productId, firstTradeId, lastTradeId, tradeCount } = bucket;
+    const notional = Number(bucket.notional.toFixed(8));
+    const size = Number(bucket.nativeQuantity.toFixed(8));
+    const price = Number((notional / size).toFixed(8));
     const result = await this.observations.observe({
       sourceMarket: 'COINBASE',
-      sourceRecordId: `${productId}:${tradeId}`,
-      sourceRecordType: 'MARKET_TRADE',
-      sourceTimestamp: trade.time || envelope.timestamp || null,
+      sourceRecordId: `${productId}:${firstTradeId}:${lastTradeId}`,
+      sourceRecordType: 'MARKET_FLOW',
+      sourceTimestamp: bucket.lastTradeAt,
       connectorId: CONNECTOR_ID,
       category: 'CRYPTO_MARKET_TRANSACTION',
       rawValues: {
-        tradeId,
+        tradeId: lastTradeId,
+        firstTradeId,
+        lastTradeId,
+        tradeCount,
         productId,
         price,
         size,
         notional,
-        side: trade.side || null,
-        eventType,
-        sequenceNumber: envelope.sequence_num ?? null
+        lowPrice: bucket.lowPrice,
+        highPrice: bucket.highPrice,
+        lastPrice: bucket.lastPrice,
+        buyCount: bucket.buyCount,
+        sellCount: bucket.sellCount,
+        windowStartedAt: bucket.firstTradeAt,
+        windowEndedAt: bucket.lastTradeAt,
+        eventType: bucket.eventType,
+        sequenceNumber: bucket.lastSequenceNumber
       },
-      rawPayload: trade,
-      sourceReference: `coinbase:advanced-trade:market_trades:${productId}:${tradeId}`
+      rawPayload: { ...bucket, nativeQuantity: size, notional, vwap: price },
+      sourceReference: `coinbase:advanced-trade:market_flow:${productId}:${firstTradeId}:${lastTradeId}`
     }, CONNECTOR_ID);
-    this.lastTradeAt = trade.time || envelope.timestamp || now();
     if (result.created) {
-      this.recordedTrades += 1;
+      this.recordedTrades += tradeCount;
       await this.processAssetPipeline(result.observation);
     } else {
       this.duplicateTrades += 1;

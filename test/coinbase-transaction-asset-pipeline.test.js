@@ -89,12 +89,29 @@ test('Coinbase trade becomes a Recognition, Financial Record, and SRA Coin Posit
   assert.equal(result.coinPosition.sourceLineage.observationId, observation.observationId);
   assert.equal(result.coinPosition.state, 'REPRESENTED');
   assert.equal(result.coinPosition.restrictions.some((item) => item.type === 'MARKET_ACCESS_SUBJECT_TO_PLATFORM_WORKFLOW'), false);
+  assert.equal(result.coinPosition.marketDestination, 'SRA_LIVING_MARKET');
+  assert.equal(result.coinPosition.marketState, 'LIVE');
   assert.equal(result.instrument, null);
 
   assert.equal(domain.list(RECORD_TYPES.RECOGNITION_ASSESSMENT).length, 1);
   assert.equal(domain.list(RECORD_TYPES.FINANCIAL_RECORD).length, 1);
   assert.equal(domain.list(RECORD_TYPES.COIN_POSITION).length, 1);
   assert.equal(domain.list(RECORD_TYPES.SRA_INSTRUMENT).length, 0);
+});
+
+test('a summarized Coinbase flow reaches the SRA market as one Coin Position', async () => {
+  const { domain, observations, pipeline } = services();
+  const { observation } = await observations.observe({
+    sourceMarket: 'COINBASE', sourceRecordId: 'BTC-USD:1:1000', sourceRecordType: 'MARKET_FLOW',
+    sourceTimestamp: '2026-08-04T22:01:00.000Z', connectorId: 'COINBASE_PUBLIC_MARKET_TRADES', category: 'CRYPTO_MARKET_TRANSACTION',
+    rawValues: { tradeId: '1000', firstTradeId: '1', lastTradeId: '1000', tradeCount: 1000, productId: 'BTC-USD', price: 50000, lastPrice: 50010, size: 1, notional: 50000 },
+    rawPayload: { productId: 'BTC-USD', tradeCount: 1000 }, sourceReference: 'coinbase:advanced-trade:market_flow:BTC-USD:1:1000'
+  }, 'COINBASE_PUBLIC_MARKET_TRADES');
+  const result = await pipeline.processObservation(observation);
+  assert.equal(result.coinPosition.sourceTradeCount, 1000);
+  assert.equal(domain.list(RECORD_TYPES.COIN_POSITION).length, 1);
+  assert.equal(pipeline.status().flowPositions[0].tradeCount, 1000);
+  assert.equal(pipeline.status().flowPositions[0].marketDestination, 'SRA_LIVING_MARKET');
 });
 
 test('reprocessing the same observation returns the existing coin asset chain without creating an instrument', async () => {

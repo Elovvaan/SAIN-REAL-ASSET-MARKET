@@ -45,6 +45,7 @@ export class CoinbaseTransactionAssetPipelineService {
     this.lastProcessedAt = null;
     this.lastError = null;
     this.backfillState = 'NOT_STARTED';
+    this.flowPositions = new Map();
   }
 
   status() {
@@ -62,13 +63,15 @@ export class CoinbaseTransactionAssetPipelineService {
       failed: this.failed,
       backfillState: this.backfillState,
       lastProcessedAt: this.lastProcessedAt,
-      lastError: this.lastError
+      lastError: this.lastError,
+      marketDestination: 'SRA_LIVING_MARKET',
+      flowPositions: [...this.flowPositions.values()]
     };
   }
 
   eligible(observation) {
     return observation?.sourceMarket === 'COINBASE'
-      && observation?.sourceRecordType === 'MARKET_TRADE'
+      && ['MARKET_TRADE', 'MARKET_FLOW'].includes(observation?.sourceRecordType)
       && observation?.category === 'CRYPTO_MARKET_TRANSACTION';
   }
 
@@ -122,7 +125,7 @@ export class CoinbaseTransactionAssetPipelineService {
     return updated;
   }
 
-  async ensureNativeSourceValuation(coinPosition, observation, { productId, tradeId, price, size, notional, nativeUnit, quoteCurrency }) {
+  async ensureNativeSourceValuation(coinPosition, observation, { productId, tradeId, price, size, notional, nativeUnit, quoteCurrency, tradeCount = 1 }) {
     if (!coinPosition) return coinPosition;
     const expectedSourcePosition = {
       amount: size,
@@ -149,6 +152,11 @@ export class CoinbaseTransactionAssetPipelineService {
       nativeUnit,
       recordedValue: { amount: notional, currency: quoteCurrency },
       representedValueUsd: notional,
+      availableQuantity: Number(coinPosition.quantity || notional),
+      marketDestination: 'SRA_LIVING_MARKET',
+      marketState: 'LIVE',
+      sourceFlow: 'COINBASE_PUBLIC_MARKET',
+      sourceTradeCount: tradeCount,
       valuation: {
         method: 'COINBASE_EXECUTED_PRICE_TIMES_SIZE',
         source: 'COINBASE',
@@ -250,6 +258,7 @@ export class CoinbaseTransactionAssetPipelineService {
         throw error;
       }
       const tradeId = String(raw.tradeId || observation.sourceRecordId || '');
+      const tradeCount = Math.max(1, Number(raw.tradeCount || 1));
       const notional = finitePositive(raw.notional, 'trade notional');
       const price = finitePositive(raw.price, 'trade price');
       const size = finitePositive(raw.size, 'trade size');
@@ -333,7 +342,7 @@ export class CoinbaseTransactionAssetPipelineService {
         if (result.created) this.coinPositionsCreated += 1;
       }
 
-      coinPosition = await this.ensureNativeSourceValuation(coinPosition, observation, { productId, tradeId, price, size, notional, nativeUnit, quoteCurrency });
+      coinPosition = await this.ensureNativeSourceValuation(coinPosition, observation, { productId, tradeId, price, size, notional, nativeUnit, quoteCurrency, tradeCount });
       coinPosition = await this.ensurePlatformOwnership(coinPosition);
       instrument = await this.ensureInstrument(coinPosition, financialRecord, observation, { productId, tradeId });
       if (instrument) {
@@ -341,6 +350,21 @@ export class CoinbaseTransactionAssetPipelineService {
       }
 
       this.processed += 1;
+      const priorFlow = this.flowPositions.get(productId) || { productId, nativeUnit, tradeCount: 0, batchCount: 0, nativeQuantity: 0, representedSra: 0 };
+      this.flowPositions.set(productId, {
+        ...priorFlow,
+        productId,
+        nativeUnit,
+        tradeCount: Number(priorFlow.tradeCount || 0) + tradeCount,
+        batchCount: Number(priorFlow.batchCount || 0) + 1,
+        nativeQuantity: Number((Number(priorFlow.nativeQuantity || 0) + size).toFixed(8)),
+        representedSra: Number((Number(priorFlow.representedSra || 0) + notional).toFixed(8)),
+        lastPrice: Number(raw.lastPrice || price),
+        marketDestination: 'SRA_LIVING_MARKET',
+        marketState: 'LIVE',
+        latestCoinPositionId: coinPosition.coinPositionId,
+        updatedAt: observation.sourceTimestamp || observation.observedAt
+      });
       this.lastProcessedAt = new Date().toISOString();
       this.lastError = null;
       return {
@@ -363,7 +387,7 @@ export class CoinbaseTransactionAssetPipelineService {
   async backfill() {
     if (!this.enabled || this.backfillState === 'RUNNING') return this.status();
     this.backfillState = 'RUNNING';
-    const observations = this.observations.list({ market: 'COINBASE', recordType: 'MARKET_TRADE' })
+    const observations = this.observations.list({ market: 'COINBASE' })
       .filter((item) => this.eligible(item))
       .slice(0, Number.isFinite(this.backfillLimit) && this.backfillLimit > 0 ? this.backfillLimit : 5000);
     for (const observation of observations) {
