@@ -231,7 +231,7 @@ export class DatabaseService {
     return result.rows.map((row) => ({ recordType: row.record_type, payload: row.payload }));
   }
 
-  async listRecordsWindow(recordType, { states = [], limit = 100 } = {}) {
+  async listRecordsWindow(recordType, { states = [], limit = 100, coinbaseSourceComponents = 'include' } = {}) {
     const boundedLimit = Math.max(1, Math.min(Number(limit) || 100, 500));
     const normalizedStates = [...new Set(states.map((value) => String(value || '').trim().toUpperCase()).filter(Boolean))];
     if (!this.pool) {
@@ -239,16 +239,23 @@ export class DatabaseService {
         .filter(([key]) => key.startsWith(`${recordType}:`))
         .map(([, value]) => clone(value))
         .filter((record) => !normalizedStates.length || normalizedStates.includes(String(record?.state || record?.status || '').toUpperCase()))
+        .filter((record) => {
+          const component = Array.isArray(record?.conditions) && record.conditions.some((item) => String(item?.type || '').toUpperCase() === 'SOURCE_TRANSACTION_LINEAGE' && String(item?.source || '').toUpperCase() === 'COINBASE');
+          return coinbaseSourceComponents === 'only' ? component : coinbaseSourceComponents === 'exclude' ? !component : true;
+        })
         .slice(-boundedLimit)
         .reverse();
     }
     const values = [recordType];
-    const stateClause = normalizedStates.length ? `AND UPPER(COALESCE(payload->>'state', payload->>'status', '')) = ANY($2::text[])` : '';
-    if (normalizedStates.length) values.push(normalizedStates);
+    const clauses = [];
+    if (normalizedStates.length) { values.push(normalizedStates); clauses.push(`UPPER(COALESCE(payload->>'state', payload->>'status', '')) = ANY($${values.length}::text[])`); }
+    const componentSql = `EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(payload->'conditions', '[]'::jsonb)) item WHERE UPPER(COALESCE(item->>'type','')) = 'SOURCE_TRANSACTION_LINEAGE' AND UPPER(COALESCE(item->>'source','')) = 'COINBASE')`;
+    if (coinbaseSourceComponents === 'only') clauses.push(componentSql);
+    if (coinbaseSourceComponents === 'exclude') clauses.push(`NOT (${componentSql})`);
     values.push(boundedLimit);
     const result = await this.pool.query(
       `SELECT payload FROM sra_domain_records
-       WHERE record_type = $1 ${stateClause}
+       WHERE record_type = $1 ${clauses.length ? `AND ${clauses.join(' AND ')}` : ''}
        ORDER BY updated_at DESC
        LIMIT $${values.length}`,
       values
@@ -267,18 +274,25 @@ export class DatabaseService {
     return result.rows.map((row) => row.payload);
   }
 
-  async countRecords(recordType, { states = [] } = {}) {
+  async countRecords(recordType, { states = [], coinbaseSourceComponents = 'include' } = {}) {
     const normalizedStates = [...new Set(states.map((value) => String(value || '').trim().toUpperCase()).filter(Boolean))];
     if (!this.pool) {
       return [...this.memory.records.entries()]
         .filter(([key]) => key.startsWith(`${recordType}:`))
         .map(([, value]) => value)
-        .filter((record) => !normalizedStates.length || normalizedStates.includes(String(record?.state || record?.status || '').toUpperCase())).length;
+        .filter((record) => !normalizedStates.length || normalizedStates.includes(String(record?.state || record?.status || '').toUpperCase()))
+        .filter((record) => {
+          const component = Array.isArray(record?.conditions) && record.conditions.some((item) => String(item?.type || '').toUpperCase() === 'SOURCE_TRANSACTION_LINEAGE' && String(item?.source || '').toUpperCase() === 'COINBASE');
+          return coinbaseSourceComponents === 'only' ? component : coinbaseSourceComponents === 'exclude' ? !component : true;
+        }).length;
     }
     const values = [recordType];
-    const stateClause = normalizedStates.length ? `AND UPPER(COALESCE(payload->>'state', payload->>'status', '')) = ANY($2::text[])` : '';
-    if (normalizedStates.length) values.push(normalizedStates);
-    const result = await this.pool.query(`SELECT COUNT(*)::int AS count FROM sra_domain_records WHERE record_type = $1 ${stateClause}`, values);
+    const clauses = [];
+    if (normalizedStates.length) { values.push(normalizedStates); clauses.push(`UPPER(COALESCE(payload->>'state', payload->>'status', '')) = ANY($${values.length}::text[])`); }
+    const componentSql = `EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(payload->'conditions', '[]'::jsonb)) item WHERE UPPER(COALESCE(item->>'type','')) = 'SOURCE_TRANSACTION_LINEAGE' AND UPPER(COALESCE(item->>'source','')) = 'COINBASE')`;
+    if (coinbaseSourceComponents === 'only') clauses.push(componentSql);
+    if (coinbaseSourceComponents === 'exclude') clauses.push(`NOT (${componentSql})`);
+    const result = await this.pool.query(`SELECT COUNT(*)::int AS count FROM sra_domain_records WHERE record_type = $1 ${clauses.length ? `AND ${clauses.join(' AND ')}` : ''}`, values);
     return Number(result.rows[0]?.count || 0);
   }
 

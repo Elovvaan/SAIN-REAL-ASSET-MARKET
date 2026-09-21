@@ -22,7 +22,7 @@
     treasury:['Overview','Commercial Instruments','Cash Position','Available Financing','Funding Capacity','Journal Entries','Treasury Wallets','Ledger','Treasury Reports'],
     'native-asset':['Current Asset','Approval Status','Listing','Marketplace Status','Export Status','Ownership','Recognitions','Asset History','Publishing','Governance'],
     marketplace:['Investor Funding Flow','Prepared','Ready','Published','Orders','Reservations','Allocations','Settlement','Historical Listings'],
-    instruments:['Overview','Pending Review','Approved','Published','History','Approval','On-Chain','Restore Record'],
+    instruments:['Overview','Pending Review','Approved','Published','History','Contract Formation','On-Chain','Restore Record'],
     records:['Recognitions','Observations','Financial Records','Evidence','Origin Records','Trace','Audit'],
     'coin-positions':['Current Supply','Represented Value','Legacy Corrections','Coin Intelligence','Instrument Linkage','Mint History','XRPL Exchange','Retirements','Adjustments'],
     transactions:['All','Pending','Completed','Failed','Exported','Imported','Settlement','Search'],
@@ -36,7 +36,7 @@
     'operations::Financing',
     'treasury::Overview',
     'instruments::Pending Review',
-    'instruments::Approval',
+    'instruments::Contract Formation',
     'instruments::On-Chain',
     'instruments::Restore Record',
     'coin-positions::Current Supply',
@@ -182,7 +182,7 @@
       if(tab==='Historical Listings') return combined(r.marketplaceListings,list(r.lifecycleEvents).filter(item=>/LISTING|MARKETPLACE/i.test(JSON.stringify(item))));
     }
     if(id==='instruments'){
-      if(['Approval','On-Chain'].includes(tab)) return [];
+      if(['Contract Formation','On-Chain'].includes(tab)) return [];
       if(tab==='Pending Review') return byState(r.instruments,['DRAFT','PENDING','PENDING_REVIEW','IN_REVIEW','REVIEW_REQUIRED','AWAITING_APPROVAL']);
       if(tab==='Approved') return byState(r.instruments,['APPROVED','AUTHORIZED','ISSUED','DEPOSITED_RECOGNIZED_USD']);
       if(tab==='Published') return byState(r.instruments,['PUBLISHED','ACTIVE','LISTED']);

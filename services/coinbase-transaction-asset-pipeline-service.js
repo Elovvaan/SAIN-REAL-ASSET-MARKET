@@ -32,7 +32,7 @@ export class CoinbaseTransactionAssetPipelineService {
     this.environment = environment;
     this.logger = logger;
     this.enabled = String(environment.COINBASE_TRANSACTION_ASSET_PIPELINE_ENABLED ?? 'true').toLowerCase() !== 'false';
-    this.instrumentFormationEnabled = String(environment.COINBASE_TRANSACTION_INSTRUMENT_FORMATION_ENABLED ?? 'false').toLowerCase() === 'true';
+    this.instrumentFormationEnabled = String(environment.COINBASE_TRANSACTION_INSTRUMENT_FORMATION_ENABLED ?? 'true').toLowerCase() === 'true';
     this.instrumentEngine = instrumentEngineService || new InstrumentEngineService(this.domain);
     this.backfillLimit = Number(environment.COINBASE_TRANSACTION_ASSET_BACKFILL_LIMIT || 5000);
     this.processed = 0;
@@ -53,7 +53,7 @@ export class CoinbaseTransactionAssetPipelineService {
       enabled: this.enabled,
       state: this.enabled ? 'ACTIVE' : 'DISABLED',
       instrumentFormationEnabled: this.instrumentFormationEnabled,
-      pipelineBoundary: this.instrumentFormationEnabled ? 'SRA_INSTRUMENT' : 'COIN_POSITION',
+      pipelineBoundary: this.instrumentFormationEnabled ? 'SRA_POSITION_CONTRACT' : 'COIN_POSITION',
       processed: this.processed,
       recognized: this.recognized,
       financialRecordsCreated: this.financialRecordsCreated,
@@ -202,41 +202,85 @@ export class CoinbaseTransactionAssetPipelineService {
     return updated;
   }
 
-  async ensureInstrument(coinPosition, financialRecord, observation, { productId, tradeId }) {
+  async ensureConsolidatedPositionContract(coinPosition, financialRecord, observation, { productId, nativeUnit, tradeCount }) {
     if (!this.instrumentFormationEnabled) return null;
     const result = await this.instrumentEngine.createFromCoinPosition(coinPosition.coinPositionId, {
-      instrumentType: 'SRA_VALUE_INSTRUMENT',
-      name: `${productId} Recorded Market Transaction Instrument`,
-      holder: {
-        type: coinPosition.ownerType || 'PLATFORM',
-        id: coinPosition.ownerId || PLATFORM_OWNER_ID
-      },
-      purpose: 'RECORDED_MARKET_TRANSACTION_OBLIGATION',
-      settlementUnit: coinPosition.symbol || 'SRA',
-      transferability: 'RESTRICTED',
+      instrumentType: 'SRA_POSITION_CONTRACT',
+      name: `${productId} Consolidated SRA Position Contract`,
+      holder: { type: coinPosition.ownerType || 'PLATFORM', id: coinPosition.ownerId || PLATFORM_OWNER_ID },
+      purpose: 'SRA_COIN_POSITION_EXECUTION',
+      settlementUnit: 'SRA',
+      transferability: 'TRANSFERABLE',
       governingReference: financialRecord.financialRecordId,
-      conditions: [
-        {
-          type: 'SOURCE_TRANSACTION_LINEAGE',
-          source: 'COINBASE',
-          productId,
-          tradeId,
-          observationId: observation.observationId,
-          financialRecordId: financialRecord.financialRecordId
-        }
-      ],
-      reason: 'Coinbase-recognized transaction financial asset formalized as an SRA obligation-bearing instrument.'
+      conditions: [{
+        type: 'CONSOLIDATED_SOURCE_LINEAGE', source: 'COINBASE', productId,
+        observationId: observation.observationId, financialRecordId: financialRecord.financialRecordId,
+      }],
+      reason: 'Consolidated SRA Coin Position formed into one executable contract record for market and on-chain lifecycle use.'
     }, ACTOR_ID);
     if (result.created) this.instrumentsCreated += 1;
-
-    let instrument = result.instrument;
-    if (['DRAFT', 'RECORDED'].includes(String(instrument.state || '').toUpperCase())) {
-      instrument = await this.instrumentEngine.changeState(instrument.instrumentId, {
-        state: 'REVIEW_REQUIRED',
-        reason: 'Coin Position propagation is complete. The obligation-bearing SRA instrument is queued for Platform Administration approval before downstream representation or marketplace use.'
-      }, ACTOR_ID);
+    const now = new Date().toISOString();
+    const contract = {
+      ...result.instrument,
+      instrumentType: 'SRA_POSITION_CONTRACT',
+      denomination: {
+        ...(result.instrument.denomination || {}),
+        symbol: 'SRA',
+        principalQuantity: Number(coinPosition.quantity || 0),
+        sourceQuantity: Number(coinPosition.quantity || 0),
+      },
+      terms: {
+        ...(result.instrument.terms || {}),
+        purpose: 'SRA_COIN_POSITION_EXECUTION',
+        settlementUnit: 'SRA',
+        transferability: 'TRANSFERABLE',
+      },
+      state: 'ACTIVE',
+      status: 'ACTIVE',
+      contractFormationState: 'FORMED',
+      contractAuthority: 'SRA_DOCUMENTARY_PACKAGE',
+      executionRole: 'SMART_CONTRACT_EXECUTOR',
+      bearerAsset: 'SRA_COIN',
+      marketDestination: 'SRA_LIVING_MARKET',
+      marketState: 'LIVE',
+      onChainState: 'READY_FOR_NETWORK_SELECTION',
+      sourceSummary: { source: 'COINBASE', productId, nativeUnit, sourceRecordCount: Number(tradeCount || 0) },
+      activatedAt: result.instrument.activatedAt || now,
+      updatedAt: now,
+    };
+    await this.domain.put(RECORD_TYPES.SRA_INSTRUMENT, contract.instrumentId, contract, {
+      actorId: ACTOR_ID,
+      eventType: result.created ? 'SRA_POSITION_CONTRACT_FORMED' : 'SRA_POSITION_CONTRACT_SYNCHRONIZED',
+    });
+    const approvalId = `IRA-${contract.instrumentId}`;
+    const existingApproval = this.domain.get('INSTRUMENT_REPRESENTATION_APPROVAL', approvalId);
+    if (!existingApproval) {
+      await this.domain.put('INSTRUMENT_REPRESENTATION_APPROVAL', approvalId, {
+        id: approvalId,
+        approvalId,
+        instrumentId: contract.instrumentId,
+        state: 'APPROVED',
+        coinRepresentation: 'APPROVED',
+        contractFormation: 'COMPLETE',
+        onChainPreparation: 'APPROVED',
+        linkedCoinPositionIds: [coinPosition.coinPositionId],
+        authorityBasis: 'RECOGNIZED_CONSOLIDATED_COIN_POSITION',
+        approvedBy: ACTOR_ID,
+        approvedAt: now,
+        updatedAt: now,
+        effect: 'Records the consolidated Coin Position as the authority source for its executable SRA contract representation.',
+      }, { actorId: ACTOR_ID, eventType: 'SRA_POSITION_CONTRACT_REPRESENTATION_RECORDED' });
     }
-    return instrument;
+    if (result.created) {
+      await this.domain.lifecycle({
+        objectType: RECORD_TYPES.SRA_INSTRUMENT,
+        objectId: contract.instrumentId,
+        eventType: 'SRA_POSITION_CONTRACT_FORMED',
+        actorId: ACTOR_ID,
+        payload: { coinPositionId: coinPosition.coinPositionId, productId, representedSra: Number(coinPosition.quantity || 0), marketDestination: 'SRA_LIVING_MARKET' },
+      });
+    }
+    return contract;
   }
 
   async processConsolidatedMarketFlow(observation) {
@@ -259,7 +303,13 @@ export class CoinbaseTransactionAssetPipelineService {
       load(RECORD_TYPES.RECOGNITION_ASSESSMENT, ids.recognition), load(RECORD_TYPES.FINANCIAL_RECORD_ACCOUNT, ids.account),
       load(RECORD_TYPES.FINANCIAL_RECORD, ids.financialRecord), load(RECORD_TYPES.COIN_ACCOUNT, ids.coinAccount), load(RECORD_TYPES.COIN_POSITION, ids.coinPosition)
     ]);
-    if (priorPosition?.lastFlowObservationId === observation.observationId) return { processed: true, observation, recognition: priorRecognition, financialRecord: priorRecord, coinPosition: priorPosition, instrument: null, pipelineBoundary: 'COIN_POSITION' };
+    if (priorPosition?.lastFlowObservationId === observation.observationId) {
+      const instrument = priorRecord
+        ? await this.ensureConsolidatedPositionContract(priorPosition, priorRecord, observation, { productId, nativeUnit, tradeCount: Number(priorPosition.sourceTradeCount || raw.tradeCount || 0) })
+        : null;
+      const currentCoinPosition = this.domain.get(RECORD_TYPES.COIN_POSITION, priorPosition.coinPositionId) || priorPosition;
+      return { processed: true, observation, recognition: priorRecognition, financialRecord: priorRecord, coinPosition: currentCoinPosition, instrument, pipelineBoundary: instrument ? 'SRA_POSITION_CONTRACT' : 'COIN_POSITION' };
+    }
     const timestamp = observation.sourceTimestamp || observation.observedAt || new Date().toISOString();
     const cumulative = {
       tradeCount: Number(priorPosition?.sourceTradeCount || 0) + tradeCount,
@@ -280,10 +330,12 @@ export class CoinbaseTransactionAssetPipelineService {
     if (!priorRecognition) this.recognized += 1;
     if (!priorRecord) this.financialRecordsCreated += 1;
     if (!priorPosition) this.coinPositionsCreated += 1;
+    const instrument = await this.ensureConsolidatedPositionContract(coinPosition, financialRecord, updatedObservation, { productId, nativeUnit, tradeCount: cumulative.tradeCount });
+    const currentCoinPosition = this.domain.get(RECORD_TYPES.COIN_POSITION, coinPosition.coinPositionId) || coinPosition;
     this.processed += 1;
     this.lastProcessedAt = timestamp;
     this.flowPositions.set(productId, { productId, nativeUnit, tradeCount: cumulative.tradeCount, batchCount: cumulative.batchCount, nativeQuantity: cumulative.nativeQuantity, representedSra: cumulative.representedSra, lastPrice: Number(raw.lastPrice || price), marketDestination: 'SRA_LIVING_MARKET', marketState: 'LIVE', latestCoinPositionId: ids.coinPosition, updatedAt: timestamp });
-    return { processed: true, observation: updatedObservation, recognition, financialRecord, coinPosition, instrument: null, pipelineBoundary: 'COIN_POSITION' };
+    return { processed: true, observation: updatedObservation, recognition, financialRecord, coinPosition: currentCoinPosition, instrument, pipelineBoundary: instrument ? 'SRA_POSITION_CONTRACT' : 'COIN_POSITION' };
   }
 
   async processObservation(observationOrId) {
@@ -396,10 +448,10 @@ export class CoinbaseTransactionAssetPipelineService {
 
       coinPosition = await this.ensureNativeSourceValuation(coinPosition, observation, { productId, tradeId, price, size, notional, nativeUnit, quoteCurrency, tradeCount });
       coinPosition = await this.ensurePlatformOwnership(coinPosition);
-      instrument = await this.ensureInstrument(coinPosition, financialRecord, observation, { productId, tradeId });
-      if (instrument) {
-        coinPosition = this.domain.get(RECORD_TYPES.COIN_POSITION, coinPosition.coinPositionId) || coinPosition;
-      }
+      // Individual Coinbase trades remain source records. Contract formation is
+      // performed once from the consolidated product Coin Position instead of
+      // creating a separate approval item for every source transaction.
+      instrument = null;
 
       this.processed += 1;
       const priorFlow = this.flowPositions.get(productId) || { productId, nativeUnit, tradeCount: 0, batchCount: 0, nativeQuantity: 0, representedSra: 0 };

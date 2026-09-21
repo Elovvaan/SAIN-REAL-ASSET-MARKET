@@ -63,7 +63,8 @@
       const status = await request('/api/admin/instruments/approval-status?stage=instrument-approval&limit=50');
       if (!ownsRender(workspace, version) || !panel.isConnected) return;
       const pending = Array.isArray(status.pending) ? status.pending : [];
-      panel.innerHTML = `<header><strong>Instrument Approval Queue</strong><em>${Number(status.pendingCount ?? pending.length).toLocaleString()} PENDING</em></header><p style="color:#9a9a9a;line-height:1.5">Coin Position → SRA instrument → administrative review → approved instrument → representation / marketplace lifecycle.</p><div style="display:grid;gap:10px">${pending.length ? pending.map(card).join('') : '<p>No instruments currently require approval.</p>'}</div>`;
+      const supporting = Number(status.supportingSourceCount || 0);
+      panel.innerHTML = `<header><strong>Instrument Review</strong><em>${Number(status.pendingCount ?? pending.length).toLocaleString()} OPERATIONAL ITEMS</em></header><p style="color:#9a9a9a;line-height:1.5">Coin Position → contract formation → SRA market status → optional on-chain execution. Coinbase transaction components remain attached to their consolidated Coin Position as source lineage.</p>${supporting ? `<div class="admin-record-grid" style="margin:12px 0"><div><span>Supporting Coinbase records</span><strong>${supporting.toLocaleString()}</strong></div><div><span>Review treatment</span><strong>CONSOLIDATED · NO INDIVIDUAL BUTTONS</strong></div></div>` : ''}<div style="display:grid;gap:10px">${pending.length ? pending.map(card).join('') : '<p>No operational instruments currently require review.</p>'}</div>`;
       bind(workspace, panel);
     } catch (error) {
       if (!ownsRender(workspace, version) || !panel.isConnected) return;

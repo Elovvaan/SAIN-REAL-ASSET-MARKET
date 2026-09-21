@@ -110,6 +110,12 @@ test('a summarized Coinbase flow reaches the SRA market as one Coin Position', a
   const result = await pipeline.processObservation(observation);
   assert.equal(result.coinPosition.sourceTradeCount, 1000);
   assert.equal(domain.list(RECORD_TYPES.COIN_POSITION).length, 1);
+  assert.equal(result.pipelineBoundary, 'SRA_POSITION_CONTRACT');
+  assert.equal(result.instrument.instrumentType, 'SRA_POSITION_CONTRACT');
+  assert.equal(result.instrument.contractFormationState, 'FORMED');
+  assert.equal(result.instrument.contractAuthority, 'SRA_DOCUMENTARY_PACKAGE');
+  assert.equal(result.instrument.marketState, 'LIVE');
+  assert.equal(domain.get('INSTRUMENT_REPRESENTATION_APPROVAL', `IRA-${result.instrument.instrumentId}`).contractFormation, 'COMPLETE');
   const { observation: next } = await observations.observe({
     sourceMarket: 'COINBASE', sourceRecordId: 'BTC-USD:1001:1500', sourceRecordType: 'MARKET_FLOW',
     sourceTimestamp: '2026-08-04T22:02:00.000Z', connectorId: 'COINBASE_PUBLIC_MARKET_TRADES', category: 'CRYPTO_MARKET_TRANSACTION',
@@ -121,6 +127,9 @@ test('a summarized Coinbase flow reaches the SRA market as one Coin Position', a
   assert.equal(updated.coinPosition.sourceTradeCount, 1500);
   assert.equal(updated.coinPosition.quantity, 75500);
   assert.equal(domain.list(RECORD_TYPES.COIN_POSITION).length, 1);
+  assert.equal(domain.list(RECORD_TYPES.SRA_INSTRUMENT).length, 1);
+  assert.equal(updated.instrument.instrumentId, result.instrument.instrumentId);
+  assert.equal(updated.instrument.denomination.principalQuantity, 75500);
   assert.equal(pipeline.status().flowPositions[0].tradeCount, 1500);
   assert.equal(pipeline.status().flowPositions[0].marketDestination, 'SRA_LIVING_MARKET');
 });
@@ -150,7 +159,7 @@ test('backfill ends at Coin Position and does not form transaction instruments',
   const status = await pipeline.backfill();
 
   assert.equal(status.backfillState, 'COMPLETED');
-  assert.equal(status.pipelineBoundary, 'COIN_POSITION');
+  assert.equal(status.pipelineBoundary, 'SRA_POSITION_CONTRACT');
   assert.equal(status.instrumentsCreated, 0);
   assert.equal(domain.list(RECORD_TYPES.RECOGNITION_ASSESSMENT).length, 2);
   assert.equal(domain.list(RECORD_TYPES.FINANCIAL_RECORD).length, 2);

@@ -483,7 +483,8 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
     const requestedRecordTypes = [...requestedKeys]
       .map((key) => ADMIN_RECORD_TYPES[key])
       .filter(Boolean);
-    await domain.hydrate(requestedRecordTypes);
+    const windowedInstrumentView = requestedWorkspace === 'instruments' && Boolean(database?.listRecordsWindow);
+    await domain.hydrate(windowedInstrumentView ? requestedRecordTypes.filter((type) => type !== RECORD_TYPES.SRA_INSTRUMENT) : requestedRecordTypes);
     const records = {};
     for (const key of requestedKeys) {
       if (key === 'users') {
@@ -491,7 +492,17 @@ export async function createPrivateAdminRouter({ database, domain, coinbasePubli
       } else if (key === 'networkAccounts') {
         records.networkAccounts = configuredNetworkAccounts();
       } else if (ADMIN_RECORD_TYPES[key]) {
-        let source = domain.list(ADMIN_RECORD_TYPES[key]);
+        let source = windowedInstrumentView && key === 'instruments'
+          ? await database.listRecordsWindow(RECORD_TYPES.SRA_INSTRUMENT, {
+              states: {
+                'Pending Review':['DRAFT','PENDING','PENDING_REVIEW','IN_REVIEW','REVIEW_REQUIRED','AWAITING_APPROVAL'],
+                Approved:['APPROVED','AUTHORIZED','ISSUED','DEPOSITED_RECOGNIZED_USD'],
+                Published:['PUBLISHED','ACTIVE','LISTED'],
+              }[requestedTab] || [],
+              limit:Number(limit) || 100,
+              coinbaseSourceComponents:'exclude',
+            })
+          : domain.list(ADMIN_RECORD_TYPES[key]);
         // Instruments tabs own distinct lifecycle views. Filter before exposing
         // the bounded page so one tab never scans/renders another stage's batch.
         if (requestedWorkspace === 'instruments' && key === 'instruments') {

@@ -3,7 +3,7 @@
   window.__sraAdminOnChainIssuanceControlsInstalled = true;
   const mounted = new WeakSet();
   const renderState = new WeakMap();
-  const SPECIAL_TABS = new Set(['Approval', 'On-Chain']);
+  const SPECIAL_TABS = new Set(['Contract Formation', 'On-Chain']);
   const esc = (value) => String(value ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;');
   const request = async (url, options = {}) => {
     if (window.SRAAdminDataClient) return window.SRAAdminDataClient.json(url, options);
@@ -38,14 +38,14 @@
     const tabs = workspace?.querySelector('.admin-workspace-tabs');
     const history = tabs?.querySelector('[data-admin-tab="History"]');
     if (!tabs || !history) return;
-    let approval = tabs.querySelector('[data-admin-tab="Approval"]');
+    let approval = tabs.querySelector('[data-admin-tab="Contract Formation"], [data-admin-tab="Approval"]');
     if (!approval) {
       approval = document.createElement('button');
       approval.type = 'button';
       approval.setAttribute('role', 'tab');
       approval.setAttribute('aria-selected', 'false');
-      approval.dataset.adminTab = 'Approval';
-      approval.textContent = 'Approval';
+      approval.dataset.adminTab = 'Contract Formation';
+      approval.textContent = 'Contract Formation';
       history.insertAdjacentElement('afterend', approval);
     }
     let onChain = tabs.querySelector('[data-admin-tab="On-Chain"]');
@@ -105,9 +105,9 @@
     const authorized = authorizedAmount(instrument);
     const workflow = item.workflow || {};
     if (item.representationApproved) {
-      return `<article class="admin-record-card"><header><strong>${esc(id)}</strong><em>REPRESENTATION APPROVED</em></header><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:12px 0">${step('1 · Instrument approval',workflow.instrumentApproval || 'COMPLETE','Instrument approval is complete.')}${step('2 · Representation approval','COMPLETE','On-chain representation approval is recorded.')}${step('3 · On-chain preparation',workflow.onChainPreparation || 'READY','Continue to the On-Chain tab for network readiness and execution.')}</div><div class="admin-record-grid"><div><span>Instrument state</span><strong>${esc(assessment.state || instrument.state || instrument.status || '—')}</strong></div><div><span>Amount / supply</span><strong>${esc(authorized ?? '—')}</strong></div></div></article>`;
+      return `<article class="admin-record-card"><header><strong>${esc(id)}</strong><em>CONTRACT FORMED</em></header><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:12px 0">${step('1 · Position authority',workflow.instrumentApproval || 'COMPLETE','The approved Coin Position supplies the contract authority.')}${step('2 · Contract formation','COMPLETE','The executable representation is recorded.')}${step('3 · On-chain preparation',workflow.onChainPreparation || 'READY','Continue to the On-Chain tab for network selection and execution.')}</div><div class="admin-record-grid"><div><span>Contract state</span><strong>${esc(assessment.state || instrument.state || instrument.status || '—')}</strong></div><div><span>Represented SRA</span><strong>${esc(authorized ?? '—')}</strong></div></div></article>`;
     }
-    return `<article class="admin-record-card" data-approval-card="${esc(id)}"><header><strong>${esc(id)}</strong><em>${assessment.eligible === false ? 'NOT ELIGIBLE' : 'STEP 2 · REPRESENTATION APPROVAL'}</em></header><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:12px 0">${step('1 · Instrument approval',workflow.instrumentApproval || 'COMPLETE','Instrument approval must be complete first.')}${step('2 · Representation approval',assessment.eligible === false ? 'BLOCKED' : 'REQUIRED','Explicitly approve this instrument for on-chain representation.')}${step('3 · On-chain preparation','WAITING','Begins only after representation approval is recorded.')}</div><div class="admin-record-grid"><div><span>Instrument state</span><strong>${esc(assessment.state || instrument.state || instrument.status || '—')}</strong></div><div><span>Amount / supply</span><strong>${esc(authorized ?? '—')}</strong></div></div>${blockers.length ? `<p style="color:#d6a92f;font-size:12px;line-height:1.45;margin:12px 0 0">${esc(blockers.join(', '))}</p>` : ''}<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px"><button data-approve-on-chain="${esc(id)}" ${assessment.eligible === false ? 'disabled' : ''}>Approve Representation</button><span data-approval-result style="color:#d6a92f;font-size:12px"></span></div></article>`;
+    return `<article class="admin-record-card" data-approval-card="${esc(id)}"><header><strong>${esc(id)}</strong><em>${assessment.eligible === false ? 'REVIEW' : 'READY TO FORM'}</em></header><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:12px 0">${step('1 · Position authority',workflow.instrumentApproval || 'COMPLETE','The approved Coin Position supplies the contract authority.')}${step('2 · Contract formation',assessment.eligible === false ? 'REVIEW' : 'READY','Record the executable representation from this Coin Position.')}${step('3 · On-chain preparation','WAITING','Begins after contract formation is recorded.')}</div><div class="admin-record-grid"><div><span>Position state</span><strong>${esc(assessment.state || instrument.state || instrument.status || '—')}</strong></div><div><span>Represented SRA</span><strong>${esc(authorized ?? '—')}</strong></div></div>${blockers.length ? `<p style="color:#d6a92f;font-size:12px;line-height:1.45;margin:12px 0 0">${esc(blockers.join(', '))}</p>` : ''}<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px"><button data-approve-on-chain="${esc(id)}" ${assessment.eligible === false ? 'disabled' : ''}>Form Contract</button><span data-approval-result style="color:#d6a92f;font-size:12px"></span></div></article>`;
   }
 
   function networkOptions(status) {
@@ -396,11 +396,11 @@
   }
 
   async function renderApproval(workspace, card) {
-    card.innerHTML = '<header><strong>Representation Approval</strong><em>CHECKING</em></header><p>Loading instruments…</p>';
+    card.innerHTML = '<header><strong>Contract Formation</strong><em>CHECKING</em></header><p>Loading approved Coin Positions…</p>';
     const approvalStatus = await request('/api/admin/instruments/approval-status?stage=representation-approval');
-    if (!active(workspace) || activeTab(workspace) !== 'Approval') return;
+    if (!active(workspace) || activeTab(workspace) !== 'Contract Formation') return;
     const eligible = approvalStatus.representationReady || [];
-    card.innerHTML = `<header><strong>Representation Approval</strong><em>INSTRUMENT LIFECYCLE</em></header><p style="color:#9a9a9a;line-height:1.5">Instrument approval comes first. Representation approval is the explicit handoff that authorizes an approved instrument to enter on-chain preparation.</p><div style="display:grid;gap:10px">${eligible.length ? eligible.map(approvalCard).join('') : '<p>No approved instruments are currently available for representation review.</p>'}</div>`;
+    card.innerHTML = `<header><strong>Contract Formation</strong><em>COIN POSITION EXECUTION LAYER</em></header><p style="color:#9a9a9a;line-height:1.5">The Coin Position remains the economic source record. Contract formation records its executable representation for market and optional on-chain use.</p><div style="display:grid;gap:10px">${eligible.length ? eligible.map(approvalCard).join('') : '<p>No approved Coin Position instruments are currently awaiting contract formation.</p>'}</div>`;
     bindApproval(workspace, card);
   }
 
@@ -491,7 +491,7 @@
     if (!card) return;
     const work = (async () => {
       try {
-        if (tab === 'Approval') await renderApproval(workspace, card);
+        if (tab === 'Contract Formation') await renderApproval(workspace, card);
         else await renderOnChain(workspace, card);
       } catch (error) {
         if (active(workspace) && activeTab(workspace) === tab) card.innerHTML = `<header><strong>${esc(tab)}</strong><em>UNAVAILABLE</em></header><p>${esc(error.message)}</p>`;

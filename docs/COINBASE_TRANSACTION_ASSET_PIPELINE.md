@@ -5,15 +5,15 @@
 The Coinbase public market connector records market-wide trades as SRA Market Observations. This pipeline advances eligible Coinbase trade observations through SRA's existing recognition, digital financial-asset, Coin Position, and instrument layers.
 
 ```text
-Coinbase public market trade
+Coinbase public market activity
 → Market Observation
 → SAIN Recognition Assessment
 → Financial Record
 → SRA Coin Position
-→ SRA Instrument
+→ Consolidated SRA Position Contract
 ```
 
-The SRA Instrument is the obligation-bearing record for this production route. It inherits the rights, obligations, restrictions, and source lineage already recorded on the Financial Record and Coin Position instead of creating a parallel obligation system.
+Individual trades remain source and evidence records. The consolidated product Coin Position forms one SRA Position Contract that inherits the rights, obligations, restrictions, and lineage already recorded on the Financial Record and Coin Position.
 
 ## Recognition basis
 
@@ -50,7 +50,7 @@ The Coin Position is initially owned by `SRA_PLATFORM` under the platform owners
 
 ## Instrument and obligation convergence
 
-When instrument formation is enabled, the same Coin Position is formalized through the existing `InstrumentEngineService` as an `SRA_VALUE_INSTRUMENT` with purpose `RECORDED_MARKET_TRANSACTION_OBLIGATION`.
+When contract formation is enabled, the consolidated Coin Position is formalized through the existing `InstrumentEngineService` as an `SRA_POSITION_CONTRACT` with purpose `SRA_COIN_POSITION_EXECUTION`.
 
 The instrument carries forward the Coin Position's existing rights and obligations, including:
 
@@ -69,7 +69,7 @@ SRA Instrument.coinPositionId
 
 That allows the platform to traverse backward from the instrument to the Coinbase observation and forward from the Coin Position into the common instrument lifecycle used by other SRA production routes.
 
-Newly formed Coinbase-backed instruments are recorded in `RECORDED` state. Their transfer, activation, servicing, settlement, or other later lifecycle actions remain governed by the existing SRA workflows.
+The position contract is recorded as active for the SRA Living Market and ready for network selection. Its documentary package remains the source of authority; on-chain code executes that recorded authority after a network is selected.
 
 ## Existing observations
 
@@ -101,6 +101,6 @@ COINBASE_TRANSACTION_ASSET_BACKFILL_LIMIT=5000
 
 ## Boundary
 
-With instrument formation enabled, the pipeline boundary is `SRA_INSTRUMENT`. The instrument formalizes the existing SRA Coin Position as an obligation-bearing SRA record while preserving the complete Coinbase observation, recognition, Financial Record, Coin Position, ownership, and source-evidence lineage.
+With contract formation enabled, the operational boundary is `SRA_POSITION_CONTRACT`. The contract formalizes the consolidated SRA Coin Position while preserving every Coinbase observation, recognition, Financial Record, Coin Position, ownership record, and source-evidence lineage behind it.
 
 The pipeline does not automatically publish an offering, execute an SRA marketplace transaction, transfer ownership to a customer, service a payment, or settle consideration. Those continue through their existing platform workflows.

@@ -166,16 +166,19 @@ export async function installInstrumentAdminRoutes({ router, domain, requireAdmi
       if (stage === 'instrument-approval') {
         if (database?.listRecordsWindow) {
           const states = [...PENDING_STATES];
-          const [pending, pendingCount] = await Promise.all([
-            database.listRecordsWindow('SRA_INSTRUMENT', { states, limit }),
-            database.countRecords('SRA_INSTRUMENT', { states }),
+          const [pending, pendingCount, supportingSourceCount] = await Promise.all([
+            database.listRecordsWindow('SRA_INSTRUMENT', { states, limit, coinbaseSourceComponents:'exclude' }),
+            database.countRecords('SRA_INSTRUMENT', { states, coinbaseSourceComponents:'exclude' }),
+            database.countRecords('SRA_INSTRUMENT', { states, coinbaseSourceComponents:'only' }),
           ]);
-          return res.json({ stage, pending, pendingCount, returnedCount:pending.length, hasMore:pendingCount > pending.length });
+          return res.json({ stage, pending, pendingCount, supportingSourceCount, returnedCount:pending.length, hasMore:pendingCount > pending.length });
         }
         await domain.hydrate?.(['SRA_INSTRUMENT']);
-        const pendingAll = domain.list('SRA_INSTRUMENT').filter((instrument) => PENDING_STATES.has(stateOf(instrument)));
+        const sourceComponent = (instrument) => Array.isArray(instrument?.conditions) && instrument.conditions.some((item) => String(item?.type || '').toUpperCase() === 'SOURCE_TRANSACTION_LINEAGE' && String(item?.source || '').toUpperCase() === 'COINBASE');
+        const allPending = domain.list('SRA_INSTRUMENT').filter((instrument) => PENDING_STATES.has(stateOf(instrument)));
+        const pendingAll = allPending.filter((instrument) => !sourceComponent(instrument));
         const pending = pendingAll.slice(0, limit);
-        return res.json({ stage, pending, pendingCount: pendingAll.length, returnedCount: pending.length, hasMore: pendingAll.length > pending.length });
+        return res.json({ stage, pending, pendingCount: pendingAll.length, supportingSourceCount:allPending.length-pendingAll.length, returnedCount: pending.length, hasMore: pendingAll.length > pending.length });
       }
 
       if (!['representation-approval','on-chain'].includes(stage)) {
@@ -233,6 +236,7 @@ export async function installInstrumentAdminRoutes({ router, domain, requireAdmi
       return res.status(409).json({ error: 'Explicit administrator instrument approval is required.', requiredApproval: 'APPROVE' });
     }
     try {
+      if (!domain.get('SRA_INSTRUMENT', req.params.instrumentId)) await domain.hydrateRecord?.('SRA_INSTRUMENT', req.params.instrumentId);
       const result = await approvals.approve(req.params.instrumentId, session.id);
       if (database?.audit) await database.audit({ actorId: session.id, eventType: 'SRA_INSTRUMENT_APPROVED', objectType: 'SRA_INSTRUMENT', objectId: req.params.instrumentId, payload: { changed: result.changed } });
       return res.status(result.changed ? 201 : 200).json(result);
