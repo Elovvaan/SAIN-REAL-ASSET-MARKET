@@ -6,6 +6,7 @@ import { SettlementRouteSelectionService } from '../services/settlement-route-se
 import { normalizeFinancingStage } from '../services/financing-lifecycle-service.js';
 import { financingLetterClosingRequirements } from '../services/financing-letter-closing-requirements.js';
 import { RECORD_TYPES } from '../services/persistent-domain-service.js';
+import { FundingSettlementInstrumentLedgerService } from '../services/funding-settlement-instrument-ledger-service.js';
 
 function actorId(req) { return req.sraOperationsAuth?.actorId || req.sraIdentity?.actorId || null; }
 function fail(res, error) { const message = error?.message || 'Unexpected financing closing error.'; return res.status(/not found/i.test(message) ? 404 : 422).json({ error: message, code: error?.code || 'FINANCING_CLOSING_ERROR', assessment: error?.assessment || null }); }
@@ -19,6 +20,7 @@ export function createFinancingClosingRouter(service) {
   const loanFinancing = new GovernedLoanFinancingService(service.domain);
   const achSettlementPacket = new AchSettlementPacketService(service.domain);
   const settlementRoutes = new SettlementRouteSelectionService(service.domain);
+  const instrumentLedger = new FundingSettlementInstrumentLedgerService(service.domain);
   let distributionReady = null;
   let loanFinancingReady = null;
   let settlementRoutesReady = null;
@@ -133,6 +135,31 @@ export function createFinancingClosingRouter(service) {
       return res.send(pdf);
     } catch (error) { return fail(res, error); }
   });
+  router.get('/exports/:exportPackageId/instrument-ledger', (req, res) => {
+    const record = instrumentLedger.forExportPackage(String(req.params.exportPackageId || '').trim());
+    return record ? res.json({ record }) : res.status(404).json({ error: 'Funding/Settlement Instrument Ledger record was not found.' });
+  });
+  router.post('/exports/:exportPackageId/instrument-ledger/originate', async (req, res) => {
+    const actor = actorId(req); if (!actor) return res.status(401).json({ error: 'An authenticated financing-operations identity is required.' });
+    try { return res.status(201).json({ record: await instrumentLedger.originate(String(req.params.exportPackageId || '').trim(), req.body || {}, actor) }); } catch (error) { return fail(res, error); }
+  });
+  router.post('/instrument-ledger/:ledgerId/execution', async (req, res) => {
+    const actor = actorId(req); if (!actor) return res.status(401).json({ error: 'An authenticated financing-operations identity is required.' });
+    try { return res.json({ record: await instrumentLedger.recordExecution(req.params.ledgerId, req.body || {}, actor) }); } catch (error) { return fail(res, error); }
+  });
+  router.post('/instrument-ledger/:ledgerId/presentment', async (req, res) => {
+    const actor = actorId(req); if (!actor) return res.status(401).json({ error: 'An authenticated financing-operations identity is required.' });
+    try { return res.json({ record: await instrumentLedger.recordPresentment(req.params.ledgerId, req.body || {}, actor) }); } catch (error) { return fail(res, error); }
+  });
+  router.post('/instrument-ledger/:ledgerId/processing-outcome', async (req, res) => {
+    const actor = actorId(req); if (!actor) return res.status(401).json({ error: 'An authenticated financing-operations identity is required.' });
+    try { return res.json({ record: await instrumentLedger.recordProcessingOutcome(req.params.ledgerId, req.body || {}, actor) }); } catch (error) { return fail(res, error); }
+  });
+  router.post('/instrument-ledger/:ledgerId/reconcile', async (req, res) => {
+    const actor = actorId(req); if (!actor) return res.status(401).json({ error: 'An authenticated financing-operations identity is required.' });
+    try { return res.json({ record: await instrumentLedger.reconcile(req.params.ledgerId, req.body || {}, actor) }); } catch (error) { return fail(res, error); }
+  });
+
   router.get('/exports/:exportPackageId/funding-settlement-note', async (req, res) => {
     try {
       if (!actorId(req)) return res.status(401).json({ error: 'An authenticated financing-operations identity is required.' });
