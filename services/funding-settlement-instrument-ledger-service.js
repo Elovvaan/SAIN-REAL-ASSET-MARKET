@@ -64,6 +64,13 @@ export class FundingSettlementInstrumentLedgerService {
       payeeName: pkg.beneficiaryName || closing?.beneficiaryName || null,
       authorizedAmount: amount(pkg.amount),
       currency: pkg.currency || 'USD',
+      disbursementStage: disbursement?.disbursementStage || pkg.disbursementStage || null,
+      disbursementPurpose: disbursement?.disbursementPurpose || pkg.disbursementPurpose || null,
+      escrowAdministration: (disbursement?.disbursementStage === 'PRE_CLOSING' || pkg.disbursementStage === 'PRE_CLOSING') ? {
+        escrowAgent: first(disbursement?.settlementInstructions?.escrowAgent, pkg.settlementInstructions?.escrowAgent),
+        escrowReference: first(disbursement?.settlementInstructions?.escrowReference, pkg.settlementInstructions?.escrowReference),
+        contractReference: first(disbursement?.settlementInstructions?.contractReference, pkg.settlementInstructions?.contractReference),
+      } : null,
       status: 'ORIGINATION_RECORDED',
       originationAuthority: {
         authorizationReference,
@@ -74,6 +81,7 @@ export class FundingSettlementInstrumentLedgerService {
         closingReference: pkg.closingId || null,
       },
       executionEvidence: null,
+      escrowReceipt: null,
       presentmentRecord: null,
       processingOutcome: null,
       reconciliation: null,
@@ -105,9 +113,34 @@ export class FundingSettlementInstrumentLedgerService {
     return updated;
   }
 
+  async recordEscrowReceipt(ledgerId, input = {}, actorId = null) {
+    const current = this.get(ledgerId); if (!current) throw new Error('Funding/Settlement Instrument Ledger record was not found.');
+    if (!current.executionEvidence) throw new Error('Execution evidence must be recorded before escrow receipt.');
+    const timestamp = now();
+    const escrowAgent = first(input.escrowAgent, current.escrowAdministration?.escrowAgent);
+    const receivedAt = text(input.receivedAt);
+    const receiptReference = text(input.receiptReference);
+    if (!escrowAgent || !receivedAt || !receiptReference) throw new Error('Escrow receipt requires escrowAgent, receivedAt, and receiptReference.');
+    const receipt = {
+      escrowAgent,
+      escrowReference: first(input.escrowReference, current.escrowAdministration?.escrowReference),
+      contractReference: first(input.contractReference, current.escrowAdministration?.contractReference),
+      receivedAt,
+      receiptReference,
+      evidenceReference: text(input.evidenceReference),
+      receivedBy: text(input.receivedBy),
+      recordedBy: actorId,
+      recordedAt: timestamp,
+    };
+    const updated = { ...current, escrowReceipt: receipt, status: 'ESCROW_RECEIPT_RECORDED', updatedAt: timestamp };
+    await this.domain.put(LEDGER_TYPE, ledgerId, updated, { actorId, eventType: 'FUNDING_SETTLEMENT_ESCROW_RECEIPT_RECORDED' });
+    return updated;
+  }
+
   async recordPresentment(ledgerId, input = {}, actorId = null) {
     const current = this.get(ledgerId); if (!current) throw new Error('Funding/Settlement Instrument Ledger record was not found.');
     if (!current.executionEvidence) throw new Error('Execution evidence must be recorded before presentment.');
+    if (current.disbursementStage === 'PRE_CLOSING' && current.disbursementPurpose === 'EARNEST_MONEY' && !current.escrowReceipt) throw new Error('Escrow receipt must be recorded before earnest-money presentment.');
     const institutionName = text(input.institutionName);
     const presentedAt = text(input.presentedAt);
     if (!institutionName || !presentedAt) throw new Error('Presentment requires institutionName and presentedAt.');
