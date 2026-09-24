@@ -138,6 +138,8 @@ export class FundingSettlementInstrumentLedgerService {
       outcome,
       institutionReference: text(input.institutionReference),
       collectionReference: text(input.collectionReference),
+      settlementOrProcessingMechanism: text(input.settlementOrProcessingMechanism),
+      achTraceOrPaymentReference: text(input.achTraceOrPaymentReference),
       federalReserveReference: text(input.federalReserveReference),
       settlementReference: text(input.settlementReference),
       evidenceReference: text(input.evidenceReference),
