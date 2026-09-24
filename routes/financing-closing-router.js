@@ -147,6 +147,10 @@ export function createFinancingClosingRouter(service) {
     const actor = actorId(req); if (!actor) return res.status(401).json({ error: 'An authenticated financing-operations identity is required.' });
     try { return res.json({ record: await instrumentLedger.recordExecution(req.params.ledgerId, req.body || {}, actor) }); } catch (error) { return fail(res, error); }
   });
+  router.post('/instrument-ledger/:ledgerId/escrow-receipt', async (req, res) => {
+    const actor = actorId(req); if (!actor) return res.status(401).json({ error: 'An authenticated financing-operations identity is required.' });
+    try { return res.json({ record: await instrumentLedger.recordEscrowReceipt(req.params.ledgerId, req.body || {}, actor) }); } catch (error) { return fail(res, error); }
+  });
   router.post('/instrument-ledger/:ledgerId/presentment', async (req, res) => {
     const actor = actorId(req); if (!actor) return res.status(401).json({ error: 'An authenticated financing-operations identity is required.' });
     try { return res.json({ record: await instrumentLedger.recordPresentment(req.params.ledgerId, req.body || {}, actor) }); } catch (error) { return fail(res, error); }
