@@ -4,7 +4,7 @@
 
   const mounted = new WeakSet();
   const conversation = [];
-  const ownedTabs = new Set(['Conversation','Capital Activation','Workforce','Suggested Actions','Workflow Approvals','Incomplete Workflows','Explain Record','Trace Instrument','Platform Questions','Diagnostics']);
+  const ownedTabs = new Set(['Conversation','Capital Activation','Workforce','Agent Market','Suggested Actions','Workflow Approvals','Incomplete Workflows','Explain Record','Trace Instrument','Platform Questions','Diagnostics']);
   const esc = (value) => String(value ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;');
 
   async function request(payload) {
@@ -130,7 +130,7 @@
       byAgent.set(item.agentId, counts);
     }
     const stored = new Map((agents || []).map((agent) => [agent.agentId, agent]));
-    return `<section class="admin-record-card" data-agent-operation-card><header><strong>SRA Agent Workforce</strong><em>${registry.length} ACTIVE AGENTS</em></header><p style="color:#b8b8b8;line-height:1.5">Agents continuously inspect their assigned lifecycle stages and prepare work. Protected value movement, publication, settlement, instrument issuance, and on-chain execution remain subject to administrator approval.</p><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:12px 0"><button type="button" data-run-agent-workforce>Run Workforce Now</button><span data-workforce-result style="color:#d6a92f;font-size:12px"></span></div></section><div data-agent-operation-card class="admin-record-list">${registry.map((agent) => { const persisted=stored.get(agent.agentId)||{}, counts=byAgent.get(agent.agentId)||{total:0,completed:0,awaitingAcceptance:0}; const stages=agent.workflowStages||persisted.workflowStages||[]; return `<article class="admin-record-card"><header><strong>${esc(agent.name||agent.agentId)}</strong><em>${esc(agent.state||persisted.state||'UNKNOWN')}</em></header><div class="admin-record-grid"><div><span>Agent ID</span><strong>${esc(agent.agentId)}</strong></div><div><span>Scope</span><strong>${esc(agent.scope||persisted.scope||'—')}</strong></div><div><span>Assigned stages</span><strong>${esc(stages.join(' · ')||'NONE')}</strong></div><div><span>Records monitored</span><strong>${Number(agent.recordCount||0).toLocaleString()}</strong></div><div><span>Work orders</span><strong>${counts.total.toLocaleString()}</strong></div><div><span>Completed / awaiting acceptance</span><strong>${counts.completed.toLocaleString()} / ${counts.awaitingAcceptance.toLocaleString()}</strong></div></div></article>`; }).join('')}</div>`;
+    return `<section class="admin-record-card" data-agent-operation-card><header><strong>SRA Agent Workforce</strong><em>${(agents || []).filter((agent)=>agent.state === 'ACTIVE').length} ACTIVE AGENTS</em></header><p style="color:#b8b8b8;line-height:1.5">Agents continuously inspect their assigned lifecycle stages and prepare work. Protected value movement, publication, settlement, instrument issuance, and on-chain execution remain subject to administrator approval.</p><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:12px 0"><button type="button" data-run-agent-workforce>Run Workforce Now</button><span data-workforce-result style="color:#d6a92f;font-size:12px"></span></div></section><div data-agent-operation-card class="admin-record-list">${registry.map((agent) => { const persisted=stored.get(agent.agentId)||{}, counts=byAgent.get(agent.agentId)||{total:0,completed:0,awaitingAcceptance:0}; const stages=agent.workflowStages||persisted.workflowStages||[]; return `<article class="admin-record-card"><header><strong>${esc(agent.name||agent.agentId)}</strong><em>${esc(persisted.state||agent.state||'UNKNOWN')}</em></header><div class="admin-record-grid"><div><span>Agent ID</span><strong>${esc(agent.agentId)}</strong></div><div><span>Scope</span><strong>${esc(agent.scope||persisted.scope||'—')}</strong></div><div><span>Assigned stages</span><strong>${esc(stages.join(' · ')||'NONE')}</strong></div><div><span>Records monitored</span><strong>${Number(agent.recordCount||0).toLocaleString()}</strong></div><div><span>Work orders</span><strong>${counts.total.toLocaleString()}</strong></div><div><span>Completed / awaiting acceptance</span><strong>${counts.completed.toLocaleString()} / ${counts.awaitingAcceptance.toLocaleString()}</strong></div></div>${persisted.agentId ? `<div style="display:flex;gap:10px;margin-top:12px"><button type="button" data-agent-state-id="${esc(agent.agentId)}" data-agent-next-state="${persisted.state === 'PAUSED' ? 'ACTIVE' : 'PAUSED'}">${persisted.state === 'PAUSED' ? 'Resume' : 'Pause'} agent</button><span data-agent-state-result style="color:#d6a92f"></span></div>` : ''}</article>`; }).join('')}</div>`;
   }
 
   function capitalActivationMarkup(payload) {
@@ -138,6 +138,21 @@
     const queue = payload.queue || [];
     const policy = payload.policy || {};
     return `<section class="admin-record-card" data-agent-operation-card><header><strong>Capital Activation Agent</strong><em>${esc(payload.state || 'UNKNOWN')}</em></header><p style="color:#b8b8b8;line-height:1.5">Maps verified Coin Positions and on-chain SRA inventory into governed issuance, direct settlement, and optional exchange actions. Proposals do not execute transfers, swaps, market orders, or external trades.</p><div class="admin-record-grid"><div><span>Tracked assets</span><strong>${Number(summary.totalAssets || 0).toLocaleString()}</strong></div><div><span>Directly deployable</span><strong>${Number(summary.deployable || 0).toLocaleString()}</strong></div><div><span>Settlement ready</span><strong>${Number(summary.settlementReady || 0).toLocaleString()}</strong></div><div><span>Dormant</span><strong>${Number(summary.dormant || 0).toLocaleString()}</strong></div><div><span>Reserved</span><strong>${Number(summary.reserved || 0).toLocaleString()}</strong></div><div><span>Available SRA units</span><strong>${Number(summary.availableUnits || 0).toLocaleString(undefined,{maximumFractionDigits:8})}</strong></div></div><p style="color:#d6a92f;font-size:12px">Authority: ${esc(policy.authorityLevel || 'RECOMMEND_AND_PREPARE_ONLY')} · Leverage cap: ${Number(policy.leverageCap || 0)} · Reserve floor: ${Number(policy.reserveFloorPercent || 0)}%</p></section>${queue.length ? `<div data-agent-operation-card class="admin-record-list">${queue.map((item)=>`<article class="admin-record-card"><header><strong>${esc(item.symbol)} · ${esc(item.assetId || item.coinPositionId || item.instrumentId)}</strong><em>${esc(item.classification)}</em></header><div class="admin-record-grid"><div><span>Available</span><strong>${Number(item.availableAmount || 0).toLocaleString(undefined,{maximumFractionDigits:8})} ${esc(item.symbol)}</strong></div><div><span>Network</span><strong>${esc(item.network || 'NOT ON CHAIN')}</strong></div><div><span>Instrument</span><strong>${esc(item.instrumentId || 'NOT LINKED')}</strong></div><div><span>Next governed action</span><strong>${esc(item.recommendedAction)}</strong></div></div><p style="color:#b8b8b8;line-height:1.5">${esc(item.reason)}</p>${item.classification === 'RESERVED' ? '' : `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button type="button" data-prepare-capital-proposal="${esc(item.assetId || item.coinPositionId || item.instrumentId)}" data-proposal-amount="${Number(item.availableAmount || 0)}">Prepare Proposal</button><span data-capital-proposal-result style="color:#d6a92f;font-size:12px"></span></div>`}</article>`).join('')}</div>` : '<div data-agent-operation-card class="admin-placeholder">No verified platform capital is currently available for classification.</div>'}`;
+  }
+
+  function agentMarketMarkup(catalog, agents, proposals) {
+    const active = agents.filter((agent) => agent.state === 'ACTIVE' && agent.executionClasses?.includes('SAFE_PREPARATION'));
+    const inputStyle = 'background:#050505;border:1px solid #333;border-radius:8px;color:#f5f5f5;padding:10px;min-width:130px';
+    const field = (name,label,type='text',value='') => `<label style="display:grid;gap:5px"><span>${label}</span><input name="${name}" type="${type}" ${type === 'number' ? 'step="any"' : ''} value="${esc(value)}" required style="${inputStyle}"></label>`;
+    return `<section class="admin-record-card" data-agent-operation-card><header><strong>Agent Market</strong><em>PREPARATION</em></header><p>Agents can prepare exact terms from live verified listings. Review records the decision and leaves execution with the existing transaction workflow.</p>
+      <div class="admin-record-grid"><div><span>Live listings</span><strong>${catalog.length}</strong></div><div><span>Prepared proposals</span><strong>${proposals.length}</strong></div><div><span>Active preparation agents</span><strong>${active.length}</strong></div></div>
+      <form data-agent-market-form style="display:grid;gap:12px;margin-top:16px">
+        <div style="display:flex;gap:12px;flex-wrap:wrap"><label style="display:grid;gap:5px"><span>Agent</span><select name="agentId" required style="${inputStyle}"><option value="">Select agent</option>${active.map((a)=>`<option value="${esc(a.agentId)}">${esc(a.name)}</option>`).join('')}</select></label>
+        <label style="display:grid;gap:5px"><span>Verified listing</span><select name="listingId" required style="${inputStyle}"><option value="">Select listing</option>${catalog.map((l)=>`<option value="${esc(l.listingId)}">${esc(l.title || l.listingId)} · ${esc(l.unit)} · ${esc(l.quantity)}</option>`).join('')}</select></label>
+        ${field('quantity','Quantity','number')}${field('recipientId','Recipient ID')}${field('settlementRoute','Settlement route')}${field('considerationUnit','Consideration unit')}${field('limitPrice','Limit price','number')}${field('maximumFees','Maximum fees','number',0)}${field('expiresAt','Expires at','datetime-local')}</div>
+        <div style="display:flex;align-items:center;gap:12px"><button type="submit" ${!active.length || !catalog.length ? 'disabled' : ''}>Prepare proposal</button><span data-agent-market-result style="color:#d6a92f"></span></div>
+      </form></section>
+      <div data-agent-operation-card class="admin-record-list">${proposals.map((p)=>`<article class="admin-record-card"><header><strong>${esc(p.proposalId)}</strong><em>${esc(p.state)}</em></header><div class="admin-record-grid"><div><span>Agent</span><strong>${esc(p.agentId)}</strong></div><div><span>Listing</span><strong>${esc(p.terms?.listingId)}</strong></div><div><span>Quantity</span><strong>${esc(p.terms?.quantity)} ${esc(p.terms?.unit)}</strong></div><div><span>Recipient</span><strong>${esc(p.terms?.recipientId)}</strong></div><div><span>Route</span><strong>${esc(p.terms?.settlementRoute)}</strong></div><div><span>Consideration</span><strong>${esc(p.terms?.considerationUnit)} · ${esc(p.terms?.limitPrice)}</strong></div><div><span>Maximum fees</span><strong>${esc(p.terms?.maximumFees)}</strong></div><div><span>Expires</span><strong>${esc(p.terms?.expiresAt)}</strong></div></div><p style="overflow-wrap:anywhere;font-size:12px">Exact terms hash: ${esc(p.termsHash)}</p>${p.state === 'PREPARED' ? `<div style="display:flex;gap:10px"><button type="button" data-agent-market-review="APPROVE" data-proposal-id="${esc(p.proposalId)}" data-terms-hash="${esc(p.termsHash)}">Approve for handoff</button><button type="button" data-agent-market-review="REJECT" data-proposal-id="${esc(p.proposalId)}" data-terms-hash="${esc(p.termsHash)}">Reject</button></div>` : ''}<span data-agent-market-review-result style="color:#d6a92f"></span></article>`).join('') || '<div class="admin-placeholder">No agent market proposals have been prepared.</div>'}</div>`;
   }
 
   function setPresentationOwnership(workspace, tab) { const records = workspace.querySelector('.admin-workspace-records'); if (records) records.style.display = ownedTabs.has(tab) ? 'none' : ''; }
@@ -169,6 +184,16 @@
         if (workspace.dataset.activeTab !== tab) return;
         controls.insertAdjacentHTML('afterbegin', workforceMarkup(status, agents.records || [], work.records || []));
       } catch (error) { if (workspace.dataset.activeTab === tab) controls.insertAdjacentHTML('afterbegin', `<div data-agent-operation-card class="admin-placeholder"><strong>Agent workforce unavailable.</strong><br>${esc(error.message)}</div>`); }
+      finally { loading?.remove(); }
+      return;
+    }
+    if (tab === 'Agent Market') {
+      controls.insertAdjacentHTML('afterbegin', loadingMarkup('Agent Market'));
+      const loading = controls.firstElementChild;
+      try {
+        const [catalog, agents, proposals] = await Promise.all([json('/api/admin/agent-workforce/market/catalog'),json('/api/admin/agent-workforce/agents'),json('/api/admin/agent-workforce/market/proposals')]);
+        if (workspace.dataset.activeTab === tab) controls.insertAdjacentHTML('afterbegin', agentMarketMarkup(catalog.records || [], agents.records || [], proposals.records || []));
+      } catch (error) { if (workspace.dataset.activeTab === tab) controls.insertAdjacentHTML('afterbegin', `<div data-agent-operation-card class="admin-placeholder">Agent Market unavailable: ${esc(error.message)}</div>`); }
       finally { loading?.remove(); }
       return;
     }
@@ -245,10 +270,35 @@
     catch (error) { if (result) result.textContent = error.message; button.disabled = false; }
   }
 
+  async function changeAgentState(workspace, button) {
+    const result = button.closest('.admin-record-card')?.querySelector('[data-agent-state-result]');
+    button.disabled = true; if (result) result.textContent = 'Updating agent…';
+    try { await json(`/api/admin/agent-workforce/agents/${encodeURIComponent(button.dataset.agentStateId)}/state`,{method:'POST',body:JSON.stringify({state:button.dataset.agentNextState})}); await render(workspace); }
+    catch (error) { if (result) result.textContent = error.message; button.disabled = false; }
+  }
+
+  async function prepareAgentMarket(workspace, form) {
+    const result = form.querySelector('[data-agent-market-result]');
+    const data = Object.fromEntries(new FormData(form));
+    const expiresAt = new Date(data.expiresAt);
+    if (Number.isNaN(expiresAt.getTime())) { result.textContent = 'Enter a valid expiry.'; return; }
+    const body = { ...data, quantity:Number(data.quantity), limitPrice:Number(data.limitPrice), maximumFees:Number(data.maximumFees), expiresAt:expiresAt.toISOString() };
+    const button = form.querySelector('button[type="submit"]'); button.disabled = true; result.textContent = 'Preparing proposal…';
+    try { await json('/api/admin/agent-workforce/market/proposals',{method:'POST',body:JSON.stringify(body)}); await render(workspace); }
+    catch (error) { result.textContent = error.message; button.disabled = false; }
+  }
+
+  async function reviewAgentMarket(workspace, button) {
+    const result = button.closest('.admin-record-card')?.querySelector('[data-agent-market-review-result]');
+    button.disabled = true; if (result) result.textContent = 'Recording review…';
+    try { await json(`/api/admin/agent-workforce/market/proposals/${encodeURIComponent(button.dataset.proposalId)}/review`,{method:'POST',body:JSON.stringify({decision:button.dataset.agentMarketReview,termsHash:button.dataset.termsHash})}); await render(workspace); }
+    catch (error) { if (result) result.textContent = error.message; button.disabled = false; }
+  }
+
   function mount(workspace) {
     if (!workspace || mounted.has(workspace)) return; mounted.add(workspace); removeForeignAgentPresentation(workspace); const controls = workspace.querySelector('.admin-workspace-controls'); const presentationObserver = controls ? new MutationObserver(() => removeForeignAgentPresentation(workspace)) : null; presentationObserver?.observe(controls,{ childList:true });
-    workspace.addEventListener('click', (event) => { const proposalButton=event.target.closest('[data-prepare-capital-proposal]'); if(proposalButton){void prepareCapitalProposal(workspace,proposalButton);return;} const runButton=event.target.closest('[data-run-agent-workforce]'); if(runButton){void runWorkforce(workspace,runButton);return;} const executeButton = event.target.closest('[data-agent-execute-chain-job]'); if (executeButton) { void execute(workspace, executeButton); return; } const quick = event.target.closest('[data-agent-quick-question]'); if (quick) { void ask(workspace, quick.dataset.agentQuickQuestion); return; } if (event.target.closest('[data-admin-tab]')) queueMicrotask(() => void render(workspace)); });
-    workspace.addEventListener('submit', (event) => { const toolForm=event.target.closest('[data-agent-tool-form]'); if(toolForm){event.preventDefault();void runAgentTool(workspace,toolForm);return;} const form = event.target.closest('[data-agent-conversation-form]'); if (!form) return; event.preventDefault(); const question = new FormData(form).get('question'); form.reset(); void ask(workspace, question); });
+    workspace.addEventListener('click', (event) => { const stateButton=event.target.closest('[data-agent-state-id]'); if(stateButton){void changeAgentState(workspace,stateButton);return;} const marketReview=event.target.closest('[data-agent-market-review]'); if(marketReview){void reviewAgentMarket(workspace,marketReview);return;} const proposalButton=event.target.closest('[data-prepare-capital-proposal]'); if(proposalButton){void prepareCapitalProposal(workspace,proposalButton);return;} const runButton=event.target.closest('[data-run-agent-workforce]'); if(runButton){void runWorkforce(workspace,runButton);return;} const executeButton = event.target.closest('[data-agent-execute-chain-job]'); if (executeButton) { void execute(workspace, executeButton); return; } const quick = event.target.closest('[data-agent-quick-question]'); if (quick) { void ask(workspace, quick.dataset.agentQuickQuestion); return; } if (event.target.closest('[data-admin-tab]')) queueMicrotask(() => void render(workspace)); });
+    workspace.addEventListener('submit', (event) => { const marketForm=event.target.closest('[data-agent-market-form]'); if(marketForm){event.preventDefault();void prepareAgentMarket(workspace,marketForm);return;} const toolForm=event.target.closest('[data-agent-tool-form]'); if(toolForm){event.preventDefault();void runAgentTool(workspace,toolForm);return;} const form = event.target.closest('[data-agent-conversation-form]'); if (!form) return; event.preventDefault(); const question = new FormData(form).get('question'); form.reset(); void ask(workspace, question); });
     window.addEventListener('sra:admin-workspace-synchronized', (event) => { if (event.detail?.workspaceId === 'agent') void render(workspace); });
     void render(workspace);
   }

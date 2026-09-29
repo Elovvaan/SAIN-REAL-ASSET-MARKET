@@ -27,7 +27,7 @@
     'coin-positions':['Current Supply','Represented Value','Legacy Corrections','Coin Intelligence','Instrument Linkage','Mint History','XRPL Exchange','Retirements','Adjustments'],
     transactions:['All','Pending','Completed','Failed','Exported','Imported','Settlement','Search'],
     settlement:['Export Packages','Settlement Instructions','External Confirmation','Destination Verification','Export History','Settlement Logs','Workflow'],
-    agent:['Conversation','Capital Activation','Workforce','Suggested Actions','Workflow Approvals','Incomplete Workflows','Explain Record','Trace Instrument','Platform Questions','Diagnostics'],
+    agent:['Conversation','Capital Activation','Workforce','Agent Market','Suggested Actions','Workflow Approvals','Incomplete Workflows','Explain Record','Trace Instrument','Platform Questions','Diagnostics'],
     connections:['Coinbase','Stellar','XRPL','Export Adapters','Connector Logs','Synchronization'],
     users:['Overview','Administrators','Roles','Permissions','Sessions','Access History'],
     system:['Overview','Core Services','Diagnostics','Protected Actions','Alerts','Audit State']
@@ -45,7 +45,8 @@
     'coin-positions::Instrument Linkage',
     'coin-positions::Mint History',
     'coin-positions::Retirements',
-    'coin-positions::Adjustments'
+    'coin-positions::Adjustments',
+    'agent::Agent Market'
   ]);
   const state = { mounted:false, workspaceData:null, loading:null, loadingScope:null, loadedScopes:new Set(), loadedViews:new Set(), loadingViews:new Map(), viewErrors:new Map() };
   const esc = value => String(value ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;');

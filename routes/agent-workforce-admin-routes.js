@@ -6,6 +6,7 @@ import { UnifiedMarketOperationsQueueService } from '../services/unified-market-
 import { CounterpartyOperationsStatusService } from '../services/counterparty-operations-status-service.js';
 import { AutonomousOperationalContinuationService } from '../services/autonomous-operational-continuation-service.js';
 import { CapitalActivationAgentService } from '../services/capital-activation-agent-service.js';
+import { AgentMarketProposalService, AGENT_MARKET_PROPOSAL_TYPE } from '../services/agent-market-proposal-service.js';
 
 export async function installAgentWorkforceAdminRoutes({ router, domain, database, requireAdmin }) {
   const workforce = new AgentWorkforceService({ domain, database });
@@ -16,9 +17,11 @@ export async function installAgentWorkforceAdminRoutes({ router, domain, databas
   const counterpartyOperations = new CounterpartyOperationsStatusService(domain);
   const autonomousContinuation = new AutonomousOperationalContinuationService(domain);
   const capitalActivation = new CapitalActivationAgentService(domain);
+  const agentMarket = new AgentMarketProposalService(domain, workforce);
   let workforceReady = null;
   const ensureWorkforce = () => (workforceReady ||= Promise.all([
     workforce.initialize(),
+    domain.hydrate([AGENT_MARKET_PROPOSAL_TYPE]),
     serviceFeeBilling.initialize('SRA_AGENT_OS'),
   ]).catch((error) => { workforceReady = null; throw error; }));
 
@@ -120,6 +123,34 @@ export async function installAgentWorkforceAdminRoutes({ router, domain, databas
   router.get('/api/admin/agent-workforce/agents', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
     return res.json({ records: workforce.listAgents({ state: req.query.state, role: req.query.role }) });
+  });
+
+  router.post('/api/admin/agent-workforce/agents/:agentId/state', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    try { return res.json(await workforce.setAgentState(req.params.agentId, req.body?.state, session)); }
+    catch (error) { return res.status(422).json({ error: error.message, code: 'SRA_AGENT_STATE_FAILED' }); }
+  });
+
+  router.get('/api/admin/agent-workforce/market/catalog', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    return res.json({ records: agentMarket.catalog(), execution: 'READ_ONLY' });
+  });
+
+  router.get('/api/admin/agent-workforce/market/proposals', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    return res.json({ records: agentMarket.list() });
+  });
+
+  router.post('/api/admin/agent-workforce/market/proposals', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    try { return res.status(201).json(await agentMarket.prepare(req.body || {}, session.id)); }
+    catch (error) { return res.status(422).json({ error: error.message, code: 'SRA_AGENT_MARKET_PROPOSAL_FAILED' }); }
+  });
+
+  router.post('/api/admin/agent-workforce/market/proposals/:proposalId/review', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    try { return res.json(await agentMarket.review(req.params.proposalId, req.body || {}, session.id)); }
+    catch (error) { return res.status(422).json({ error: error.message, code: 'SRA_AGENT_MARKET_PROPOSAL_REVIEW_FAILED' }); }
   });
 
   router.post('/api/admin/agent-workforce/agents', async (req, res) => {

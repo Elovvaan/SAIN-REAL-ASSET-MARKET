@@ -44,7 +44,7 @@ test('unified operations queue hands direct Coin Position representation to Coin
 test('admin workforce UI exposes agents, stages, work counts, and manual run control', () => {
   const shell = fs.readFileSync(new URL('../public/admin/admin-suite-shell.js', import.meta.url), 'utf8');
   const ui = fs.readFileSync(new URL('../public/admin/admin-agent-operations-workstation.js', import.meta.url), 'utf8');
-  assert.match(shell, /'Conversation','Capital Activation','Workforce','Suggested Actions'/);
+  assert.match(shell, /'Conversation','Capital Activation','Workforce','Agent Market','Suggested Actions'/);
   assert.match(ui, /SRA Agent Workforce/);
   assert.match(ui, /Assigned stages/);
   assert.match(ui, /Run Workforce Now/);
