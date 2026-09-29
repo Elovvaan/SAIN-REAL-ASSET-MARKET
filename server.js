@@ -48,6 +48,7 @@ import { SainOperationsIntelligenceService } from './services/sain-operations-in
 import { ProductionReadinessService } from './services/production-readiness-service.js';
 import { NativePlatformAssetService } from './services/native-platform-asset-service.js';
 import { PublicSraExchangeService } from './services/public-sra-exchange-service.js';
+import { createAgentMarketAccessRouter } from './routes/agent-market-access-router.js';
 
 const port = Number(process.env.PORT) || 3000;
 const bootstrap = express();
@@ -186,6 +187,7 @@ let ensureFundingOperations;
 let ensureFinancingClosing;
 let ensureOnChainProjection;
 let ensurePublicSraExchange;
+let ensureAgentMarketAccess;
 
 async function routeLazy(req, res, next, ensureExtension) {
   try {
@@ -204,6 +206,7 @@ bootstrap.use(async (req, res, next) => {
 
   if (ensureFinancingClosing && req.path.startsWith('/api/financing-closing')) return routeLazy(req, res, next, ensureFinancingClosing);
   if (ensurePublicSraExchange && req.path.startsWith('/api/public-exchange')) return routeLazy(req, res, next, ensurePublicSraExchange);
+  if (ensureAgentMarketAccess && req.path.startsWith('/api/agent-market/')) return routeLazy(req, res, next, ensureAgentMarketAccess);
   if (ensureFundingOperations && req.path.startsWith('/api/funding-operations')) return routeLazy(req, res, next, ensureFundingOperations);
   if (ensureFundingMarketplaceSettlement && req.path.startsWith('/api/funding-marketplace-settlement')) return routeLazy(req, res, next, ensureFundingMarketplaceSettlement);
   if (ensureFundingMarketplaceAllocation && req.path.startsWith('/api/funding-marketplace-allocation')) return routeLazy(req, res, next, ensureFundingMarketplaceAllocation);
@@ -261,6 +264,8 @@ try {
   startupMilestones.adminReadyAt = new Date().toISOString();
 
   const domain = createdApp.persistentDomain;
+
+  ensureAgentMarketAccess = createSingleFlightInitializer('Agent Market Access Router', async () => mountExtension('/api/agent-market', await createAgentMarketAccessRouter(domain)));
 
   ensurePlatformExtensions = createSingleFlightInitializer('Universal Account Blockchain Router', async () => createUniversalAccountBlockchainRouter(domain, createdApp.database));
 

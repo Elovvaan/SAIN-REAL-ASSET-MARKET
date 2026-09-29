@@ -7,6 +7,7 @@ import { CounterpartyOperationsStatusService } from '../services/counterparty-op
 import { AutonomousOperationalContinuationService } from '../services/autonomous-operational-continuation-service.js';
 import { CapitalActivationAgentService } from '../services/capital-activation-agent-service.js';
 import { AgentMarketProposalService, AGENT_MARKET_PROPOSAL_TYPE } from '../services/agent-market-proposal-service.js';
+import { AgentMarketAccessService, AGENT_MARKET_GRANT_TYPE } from '../services/agent-market-access-service.js';
 
 export async function installAgentWorkforceAdminRoutes({ router, domain, database, requireAdmin }) {
   const workforce = new AgentWorkforceService({ domain, database });
@@ -18,10 +19,11 @@ export async function installAgentWorkforceAdminRoutes({ router, domain, databas
   const autonomousContinuation = new AutonomousOperationalContinuationService(domain);
   const capitalActivation = new CapitalActivationAgentService(domain);
   const agentMarket = new AgentMarketProposalService(domain, workforce);
+  const marketAccess = new AgentMarketAccessService(domain, workforce);
   let workforceReady = null;
   const ensureWorkforce = () => (workforceReady ||= Promise.all([
     workforce.initialize(),
-    domain.hydrate([AGENT_MARKET_PROPOSAL_TYPE]),
+    domain.hydrate([AGENT_MARKET_PROPOSAL_TYPE, AGENT_MARKET_GRANT_TYPE]),
     serviceFeeBilling.initialize('SRA_AGENT_OS'),
   ]).catch((error) => { workforceReady = null; throw error; }));
 
@@ -139,6 +141,23 @@ export async function installAgentWorkforceAdminRoutes({ router, domain, databas
   router.get('/api/admin/agent-workforce/market/proposals', async (req, res) => {
     const session = await requireAdmin(req, res); if (!session) return;
     return res.json({ records: agentMarket.list() });
+  });
+
+  router.get('/api/admin/agent-workforce/market/grants', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    return res.json({ records:marketAccess.list() });
+  });
+
+  router.post('/api/admin/agent-workforce/market/grants', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    try { res.set('Cache-Control','no-store'); return res.status(201).json(await marketAccess.issue(req.body || {}, session.id)); }
+    catch (error) { return res.status(422).json({ error:error.message, code:'SRA_AGENT_MARKET_GRANT_FAILED' }); }
+  });
+
+  router.post('/api/admin/agent-workforce/market/grants/:grantId/revoke', async (req, res) => {
+    const session = await requireAdmin(req, res); if (!session) return;
+    try { return res.json(await marketAccess.revoke(req.params.grantId, session.id)); }
+    catch (error) { return res.status(422).json({ error:error.message, code:'SRA_AGENT_MARKET_GRANT_REVOKE_FAILED' }); }
   });
 
   router.post('/api/admin/agent-workforce/market/proposals', async (req, res) => {
