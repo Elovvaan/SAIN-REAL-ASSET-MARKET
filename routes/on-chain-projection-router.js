@@ -202,6 +202,28 @@ export function createOnChainProjectionRouter(service, { financingClosingService
     } catch (error) { return handle(res, error); }
   });
 
+  router.get('/assets/:assetId/issuer-domain', async (req, res) => {
+    try {
+      const asset = service.getAsset(req.params.assetId);
+      if (!asset || upper(asset.network) !== 'STELLAR') throw new Error('Stellar on-chain asset not found.');
+      return res.json(await stellar.issuerHomeDomain(asset.assetAddress));
+    } catch (error) { return handle(res, error); }
+  });
+
+  router.post('/assets/:assetId/issuer-domain', async (req, res) => {
+    try {
+      const actor = requireActor(req);
+      if (req.body?.confirmIssuerDomainLink !== true) throw new Error('Explicit issuer home-domain confirmation is required.');
+      const asset = service.getAsset(req.params.assetId);
+      if (!asset || upper(asset.network) !== 'STELLAR' || upper(asset.state) !== 'ISSUED' || !(Number(asset.issuedSupply) > 0)) throw new Error('An issued Stellar SRA asset is required.');
+      const source = service.domain.get('COIN_POSITION', asset.sourcePositionId);
+      if (!source || (upper(source.assetIdentity) !== 'SRA_COIN' && !['SRA','SRAUSD'].includes(upper(source.symbol || source.unit)))) throw new Error('The issued asset is not linked to an SRA Coin Position.');
+      const linked = await stellar.linkIssuerHomeDomain(asset.assetAddress);
+      await service.domain.put('SRA_STELLAR_ISSUER_DOMAIN', linked.issuerAddress, { ...linked, assetId:asset.assetId, linkedBy:actor, updatedAt:new Date().toISOString() }, { actorId:actor, eventType:'SRA_STELLAR_ISSUER_DOMAIN_LINKED' });
+      return res.json(linked);
+    } catch (error) { return handle(res, error); }
+  });
+
   router.post('/assets', async (req, res) => {
     try {
       const actor = requireActor(req);

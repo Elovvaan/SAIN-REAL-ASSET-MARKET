@@ -142,6 +142,7 @@ export async function createApp(options = {}) {
   app.disable('x-powered-by');
   app.use(express.json({ limit: '1mb' }));
   app.get('/brand-logo', (_req, res) => res.sendFile(path.join(__dirname, 'SRA LOGO.jpg')));
+  app.get('/brand-logo.png', (_req, res) => res.sendFile(path.join(__dirname, 'SRA LOGO.png')));
   if (options.seedMarketplace !== false) {
     await persistentDomain.seed(RECORD_TYPES.ASSET_ACCOUNT, marketplaceSeed.assets);
     await persistentDomain.seed(RECORD_TYPES.PROJECT_ACCOUNT, marketplaceSeed.projects);
@@ -211,8 +212,11 @@ export async function createApp(options = {}) {
   const onboardingRouter = await createOnboardingRouter(domainStore, database, persistentDomain, accessService);
   const authoritativeAssetRegistryService = installAuthoritativeAssetRegistry(app, { persistentDomain, accessService });
 
-  app.get('/.well-known/stellar.toml', (_req, res) => {
-    try { return res.type('text/plain').send(sraAnchorPlatformService.stellarToml()); }
+  app.get('/.well-known/stellar.toml', async (_req, res) => {
+    try {
+      await persistentDomain.hydrate(['ON_CHAIN_ASSET', 'COIN_POSITION']);
+      return res.set('Access-Control-Allow-Origin', '*').type('text/plain').send(sraAnchorPlatformService.stellarToml());
+    }
     catch (error) { return res.status(503).type('text/plain').send(`# SRA Anchor Platform unavailable\n# ${error.message}\n`); }
   });
   if (options.serveStatic !== false) app.use(express.static(path.join(__dirname, 'public')));

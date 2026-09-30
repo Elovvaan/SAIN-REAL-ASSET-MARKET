@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import * as StellarSdk from '@stellar/stellar-sdk';
 import { RECORD_TYPES } from './persistent-domain-service.js';
 
 const PUBLIC_NETWORK = 'Public Global Stellar Network ; September 2015';
@@ -62,29 +63,53 @@ export class SraAnchorPlatformService {
     };
   }
 
+  publishedSraAssets() {
+    const positions = new Map(this.domain.list('COIN_POSITION').map((item) => [item.coinPositionId || item.positionId || item.id, item]));
+    const identities = new Map();
+    for (const asset of this.domain.list('ON_CHAIN_ASSET')) {
+      if (upper(asset.network) !== 'STELLAR' || upper(asset.state) !== 'ISSUED' || !(Number(asset.issuedSupply) > 0)) continue;
+      const position = positions.get(asset.sourcePositionId);
+      if (!position || (upper(position.assetIdentity) !== 'SRA_COIN' && !['SRA','SRAUSD'].includes(upper(position.symbol || position.unit)))) continue;
+      const [code, issuer, extra] = text(asset.assetAddress).split(':');
+      if (extra || !/^[A-Z0-9]{1,12}$/.test(code || '') || !StellarSdk.StrKey.isValidEd25519PublicKey(issuer || '') || upper(asset.asset) !== code) continue;
+      identities.set(`${code}:${issuer}`, { code, issuer, assetId:asset.assetId });
+    }
+    return [...identities.values()].sort((a, b) => `${a.code}:${a.issuer}`.localeCompare(`${b.code}:${b.issuer}`));
+  }
+
   stellarToml() {
     const config = this.configuration();
-    if (!config.signingKey) throw new Error('SRA_ANCHOR_SIGNING_KEY is required to publish stellar.toml.');
-    if (!config.distributionAccount) throw new Error('STELLAR_DISTRIBUTOR_PUBLIC_KEY is required to publish stellar.toml.');
-    if (!config.usdcIssuer) throw new Error('SRA_ANCHOR_USDC_ISSUER is required to publish stellar.toml.');
-    if (!config.publicUrl.startsWith('https://') && config.mode === 'PRODUCTION') throw new Error('Production SRA Anchor Platform requires an HTTPS public URL.');
-    return [
-      `NETWORK_PASSPHRASE="${config.networkPassphrase}"`,
-      `SIGNING_KEY="${config.signingKey}"`,
-      `WEB_AUTH_ENDPOINT="${config.publicUrl}/auth"`,
-      `TRANSFER_SERVER_SEP0024="${config.publicUrl}/sep24"`,
-      `KYC_SERVER="${config.publicUrl}/sep12"`,
-      `ACCOUNTS=["${config.distributionAccount}"]`,
-      '',
-      '[[CURRENCIES]]',
-      'code="USDC"',
-      `issuer="${config.usdcIssuer}"`,
-      `status="${config.mode === 'PRODUCTION' ? 'live' : 'test'}"`,
-      'is_asset_anchored=true',
-      'anchor_asset_type="fiat"',
-      'anchor_asset="USD"',
-      '',
-    ].join('\n');
+    const assets = this.publishedSraAssets();
+    const networkPassphrase = text(this.environment.STELLAR_NETWORK_PASSPHRASE)
+      || (['PUBLIC','MAINNET'].includes(upper(this.environment.STELLAR_NETWORK)) ? PUBLIC_NETWORK : config.networkPassphrase);
+    const anchorReady = config.ready && networkPassphrase === config.networkPassphrase;
+    const accounts = [...new Set([...assets.map((asset) => asset.issuer), ...(anchorReady ? [config.distributionAccount] : [])])];
+    const lines = [
+      `NETWORK_PASSPHRASE="${networkPassphrase}"`,
+      'VERSION="2.0.0"',
+      `ACCOUNTS=[${accounts.map((account) => `"${account}"`).join(',')}]`,
+    ];
+    if (anchorReady) {
+      if (!config.publicUrl.startsWith('https://') && config.mode === 'PRODUCTION') throw new Error('Production SRA Anchor Platform requires an HTTPS public URL.');
+      lines.push(`SIGNING_KEY="${config.signingKey}"`, `WEB_AUTH_ENDPOINT="${config.publicUrl}/auth"`,
+        `TRANSFER_SERVER_SEP0024="${config.publicUrl}/sep24"`, `KYC_SERVER="${config.publicUrl}/sep12"`);
+    }
+    lines.push('', '[DOCUMENTATION]',
+      'ORG_NAME="SAIN Real Asset Market"',
+      'ORG_URL="https://www.sainrealasset.com"',
+      'ORG_LOGO="https://www.sainrealasset.com/brand-logo.png"', '');
+    if (anchorReady) {
+      lines.push('[[CURRENCIES]]', 'code="USDC"', `issuer="${config.usdcIssuer}"`,
+        `status="${config.mode === 'PRODUCTION' ? 'live' : 'test'}"`, 'is_asset_anchored=true',
+        'anchor_asset_type="fiat"', 'anchor_asset="USD"', '');
+    }
+    for (const asset of assets) lines.push('[[CURRENCIES]]', `code="${asset.code}"`,
+      `issuer="${asset.issuer}"`, 'name="SRA Coin"',
+      'desc="On-chain SRA Coin representation linked to a verified SRA position."',
+      'image="https://www.sainrealasset.com/brand-logo.png"',
+      'is_asset_anchored=false',
+      'status="live"', '');
+    return lines.join('\n');
   }
 
   authorizeCallback(apiKey) {

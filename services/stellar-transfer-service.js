@@ -111,6 +111,29 @@ export class StellarTransferService {
 
   distributionAddress() { return this.ensure().distributor.publicKey(); }
 
+  async issuerHomeDomain(assetAddress) {
+    const address = text(assetAddress).split(':')[1];
+    if (!StellarSdk.StrKey.isValidEd25519PublicKey(address || '')) throw new Error('A Stellar asset issuer address is required.');
+    const server = this.server || new StellarSdk.Horizon.Server(this.horizonUrl);
+    const account = await server.loadAccount(address);
+    return { network:NETWORK, issuerAddress:address, homeDomain:text(account.home_domain) || null };
+  }
+
+  async linkIssuerHomeDomain(assetAddress, homeDomain = 'www.sainrealasset.com') {
+    if (homeDomain !== 'www.sainrealasset.com') throw new Error('The issuer home domain must match the published SRA stellar.toml host.');
+    const { server, issuer } = this.ensure();
+    const assetIssuer = text(assetAddress).split(':')[1];
+    if (assetIssuer !== issuer.publicKey()) throw new Error('The configured Stellar issuer signer does not control this SRA asset.');
+    const account = await server.loadAccount(assetIssuer);
+    if (text(account.home_domain) === homeDomain) return { network:NETWORK, issuerAddress:assetIssuer, homeDomain, state:'ALREADY_LINKED', transactionId:null };
+    const tx = new StellarSdk.TransactionBuilder(account, { fee:StellarSdk.BASE_FEE, networkPassphrase:this.passphrase })
+      .addOperation(StellarSdk.Operation.setOptions({ homeDomain }))
+      .setTimeout(100).build();
+    tx.sign(issuer);
+    const result = await server.submitTransaction(tx);
+    return { network:NETWORK, issuerAddress:assetIssuer, homeDomain, state:'CONFIRMED', transactionId:result.hash, ledger:result.ledger };
+  }
+
   usdcRecord() {
     const network = this.passphrase === StellarSdk.Networks.TESTNET ? 'TESTNET' : 'PUBLIC';
     const issuerAddress = stellarUsdcIssuer(this.environment, this.passphrase);
