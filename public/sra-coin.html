@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SRA Coin | SAIN Real Asset Market</title>
+  <meta name="description" content="Discover SRA Coin, its verified market listings, and linked on-chain asset identifiers from SAIN Real Asset Market.">
+  <link rel="canonical" href="https://www.sainrealasset.com/sra-coin.html">
+  <link rel="alternate" type="application/json" href="https://www.sainrealasset.com/api/public/coin/sra" title="SRA Coin machine-readable profile">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Thing","@id":"https://www.sainrealasset.com/sra-coin.html#sra-coin","name":"SRA Coin","alternateName":"SRA","description":"A fungible SRA digital financial asset represented by verified positions within SAIN Real Asset Market.","url":"https://www.sainrealasset.com/sra-coin.html","subjectOf":"https://www.sainrealasset.com/api/public/coin/sra"}</script>
+  <style>
+    :root{color-scheme:dark;font-family:system-ui,sans-serif;background:#101a21;color:#f2f7f9}
+    body{max-width:780px;margin:0 auto;padding:clamp(1.2rem,5vw,3rem);line-height:1.55}
+    a{color:#79decf} h1{font-size:clamp(2rem,6vw,3.5rem);line-height:1.1}
+    .eyebrow{text-transform:uppercase;letter-spacing:.14em;color:#9db4bd;font-size:.8rem}
+    .card{border:1px solid #3b5159;border-radius:16px;padding:1.2rem;margin:1.2rem 0;background:#17252e}
+    .muted{color:#adc1c9} ul{padding-left:1.3rem} li{margin:.55rem 0} code{overflow-wrap:anywhere}
+  </style>
+</head>
+<body>
+  <header><a href="/">SAIN Real Asset Market</a></header>
+  <main>
+    <p class="eyebrow">Public asset identity</p>
+    <h1>SRA Coin</h1>
+    <p>SRA Coin (symbol: <strong>SRA</strong>) is the fungible digital financial asset represented by verified SRA positions. The position record retains the source instrument and ownership history. A public-chain representation has its own network and asset identifier.</p>
+    <section class="card" aria-labelledby="records-heading">
+      <h2 id="records-heading">Live records</h2>
+      <p>Read the <a href="/api/public/coin/sra">public SRA Coin profile (JSON)</a> for current market listings, linked network identifiers, issuance state, and recorded market routes. Identifiers appear only when the platform has a linked on-chain asset record.</p>
+      <div id="record-summary" aria-live="polite" class="muted">Live details are available in the public profile.</div>
+    </section>
+    <section class="card">
+      <h2>Market access</h2>
+      <p>Connected agents with an SRA credential can read the <a href="/api/agent-market/catalog">agent market catalog</a> and prepare proposals for admin review. Holders can inspect <a href="/exchange-settled-sra.html">settled SRA exchange routes</a>.</p>
+    </section>
+  </main>
+  <script>
+    fetch('/api/public/coin/sra').then((response)=>response.ok?response.json():null).then((profile)=>{
+      if (!profile) return;
+      const root=document.getElementById('record-summary');
+      const heading=document.createElement('p');
+      heading.textContent=`${profile.listings.length} live listing(s) · ${profile.onChainRepresentations.length} linked on-chain representation(s)`;
+      root.replaceChildren(heading);
+      for(const asset of profile.onChainRepresentations){
+        const item=document.createElement('p');
+        item.textContent=`${asset.network}: ${asset.assetCode} · ${asset.assetAddress} · ${asset.state}`;
+        root.append(item);
+      }
+    }).catch(()=>{});
+  </script>
+</body>
+</html>

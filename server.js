@@ -49,6 +49,8 @@ import { ProductionReadinessService } from './services/production-readiness-serv
 import { NativePlatformAssetService } from './services/native-platform-asset-service.js';
 import { PublicSraExchangeService } from './services/public-sra-exchange-service.js';
 import { createAgentMarketAccessRouter } from './routes/agent-market-access-router.js';
+import { PublicSraCoinDiscoveryService } from './services/public-sra-coin-discovery-service.js';
+import { createPublicSraCoinDiscoveryRouter } from './routes/public-sra-coin-discovery-router.js';
 
 const port = Number(process.env.PORT) || 3000;
 const bootstrap = express();
@@ -188,6 +190,7 @@ let ensureFinancingClosing;
 let ensureOnChainProjection;
 let ensurePublicSraExchange;
 let ensureAgentMarketAccess;
+let ensurePublicSraCoinDiscovery;
 
 async function routeLazy(req, res, next, ensureExtension) {
   try {
@@ -207,6 +210,7 @@ bootstrap.use(async (req, res, next) => {
   if (ensureFinancingClosing && req.path.startsWith('/api/financing-closing')) return routeLazy(req, res, next, ensureFinancingClosing);
   if (ensurePublicSraExchange && req.path.startsWith('/api/public-exchange')) return routeLazy(req, res, next, ensurePublicSraExchange);
   if (ensureAgentMarketAccess && req.path.startsWith('/api/agent-market/')) return routeLazy(req, res, next, ensureAgentMarketAccess);
+  if (ensurePublicSraCoinDiscovery && req.path.startsWith('/api/public/coin/')) return routeLazy(req, res, next, ensurePublicSraCoinDiscovery);
   if (ensureFundingOperations && req.path.startsWith('/api/funding-operations')) return routeLazy(req, res, next, ensureFundingOperations);
   if (ensureFundingMarketplaceSettlement && req.path.startsWith('/api/funding-marketplace-settlement')) return routeLazy(req, res, next, ensureFundingMarketplaceSettlement);
   if (ensureFundingMarketplaceAllocation && req.path.startsWith('/api/funding-marketplace-allocation')) return routeLazy(req, res, next, ensureFundingMarketplaceAllocation);
@@ -266,6 +270,10 @@ try {
   const domain = createdApp.persistentDomain;
 
   ensureAgentMarketAccess = createSingleFlightInitializer('Agent Market Access Router', async () => mountExtension('/api/agent-market', await createAgentMarketAccessRouter(domain)));
+  ensurePublicSraCoinDiscovery = createSingleFlightInitializer('Public SRA Coin Discovery', async () => {
+    const service = await new PublicSraCoinDiscoveryService(domain).initialize();
+    return mountExtension('/api/public/coin', createPublicSraCoinDiscoveryRouter(service));
+  });
 
   ensurePlatformExtensions = createSingleFlightInitializer('Universal Account Blockchain Router', async () => createUniversalAccountBlockchainRouter(domain, createdApp.database));
 
