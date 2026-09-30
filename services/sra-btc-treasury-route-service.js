@@ -46,7 +46,10 @@ export class SraBtcTreasuryRouteService {
     const wallets = this.wallets();
     return { pair:'SRA/BTC', purpose:'SRA_TREASURY_RETENTION', network:'BITCOIN',
       walletRegistered:wallets.some((item) => item.state === 'ACTIVE'), bitcoinRpcConfigured:this.bitcoin.status().configured,
-      tradeExecution:'PREPARATION_ONLY', liveCounterpartyConnected:false, minimumBtcDeposit:'0',
+      tradeExecution:'AWAITING_MARKET_CONNECTOR', marketLiquidityConnected:false, minimumBtcDeposit:'0',
+      route:{ type:'MARKET_SWAP', source:'SRA', target:'NATIVE_BTC',
+        stages:['SRA_MARKET_LIQUIDITY','CROSS_NETWORK_BTC_DELIVERY','TREASURY_RECEIPT'],
+        quoteAvailable:false, executionAvailable:false },
       wallets, eligibleListings:this.eligibleListings(), trades:this.trades() };
   }
 
@@ -94,13 +97,14 @@ export class SraBtcTreasuryRouteService {
     const listing = this.eligibleListings().find((item) => item.listingId === required(input.listingId, 'listingId'));
     if (!listing) throw new Error('Live SRA-owned coin listing not found.');
     const sraQuantity = amount(input.sraQuantity, 'sraQuantity', 8);
-    const btcAmount = amount(input.btcAmount, 'btcAmount', 8);
+    const minimumBtc = amount(input.minimumBtc ?? input.btcAmount, 'minimumBtc', 8);
     if (listing.availableQuantity != null && Number(sraQuantity) > Number(listing.availableQuantity)) throw new Error('SRA quantity exceeds the listing.');
     const expiresAt = required(input.expiresAt, 'expiresAt');
     if (!Number.isFinite(Date.parse(expiresAt)) || Date.parse(expiresAt) <= Date.now()) throw new Error('expiresAt must be a future date.');
-    const record = { id:id('BTCT'), pair:'SRA/BTC', listingId:listing.listingId, instrumentId:listing.instrumentId,
-      walletId:wallet.walletId, destinationAddress:wallet.address, counterpartyId:required(input.counterpartyId, 'counterpartyId'),
-      sraQuantity, btcAmount, expiresAt, state:'PREPARED', executionAuthorized:false,
+    const record = { id:id('BTCT'), pair:'SRA/BTC', routeType:'MARKET_SWAP', listingId:listing.listingId, instrumentId:listing.instrumentId,
+      walletId:wallet.walletId, destinationAddress:wallet.address,
+      sraQuantity, minimumBtc, expiresAt, marketQuoteId:null, marketExecutionId:null,
+      state:'AWAITING_MARKET_QUOTE', executionAuthorized:false,
       sraDeliveryVerified:false, btcReceiptVerified:false, createdBy:actorId, createdAt:now(), updatedAt:now() };
     await this.domain.put(TRADE, record.id, record, { actorId, eventType:'SRA_BTC_TREASURY_TRADE_PREPARED' });
     return record;
@@ -108,12 +112,12 @@ export class SraBtcTreasuryRouteService {
 
   async verifyBtcReceipt(tradeId, transactionId, actorId) {
     const trade = this.domain.get(TRADE, tradeId);
-    if (!trade || !['PREPARED', 'BTC_RECEIPT_PENDING'].includes(trade.state)) throw new Error('Prepared BTC treasury trade not found.');
+    if (!trade || !['MARKET_EXECUTED_AWAITING_BTC', 'BTC_RECEIPT_PENDING'].includes(trade.state) || !trade.marketExecutionId) throw new Error('A verified market execution is required before attributing BTC receipt to a swap.');
     const txid = required(transactionId, 'transactionId').toLowerCase();
     if (this.trades().some((item) => item.id !== trade.id && item.btcTransactionId === txid)) throw new Error('This Bitcoin transaction is already linked to another trade.');
     const evidence = await this.bitcoin.inspectIncoming(txid, trade.destinationAddress);
     const received = evidence.outputs.reduce((sum, output) => sum + satoshis(output.amount), 0n);
-    if (received < satoshis(trade.btcAmount)) throw new Error('Bitcoin transaction does not pay the quoted amount to the SRA treasury address.');
+    if (received < satoshis(trade.minimumBtc)) throw new Error('Bitcoin transaction does not pay the minimum amount to the SRA treasury address.');
     const verified = evidence.confirmations >= 3;
     const updated = { ...trade, btcTransactionId:txid, btcConfirmations:evidence.confirmations,
       btcOutputIndexes:evidence.outputs.map((output) => output.vout), btcReceiptVerified:verified,

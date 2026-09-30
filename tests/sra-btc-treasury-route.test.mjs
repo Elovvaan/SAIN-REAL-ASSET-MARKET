@@ -35,18 +35,23 @@ test('dedicated Bitcoin receiving address needs no BTC deposit and leaves execut
   assert.equal(wallet.networkValidated,false);
   assert.equal(wallet.privateKeyStored,false);
   assert.equal(service.status().minimumBtcDeposit,'0');
-  assert.equal(service.status().tradeExecution,'PREPARATION_ONLY');
-  const trade = await service.prepareTrade({walletId:wallet.walletId,listingId:'LIST-1',counterpartyId:'PARTY-1',sraQuantity:'1',btcAmount:'0.00000001',expiresAt:new Date(Date.now()+60000).toISOString()},'ADMIN');
+  assert.equal(service.status().tradeExecution,'AWAITING_MARKET_CONNECTOR');
+  const trade = await service.prepareTrade({walletId:wallet.walletId,listingId:'LIST-1',sraQuantity:'1',minimumBtc:'0.00000001',expiresAt:new Date(Date.now()+60000).toISOString()},'ADMIN');
   assert.equal(trade.executionAuthorized,false);
   assert.equal(trade.destinationAddress,address);
-  assert.equal(trade.state,'PREPARED');
+  assert.equal(trade.state,'AWAITING_MARKET_QUOTE');
+  assert.equal(trade.routeType,'MARKET_SWAP');
+  assert.equal(trade.marketExecutionId,null);
+  assert.equal(trade.counterpartyId,undefined);
 });
 
 test('Bitcoin receipt checks amount and confirmations without claiming SRA delivery', async () => {
-  const {service,bitcoin} = fixture({configured:true,confirmations:2});
+  const {service,bitcoin,domain} = fixture({configured:true,confirmations:2});
   const wallet = await service.registerWallet({label:'SRA Bitcoin Treasury',address},'ADMIN');
-  const trade = await service.prepareTrade({walletId:wallet.walletId,listingId:'LIST-1',counterpartyId:'PARTY-1',sraQuantity:'1',btcAmount:'0.00000001',expiresAt:new Date(Date.now()+60000).toISOString()},'ADMIN');
+  const trade = await service.prepareTrade({walletId:wallet.walletId,listingId:'LIST-1',sraQuantity:'1',minimumBtc:'0.00000001',expiresAt:new Date(Date.now()+60000).toISOString()},'ADMIN');
   const txid='a'.repeat(64);
+  await assert.rejects(service.verifyBtcReceipt(trade.id,txid,'ADMIN'),/verified market execution/);
+  await domain.put(RECORD_TYPES.SRA_BTC_TREASURY_TRADE,trade.id,{...trade,state:'MARKET_EXECUTED_AWAITING_BTC',marketExecutionId:'VERIFIED-MARKET-FILL-1'});
   const pending = await service.verifyBtcReceipt(trade.id,txid,'ADMIN');
   assert.equal(pending.state,'BTC_RECEIPT_PENDING');
   bitcoin.inspectIncoming=async()=>({transactionId:txid,confirmations:3,outputs:[{vout:0,amount:'0.00000001'}]});
@@ -57,13 +62,14 @@ test('Bitcoin receipt checks amount and confirmations without claiming SRA deliv
 });
 
 test('wrong BTC destination or insufficient payment cannot satisfy prepared trade', async () => {
-  const {service,bitcoin} = fixture({configured:true});
+  const {service,bitcoin,domain} = fixture({configured:true});
   const wallet = await service.registerWallet({label:'SRA Bitcoin Treasury',address},'ADMIN');
-  const trade = await service.prepareTrade({walletId:wallet.walletId,listingId:'LIST-1',counterpartyId:'PARTY-1',sraQuantity:'1',btcAmount:'0.5',expiresAt:new Date(Date.now()+60000).toISOString()},'ADMIN');
+  const trade = await service.prepareTrade({walletId:wallet.walletId,listingId:'LIST-1',sraQuantity:'1',minimumBtc:'0.5',expiresAt:new Date(Date.now()+60000).toISOString()},'ADMIN');
+  await domain.put(RECORD_TYPES.SRA_BTC_TREASURY_TRADE,trade.id,{...trade,state:'MARKET_EXECUTED_AWAITING_BTC',marketExecutionId:'VERIFIED-MARKET-FILL-1'});
   await assert.rejects(service.verifyBtcReceipt(trade.id,'b'.repeat(64),'ADMIN'),/does not pay/);
   bitcoin.inspectIncoming=async()=>({transactionId:'b'.repeat(64),confirmations:5,outputs:[]});
   await assert.rejects(service.verifyBtcReceipt(trade.id,'b'.repeat(64),'ADMIN'),/does not pay/);
-  assert.equal(service.trades()[0].state,'PREPARED');
+  assert.equal(service.trades()[0].state,'MARKET_EXECUTED_AWAITING_BTC');
 });
 
 test('BTC route API requires treasury operations identity', async () => {
@@ -83,7 +89,7 @@ test('BTC wallet and prepared trade survive persistent-domain hydration', async 
   const bitcoin={status:()=>({configured:false})};
   const first=await new SraBtcTreasuryRouteService({domain,bitcoin}).initialize();
   const wallet=await first.registerWallet({label:'Dedicated SRA BTC',address},'ADMIN');
-  const trade=await first.prepareTrade({walletId:wallet.walletId,listingId:'LIST-1',counterpartyId:'PARTY',sraQuantity:'1',btcAmount:'0.00001',expiresAt:new Date(Date.now()+60000).toISOString()},'ADMIN');
+  const trade=await first.prepareTrade({walletId:wallet.walletId,listingId:'LIST-1',sraQuantity:'1',minimumBtc:'0.00001',expiresAt:new Date(Date.now()+60000).toISOString()},'ADMIN');
   const second=await new SraBtcTreasuryRouteService({domain:new PersistentDomainService(database),bitcoin}).initialize();
   assert.equal(second.status().wallets[0].walletId,wallet.walletId);
   assert.equal(second.status().trades[0].id,trade.id);
