@@ -83,6 +83,20 @@ export class BitcoinTransferService {
     }
   }
 
+  async validateReceivingAddress(address) {
+    const result = await this.rpc('validateaddress', [text(address)]);
+    return { valid: result?.isvalid === true, address: result?.address || text(address) };
+  }
+
+  async inspectIncoming(transactionId, destinationAddress) {
+    if (!/^[a-fA-F0-9]{64}$/.test(text(transactionId))) throw new Error('A Bitcoin transaction ID is required.');
+    const tx = await this.rpc('getrawtransaction', [transactionId, true]);
+    const outputs = (tx?.vout || [])
+      .filter((output) => output.scriptPubKey?.address === destinationAddress)
+      .map((output) => ({ vout: output.n, amount: Number(output.value).toFixed(8) }));
+    return { transactionId: tx?.txid || transactionId, confirmations: Number(tx?.confirmations || 0), outputs };
+  }
+
   async confirm(transactionId) {
     try {
       const tx = await this.rpc('gettransaction', [transactionId], { wallet: true });
