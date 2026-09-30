@@ -76,9 +76,9 @@ export class PublicSraExchangeService {
           pair: `SRA/${receiveAsset}`,
           issuedSupply: String(asset.issuedSupply),
           marketId: market?.marketId || null,
-          marketState: state || 'NOT_ACTIVE',
-          available: Boolean(market && ['ACTIVE', 'TWO_SIDED'].includes(state)),
-          ...(receiveAsset === 'USDC' ? { minimumRate:'1 USDC per SRA', parFillRequiresLiquidity:true } : {}),
+          marketState: state || (receiveAsset === 'USDC' ? 'EXTERNAL_MARKET_QUOTE_REQUIRED' : 'NOT_ACTIVE'),
+          available: receiveAsset === 'USDC' || Boolean(market && ['ACTIVE', 'TWO_SIDED'].includes(state)),
+          ...(receiveAsset === 'USDC' ? { minimumRate:'1 USDC per SRA', parFillRequiresLiquidity:true, platformInventoryRequired:false } : {}),
       };
     }));
   }

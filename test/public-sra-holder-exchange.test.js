@@ -70,6 +70,19 @@ test('USDC holder exchange refuses quotes below par and allows XLM market pricin
   assert.ok(Number(xlm.minimumReceiveAmount) < 20);
 });
 
+test('issued SRA can quote external USDC offers without an SRA-funded market record', async () => {
+  const data = fixture();
+  data.domain.records.ON_CHAIN_USDC_MARKET = [];
+  const service = new PublicSraExchangeService(data);
+  const route = service.status().availableMarkets[0];
+  assert.equal(route.marketId, null);
+  assert.equal(route.platformInventoryRequired, false);
+  assert.equal(route.marketState, 'EXTERNAL_MARKET_QUOTE_REQUIRED');
+  const quote = await service.quote({ assetId:'OCA-1', sourceAddress:data.holder.publicKey(), sellAmount:'20' });
+  assert.equal(quote.marketId, null);
+  assert.equal(quote.minimumUsdc, '20.0000000');
+});
+
 test('USDC holder exchange rejects an older below-par quote at signed submission', async () => {
   const data = fixture();
   const service = new PublicSraExchangeService(data);

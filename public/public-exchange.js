@@ -31,7 +31,7 @@
     $('#quote-button').disabled = !routes.length;
     const pair = receiveAssetSelect.value ? `SRA/${receiveAssetSelect.value}` : 'SRA exchange';
     $('#market-state').innerHTML = routes.length
-      ? `<strong>${esc(pair)} is available</strong><span>${routes.length} active market${routes.length === 1 ? '' : 's'} · ${esc(networkSelect.value)} ${esc(networkEnvironment.toLowerCase())}${receiveAssetSelect.value === 'USDC' ? ' · 1:1 quote requires available USDC' : ''}</span>`
+      ? `<strong>${esc(pair)} route is ready for a quote</strong><span>${routes.length} issued asset${routes.length === 1 ? '' : 's'} · ${esc(networkSelect.value)} ${esc(networkEnvironment.toLowerCase())}${receiveAssetSelect.value === 'USDC' ? ' · checks market offers at 1:1 or better' : ''}</span>`
       : `<strong>${esc(pair)} is being prepared</strong><span>An issued SRA asset and active market will appear here when ready.</span>`;
   }
 
