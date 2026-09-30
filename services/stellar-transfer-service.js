@@ -34,11 +34,6 @@ function amountSubunits(value) {
   const [whole, fraction=''] = amount(value).split('.');
   return BigInt(whole) * 10_000_000n + BigInt((fraction + '0000000').slice(0, 7));
 }
-function subunitsAmount(value) {
-  const whole = value / 10_000_000n;
-  const fraction = String(value % 10_000_000n).padStart(7, '0');
-  return `${whole}.${fraction}`;
-}
 function assetCode(value) {
   const code = upper(value);
   if (!/^[A-Z0-9]{1,12}$/.test(code)) throw new Error('Stellar asset code must be 1 to 12 letters or numbers.');
@@ -392,13 +387,12 @@ export class StellarTransferService {
     const usdc = this.stellarAsset(usdcRecord);
     const sraSellAmount = amount(input.sraSellAmount);
     const usdcSellAmount = amount(input.usdcSellAmount);
-    const usdcPerSra = amount(input.usdcPerSra);
-    const referencePrice = Number(usdcPerSra);
-    const spreadBps = Number(input.spreadBps ?? 100);
-    if (!Number.isFinite(referencePrice) || referencePrice <= 0) throw new Error('USDC per SRAUSD must be greater than zero.');
-    if (!Number.isInteger(spreadBps) || spreadBps < 1 || spreadBps > 2500) throw new Error('spreadBps must be an integer from 1 to 2500.');
-    const askUsdcPerSra = referencePrice * (1 + spreadBps / 10000);
-    const bidUsdcPerSra = referencePrice * (1 - spreadBps / 10000);
+    if (input.usdcPerSra != null && amountSubunits(input.usdcPerSra) !== 10_000_000n) throw new Error('The SRA/USDC holder exit price must be 1 USDC per SRA.');
+    if (input.spreadBps != null && Number(input.spreadBps) !== 0) throw new Error('The SRA/USDC par route does not apply a bid/ask spread.');
+    const referencePrice = 1;
+    const spreadBps = 0;
+    const askUsdcPerSra = 1;
+    const bidUsdcPerSra = 1;
     const [sraBalance, usdcBalance] = await Promise.all([this.assetBalance(record.assetAddress), this.assetBalance('USDC')]);
     if (Number(sraSellAmount) > Number(sraBalance.available || 0)) throw new Error(`Market allocation exceeds the live uncommitted distribution balance of ${sraBalance.available || 0} SRAUSD.`);
     if (!usdcBalance.trustline) throw new Error('The Stellar distribution account must receive a USDC trustline before USDC market inventory can be allocated.');
@@ -470,9 +464,12 @@ export class StellarTransferService {
     }
     const best = [...paths].sort((a,b)=>amountSubunits(a.destination_amount) > amountSubunits(b.destination_amount) ? -1 : 1)[0];
     const expectedUsdc = amount(best.destination_amount);
-    const minimumUnits = amountSubunits(expectedUsdc) * BigInt(10000 - slippageBps) / 10000n;
-    if (minimumUnits <= 0n) throw new Error('Live SRAUSD/USDC quote is too small to execute at Stellar precision.');
-    const minimumUsdc = subunitsAmount(minimumUnits);
+    if (amountSubunits(expectedUsdc) < amountSubunits(sendAmount)) {
+      const error = new Error('No SRA/USDC path fills this amount at 1 USDC per SRA. Request a smaller amount or wait for par liquidity.');
+      error.code = 'STELLAR_USDC_PAR_LIQUIDITY_UNAVAILABLE';
+      throw error;
+    }
+    const minimumUsdc = sendAmount;
     return {
       network:NETWORK, market:`${record.asset || record.symbol}/USDC`, side:'SELL_SRA_ASSET_FOR_USDC',
       sourceAccount:distributor.publicKey(), sellAmount:sendAmount, expectedUsdc, minimumUsdc,
@@ -483,6 +480,7 @@ export class StellarTransferService {
 
   async executeUsdcSwap(record, quote) {
     if (new Date(quote.expiresAt).getTime() <= Date.now()) throw new Error('SRAUSD/USDC quote has expired. Request a new quote.');
+    if (amountSubunits(quote.minimumUsdc) < amountSubunits(quote.sellAmount)) throw new Error('SRA/USDC exchange requires at least 1 USDC per SRA.');
     const { server, distributor } = this.ensure();
     const selling = this.stellarAsset(record);
     const buying = this.stellarAsset(this.usdcRecord());

@@ -26,7 +26,7 @@ function fixture() {
   const submitted = [];
   const server = {
     async loadAccount(address) { assert.equal(address, holder.publicKey()); return account; },
-    strictSendPaths() { return { async call() { return { records: [{ destination_amount: '19.7500000', path: [] }] }; } }; },
+    strictSendPaths(_selling, _amount, destinations) { return { async call() { return { records: [{ destination_amount: destinations[0].isNative() ? '19.7500000' : '20.0000000', path: [] }] }; } }; },
     async submitTransaction(transaction) { submitted.push(transaction); return { hash: transaction.hash().toString('hex'), ledger: 123 }; },
   };
   const domain = new Domain({
@@ -49,6 +49,8 @@ test('public holder exchange requires no SRA account and uses the holder signatu
   assert.deepEqual(status.availableRoutes.map((route) => route.receiveAsset).sort(), ['USDC','XLM']);
 
   const quote = await service.quote({ quoteId: 'PHQ-1', assetId: 'OCA-1', sourceAddress: data.holder.publicKey(), sellAmount: '20' });
+  assert.equal(quote.minimumUsdc, '20.0000000');
+  assert.equal(quote.expectedUsdc, '20.0000000');
   const transaction = StellarSdk.TransactionBuilder.fromXDR(quote.unsignedXdr, quote.networkPassphrase);
   transaction.sign(data.holder);
   const result = await service.submit(quote, transaction.toXDR());
@@ -56,6 +58,24 @@ test('public holder exchange requires no SRA account and uses the holder signatu
   assert.equal(result.sourceAddress, data.holder.publicKey());
   assert.equal(result.destinationAddress, data.holder.publicKey());
   assert.equal(data.submitted.length, 1);
+});
+
+test('USDC holder exchange refuses quotes below par and allows XLM market pricing', async () => {
+  const data = fixture();
+  data.server.strictSendPaths = () => ({ async call() { return { records:[{ destination_amount:'19.9999999', path:[] }] }; } });
+  const service = new PublicSraExchangeService(data);
+  await assert.rejects(service.quote({ assetId:'OCA-1', sourceAddress:data.holder.publicKey(), sellAmount:'20', slippageBps:5000 }), (error) => error.code === 'PUBLIC_EXCHANGE_PAR_LIQUIDITY_UNAVAILABLE');
+  const xlm = await service.quote({ assetId:'OCA-1', receiveAsset:'XLM', sourceAddress:data.holder.publicKey(), sellAmount:'20' });
+  assert.equal(xlm.expectedReceiveAmount, '19.9999999');
+  assert.ok(Number(xlm.minimumReceiveAmount) < 20);
+});
+
+test('USDC holder exchange rejects an older below-par quote at signed submission', async () => {
+  const data = fixture();
+  const service = new PublicSraExchangeService(data);
+  const quote = await service.quote({ assetId:'OCA-1', sourceAddress:data.holder.publicKey(), sellAmount:'20' });
+  const downgraded = { ...quote, minimumReceiveAmount:'19.0000000', minimumUsdc:'19.0000000' };
+  assert.throws(() => service.verifySignedTransaction(downgraded, quote.unsignedXdr), (error) => error.code === 'PUBLIC_EXCHANGE_PAR_MINIMUM_INVALID');
 });
 
 test('public holder can select the active Stellar SRA/XLM route', async () => {

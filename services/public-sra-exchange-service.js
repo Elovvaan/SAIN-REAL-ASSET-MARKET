@@ -78,6 +78,7 @@ export class PublicSraExchangeService {
           marketId: market?.marketId || null,
           marketState: state || 'NOT_ACTIVE',
           available: Boolean(market && ['ACTIVE', 'TWO_SIDED'].includes(state)),
+          ...(receiveAsset === 'USDC' ? { minimumRate:'1 USDC per SRA', parFillRequiresLiquidity:true } : {}),
       };
     }));
   }
@@ -132,7 +133,8 @@ export class PublicSraExchangeService {
     if (!paths.length) throw publicError(`No live ${market.pair} exchange path is available for this amount right now.`, 'PUBLIC_EXCHANGE_PATH_UNAVAILABLE');
     const best = [...paths].sort((a, b) => units(a.destination_amount) > units(b.destination_amount) ? -1 : 1)[0];
     const expectedReceiveAmount = stellarAmount(best.destination_amount);
-    const minimumUnits = units(expectedReceiveAmount) * BigInt(10000 - slippage) / 10000n;
+    if (market.receiveAsset === 'USDC' && units(expectedReceiveAmount) < units(sendAmount)) throw publicError('No SRA/USDC path fills this amount at 1 USDC per SRA. Request a smaller amount or wait for par liquidity.', 'PUBLIC_EXCHANGE_PAR_LIQUIDITY_UNAVAILABLE');
+    const minimumUnits = market.receiveAsset === 'USDC' ? units(sendAmount) : units(expectedReceiveAmount) * BigInt(10000 - slippage) / 10000n;
     if (minimumUnits <= 0n) throw new Error('The quoted amount is below Stellar precision.');
     const minimumUsdc = amountFromUnits(minimumUnits);
     const path = (best.path || []).map((item) => item.asset_type === 'native' ? StellarSdk.Asset.native() : new StellarSdk.Asset(item.asset_code, item.asset_issuer));
@@ -170,6 +172,7 @@ export class PublicSraExchangeService {
 
   verifySignedTransaction(quote, signedXdr) {
     if (new Date(quote.expiresAt).getTime() <= Date.now()) throw publicError('This quote has expired. Request a new quote.', 'PUBLIC_EXCHANGE_QUOTE_EXPIRED');
+    if (quote.receiveAsset === 'USDC' && units(quote.minimumReceiveAmount || quote.minimumUsdc) < units(quote.sellAmount)) throw publicError('The SRA/USDC quote does not protect the 1:1 minimum.', 'PUBLIC_EXCHANGE_PAR_MINIMUM_INVALID');
     let transaction;
     try { transaction = StellarSdk.TransactionBuilder.fromXDR(text(signedXdr), this.passphrase); }
     catch { throw publicError('The signed Stellar transaction could not be read.', 'PUBLIC_EXCHANGE_SIGNED_XDR_INVALID'); }
