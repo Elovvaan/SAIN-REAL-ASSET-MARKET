@@ -43,3 +43,20 @@ export async function readConfiguredStellarAssets(environment = process.env, fet
   }));
   return results.filter((item) => item.status === 'fulfilled' && item.value).map((item) => item.value);
 }
+
+
+export async function hydrateSraIdentityRecords(domain, extraTypes = []) {
+  await domain.hydrate?.(['ON_CHAIN_ASSET', 'SRA_INSTRUMENT', ...extraTypes]);
+  if (!domain.hydrateRecord) {
+    await domain.hydrate?.(['COIN_POSITION', 'SRA_COIN_POSITION']);
+    return;
+  }
+  const ids = new Set([
+    ...domain.list('ON_CHAIN_ASSET').map((item) => item.sourcePositionId || item.coinPositionId),
+    ...domain.list('SRA_INSTRUMENT').map((item) => item.coinPositionId),
+  ].filter(Boolean));
+  await Promise.all([...ids].map(async (id) => {
+    const position = await domain.hydrateRecord('COIN_POSITION', id);
+    if (!position) await domain.hydrateRecord('SRA_COIN_POSITION', id);
+  }));
+}

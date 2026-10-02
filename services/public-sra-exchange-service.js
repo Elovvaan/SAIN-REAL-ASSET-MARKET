@@ -1,4 +1,4 @@
-import { SRA_DISCOVERY_RECORD_TYPES, readConfiguredStellarAssets } from './sra-coin-identity-service.js';
+import { readConfiguredStellarAssets } from './sra-coin-identity-service.js';
 import crypto from 'node:crypto';
 import * as StellarSdk from '@stellar/stellar-sdk';
 import { stellarUsdcIssuer } from './stellar-transfer-service.js';
@@ -53,7 +53,7 @@ export class PublicSraExchangeService {
   }
 
   async initialize() {
-    await this.domain.hydrate?.(SRA_DISCOVERY_RECORD_TYPES);
+    await this.domain.hydrate?.(['ON_CHAIN_ASSET', 'ON_CHAIN_USDC_MARKET', 'ON_CHAIN_NATIVE_MARKET']);
     await this.refreshLedgerAssets();
     return this;
   }

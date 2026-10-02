@@ -44,7 +44,7 @@ test('direct and legacy SRA source positions are discoverable without an instrum
     ],
   };
   let hydrated;
-  const service = await new PublicSraCoinDiscoveryService({hydrate:async(types)=>{hydrated=types;},list:(type)=>records[type]||[]}).initialize();
+  const service = await new PublicSraCoinDiscoveryService({hydrate:async(types)=>{hydrated=[...(hydrated || []),...types];},list:(type)=>records[type]||[]}).initialize();
   assert.ok(hydrated.includes('SRA_COIN_POSITION'));
   assert.deepEqual(service.profile().onChainRepresentations.map((item)=>item.assetId),['DIRECT-ASSET','LEGACY-ASSET']);
 });
