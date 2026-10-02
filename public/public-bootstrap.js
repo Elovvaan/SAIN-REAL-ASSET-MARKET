@@ -83,7 +83,7 @@
     await loadScript(ACCESS_FEATURE);
 
     if (document.readyState !== 'loading' && typeof window.initializeAccess === 'function') {
-      await window.initializeAccess();
+      void window.initializeAccess().catch((error) => console.error('SRA access initialization failed.', error));
     }
 
     await Promise.all(CORE_PARALLEL_FEATURES.map(loadScript));
@@ -138,6 +138,12 @@
     const view = requestedView(event);
     if (view) void loadWorkspaceFeatures(view).catch(() => {});
   }, true);
+
+  // Workspace styling must not hold up the public first paint. Keep the links
+  // in document order so the existing cascade is preserved.
+  requestAnimationFrame(() => setTimeout(() => {
+    document.querySelectorAll('link[data-sra-deferred-style]').forEach((link) => { link.media = 'all'; });
+  }, 0));
 
   void loadCore()
     .catch((error) => {

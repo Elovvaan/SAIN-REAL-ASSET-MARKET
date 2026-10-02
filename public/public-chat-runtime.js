@@ -105,5 +105,6 @@
     if ('requestIdleCallback' in window) window.requestIdleCallback(() => void startHeartbeat(), { timeout: 1500 });
     else window.setTimeout(() => void startHeartbeat(), 0);
   }
-  window.addEventListener('sra:public-access-ready', scheduleHeartbeat, { once: true });
+  if (window.__sraPublicAccessReady) scheduleHeartbeat();
+  else window.addEventListener('sra:public-access-ready', scheduleHeartbeat, { once: true });
 })();

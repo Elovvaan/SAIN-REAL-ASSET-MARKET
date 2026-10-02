@@ -145,6 +145,22 @@ function configureNavigation(){const workspace=accessState.session?currentWorksp
 function updateSaneContext(){const workspace=currentWorkspace();const context=document.querySelector('.chat-context');if(context)context.textContent=`Sane is operating in the ${workspace.label} tier and will interpret requests through this workspace.`}
 function applyAccessShell(){renderAccessControls();configureNavigation();if(!accessState.session){document.body.classList.add('access-public');if(window.SRAPublicHome?.refreshNow){window.SRAPublicHome.refreshNow();return}renderPublicShell();return}document.body.classList.remove('access-public');updateSaneContext();renderTierHome()}
 let accessInitialization=null;
+async function readInitialAccess(path){
+  const controller=new AbortController();
+  let timeout;
+  try{
+    return await Promise.race([
+      (async()=>{
+        const response=await fetch(path,{signal:controller.signal});
+        if(!response.ok)throw new Error(`Access request failed: ${response.status}`);
+        return response.json();
+      })(),
+      new Promise((_,reject)=>{timeout=setTimeout(()=>{
+        controller.abort();reject(new Error('Access initialization timed out'));
+      },6000)}),
+    ]);
+  }finally{clearTimeout(timeout)}
+}
 async function initializeAccess(){
   if(accessInitialization)return accessInitialization;
   accessInitialization=(async()=>{
@@ -157,22 +173,22 @@ async function initializeAccess(){
     applyAccessShell();
     document.body.classList.remove('sra-access-resolving');
     try{
-      const sessionResponse=await fetch('/api/access/session');
-      const sessionPayload=await sessionResponse.json();
-      accessState.session=sessionPayload.session;
+      const sessionPayload=await readInitialAccess('/api/access/session');
+      // A sign-in completed while this initial request was pending wins.
+      if(!accessState.session)accessState.session=sessionPayload.session;
       if(accessState.session){
         accessState.publicData={opportunities:[]};
         applyAccessShell();
       }else{
-        const publicResponse=await fetch('/api/access/public');
-        accessState.publicData=await publicResponse.json();
+        const publicPayload=await readInitialAccess('/api/access/public');
+        if(!accessState.session)accessState.publicData=publicPayload;
         applyAccessShell();
       }
     }catch{
-      accessState.session=null;
       accessState.publicData=accessState.publicData||{opportunities:[]};
     }
     window.SRAPublicHome?.refreshNow?.();
+    window.__sraPublicAccessReady=true;
     window.dispatchEvent(new CustomEvent('sra:public-access-ready',{detail:{signedIn:Boolean(accessState.session)}}));
     return accessState;
   })();
