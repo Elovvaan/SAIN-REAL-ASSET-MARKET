@@ -55,8 +55,21 @@ export async function hydrateSraIdentityRecords(domain, extraTypes = []) {
     ...domain.list('ON_CHAIN_ASSET').map((item) => item.sourcePositionId || item.coinPositionId),
     ...domain.list('SRA_INSTRUMENT').map((item) => item.coinPositionId),
   ].filter(Boolean));
-  await Promise.all([...ids].map(async (id) => {
+  if (domain.database?.listRecordsByIds && domain.cacheRecord) {
+    for (const type of ['COIN_POSITION', 'SRA_COIN_POSITION']) {
+      const missing = [...ids].filter((id) => !domain.get('COIN_POSITION', id) && !domain.get('SRA_COIN_POSITION', id));
+      for (let offset = 0; offset < missing.length; offset += 500) {
+        const records = await domain.database.listRecordsByIds(type, missing.slice(offset, offset + 500));
+        for (const position of records) {
+          const id = position.coinPositionId || position.positionId || position.id;
+          if (id) domain.cacheRecord(type, id, position);
+        }
+      }
+    }
+    return;
+  }
+  for (const id of ids) {
     const position = await domain.hydrateRecord('COIN_POSITION', id);
     if (!position) await domain.hydrateRecord('SRA_COIN_POSITION', id);
-  }));
+  }
 }

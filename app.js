@@ -1,4 +1,4 @@
-import { hydrateSraIdentityRecords } from './services/sra-coin-identity-service.js';
+import { hydrateSraIdentityRecords, configuredStellarAssets } from './services/sra-coin-identity-service.js';
 import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -215,7 +215,7 @@ export async function createApp(options = {}) {
 
   app.get('/.well-known/stellar.toml', async (_req, res) => {
     try {
-      await hydrateSraIdentityRecords(persistentDomain);
+      if (!configuredStellarAssets(sraAnchorPlatformService.environment).length) await hydrateSraIdentityRecords(persistentDomain);
       return res.set('Access-Control-Allow-Origin', '*').type('text/plain').send(sraAnchorPlatformService.stellarToml());
     }
     catch (error) { return res.status(503).type('text/plain').send(`# SRA Anchor Platform unavailable\n# ${error.message}\n`); }

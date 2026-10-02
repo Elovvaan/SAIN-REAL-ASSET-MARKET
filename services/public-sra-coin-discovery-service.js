@@ -1,4 +1,4 @@
-import { hydrateSraIdentityRecords, sraCoinPositions, sraCoinAssets, readConfiguredStellarAssets } from './sra-coin-identity-service.js';
+import { hydrateSraIdentityRecords, configuredStellarAssets, sraCoinPositions, sraCoinAssets, readConfiguredStellarAssets } from './sra-coin-identity-service.js';
 const LIVE = new Set(['LIVE', 'PUBLISHED', 'ACTIVE']);
 const PUBLIC_URL = 'https://www.sainrealasset.com';
 
@@ -6,7 +6,8 @@ export class PublicSraCoinDiscoveryService {
   constructor(domain, { environment = process.env, fetchImpl = globalThis.fetch } = {}) { this.domain = domain; this.environment = environment; this.fetch = fetchImpl; this.ledgerAssets = []; }
 
   async initialize() {
-    await hydrateSraIdentityRecords(this.domain, ['MARKETPLACE_LISTING', 'ON_CHAIN_USDC_MARKET', 'ON_CHAIN_NATIVE_MARKET']);
+    try { await hydrateSraIdentityRecords(this.domain, ['MARKETPLACE_LISTING', 'ON_CHAIN_USDC_MARKET', 'ON_CHAIN_NATIVE_MARKET']); }
+    catch (error) { if (!configuredStellarAssets(this.environment).length) throw error; }
     await this.refreshLedgerAssets();
     return this;
   }

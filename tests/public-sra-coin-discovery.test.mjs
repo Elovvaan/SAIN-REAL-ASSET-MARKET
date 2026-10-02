@@ -63,3 +63,20 @@ test('explicit public ledger identity is verified without inventing an internal 
   const wrong = await new PublicSraCoinDiscoveryService({hydrate:async()=>{},list:()=>[]},{environment,fetchImpl:async()=>({ok:true,json:async()=>({_embedded:{records:[{asset_code:'SRA',asset_issuer:Keypair.random().publicKey(),balances:{authorized:'20'}}]}})})}).initialize();
   assert.deepEqual(wrong.profile().onChainRepresentations,[]);
 });
+
+
+test('linked position hydration uses bounded batches instead of concurrent per-record reads', async () => {
+  const { hydrateSraIdentityRecords } = await import('../services/sra-coin-identity-service.js');
+  const positions=new Map();
+  const ids=Array.from({length:1200},(_,i)=>`CP-${i}`);
+  const calls=[];
+  const domain={
+    hydrate:async()=>{},hydrateRecord:async()=>{throw new Error('Per-record read should not be used');},
+    list:(type)=>type==='SRA_INSTRUMENT'?ids.map((id)=>({coinPositionId:id})):[],
+    get:(_type,id)=>positions.get(id),cacheRecord:(_type,id,position)=>positions.set(id,position),
+    database:{listRecordsByIds:async(type,batch)=>{calls.push(batch.length);return batch.map((id)=>({coinPositionId:id,symbol:'SRA'}));}},
+  };
+  await hydrateSraIdentityRecords(domain);
+  assert.deepEqual(calls,[500,500,200]);
+  assert.equal(positions.size,1200);
+});
