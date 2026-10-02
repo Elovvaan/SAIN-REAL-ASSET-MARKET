@@ -104,7 +104,7 @@ export class SraAnchorPlatformService {
     }
     for (const asset of assets) lines.push('[[CURRENCIES]]', `code="${asset.code}"`,
       `issuer="${asset.issuer}"`, 'name="SRA Coin"',
-      'desc="On-chain SRA Coin representation linked to a verified SRA position."',
+      'desc="SRA Coin representation on Stellar."',
       'image="https://www.sainrealasset.com/brand-logo.png"',
       'is_asset_anchored=false',
       'status="live"', '');
