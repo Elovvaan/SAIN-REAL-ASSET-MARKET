@@ -6,7 +6,7 @@ export class PublicSraCoinDiscoveryService {
   constructor(domain, { environment = process.env, fetchImpl = globalThis.fetch } = {}) { this.domain = domain; this.environment = environment; this.fetch = fetchImpl; this.ledgerAssets = []; }
 
   async initialize() {
-    await this.domain.hydrate?.([...hydrateSraIdentityRecords, 'MARKETPLACE_LISTING']);
+    await hydrateSraIdentityRecords(this.domain, ['MARKETPLACE_LISTING', 'ON_CHAIN_USDC_MARKET', 'ON_CHAIN_NATIVE_MARKET']);
     await this.refreshLedgerAssets();
     return this;
   }
