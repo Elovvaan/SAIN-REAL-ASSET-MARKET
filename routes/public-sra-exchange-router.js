@@ -10,8 +10,8 @@ function handle(res, error) {
 export function createPublicSraExchangeRouter(service) {
   const router = express.Router();
 
-  router.get('/status', (_req, res) => {
-    try { return res.json(service.status()); }
+  router.get('/status', async (_req, res) => {
+    try { await service.refreshLedgerAssets?.(); return res.json(service.status()); }
     catch (error) { return handle(res, error); }
   });
 

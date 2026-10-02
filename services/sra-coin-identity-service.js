@@ -1,3 +1,4 @@
+import * as StellarSdk from '@stellar/stellar-sdk';
 const upper = (value) => String(value ?? '').trim().toUpperCase();
 export const SRA_DISCOVERY_RECORD_TYPES = ['COIN_POSITION', 'SRA_COIN_POSITION', 'SRA_INSTRUMENT', 'ON_CHAIN_ASSET', 'ON_CHAIN_USDC_MARKET', 'ON_CHAIN_NATIVE_MARKET', 'ON_CHAIN_MARKET_OFFER'];
 export function sraCoinPositions(domain) {
@@ -15,4 +16,30 @@ export function sraCoinAssets(domain) {
   return domain.list('ON_CHAIN_ASSET').filter((item) =>
     item.assetAddress && ['CREATED', 'ISSUED'].includes(upper(item.state)) &&
     (positions.has(item.sourcePositionId || item.coinPositionId) || instruments.has(item.instrumentId)));
+}
+
+
+export function configuredStellarAssets(environment = process.env) {
+  return String(environment.SRA_STELLAR_PUBLIC_ASSETS || '').split(',').map((value) => value.trim()).filter(Boolean).map((address) => {
+    const [code, issuer, extra] = address.split(':');
+    if (extra || !/^[A-Z0-9]{1,12}$/.test(code || '') || !StellarSdk.StrKey.isValidEd25519PublicKey(issuer || '')) throw new Error('SRA_STELLAR_PUBLIC_ASSETS must contain Stellar code:issuer identities.');
+    return {code,issuer,assetAddress:address};
+  });
+}
+
+export async function readConfiguredStellarAssets(environment = process.env, fetchImpl = globalThis.fetch) {
+  const horizon = String(environment.STELLAR_HORIZON_URL || (upper(environment.STELLAR_NETWORK) === 'TESTNET' ? 'https://horizon-testnet.stellar.org' : 'https://horizon.stellar.org')).replace(/\/$/, '');
+  const results = await Promise.allSettled(configuredStellarAssets(environment).map(async (asset) => {
+    const query = new URLSearchParams({asset_code:asset.code,asset_issuer:asset.issuer});
+    const response = await fetchImpl(`${horizon}/assets?${query}`, {signal:AbortSignal.timeout(8000)});
+    if (!response.ok) throw new Error('Stellar asset verification is temporarily unavailable.');
+    const data = await response.json();
+    const record = data._embedded?.records?.find((item) => item.asset_code === asset.code && item.asset_issuer === asset.issuer);
+    if (!record) return null;
+    const supply = Object.values(record.balances || {}).reduce((total, value) => total + Number(value || 0), 0)
+      + Number(record.claimable_balances_amount || 0) + Number(record.liquidity_pools_amount || 0) + Number(record.contracts_amount || 0);
+    if (!(supply > 0)) return null;
+    return {assetId:`PUBLIC-STELLAR-${asset.code}-${asset.issuer}`,instrumentId:null,network:'STELLAR',asset:asset.code,assetAddress:asset.assetAddress,state:'ISSUED',issuedSupply:supply.toFixed(7),identitySource:'CONFIGURED_LEDGER_IDENTITY',verifiedAt:new Date().toISOString()};
+  }));
+  return results.filter((item) => item.status === 'fulfilled' && item.value).map((item) => item.value);
 }

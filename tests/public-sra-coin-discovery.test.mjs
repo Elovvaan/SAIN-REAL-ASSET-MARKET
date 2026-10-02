@@ -48,3 +48,18 @@ test('direct and legacy SRA source positions are discoverable without an instrum
   assert.ok(hydrated.includes('SRA_COIN_POSITION'));
   assert.deepEqual(service.profile().onChainRepresentations.map((item)=>item.assetId),['DIRECT-ASSET','LEGACY-ASSET']);
 });
+
+
+test('explicit public ledger identity is verified without inventing an internal source position', async () => {
+  const { Keypair } = await import('@stellar/stellar-sdk');
+  const issuer = Keypair.random().publicKey();
+  const environment = {SRA_STELLAR_PUBLIC_ASSETS:`SRA:${issuer}`,STELLAR_NETWORK:'PUBLIC'};
+  const fetchImpl = async () => ({ok:true,json:async()=>({_embedded:{records:[{asset_code:'SRA',asset_issuer:issuer,balances:{authorized:'20',unauthorized:'2'},liquidity_pools_amount:'3'}]}})});
+  const service = await new PublicSraCoinDiscoveryService({hydrate:async()=>{},list:()=>[]},{environment,fetchImpl}).initialize();
+  const asset = service.profile().onChainRepresentations[0];
+  assert.equal(asset.issuedSupply,'25.0000000');
+  assert.equal(asset.instrumentId,null);
+  assert.equal(asset.identitySource,'CONFIGURED_LEDGER_IDENTITY');
+  const wrong = await new PublicSraCoinDiscoveryService({hydrate:async()=>{},list:()=>[]},{environment,fetchImpl:async()=>({ok:true,json:async()=>({_embedded:{records:[{asset_code:'SRA',asset_issuer:Keypair.random().publicKey(),balances:{authorized:'20'}}]}})})}).initialize();
+  assert.deepEqual(wrong.profile().onChainRepresentations,[]);
+});

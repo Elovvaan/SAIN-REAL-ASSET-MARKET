@@ -1,4 +1,4 @@
-import { sraCoinAssets } from './sra-coin-identity-service.js';
+import { sraCoinAssets, configuredStellarAssets } from './sra-coin-identity-service.js';
 import crypto from 'node:crypto';
 import * as StellarSdk from '@stellar/stellar-sdk';
 import { RECORD_TYPES } from './persistent-domain-service.js';
@@ -72,6 +72,7 @@ export class SraAnchorPlatformService {
       if (extra || !/^[A-Z0-9]{1,12}$/.test(code || '') || !StellarSdk.StrKey.isValidEd25519PublicKey(issuer || '') || upper(asset.asset) !== code) continue;
       identities.set(`${code}:${issuer}`, { code, issuer, assetId:asset.assetId });
     }
+    for (const asset of configuredStellarAssets(this.environment)) if (!identities.has(asset.assetAddress)) identities.set(asset.assetAddress, asset);
     return [...identities.values()].sort((a, b) => `${a.code}:${a.issuer}`.localeCompare(`${b.code}:${b.issuer}`));
   }
 

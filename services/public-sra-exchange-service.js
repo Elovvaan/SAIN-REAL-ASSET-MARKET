@@ -1,4 +1,4 @@
-import { SRA_DISCOVERY_RECORD_TYPES } from './sra-coin-identity-service.js';
+import { SRA_DISCOVERY_RECORD_TYPES, readConfiguredStellarAssets } from './sra-coin-identity-service.js';
 import crypto from 'node:crypto';
 import * as StellarSdk from '@stellar/stellar-sdk';
 import { stellarUsdcIssuer } from './stellar-transfer-service.js';
@@ -46,6 +46,7 @@ export class PublicSraExchangeService {
   constructor({ domain, environment = process.env, server = null } = {}) {
     this.domain = domain;
     this.environment = environment;
+    this.ledgerAssets = [];
     this.passphrase = networkPassphrase(environment);
     this.horizonUrl = horizonUrl(environment);
     this.server = server || new StellarSdk.Horizon.Server(this.horizonUrl);
@@ -53,7 +54,17 @@ export class PublicSraExchangeService {
 
   async initialize() {
     await this.domain.hydrate?.(SRA_DISCOVERY_RECORD_TYPES);
+    await this.refreshLedgerAssets();
     return this;
+  }
+
+  async refreshLedgerAssets() {
+    if (this.ledgerReadAt && Date.now() - this.ledgerReadAt < 60000) return;
+    if (!this.ledgerRead) this.ledgerRead = readConfiguredStellarAssets(this.environment, this.fetch || globalThis.fetch).then((assets) => {
+      this.ledgerAssets = assets;
+      this.ledgerReadAt = Date.now();
+    }).finally(() => { this.ledgerRead = null; });
+    await this.ledgerRead;
   }
 
   usdc() {
@@ -65,7 +76,9 @@ export class PublicSraExchangeService {
       { recordType:'ON_CHAIN_USDC_MARKET', receiveAsset:'USDC' },
       { recordType:'ON_CHAIN_NATIVE_MARKET', receiveAsset:'XLM' },
     ];
-    const assets = this.domain.list('ON_CHAIN_ASSET')
+    const knownAssets = this.domain.list('ON_CHAIN_ASSET');
+    const addresses = new Set(knownAssets.map((item) => item.assetAddress));
+    const assets = [...knownAssets, ...this.ledgerAssets.filter((item) => !addresses.has(item.assetAddress))]
       .filter((asset) => upper(asset.network) === 'STELLAR' && Number(asset.issuedSupply || 0) > 0)
     return assets.flatMap((asset) => marketTypes.map(({ recordType, receiveAsset }) => {
       const market = this.domain.list(recordType).filter((item) => item.assetId === asset.assetId)
