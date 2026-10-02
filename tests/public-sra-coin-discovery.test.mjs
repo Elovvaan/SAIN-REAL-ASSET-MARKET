@@ -80,3 +80,17 @@ test('linked position hydration uses bounded batches instead of concurrent per-r
   assert.deepEqual(calls,[500,500,200]);
   assert.equal(positions.size,1200);
 });
+
+
+test('configured ledger discovery stays available while internal record hydration is pending', async () => {
+  const { Keypair }=await import('@stellar/stellar-sdk');
+  const issuer=Keypair.random().publicKey();
+  let finish;
+  const pending=new Promise((resolve)=>{finish=resolve;});
+  const service=await new PublicSraCoinDiscoveryService({hydrate:()=>pending,list:()=>[]},{
+    environment:{SRA_STELLAR_PUBLIC_ASSETS:`SRA:${issuer}`},
+    fetchImpl:async()=>({ok:true,json:async()=>({_embedded:{records:[{asset_code:'SRA',asset_issuer:issuer,balances:{authorized:'20'}}]}})}),
+  }).initialize();
+  assert.equal(service.profile().onChainRepresentations[0].issuedSupply,'20.0000000');
+  finish();await service.recordHydration;
+});

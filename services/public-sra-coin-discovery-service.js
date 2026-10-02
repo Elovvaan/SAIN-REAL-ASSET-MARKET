@@ -6,8 +6,9 @@ export class PublicSraCoinDiscoveryService {
   constructor(domain, { environment = process.env, fetchImpl = globalThis.fetch } = {}) { this.domain = domain; this.environment = environment; this.fetch = fetchImpl; this.ledgerAssets = []; }
 
   async initialize() {
-    try { await hydrateSraIdentityRecords(this.domain, ['MARKETPLACE_LISTING', 'ON_CHAIN_USDC_MARKET', 'ON_CHAIN_NATIVE_MARKET']); }
-    catch (error) { if (!configuredStellarAssets(this.environment).length) throw error; }
+    const records = hydrateSraIdentityRecords(this.domain, ['MARKETPLACE_LISTING', 'ON_CHAIN_USDC_MARKET', 'ON_CHAIN_NATIVE_MARKET']);
+    if (configuredStellarAssets(this.environment).length) this.recordHydration = records.catch(() => { this.recordHydrationUnavailable = true; });
+    else await records;
     await this.refreshLedgerAssets();
     return this;
   }
