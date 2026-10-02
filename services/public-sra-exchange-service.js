@@ -53,9 +53,9 @@ export class PublicSraExchangeService {
   }
 
   async initialize() {
-    const records = this.domain.hydrate?.(['ON_CHAIN_ASSET', 'ON_CHAIN_USDC_MARKET', 'ON_CHAIN_NATIVE_MARKET']);
-    if (configuredStellarAssets(this.environment).length) this.recordHydration = Promise.resolve(records).catch(() => { this.recordHydrationUnavailable = true; });
-    else await records;
+    if (!configuredStellarAssets(this.environment).length) {
+      await this.domain.hydrate?.(['ON_CHAIN_ASSET', 'ON_CHAIN_USDC_MARKET', 'ON_CHAIN_NATIVE_MARKET']);
+    }
     await this.refreshLedgerAssets();
     return this;
   }
