@@ -409,7 +409,10 @@ export class StellarTransferService {
     const usdcRecord = this.usdcRecord();
     const usdc = this.stellarAsset(usdcRecord);
     const sraSellAmount = amount(input.sraSellAmount);
-    const usdcSellAmount = amount(input.usdcSellAmount);
+    const rawUsdcAmount = text(input.usdcSellAmount ?? '0');
+    if (!/^\d+(?:\.\d{1,7})?$/.test(rawUsdcAmount)) throw new Error('usdcSellAmount must be zero or a positive Stellar amount.');
+    const twoSided = Number(rawUsdcAmount) > 0;
+    const usdcSellAmount = twoSided ? amount(rawUsdcAmount) : '0';
     if (input.usdcPerSra != null && amountSubunits(input.usdcPerSra) !== 10_000_000n) throw new Error('The SRA/USDC holder exit price must be 1 USDC per SRA.');
     if (input.spreadBps != null && Number(input.spreadBps) !== 0) throw new Error('The SRA/USDC par route does not apply a bid/ask spread.');
     const referencePrice = 1;
@@ -421,17 +424,18 @@ export class StellarTransferService {
     if (!usdcBalance.trustline) throw new Error('The Stellar distribution account must receive a USDC trustline before USDC market inventory can be allocated.');
     if (Number(usdcSellAmount) > Number(usdcBalance.available || 0)) throw new Error(`Market allocation exceeds the live uncommitted distribution balance of ${usdcBalance.available || 0} USDC.`);
     const account = await server.loadAccount(distributor.publicKey());
-    const tx = new StellarSdk.TransactionBuilder(account, { fee:String(Number(StellarSdk.BASE_FEE) * 2), networkPassphrase:this.passphrase })
-      .addOperation(StellarSdk.Operation.manageSellOffer({ selling:sra, buying:usdc, amount:sraSellAmount, price:askUsdcPerSra.toFixed(7) }))
-      .addOperation(StellarSdk.Operation.manageSellOffer({ selling:usdc, buying:sra, amount:usdcSellAmount, price:(1 / bidUsdcPerSra).toFixed(7) }))
-      .setTimeout(100).build();
+    const builder = new StellarSdk.TransactionBuilder(account, { fee:StellarSdk.BASE_FEE, networkPassphrase:this.passphrase })
+      .addOperation(StellarSdk.Operation.manageSellOffer({ selling:sra, buying:usdc, amount:sraSellAmount, price:askUsdcPerSra.toFixed(7) }));
+    if (twoSided) builder.addOperation(StellarSdk.Operation.manageSellOffer({ selling:usdc, buying:sra, amount:usdcSellAmount, price:(1 / bidUsdcPerSra).toFixed(7) }));
+    const tx = builder.setTimeout(100).build();
     tx.sign(distributor);
     const result = await server.submitTransaction(tx);
     return {
       network:NETWORK, market:`${record.asset || record.symbol}/USDC`, marketType:'STELLAR_ORDER_BOOK',
       account:distributor.publicKey(), sraAssetAddress:record.assetAddress, usdcAssetAddress:usdcRecord.assetAddress,
       sraSellAmount, usdcSellAmount, referenceUsdcPerSra:referencePrice.toFixed(7), spreadBps,
-      askUsdcPerSra:askUsdcPerSra.toFixed(7), bidUsdcPerSra:bidUsdcPerSra.toFixed(7),
+      askUsdcPerSra:askUsdcPerSra.toFixed(7), bidUsdcPerSra:twoSided ? bidUsdcPerSra.toFixed(7) : null,
+      marketMode:twoSided ? 'TWO_SIDED' : 'SELL_ONLY',
       transactionId:result.hash, confirmation:{state:'CONFIRMED',transactionId:result.hash,ledger:result.ledger}, state:'ACTIVE',
     };
   }

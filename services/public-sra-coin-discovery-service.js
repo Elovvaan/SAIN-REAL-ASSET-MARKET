@@ -1,3 +1,4 @@
+import { SRA_DISCOVERY_RECORD_TYPES, sraCoinPositions, sraCoinAssets } from './sra-coin-identity-service.js';
 const LIVE = new Set(['LIVE', 'PUBLISHED', 'ACTIVE']);
 const PUBLIC_URL = 'https://www.sainrealasset.com';
 
@@ -5,13 +6,12 @@ export class PublicSraCoinDiscoveryService {
   constructor(domain) { this.domain = domain; }
 
   async initialize() {
-    await this.domain.hydrate?.(['COIN_POSITION', 'SRA_INSTRUMENT', 'MARKETPLACE_LISTING', 'ON_CHAIN_ASSET', 'ON_CHAIN_USDC_MARKET', 'ON_CHAIN_NATIVE_MARKET']);
+    await this.domain.hydrate?.([...SRA_DISCOVERY_RECORD_TYPES, 'MARKETPLACE_LISTING']);
     return this;
   }
 
   profile() {
-    const positions = this.domain.list('COIN_POSITION').filter((item) => item.assetIdentity === 'SRA_COIN' && item.symbol === 'SRA');
-    const positionIds = new Set(positions.map((item) => item.coinPositionId));
+    const positionIds = new Set(sraCoinPositions(this.domain).keys());
     const instruments = this.domain.list('SRA_INSTRUMENT').filter((item) => positionIds.has(item.coinPositionId));
     const instrumentIds = new Set(instruments.map((item) => item.instrumentId));
     const listings = this.domain.list('MARKETPLACE_LISTING')
@@ -19,8 +19,7 @@ export class PublicSraCoinDiscoveryService {
       .filter((item) => LIVE.has(String(item.status || item.state || '').toUpperCase()))
       .filter((item) => !item.blockers?.length && item.canonicalization?.state !== 'INVALID_LINKED_FINANCIAL_RECORD')
       .map((item) => ({ listingId:item.listingId, instrumentId:item.instrumentId, state:item.status || item.state, unit:item.unit || 'SRA', quantity:item.quantity ?? null, currency:item.pricing?.currency || item.currency || null, unitPrice:item.pricing?.unitPrice ?? item.unitPrice ?? null }));
-    const assets = this.domain.list('ON_CHAIN_ASSET')
-      .filter((item) => instrumentIds.has(item.instrumentId) && item.assetAddress && ['CREATED', 'ISSUED'].includes(item.state))
+    const assets = sraCoinAssets(this.domain)
       .map((item) => {
         const markets = [
           ...this.domain.list('ON_CHAIN_USDC_MARKET').filter((market) => market.assetId === item.assetId).map((market) => ({ pair:'SRA/USDC', state:market.state })),

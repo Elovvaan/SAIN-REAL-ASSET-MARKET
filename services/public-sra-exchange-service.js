@@ -1,3 +1,4 @@
+import { SRA_DISCOVERY_RECORD_TYPES } from './sra-coin-identity-service.js';
 import crypto from 'node:crypto';
 import * as StellarSdk from '@stellar/stellar-sdk';
 import { stellarUsdcIssuer } from './stellar-transfer-service.js';
@@ -48,6 +49,11 @@ export class PublicSraExchangeService {
     this.passphrase = networkPassphrase(environment);
     this.horizonUrl = horizonUrl(environment);
     this.server = server || new StellarSdk.Horizon.Server(this.horizonUrl);
+  }
+
+  async initialize() {
+    await this.domain.hydrate?.(SRA_DISCOVERY_RECORD_TYPES);
+    return this;
   }
 
   usdc() {

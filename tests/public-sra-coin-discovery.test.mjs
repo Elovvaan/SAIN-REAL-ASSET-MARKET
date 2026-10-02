@@ -31,3 +31,20 @@ test('the public coin identity stays available before any issuance or listing', 
   assert.deepEqual(service.profile().onChainRepresentations, []);
   assert.deepEqual(service.profile().listings, []);
 });
+
+
+test('direct and legacy SRA source positions are discoverable without an instrument link', async () => {
+  const records = {
+    SRA_COIN_POSITION:[{positionId:'LEGACY',unit:'SRA/USD'}],
+    COIN_POSITION:[{coinPositionId:'DIRECT',symbol:'SRA'}],
+    ON_CHAIN_ASSET:[
+      {assetId:'DIRECT-ASSET',sourcePositionId:'DIRECT',network:'STELLAR',asset:'SRA',assetAddress:'SRA:GISSUER',state:'ISSUED',issuedSupply:'20'},
+      {assetId:'LEGACY-ASSET',sourcePositionId:'LEGACY',network:'STELLAR',asset:'SRA2',assetAddress:'SRA2:GISSUER',state:'ISSUED',issuedSupply:'30'},
+      {assetId:'UNRELATED',sourcePositionId:'OTHER',network:'STELLAR',asset:'OTHER',assetAddress:'OTHER:GISSUER',state:'ISSUED',issuedSupply:'30'},
+    ],
+  };
+  let hydrated;
+  const service = await new PublicSraCoinDiscoveryService({hydrate:async(types)=>{hydrated=types;},list:(type)=>records[type]||[]}).initialize();
+  assert.ok(hydrated.includes('SRA_COIN_POSITION'));
+  assert.deepEqual(service.profile().onChainRepresentations.map((item)=>item.assetId),['DIRECT-ASSET','LEGACY-ASSET']);
+});

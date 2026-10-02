@@ -364,7 +364,7 @@ try {
     return createOnChainProjectionRouter(onChainProjectionService, { financingClosingService });
   });
   ensurePublicSraExchange = createSingleFlightInitializer('Public SRA Exchange', async () => {
-    const service = new PublicSraExchangeService({ domain });
+    const service = await new PublicSraExchangeService({ domain }).initialize();
     return mountExtension('/api/public-exchange', createPublicSraExchangeRouter(service));
   });
 

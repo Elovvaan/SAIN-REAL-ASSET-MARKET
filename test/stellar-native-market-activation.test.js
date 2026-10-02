@@ -22,7 +22,7 @@ test('native market activation is approved, persisted, reconciled, and visible',
   assert.match(router,/SRA_XLM_MARKET_ACTIVATED/);
   assert.match(router,/markets\/native\/activate/);
   assert.match(router,/markets\/native\/:marketId\/reconcile/);
-  assert.match(ui,/Activate Funded SRA\/XLM Market/);
+  assert.match(ui,/Activate Optional SRA\/XLM Market/);
   assert.match(ui,/data-reconcile-native-market/);
   assert.match(ui,/\/api\/on-chain\/native-markets/);
 });

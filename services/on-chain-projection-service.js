@@ -10,7 +10,7 @@ export class OnChainProjectionService {
   }
 
   async initialize() {
-    await this.domain.hydrate?.([TYPE, 'ON_CHAIN_MARKET_OFFER']);
+    await this.domain.hydrate?.([TYPE, 'ON_CHAIN_MARKET_OFFER', 'ON_CHAIN_USDC_MARKET', 'ON_CHAIN_NATIVE_MARKET', 'COIN_POSITION', 'SRA_COIN_POSITION', 'SRA_INSTRUMENT']);
     return this.status();
   }
 

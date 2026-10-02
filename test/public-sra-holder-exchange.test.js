@@ -137,3 +137,18 @@ test('public exchange page keeps documentary settlement separate', async () => {
   assert.match(page, /note or documentary settlement package/i);
   assert.match(page, /institutional presentment/i);
 });
+
+
+test('public exchange hydrates persisted routes before serving a cold-start status', async () => {
+  const data = {};
+  const domain = {
+    list: (type) => data[type] || [],
+    hydrate: async (types) => {
+      assert.ok(types.includes('ON_CHAIN_ASSET'));
+      assert.ok(types.includes('ON_CHAIN_USDC_MARKET'));
+      data.ON_CHAIN_ASSET = [{assetId:'PERSISTED',network:'STELLAR',asset:'SRA',assetAddress:'SRA:GISSUER',issuedSupply:'20'}];
+    },
+  };
+  const service = await new PublicSraExchangeService({domain}).initialize();
+  assert.equal(service.status().markets[0].assetId,'PERSISTED');
+});

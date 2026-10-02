@@ -57,3 +57,26 @@ test('funded SRA/USDC market submits two offers exactly at par', async()=>{
   adapter.assetBalance=async(asset)=>({available:asset==='USDC'?'0':'50',trustline:true});
   await assert.rejects(adapter.activateUsdcMarket(asset,{sraSellAmount:'20',usdcSellAmount:'20'}),/Market allocation exceeds/);
 });
+
+
+test('sell-only SRA/USDC publication works with zero USDC and never submits a buyback', async () => {
+  const distributor=StellarSdk.Keypair.random();
+  const issuer=StellarSdk.Keypair.random();
+  let submitted;
+  const adapter=new StellarTransferService({environment:{STELLAR_NETWORK:'PUBLIC'}});
+  adapter.ensure=()=>({distributor,server:{
+    async loadAccount(){return new StellarSdk.Account(distributor.publicKey(),'123');},
+    async submitTransaction(tx){submitted=tx;return {hash:'sell-only',ledger:42};},
+  }});
+  adapter.assetBalance=async(asset)=>({available:asset==='USDC'?'0':'50',trustline:true});
+  const asset={asset:'SRA',assetAddress:`SRA:${issuer.publicKey()}`};
+  const result=await adapter.activateUsdcMarket(asset,{sraSellAmount:'20',usdcSellAmount:'0.0000000'});
+  assert.equal(submitted.operations.length,1);
+  assert.equal(submitted.operations[0].selling.code,'SRA');
+  assert.equal(submitted.operations[0].buying.code,'USDC');
+  assert.equal(Number(submitted.operations[0].price),1);
+  assert.equal(result.marketMode,'SELL_ONLY');
+  assert.equal(result.bidUsdcPerSra,null);
+  await assert.rejects(adapter.activateUsdcMarket(asset,{sraSellAmount:'51',usdcSellAmount:'0'}),/Market allocation exceeds/);
+  await assert.rejects(adapter.activateUsdcMarket(asset,{sraSellAmount:'20',usdcSellAmount:'-1'}),/must be zero/);
+});
