@@ -12,6 +12,7 @@ export function createPlatformEconomicsRouter(service, accessService){
   const payments=new FeePaymentService(service.domain,service,service.ledgerService);
   const run=handler=>async(req,res)=>{try{return await handler(req,res);}catch(error){return fail(res,error);}};
   router.post('/revenue-models',run(async(req,res)=>res.status(201).json(await reports.saveModel(req.body||{},req.billingActorId))));
+  router.get('/report/export',run(async(_req,res)=>res.attachment('SRA_Billing_Financing_Inputs.json').type('application/json').send(JSON.stringify(await reports.snapshot(),null,2))));
   router.get('/report',run(async(_req,res)=>res.json(await reports.snapshot())));
   router.post('/agent-schedule',run(async(req,res)=>{const billing=new AgentServiceFeeBillingService(service.domain);return res.json(await billing.initialize(req.billingActorId));}));
   router.get('/catalog',(req,res)=>res.json({items:service.listCatalog({category:req.query.category||null,state:req.query.state||null})}));

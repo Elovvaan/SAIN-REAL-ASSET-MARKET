@@ -121,3 +121,14 @@ test('saved revenue scenarios use established prices and keep unentered volumes 
   assert.equal(report.body.totals[0].collected,0);
   await request(app).post('/api/economics/revenue-models').set(admin).send({name:'Invalid volume',period:'2026-11',workCounts:{'SRA-COIN-AGENT':1.5}}).expect(400);
 });
+
+
+test('financing export requires an administrator and downloads the recorded report',async()=>{
+  const {app,admin}=await fixture();
+  await request(app).get('/api/economics/report/export').expect(401);
+  const download=await request(app).get('/api/economics/report/export').set(admin).expect(200);
+  assert.match(download.headers['content-disposition'],/attachment;.*SRA_Billing_Financing_Inputs.json/);
+  assert.equal(download.body.fundingTarget,5000000);
+  assert.equal(download.body.invoices.length,1);
+  assert.equal(download.body.serviceRates.find(rate=>rate.agentId==='SRA-COIN-AGENT').amount,16.5);
+});
