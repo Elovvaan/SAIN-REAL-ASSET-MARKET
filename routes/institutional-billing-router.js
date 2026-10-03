@@ -1,7 +1,11 @@
 import express from 'express';
-function actorId(req){return req.headers['x-sra-actor-id']||req.body?.actorId||null;}
+import { billingAuthorization } from '../middleware/billing-authorization.js';
+import { RECORD_TYPES as T } from '../services/persistent-domain-service.js';
+function actorId(req){return req.billingActorId;}
 function fail(res,error){const message=error?.message||'Unexpected institutional billing error.';return res.status(/not found/i.test(message)?404:400).json({error:message});}
-export function createInstitutionalBillingRouter(service){const router=express.Router();
+export function createInstitutionalBillingRouter(service,accessService){const router=express.Router();
+router.use(billingAuthorization(accessService));
+router.use(async(_req,_res,next)=>{try{await service.economicsService.hydrate();await service.domain.hydrate([T.INSTITUTION_BILLING_PROFILE,T.INSTITUTION_USAGE_EVENT,T.INSTITUTION_BILLING_RUN]);return next();}catch(error){return next(error);}});
 router.get('/profiles',(req,res)=>res.json({profiles:service.listProfiles({institutionId:req.query.institutionId||null,state:req.query.state||null})}));
 router.post('/profiles',async(req,res)=>{try{return res.status(201).json(await service.createProfile(req.body||{},actorId(req)));}catch(e){return fail(res,e);}});
 router.get('/profiles/:profileId',(req,res)=>{const item=service.getProfile(req.params.profileId);return item?res.json(item):res.status(404).json({error:'Institution Billing Profile not found.'});});

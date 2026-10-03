@@ -26,6 +26,7 @@
       ['/admin/admin-treasury-instrument-recording.js', 'data-sra-admin-treasury-instrument-recording'],
     ],
     'native-asset': [['/admin/admin-native-platform-asset-workstation.js', 'data-sra-admin-native-platform-asset-workstation']],
+    billing: [['/admin/admin-pricing-billing-workstation.js', 'data-sra-admin-pricing-billing-workstation']],
     records: [['/admin/admin-financial-records-workstation.js', 'data-sra-admin-financial-records-workstation']],
     'coin-positions': [
       ['/admin/admin-coin-representation-integrity.js', 'data-sra-admin-coin-representation-integrity'],
@@ -138,6 +139,7 @@
       window.mountAdminTreasuryWorkstation?.(root); window.mountAdminTreasuryPresentationOwner?.(root); window.mountAdminTreasuryCashRecording?.(root); return;
     }
     if (workspaceId === 'native-asset') return window.mountAdminNativePlatformAssetWorkstation?.(admin.querySelector('[data-workspace="native-asset"]'));
+    if (workspaceId === 'billing') return window.mountAdminPricingBillingWorkstation?.(admin.querySelector('[data-workspace="billing"]'));
     if (workspaceId === 'records') return window.mountAdminFinancialRecordsWorkstation?.(admin.querySelector('[data-workspace="records"]'));
     if (workspaceId === 'coin-positions') {
       const root = admin.querySelector('[data-workspace="coin-positions"]');

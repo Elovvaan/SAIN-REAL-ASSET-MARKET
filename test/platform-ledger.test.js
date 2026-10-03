@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
 import { createApp } from '../app.js';
+import { billingAdmin } from './helpers/billing-admin.js';
 
 const actor={'x-sra-actor-id':'LEDGER-ADMIN'};
 
@@ -14,30 +15,36 @@ async function setupFee(app){
 }
 
 test('fee invoice automatically posts balanced receivable and revenue entry',async()=>{
-  const {app}=await createApp({serveStatic:false,seedMarketplace:false});
+  const {app,accessService}=await createApp({serveStatic:false,seedMarketplace:false});
+  const admin=await billingAdmin(accessService);
+  Object.assign(actor,admin);
   const charge=await setupFee(app);
   const invoice=await request(app).post('/api/economics/invoices').set(actor).send({payerId:'CUSTOMER-19',payerType:'CUSTOMER',chargeIds:[charge.chargeId],dueDate:'2026-09-01'}).expect(201);
-  const entries=await request(app).get(`/api/ledger/entries?referenceId=${invoice.body.invoiceId}`).expect(200);
+  const entries=await request(app).get(`/api/ledger/entries?referenceId=${invoice.body.invoiceId}`).set(actor).expect(200);
   assert.equal(entries.body.entries.length,1);
   assert.equal(entries.body.entries[0].totalDebits,500);
   assert.equal(entries.body.entries[0].totalCredits,500);
-  const trial=await request(app).get('/api/ledger/trial-balance').expect(200);
+  const trial=await request(app).get('/api/ledger/trial-balance').set(actor).expect(200);
   assert.equal(trial.body.totalDebits,trial.body.totalCredits);
 });
 
 test('invoice payment moves receivable into cash',async()=>{
-  const {app}=await createApp({serveStatic:false,seedMarketplace:false});
+  const {app,accessService}=await createApp({serveStatic:false,seedMarketplace:false});
+  const admin=await billingAdmin(accessService);
+  Object.assign(actor,admin);
   const charge=await setupFee(app);
-  const invoice=await request(app).post('/api/economics/invoices').send({payerId:'CUSTOMER-19',payerType:'CUSTOMER',chargeIds:[charge.chargeId],dueDate:'2026-09-01'}).expect(201);
+  const invoice=await request(app).post('/api/economics/invoices').set(actor).send({payerId:'CUSTOMER-19',payerType:'CUSTOMER',chargeIds:[charge.chargeId],dueDate:'2026-09-01'}).expect(201);
   await request(app).post('/api/ledger/invoice-payments').set(actor).send({invoiceId:invoice.body.invoiceId,amount:500,cashAccountId:'GL-CASH-OPERATING'}).expect(201);
-  const cash=await request(app).get('/api/ledger/accounts/GL-CASH-OPERATING/balance').expect(200);
-  const ar=await request(app).get('/api/ledger/accounts/GL-AR/balance').expect(200);
+  const cash=await request(app).get('/api/ledger/accounts/GL-CASH-OPERATING/balance').set(actor).expect(200);
+  const ar=await request(app).get('/api/ledger/accounts/GL-AR/balance').set(actor).expect(200);
   assert.equal(cash.body.balance,500);
   assert.equal(ar.body.balance,0);
 });
 
 test('unbalanced manual entries are rejected',async()=>{
-  const {app}=await createApp({serveStatic:false,seedMarketplace:false});
-  const result=await request(app).post('/api/ledger/entries').send({referenceType:'TEST',referenceId:'BAD-1',eventType:'BAD_ENTRY',description:'Unbalanced',lines:[{accountId:'GL-CASH-OPERATING',debit:100},{accountId:'GL-FEE-REVENUE',credit:90}]}).expect(400);
+  const {app,accessService}=await createApp({serveStatic:false,seedMarketplace:false});
+  const admin=await billingAdmin(accessService);
+  Object.assign(actor,admin);
+  const result=await request(app).post('/api/ledger/entries').set(actor).send({referenceType:'TEST',referenceId:'BAD-1',eventType:'BAD_ENTRY',description:'Unbalanced',lines:[{accountId:'GL-CASH-OPERATING',debit:100},{accountId:'GL-FEE-REVENUE',credit:90}]}).expect(400);
   assert.match(result.body.error,/not balanced/i);
 });

@@ -8,6 +8,7 @@
     ['marketplace','Marketplace Lifecycle','Prepared through settlement'],
     ['instruments','Instruments','Instrument registry and approvals'],
     ['records','Financial Records','Recognitions, evidence, and trace'],
+    ['billing','Pricing & Billing','Prices, invoices, collections, and financing inputs'],
     ['coin-positions','Coin Positions','Supply, representation, and intelligence'],
     ['transactions','Transactions','All transaction states'],
     ['settlement','Export & Settlement','External movement and confirmation'],
@@ -23,6 +24,7 @@
     'native-asset':['Current Asset','Approval Status','Listing','Marketplace Status','Export Status','Ownership','Recognitions','Asset History','Publishing','Governance'],
     marketplace:['Investor Funding Flow','Prepared','Ready','Published','Orders','Reservations','Allocations','Settlement','Historical Listings'],
     instruments:['Overview','Pending Review','Approved','Published','History','Contract Formation','On-Chain','Restore Record'],
+    billing:['Overview','Schedules','Charges','Invoices','Collections','Revenue Model'],
     records:['Recognitions','Observations','Financial Records','Evidence','Origin Records','Trace','Audit'],
     'coin-positions':['Current Supply','Represented Value','Legacy Corrections','Coin Intelligence','Instrument Linkage','Mint History','XRPL Exchange','Retirements','Adjustments'],
     transactions:['All','Pending','Completed','Failed','Exported','Imported','Settlement','Search'],
@@ -34,6 +36,7 @@
   };
   const FEATURE_ONLY_TABS = new Set([
     'operations::Financing',
+    ...['Overview','Schedules','Charges','Invoices','Collections','Revenue Model'].map(tab => `billing::${tab}`),
     'treasury::Overview',
     'instruments::Pending Review',
     'instruments::Contract Formation',

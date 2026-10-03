@@ -228,9 +228,9 @@ export async function createApp(options = {}) {
   app.use('/api/institutions', createInstitutionParticipationRouter(institutionParticipationService, accessService));
   app.use('/api/settlement-rails', createSettlementRailGatewayRouter(settlementRailGatewayService, undefined, stellarUsdcSettlementService, moneyGramSandboxCertificationService));
   app.use('/api/treasury', createTreasuryBankConnectorRouter(treasuryBankConnectorService));
-  app.use('/api/economics', createPlatformEconomicsRouter(platformEconomicsService));
+  app.use('/api/economics', createPlatformEconomicsRouter(platformEconomicsService, accessService));
   app.use('/api/ledger', createPlatformLedgerRouter(platformLedgerService));
-  app.use('/api/institution-billing', createInstitutionalBillingRouter(institutionalBillingService));
+  app.use('/api/institution-billing', createInstitutionalBillingRouter(institutionalBillingService, accessService));
   app.use('/api/servicing', createAssetServicingRouter(assetServicingService));
   app.use('/api/platform-treasury', createPlatformTreasuryRouter(platformTreasuryService, treasuryUsdcConversionService, circleCctpTransferService));
   app.use('/api/anchor-platform', createSraAnchorPlatformRouter(sraAnchorPlatformService));

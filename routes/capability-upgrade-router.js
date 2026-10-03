@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { Router } from 'express';
 import { CAPACITY_DEFINITIONS } from '../services/access-service.js';
 import { PlatformLedgerService } from '../services/platform-ledger-service.js';
+import { FeePaymentService } from '../services/fee-payment-service.js';
 import { RECORD_TYPES } from '../services/persistent-domain-service.js';
 
 function readCookie(req, name) {
@@ -57,12 +58,14 @@ export function createCapabilityUpgradeRouter({ accessService, economicsService,
   async function participantSession(req, res) {
     const session = await accessService.getSession(readCookie(req, 'sra_session'));
     if (!session) res.status(401).json({ error: 'Authentication required.' });
+    if(session){await economicsService.hydrate();await domain.hydrate([RECORD_TYPES.FUNDING_INSTRUCTION]);}
     return session;
   }
   async function administratorSession(req, res) {
     const session = await accessService.getSession(readCookie(req, 'sra_admin_session'));
     const admin = session?.activeCapacity === 'PLATFORM_ADMIN' && session?.capacities?.some((item) => item.id === 'PLATFORM_ADMIN');
     if (!admin) res.status(401).json({ error: 'Private Platform Administration authentication is required.' });
+    if(admin){await economicsService.hydrate();await domain.hydrate([RECORD_TYPES.FUNDING_INSTRUCTION]);}
     return admin ? session : null;
   }
   function latestPaymentInstruction(invoiceId) {
@@ -267,21 +270,16 @@ export function createCapabilityUpgradeRouter({ accessService, economicsService,
       const invoice = domain.get(RECORD_TYPES.FEE_INVOICE, record.invoiceId);
       if (!invoice) return res.status(404).json({ error: 'Linked fee invoice not found.' });
       if (invoice.state === 'PAID') return res.status(409).json({ error: 'The linked fee invoice is already paid.' });
-      const ledgerEntry = await ledger.recordInvoicePayment({ invoiceId: invoice.invoiceId, amount: record.amount, cashAccountId: 'GL-CASH-OPERATING', currency: record.currency }, admin.id);
-      const paidAt = now();
-      await domain.put(RECORD_TYPES.FEE_INVOICE, invoice.invoiceId, { ...invoice, state: 'PAID', paidAt, paymentReference: externalReference, updatedAt: paidAt }, { actorId: admin.id, eventType: 'FEE_INVOICE_PAID' });
-      for (const chargeId of invoice.chargeIds || []) {
-        const charge = domain.get(RECORD_TYPES.FEE_CHARGE, chargeId);
-        if (charge) await domain.put(RECORD_TYPES.FEE_CHARGE, chargeId, { ...charge, state: 'PAID', paidAt, updatedAt: paidAt }, { actorId: admin.id, eventType: 'FEE_CHARGE_PAID' });
-      }
+      const payment = await new FeePaymentService(domain,economicsService,ledger).record(invoice.invoiceId,{
+        amount:record.amount,currency:record.currency||'USD',cashAccountId:'GL-CASH-OPERATING',externalReference,
+        evidenceReference:req.body?.evidenceReference||externalReference,fundingInstructionId:record.fundingInstructionId,
+        accountId:record.accountId
+      },admin.id);
+      const ledgerEntry=payment.ledgerEntry||domain.get(RECORD_TYPES.LEDGER_ENTRY,payment.receipt.ledgerEntryId);
+      const paidAt=payment.invoice?.paidAt||payment.receipt.recordedAt;
       const updated = { ...record, state: 'CONFIRMED', externalReference, ledgerEntryId: ledgerEntry.entryId, confirmedBy: admin.id, confirmedAt: paidAt, updatedAt: paidAt };
       await domain.put(RECORD_TYPES.FUNDING_INSTRUCTION, record.fundingInstructionId, updated, { actorId: admin.id, eventType: 'EXTERNAL_FUNDS_CONFIRMED' });
-      const receipt = {
-        paymentReceiptId: id('RCPT'), fundingInstructionId: record.fundingInstructionId, purpose: record.purpose,
-        participantId: record.participantId, accountId: record.accountId, amount: record.amount, currency: record.currency,
-        externalReference, ledgerEntryId: ledgerEntry.entryId, state: 'RECORDED', recordedAt: paidAt, createdAt: paidAt
-      };
-      await domain.put(RECORD_TYPES.PAYMENT_RECEIPT, receipt.paymentReceiptId, receipt, { actorId: admin.id, eventType: 'PAYMENT_RECEIPT_RECORDED' });
+      const receipt=payment.receipt;
       const eventId = id('VME');
       await domain.put(RECORD_TYPES.VERIFIED_MARKET_EVENT, eventId, {
         eventId, eventType: 'PLATFORM_FEE_PAYMENT_CONFIRMED', participantId: record.participantId,

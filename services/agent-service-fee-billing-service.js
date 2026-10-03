@@ -27,6 +27,7 @@ export class AgentServiceFeeBillingService {
   }
 
   async initialize(actorId = 'SRA_AGENT_OS') {
+    await this.economics.hydrate();
     for (const service of Object.values(SRA_AGENT_SERVICE_FEE_SCHEDULE.services)) {
       if (!this.economics.getCatalogItem(service.feeCode)) {
         await this.economics.createCatalogItem({

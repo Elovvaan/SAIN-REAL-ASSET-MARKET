@@ -82,7 +82,8 @@ export async function installAgentWorkforceAdminRoutes({ router, domain, databas
     catch (error) { return res.status(422).json({ error: error?.message || String(error), code: 'SRA_AUTONOMOUS_CONTINUATION_BATCH_FAILED' }); }
   });
 
-  router.use('/api/admin/agent-workforce', async (_req, _res, next) => {
+  router.use('/api/admin/agent-workforce', async (req, res, next) => {
+    const session = await requireAdmin(req, res); if (!session) return;
     try { await ensureWorkforce(); return next(); }
     catch (error) { return next(error); }
   });
