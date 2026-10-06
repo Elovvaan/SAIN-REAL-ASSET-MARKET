@@ -26,10 +26,18 @@
     .detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:16px}
     .info{border:1px solid var(--line);border-radius:18px;padding:22px;background:var(--panel)}
     .info h3{margin:0 0 9px;font-size:18px}
+    .steps{margin-top:34px}
+    .steps-intro{max-width:690px;color:#c8c8cc;line-height:1.65;margin:0 0 16px}
+    .step-list{display:grid;gap:10px;list-style:none;margin:0;padding:0;counter-reset:investor-step}
+    .step{counter-increment:investor-step;display:grid;grid-template-columns:42px minmax(0,1fr) auto;gap:14px;align-items:start;border:1px solid var(--line);border-radius:16px;padding:18px;background:var(--panel)}
+    .step:before{content:counter(investor-step);display:grid;place-items:center;width:34px;height:34px;border:1px solid rgba(215,166,42,.5);border-radius:50%;color:var(--gold2);font-weight:750}
+    .step h3{margin:1px 0 5px;font-size:17px}
+    .step p{margin:0;color:#bcbcc1;line-height:1.55}
+    .step-state{border:1px solid #444;border-radius:999px;padding:6px 10px;color:#c4c4c8;font-size:12px;white-space:nowrap}
     .notice{margin-top:16px;border-left:3px solid var(--gold);padding:14px 17px;background:rgba(215,166,42,.06);color:#dedee1;line-height:1.6}
     footer{display:flex;gap:18px;flex-wrap:wrap;margin-top:34px;padding-top:20px;border-top:1px solid var(--line);color:var(--muted);font-size:14px}
     footer a{color:var(--gold2);text-decoration:none}
-    @media(max-width:680px){.opportunity{grid-template-columns:1fr}.detail-grid{grid-template-columns:1fr}.status{justify-self:start}header{align-items:flex-start}}
+    @media(max-width:680px){.opportunity{grid-template-columns:1fr}.detail-grid{grid-template-columns:1fr}.status{justify-self:start}header{align-items:flex-start}.step{grid-template-columns:36px minmax(0,1fr)}.step-state{grid-column:2;justify-self:start}}
   </style>
 </head>
 <body>
@@ -55,7 +63,7 @@
       <div class="detail-grid">
         <section class="info">
           <h3>Investor access</h3>
-          <p>For an offering limited to accredited investors, verification will take place through a private investor workflow after the offering details are published. Accreditation documents belong in that secure workflow, not on this public page.</p>
+          <p>For an offering limited to accredited investors, the issuer must use an appropriate verification process. The future investor workflow will keep verification materials private and tied to the specific offering.</p>
         </section>
         <section class="info">
           <h3>Offering status</h3>
@@ -63,7 +71,20 @@
         </section>
       </div>
 
-      <p class="notice">Browse the opportunity overview now. Investor verification and subscriptions will be enabled with a published offering and its defined terms.</p>
+      <section class="steps" aria-labelledby="investor-steps-title">
+        <p class="eyebrow">PLANNED INVESTOR WORKFLOW</p>
+        <h2 id="investor-steps-title">From opportunity review to subscription</h2>
+        <p class="steps-intro">When an offering is ready, its page will guide each investor through these steps. Availability will depend on the issuer, offering terms, and investor eligibility.</p>
+        <ol class="step-list">
+          <li class="step"><div><h3>Create or sign in to a Universal Account</h3><p>Use one account to save an opportunity and return to its investor checklist.</p></div><span class="step-state">Account access available</span></li>
+          <li class="step"><div><h3>Review the offering and eligibility</h3><p>Read the issuer, use of proceeds, structure, risks, and the documents for that specific offering.</p></div><span class="step-state">Waiting for offering terms</span></li>
+          <li class="step"><div><h3>Complete investor verification</h3><p>Use the verification method specified for the offering. If documents are requested, upload them only in the authenticated private portal; an approved verifier may be used where available.</p></div><span class="step-state">Private intake not enabled</span></li>
+          <li class="step"><div><h3>Complete and submit subscription documents</h3><p>Review the subscription agreement and required representations, then submit the completed package for issuer review.</p></div><span class="step-state">Not open</span></li>
+          <li class="step"><div><h3>Issuer review and acceptance</h3><p>The issuer reviews eligibility and the submitted subscription before confirming acceptance and the next closing instructions.</p></div><span class="step-state">Not open</span></li>
+        </ol>
+      </section>
+
+      <p class="notice"><strong>No document upload or investment subscription is open yet.</strong> Do not send tax returns, bank statements, identity records, or signed subscription documents by email or through this public page. The private intake and subscription flow will open only after its secure storage, access controls, offering documents, and review process are in place.</p>
     </main>
     <footer>
       <span>SAIN Real Asset Market</span>
