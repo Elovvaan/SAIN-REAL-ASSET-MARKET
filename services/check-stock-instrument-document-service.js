@@ -79,6 +79,8 @@ export class CheckStockInstrumentDocumentService {
     field(doc, 'Governing document ID', value(transaction?.governingDocumentId, instrument.governingDocumentId, '—'), 42, 350, 250);
     field(doc, 'Verified value reference', value(instrument.canonicalVerifiedValueRecordId, instrument.verifiedRecordId, '—'), 315, 350, 245);
     field(doc, 'Institutional delivery details', value(terms.presentmentInstructions, terms.deliveryInstructions, terms.processingContact, 'Recorded with transaction file'), 42, 398, 518);
+    field(doc, 'Present to', value(instrument.handoffCounterparty?.organizationName, '—'), 42, 446, 250);
+    field(doc, 'Counterparty role', label(value(instrument.handoffCounterparty?.role, '—')), 315, 446, 245);
     doc.font('Helvetica').fontSize(7).fillColor('#6b7280').text('Use the instrument number and transaction reference for presentment, settlement processing, and record matching.', 42, 475, { width: 518 });
 
     rule(doc, 528, true);

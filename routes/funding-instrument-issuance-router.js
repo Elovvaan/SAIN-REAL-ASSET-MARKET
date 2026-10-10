@@ -57,6 +57,16 @@ export function createFundingInstrumentIssuanceRouter(service) {
     catch (error) { return handle(res, error); }
   });
 
+  router.get('/transactions/:transactionId/handoff', (req, res) => {
+    try { return res.json(service.getHandoff(req.params.transactionId)); }
+    catch (error) { return handle(res, error); }
+  });
+
+  router.post('/transactions/:transactionId/handoff-events', async (req, res) => {
+    try { return res.status(201).json(await service.recordHandoffEvent(req.params.transactionId, req.body || {}, actorId(req))); }
+    catch (error) { return handle(res, error); }
+  });
+
   router.get('/instruments/:instrumentId/document', async (req, res) => {
     try {
       const printReady = String(req.query.version || '').toLowerCase() === 'print';

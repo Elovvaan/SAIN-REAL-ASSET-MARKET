@@ -11,6 +11,8 @@ const DECISIONS = new Set(['AUTHORIZED', 'CHANGES_REQUIRED', 'REJECTED']);
 const id = (prefix) => `${prefix}-${crypto.randomUUID().split('-')[0].toUpperCase()}`;
 const now = () => new Date().toISOString();
 const unique = (values = []) => [...new Set(values.filter(Boolean))];
+const HANDOFF_EVENTS = new Set(['PACKAGE_PRESENTED','RECEIPT_CONFIRMED','COUNTERPARTY_REVIEW_STARTED','COUNTERPARTY_RESPONSE_RECORDED','PROCESSING_SUBMITTED','SETTLEMENT_CONFIRMED','CLARIFICATION_REQUESTED','PROCESSING_ISSUE_REPORTED']);
+const HANDOFF_STATUSES = Object.freeze({ PACKAGE_PRESENTED: 'PRESENTED', RECEIPT_CONFIRMED: 'RECEIPT_CONFIRMED', COUNTERPARTY_REVIEW_STARTED: 'IN_COUNTERPARTY_REVIEW', COUNTERPARTY_RESPONSE_RECORDED: 'RESPONSE_RECORDED', PROCESSING_SUBMITTED: 'SUBMITTED_FOR_PROCESSING', SETTLEMENT_CONFIRMED: 'SETTLEMENT_CONFIRMED', CLARIFICATION_REQUESTED: 'CLARIFICATION_REQUESTED', PROCESSING_ISSUE_REPORTED: 'PROCESSING_ISSUE_REPORTED' });
 
 function inspectCanonicalVvr(domain, instrument) {
   if (!instrument.canonicalVerifiedValueRecordId) return { mode: 'LEGACY_COMPATIBILITY', present: false, valid: true, record: null };
@@ -52,6 +54,30 @@ export class FundingInstrumentIssuanceService {
   getReview(reviewId) { return this.domain.get(TYPES.ISSUANCE_REVIEW, reviewId); }
   listReviews(filters = {}) { return this.domain.list(TYPES.ISSUANCE_REVIEW).filter((r) => (!filters.issuanceRequestId || r.issuanceRequestId === filters.issuanceRequestId) && (!filters.status || r.status === filters.status)); }
   listAuthorizations(filters = {}) { return this.domain.list(TYPES.ISSUANCE_AUTHORIZATION).filter((r) => (!filters.instrumentId || r.instrumentId === filters.instrumentId) && (!filters.status || r.status === filters.status)); }
+
+  getHandoff(transactionId) {
+    const transaction = this.domain.get(TYPES.SRA_TRANSACTION, transactionId);
+    if (!transaction || transaction.transactionType !== 'INSTRUMENT_ISSUANCE') throw new Error('Instrument issuance transaction was not found.');
+    return { transactionId, instrumentId: transaction.instrumentId, counterpartyHandoff: transaction.counterpartyHandoff || { status: 'COUNTERPARTY_NOT_SELECTED', counterparty: null, events: [] } };
+  }
+
+  async recordHandoffEvent(transactionId, input = {}, actorId = null) {
+    const transaction = this.domain.get(TYPES.SRA_TRANSACTION, transactionId);
+    if (!transaction || transaction.transactionType !== 'INSTRUMENT_ISSUANCE') throw new Error('Instrument issuance transaction was not found.');
+    const eventType = String(input.eventType || '').trim().toUpperCase();
+    if (!HANDOFF_EVENTS.has(eventType)) throw new Error('Unsupported counterparty handoff event.');
+    const prior = transaction.counterpartyHandoff || { status: transaction.counterparty ? 'READY_TO_PRESENT' : 'COUNTERPARTY_NOT_SELECTED', counterparty: transaction.counterparty || null, events: [] };
+    if (!prior.counterparty && eventType !== 'PACKAGE_PRESENTED') throw new Error('Add the named counterparty to the instrument before recording its response.');
+    if (eventType === 'COUNTERPARTY_RESPONSE_RECORDED' && !['PURCHASE_COMMITMENT','CHANGES_REQUESTED','DECLINED','NEEDS_INFORMATION','ACKNOWLEDGED'].includes(String(input.response || '').toUpperCase())) throw new Error('Choose a valid counterparty response.');
+    const occurredAt = input.occurredAt || now();
+    const event = { eventId: id('SRAHE'), eventType, response: input.response ? String(input.response).toUpperCase() : null, externalReference: input.externalReference || null, note: input.note || null, actorId, occurredAt };
+    const counterpartyHandoff = { ...prior, status: HANDOFF_STATUSES[eventType], lastEventAt: occurredAt, events: [...(prior.events || []), event] };
+    const updated = { ...transaction, counterpartyHandoff, updatedAt: now() };
+    await this.domain.put(TYPES.SRA_TRANSACTION, transactionId, updated, { actorId, eventType: 'FUNDING_INSTRUMENT_COUNTERPARTY_HANDOFF_EVENT_RECORDED' });
+    const lifecycle = { id: id('LE'), objectType: TYPES.SRA_TRANSACTION, objectId: transactionId, eventType: 'FUNDING_INSTRUMENT_COUNTERPARTY_HANDOFF_EVENT_RECORDED', actorId, payload: { instrumentId: transaction.instrumentId, eventType, response: event.response, externalReference: event.externalReference, handoffStatus: counterpartyHandoff.status }, occurredAt };
+    await this.domain.put(TYPES.LIFECYCLE_EVENT, lifecycle.id, lifecycle, { actorId, eventType: lifecycle.eventType });
+    return { transactionId, counterpartyHandoff };
+  }
 
   assessRequest(requestId) {
     const request = this.getRequest(requestId); if (!request) throw new Error('Issuance request was not found.');
@@ -126,7 +152,7 @@ export class FundingInstrumentIssuanceService {
       transactionId: input.transactionId || id('SRATX'), transactionType: 'INSTRUMENT_ISSUANCE', instrumentId: instrument.instrumentId, opportunityId: instrument.opportunityId, issuerParticipantId: instrument.issuerParticipantId, issuanceAuthorizationId: authorizationId,
       requestedAmount: basis.requestedAmount, recognizedReferenceValue: basis.recognizedReferenceValue, recognizedReferenceCurrency: basis.recognizedReferenceCurrency, faceValueBasis: basis.faceValueBasis, requestedToRecognizedRatio: basis.requestedToRecognizedRatio, faceValueToRecognizedRatio: basis.faceValueToRecognizedRatio, faceValueVarianceFromRecognized: basis.faceValueVarianceFromRecognized, economicBasis: basis,
       canonicalVerifiedValueRecordId: instrument.canonicalVerifiedValueRecordId || null, referencedDeterminationId: vvr.record?.determinationId || authorization.referencedDeterminationId || null, referencedSnapshotId: vvr.record?.snapshotId || authorization.referencedSnapshotId || null,
-      amount: authorization.authorizedFaceValue, currency: authorization.currency, issueDate: authorization.authorizedIssueDate || issuedAt, maturityDate: authorization.authorizedMaturityDate || instrument.maturityDate || null, governingDocumentId: instrument.governingDocumentId, settlementRule: instrument.settlementRule, state: 'RECORDED', status: 'RECORDED', recordedBy: actorId, recordedAt: issuedAt,
+      amount: authorization.authorizedFaceValue, currency: authorization.currency, issueDate: authorization.authorizedIssueDate || issuedAt, maturityDate: authorization.authorizedMaturityDate || instrument.maturityDate || null, governingDocumentId: instrument.governingDocumentId, settlementRule: instrument.settlementRule, repaymentTerms: instrument.terms?.repaymentTerms || null, amortizationSchedule: instrument.terms?.amortizationSchedule || null, counterparty: instrument.handoffCounterparty || null, counterpartyHandoff: { status: instrument.handoffCounterparty ? 'READY_TO_PRESENT' : 'COUNTERPARTY_NOT_SELECTED', counterparty: instrument.handoffCounterparty || null, events: [{ eventId: id('SRAHE'), eventType: 'ISSUANCE_PACKET_AVAILABLE', response: null, externalReference: null, note: 'Issued instrument and transaction record are available for counterparty presentment.', actorId, occurredAt: issuedAt }] }, state: 'RECORDED', status: 'RECORDED', recordedBy: actorId, recordedAt: issuedAt,
     };
     const documentPresentation = { layout: 'CHECK_STOCK', templateVersion: 'SRA_CHECK_STOCK_V1', digitalFormat: 'PDF', printFormat: 'LETTER_THREE_PART', contentSource: 'ISSUED_INSTRUMENT_RECORD' };
     const issuedInstrument = { ...instrument, economicBasis: basis, state: 'ISSUED', status: 'ACTIVE', issuanceStatus: 'ISSUED', issuanceAuthorizationId: authorizationId, issuanceTransactionId: transaction.transactionId, documentPresentation, valueReferenceArchitecture: vvr.mode === 'CANONICAL_VVR_REFERENCE' ? 'CANONICAL_VVR_REFERENCE' : instrument.valueReferenceArchitecture || 'LEGACY_VERIFIED_RECORD_REFERENCE', issueDate: transaction.issueDate, maturityDate: transaction.maturityDate, issuedBy: actorId, issuedAt, updatedAt: issuedAt };

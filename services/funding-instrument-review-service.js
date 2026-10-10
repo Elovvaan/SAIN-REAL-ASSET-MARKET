@@ -47,7 +47,12 @@ export class FundingInstrumentReviewService {
 
   assessCompleteness(instrumentId) {
     const instrument = this.getInstrument(instrumentId); if (!instrument) throw new Error('Draft instrument was not found.');
+    const schedule = instrument.terms?.amortizationSchedule;
+    const acquisitionFinancing = instrument.financingWorkflow === 'ACQUISITION_FINANCING_V1';
+    const repaymentScheduleValid = !acquisitionFinancing || Boolean(schedule?.method === 'FIXED_MONTHLY_AMORTIZATION' && Number(schedule.principal) === Number(instrument.faceValue) && Number(schedule.termMonths) > 0 && schedule.payments?.length === Number(schedule.termMonths) && schedule.payments.at(-1)?.endingBalance === 0);
+    const handoffCounterpartyNamed = !acquisitionFinancing || Boolean(instrument.handoffCounterparty?.organizationName);
     const required = {
+      acquisitionRepaymentSchedule: repaymentScheduleValid, handoffCounterparty: handoffCounterpartyNamed,
       instrumentFamily: Boolean(instrument.instrumentFamily), fundingModel: Boolean(instrument.fundingModel), opportunityId: Boolean(instrument.opportunityId), issuerParticipantId: Boolean(instrument.issuerParticipantId), verifiedRecordId: Boolean(instrument.verifiedRecordId), purpose: Boolean(instrument.purpose), faceValue: Number(instrument.faceValue) > 0, currency: Boolean(instrument.currency), transferabilityStatus: Boolean(instrument.transferabilityStatus), settlementRule: Boolean(instrument.settlementRule), governingDocumentId: Boolean(instrument.governingDocumentId),
     };
     const conditional = {

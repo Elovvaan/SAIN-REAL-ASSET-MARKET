@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { DETERMINATION_RECORD_TYPES } from './determination-engine-service.js';
+import { buildMonthlyAmortizationSchedule } from './acquisition-amortization.js';
 
 const TYPES = Object.freeze({
   OPPORTUNITY: 'FUNDING_OPPORTUNITY', MODEL_SELECTION: 'FUNDING_MODEL_SELECTION', INSTRUMENT_REQUEST: 'FUNDING_INSTRUMENT_SELECTION_REQUEST',
@@ -60,6 +61,31 @@ export class FundingInstrumentSelectionService{
     const homeEquityFunding=request.homeEquityFunding||opportunity.homeEquityFunding||null;
     const defaultFaceValue=homeEquityFunding?.transactionForm==='CLOSED_END_FIXED_RETURN'?homeEquityFunding.totalRepaymentObligation:request.requestedAmount;
     const faceValue=Number(input.faceValue??defaultFaceValue);
+    const acquisitionFinancing = opportunity.opportunityType === 'BUSINESS_ACQUISITION';
+    const repaymentInput = acquisitionFinancing ? input.repaymentTerms || null : null;
+    if (acquisitionFinancing && !repaymentInput) throw new Error('Business acquisition instruments require agreed monthly repayment terms.');
+    if (acquisitionFinancing && !input.handoffCounterparty) throw new Error('Business acquisition instruments require a named counterparty for presentment.');
+    if (repaymentInput && (repaymentInput.annualRatePercent === null || repaymentInput.annualRatePercent === undefined || String(repaymentInput.annualRatePercent).trim() === '')) throw new Error('Annual rate is required.');
+    const repaymentTerms = repaymentInput ? {
+      annualRatePercent: Number(repaymentInput.annualRatePercent),
+      termMonths: Number(repaymentInput.termMonths),
+      firstPaymentDate: repaymentInput.firstPaymentDate,
+      method: 'FIXED_MONTHLY_AMORTIZATION',
+    } : null;
+    const amortizationSchedule = repaymentTerms ? buildMonthlyAmortizationSchedule({
+      principal: faceValue,
+      annualRatePercent: repaymentTerms.annualRatePercent,
+      termMonths: repaymentTerms.termMonths,
+      firstPaymentDate: repaymentTerms.firstPaymentDate,
+      currency: input.currency || request.currency || 'USD',
+    }) : null;
+    const handoffCounterparty = acquisitionFinancing && input.handoffCounterparty ? {
+      organizationName: String(input.handoffCounterparty.organizationName || '').trim(),
+      role: String(input.handoffCounterparty.role || 'PURCHASER_OR_PROCESSOR').trim().toUpperCase(),
+      contactName: String(input.handoffCounterparty.contactName || '').trim() || null,
+      contactEmail: String(input.handoffCounterparty.contactEmail || '').trim() || null,
+    } : null;
+    if (handoffCounterparty && !handoffCounterparty.organizationName) throw new Error('Handoff counterparty organization name is required.');
     const instrument={
       instrumentId:input.instrumentId||id('SRAI'),instrumentFamily:selection.selectedInstrumentFamily,instrumentType:selection.selectedInstrumentFamily,fundingModel:selection.fundingModel,
       proposedTransactionStructure:request.proposedTransactionStructure||opportunity.proposedTransactionStructure||null,approvedTransactionStructure:request.approvedTransactionStructure||opportunity.approvedTransactionStructure||null,
@@ -68,8 +94,8 @@ export class FundingInstrumentSelectionService{
       valueReferenceArchitecture:vvr?'CANONICAL_VVR_REFERENCE':'LEGACY_VERIFIED_RECORD_REFERENCE',referencedDeterminationId:vvr?.determinationId||request.referencedDeterminationId||null,referencedSnapshotId:vvr?.snapshotId||request.referencedSnapshotId||null,
       requestedAmount,recognizedReferenceValue,recognizedReferenceCurrency:vvr?.currency||request.recognizedReferenceCurrency||null,
       faceValue,faceValueBasis:input.faceValue!==undefined?'EXPLICIT_STRUCTURING_DECISION':homeEquityFunding?.transactionForm==='CLOSED_END_FIXED_RETURN'?'HOME_EQUITY_TOTAL_REPAYMENT_OBLIGATION':'REQUESTED_AMOUNT_DEFAULT',faceValueToRecognizedRatio:ratio(faceValue,recognizedReferenceValue),requestedToRecognizedRatio:ratio(requestedAmount,recognizedReferenceValue),
-      verifiedValuePackageId:input.verifiedValuePackageId||null,purpose:opportunity.purpose,currency:input.currency||request.currency,denomination:input.denomination||null,maturityDate:input.maturityDate||null,transferabilityStatus:input.transferabilityStatus||'RESTRICTED',settlementRule:input.settlementRule||null,governingDocumentId:input.governingDocumentId||null,
-      terms:{...(selection.terms||{}),...(homeEquityFunding?{homeEquityFunding:structuredClone(homeEquityFunding)}:{}),...(input.terms||{})},restrictions:unique([...(selection.restrictions||[]),...(input.restrictions||[])]),state:'DRAFT',status:'DRAFT',issuanceStatus:'NOT_ISSUED',createdBy:actorId,createdAt:now(),updatedAt:now(),
+      verifiedValuePackageId:input.verifiedValuePackageId||null,purpose:opportunity.purpose,currency:input.currency||request.currency,denomination:input.denomination||null,maturityDate:amortizationSchedule?.maturityDate||input.maturityDate||null,financingWorkflow:acquisitionFinancing?'ACQUISITION_FINANCING_V1':null,transferabilityStatus:input.transferabilityStatus||'RESTRICTED',settlementRule:input.settlementRule||null,governingDocumentId:input.governingDocumentId||null,
+      terms:{...(selection.terms||{}),...(homeEquityFunding?{homeEquityFunding:structuredClone(homeEquityFunding)}:{}),...(input.terms||{}),...(repaymentTerms?{repaymentTerms,amortizationSchedule}: {})},handoffCounterparty,restrictions:unique([...(selection.restrictions||[]),...(input.restrictions||[])]),state:'DRAFT',status:'DRAFT',issuanceStatus:'NOT_ISSUED',createdBy:actorId,createdAt:now(),updatedAt:now(),
     };
     if(!Number.isFinite(instrument.faceValue)||instrument.faceValue<=0)throw new Error('Draft instrument face value must be greater than zero.');
     await this.domain.put(TYPES.SRA_INSTRUMENT,instrument.instrumentId,instrument,{actorId,eventType:'SRA_INSTRUMENT_DRAFT_CREATED'});
